@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message ParkFishingBait {
+	option (options.master.table) = true;
+
+	string id = 1 [(options.master.pk) = true];
+	string name_lang_id = 2 [(options.master.fk) = "LangParkFishingBait:id"];
+	string description_lang_id = 3 [(options.master.fk) = "LangParkFishingBait:id"];
+	string asset_id = 4 [(options.master.optional) = true];
+	bool is_unlimited = 5 [(options.master.optional) = true];
+	string resource_obtainment_route_group_id = 6 [(options.master.fk) = "ResourceObtainmentRoute:group_id"];
+	int32 order = 999;
+}

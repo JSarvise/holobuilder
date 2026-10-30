@@ -1,0 +1,112 @@
+/* The game's own card face, VerticalCardThumbnail (224x320 root).
+   PORTED, not designed: every value is copied from tools/web/static/style.css's
+   card-face block and tools/explorer/build_explorer.py, which trace it to the
+   game's prefab geometry (the portrait is a RawImage stretched full-bleed:
+   object-fit:fill). A percentage is
+   <prefab px>/224 across and /320 down. Do not retype from taste. */
+
+@font-face {
+  font-family:"LINE Seed Sans";
+  src:url("/font/line-seed-sans-xbd-latin.woff2") format("woff2");
+  font-weight:800; font-style:normal; font-display:swap;
+}
+
+.gc { container-type:inline-size; position:relative; min-width:0; }
+.gc { --tc:120,130,150; }
+.gc.Cute { --tc:242,64,104; } .gc.Pure { --tc:13,193,52; } .gc.Happy { --tc:255,167,18; }
+
+/* 5:7, radius 40 on 224x320 = 17.857% / 12.5%. */
+.gc .gc-face { position:relative; aspect-ratio:5/7; background-color:#11141d;
+  border-radius:17.857% / 12.5%;
+  /* ui_999_shadow_b16y8_a35_r40_9s */
+  box-shadow:0 3.57cqw 7.14cqw rgba(0,0,0,.35); }
+/* The portrait, stretched full-bleed (RawImage, uvRect 0,0,1,1): fill, never cover. */
+.gc .gc-port { position:absolute; inset:0; width:100%; height:100%; display:block;
+  object-fit:fill; border-radius:inherit; }
+/* White inner frame ui_999_outline_w4_r40_9s: stroke 4 of 224. */
+.gc .gc-ring { position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  box-shadow:inset 0 0 0 1.79cqw rgba(255,255,255,.92); }
+.gc .gc-face:not(.has) { background-image:
+    repeating-linear-gradient(115deg, rgba(255,255,255,.045) 0 2px, transparent 2px 11px),
+    linear-gradient(140deg, rgba(var(--tc),.55), rgba(var(--tc),.16) 58%, rgba(8,10,16,.55)); }
+
+/* ico_element 64x64 at (-4,+4): overhangs top-left. */
+.gc .gc-el { position:absolute; top:-1.25%; left:-1.786%; width:28.571%; aspect-ratio:1;
+  z-index:2; filter:drop-shadow(0 1px 2px rgba(0,0,0,.55)); }
+
+/* CharacterGroupingLabel: 46 px tall, width FITS ITS TEXT (FitToChild padding L12 / R16),
+   right-aligned group at (+8,+4), 40 px pitch, max 2 (from the prefab).
+   Tint = CharacterGrouping color1 -> color2. Shape = ui_999_lab_unit_base_wh_9s as a
+   three-layer zero-middle 9-slice mask: caps at their own aspect, seam stretched between. */
+.gc .gc-gens { position:absolute; top:-1.25%; right:-3.571%; z-index:2;
+  display:flex; flex-direction:column; align-items:flex-end; }
+.gc .gc-gen { position:relative; height:20.54cqw; min-width:29cqw; box-sizing:border-box;
+  padding:0 7.14cqw 0 5.36cqw; display:flex; align-items:center; justify-content:center;
+  filter:drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+.gc .gc-gen + .gc-gen { margin-top:-2.68cqw; }
+.gc .gc-gen i, .gc .gc-gen u { position:absolute; inset:0;
+  -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat;
+  -webkit-mask-size:auto 100%, auto 100%, calc(100% - 13.2cqw) 100%; mask-size:auto 100%, auto 100%, calc(100% - 13.2cqw) 100%;
+  -webkit-mask-position:left center, right center, 8.3cqw center; mask-position:left center, right center, 8.3cqw center; }
+.gc .gc-gen i { background:linear-gradient(90deg, var(--gc, rgb(var(--tc))), var(--gc2, var(--gc, rgb(var(--tc)))));
+  -webkit-mask-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAABgCAYAAABv9TBsAAACVElEQVR4nNWbvYoUQRRGT33OA4xGGoguzAoGBoKYKIhsIuITmLgiOIgGosFiYGKgbCYmmwm+gSDoA5hpZLrqroGx7hu0FNZAUe6481Pd/e2BpqubnuFw66e7um+FpmmoRCiOj6T9SeAycB44DawAw1Q+kAHtsAZcB24Aq8v8UU3BITAGNlK5CjUEjwH3gUc1xRYRLNuYgLvA8zbElo3gCNhKba1VYhTmJbazT13ILRLBF6kTdMZgjjb3GlinYwYzXher9AI9oBmu2epLbhbBjdQpeiNk9+KyzT0AXtEzYYrgKLW71gbgZQW3k2TvaJ9zYxe5/SIYxd47Cao4vuMkV0Zw1aVjTIvgmptcGcHdWecJfUTwiqNcLngbU5RF0FZwxbV6J4LnMEaHQfAS5oInMBccYkxoKr7ecpm4d4owR5gjzBHmCHOEOcIcYY4wR5gjzBHmCHOEOcIcYY4wR5gjzBHmCHOEOcIcYY4wR5gjzBHmCHOEOcIcYY4wRxwCwR+YC+5hLvgTc8FdzAW/YC74EXPBr8B3zMfBt5gLvsP4Y2JI5V+OXz4FNGnbxJCQfY09Cuy4RVFZec8xiqFIzxu6RVFZOZr+Bp5iGsGcD8A1jAVHwGeHqtaU89+AZ5g/8r906NXhP1kpIUuVHzsL2i82iFwE3mAm2BRbzNJ8gvm8eBO41+VMMMyRulUuRugkY33RNwtxnDyTohnLFhH857f85RTwELjVxp2nhuCEUcpmf1yz6msKkhFFbwJXl80wbkswMlm+ezwt3Y1j6dmUFh2f3uP+QP4AvFN52gLILPMAAAAASUVORK5CYII="),url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABkAAABgCAYAAADoxNlqAAACHUlEQVR4nO2avW3DMBCFz4IXyAAu2KjKDmo4QdSkVbbIBqmyAdVkjXgDAlGRMkWKpE4GCHCBDMmgBf3wjneCjeQAGRJ5wud7Np8kUhtEREiPbwB4AYCnbmvj59iL8vGIiNv2u/ebBqQHHSEbIbnG4qqTETLQi7t+RxNyvQYE1oC89juaP7wBgHfNSpoeoAmpwwMtuXYA8KFZiQeAz7BBA+KGDRqQvTbEA8CbNsSNNWbaUklD/JhU0hA31SE5GE1oJRqVNFMASUg91ykl1y70Ko1K/NCrNCBuKSHTGoCSED81ACUhLiYp05YqFeJjpEqFuNjElMFo5qxEopImFpACqSnJXLl2c14lUYlf8ioJiKOekGkNwBSIjx2AKRBHBXAge22I50hFhThgBmUwGoqVcCoheRUXQvIqrlwkr+JWso3MS4JUa0CKFMhZ/YXbuG2/VLCpQCwwg3r5zQP/Qi0XLon5LIjlQDh3K3knmZpcLMk4EEs9gXtzZ9a4Ta0oyVxIQUk+60cHkpelQGxsYuq0Rx7jZalPv2VMUirExiRJzBLlS14mMbdSLiVIQOxSgtSkmlljerCa65SCFHOdFzVlO+tlkhA71SG93JSPeZn0qkM51igNsWONGqtz+dDLNNa0ymGDBsQOG7QWM80ay7JVeKAFKcKDi14qb+Pm8Pn/jsSfekfi/uQqeXjzRzYeELFVSPyFpS9EfEZE2wFOIL8IuCu98e72JwAAAABJRU5ErkJggg=="),url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAABgCAYAAADcvRh2AAAAGElEQVR4nGP4////fyYGBgaGUYJhGIYBACMCBLvPEhW9AAAAAElFTkSuQmCC");
+  mask-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAABgCAYAAABv9TBsAAACVElEQVR4nNWbvYoUQRRGT33OA4xGGoguzAoGBoKYKIhsIuITmLgiOIgGosFiYGKgbCYmmwm+gSDoA5hpZLrqroGx7hu0FNZAUe6481Pd/e2BpqubnuFw66e7um+FpmmoRCiOj6T9SeAycB44DawAw1Q+kAHtsAZcB24Aq8v8UU3BITAGNlK5CjUEjwH3gUc1xRYRLNuYgLvA8zbElo3gCNhKba1VYhTmJbazT13ILRLBF6kTdMZgjjb3GlinYwYzXher9AI9oBmu2epLbhbBjdQpeiNk9+KyzT0AXtEzYYrgKLW71gbgZQW3k2TvaJ9zYxe5/SIYxd47Cao4vuMkV0Zw1aVjTIvgmptcGcHdWecJfUTwiqNcLngbU5RF0FZwxbV6J4LnMEaHQfAS5oInMBccYkxoKr7ecpm4d4owR5gjzBHmCHOEOcIcYY4wR5gjzBHmCHOEOcIcYY4wR5gjzBHmCHOEOcIcYY4wR5gjzBHmCHOEOcIcYY4wRxwCwR+YC+5hLvgTc8FdzAW/YC74EXPBr8B3zMfBt5gLvsP4Y2JI5V+OXz4FNGnbxJCQfY09Cuy4RVFZec8xiqFIzxu6RVFZOZr+Bp5iGsGcD8A1jAVHwGeHqtaU89+AZ5g/8r906NXhP1kpIUuVHzsL2i82iFwE3mAm2BRbzNJ8gvm8eBO41+VMMMyRulUuRugkY33RNwtxnDyTohnLFhH857f85RTwELjVxp2nhuCEUcpmf1yz6msKkhFFbwJXl80wbkswMlm+ezwt3Y1j6dmUFh2f3uP+QP4AvFN52gLILPMAAAAASUVORK5CYII="),url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABkAAABgCAYAAADoxNlqAAACHUlEQVR4nO2avW3DMBCFz4IXyAAu2KjKDmo4QdSkVbbIBqmyAdVkjXgDAlGRMkWKpE4GCHCBDMmgBf3wjneCjeQAGRJ5wud7Np8kUhtEREiPbwB4AYCnbmvj59iL8vGIiNv2u/ebBqQHHSEbIbnG4qqTETLQi7t+RxNyvQYE1oC89juaP7wBgHfNSpoeoAmpwwMtuXYA8KFZiQeAz7BBA+KGDRqQvTbEA8CbNsSNNWbaUklD/JhU0hA31SE5GE1oJRqVNFMASUg91ykl1y70Ko1K/NCrNCBuKSHTGoCSED81ACUhLiYp05YqFeJjpEqFuNjElMFo5qxEopImFpACqSnJXLl2c14lUYlf8ioJiKOekGkNwBSIjx2AKRBHBXAge22I50hFhThgBmUwGoqVcCoheRUXQvIqrlwkr+JWso3MS4JUa0CKFMhZ/YXbuG2/VLCpQCwwg3r5zQP/Qi0XLon5LIjlQDh3K3knmZpcLMk4EEs9gXtzZ9a4Ta0oyVxIQUk+60cHkpelQGxsYuq0Rx7jZalPv2VMUirExiRJzBLlS14mMbdSLiVIQOxSgtSkmlljerCa65SCFHOdFzVlO+tlkhA71SG93JSPeZn0qkM51igNsWONGqtz+dDLNNa0ymGDBsQOG7QWM80ay7JVeKAFKcKDi14qb+Pm8Pn/jsSfekfi/uQqeXjzRzYeELFVSPyFpS9EfEZE2wFOIL8IuCu98e72JwAAAABJRU5ErkJggg=="),url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAABgCAYAAADcvRh2AAAAGElEQVR4nGP4////fyYGBgaGUYJhGIYBACMCBLvPEhW9AAAAAElFTkSuQmCC"); }
+/* ribbon outline layer: white at 65 % */
+.gc .gc-gen u { background:rgba(255,255,255,.65);
+  -webkit-mask-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAABgCAYAAABv9TBsAAADWElEQVR4nNWbPYvUQBiAn7xuv3tiY3WeeoigWChYqHBw9w/UVrRyEVELwRNFDi3UQhBs7or7B9r50eyBCDZ+wFUWKncnNoLgF1iJvBKdwDiX7CabZPPeAyG7bzabh8xMZpK8E6kqJYhy/GYnMA1sA3YBE0DbfR9Ii3qYBmaAo05waKoUbANd4BLQqepPWxWJnQcuVCk2rGBY584BV4Etffb5BrwGXgFvgGXgO/Ah1xHjRlJgidwyqao9zearqt5X1RlVHfP2K3q8oQS7TiBLbDaQikYpeCtD7LOq3ugjVpug/+fzKWK/VPWhqu4Y5uBVCr7MKM4zdYkVEUw7c6uquqduuTyCsxly46raakLQr3PdPnKMaon+Wq6/EMf954ugZ1gDpnJfYCsiS/Bt0MnHvcFBFx8pkhI7nTICuQas0AT6f5lvV9WVoN7Nl7nQaslFUjr/eECZ8B64Q4OI9zke4Z4Mti86SROCU25sl7AK3KZhWl7LvRJsuxlXURpGvHuIsOU+wQDi1seC+ALwCQOIdwZ9HmGESFUnUi7Cm13vYaIO7g1iS07OBJIiGN99YUnwkHXBrUHMTPEmguHTgJGO9/K0Yu3T/ZloxaZppcQaP2sb6gwKxhGMIxhHMI5gHME4gnEE4wjGEYwjGEcwjmAcwTiCcQTjCMYRjCMYRzCOYBzBOIJxBOMIxhGMIxhHMI5gHGEDPh+MLD0rFIwjLlnCp1RCYh2C4WuHynMAywp+DGL7MSa4EsRyJb+OUnA5iB3AmOCzlCLuWBJcDTI7Opbqobj1gyAepxubEuwF8WkrxSwZb9k7LofLhKC65V6wbRYYc31zsjQimHDXJWAntC2cRfE+f3GSPpXm5VeR4Nh2b9z9HK64hR9vavglwfcfru75xFMuLgKbaAJNT7LtpeRM724iwTGynmQrGfG467ucMsp5CowzSrT45AI/0TsqO5mgaKJ3kVT5WNKEYL/JBl0rgllnUl18sinBPJMPkiKfGzDZxcSUoXdu+2RVguF1cBD+dfLxgHvoBTfO9IdyhbvKYQUTTgBzOe4El1xe4nPgp7uTXKtDcN3+/EutPwucqmPkU4VgwoTL5rxe5b11lYJ4I57DrviPlH3WU5dgwm8nuM+t40kzhabv/gF9/F4J7wSfswAAAABJRU5ErkJggg=="),url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABkAAABgCAYAAADoxNlqAAACv0lEQVR4nN2aP4sTQRjGn1ksUyymthD2rhX8AlfsdYeVwUKEfARrv4G1ncVZCkLSeFiK2lucrZ6ovZyLpB+ZXHLsvezOvP+28YUlmckkT96HeX+bzEyIMUbY4w+ALwDeAHjZ67/67Ogfz2OMYXelz59EpC+0FQlOdg3F7Z2NqAAEw1XtrvsAfhCR5f5JGuAR5wBekL573iLZ8BR5QNppSm9jOwMMEXaPDYCv5LVDAN88M2lJ+zOAi33DS2RB2qf9hoddzYhVKZPolUmbs8pLZJGzysOug4xV8LKrLVmV4payLvbxCDfj9fU9xGBX6D2/A+AXef0ugJ/0TZWjVedDAlaRJWm/GhuotavJscork5Yzq6wii1IBWu1qSqzyyKSVWKUVWUis0th1wGGVNZNWahWHXSpWSe1SscpiV8tllUVkyWWV1i4Rq7SZqGaVVERcgFK7xKzSZGKyiitisopjl4pV0kzMVg2xy4VVJbtcWCWxS80qiYiaVVy7TKziZuIyq0oi5gIs2WVmFSeT33COaqCvA/Ce9D30FkmxIu1ji8jYFK4BXE49hTsAH0nfE41ATiTFGWkfaUVygJwB+EvGNwC+e2ayAfCJ9D2WCgyJRHKldV5qWehdLrff+UBxHnrffl0Ks2KMWVsLMzB+3I0V5oXnjzuzZRVznIllgfnXwcSyivllTCyruAMtLJP8MZ1pWSbJZKNlWUnEhWVBuOwx17BMuuzRaQpTs0q0lhamZlGtlrJMk0kntUy7BrmSWKZdsq0lLNNm0klYZlnhPuOyzLIhMOOyzJLJhssyqUjUsMy63TTnsMy63dRxCtNjd25dKkyPzcy6xDKPTLqSZV57v6ucZV5b5XWOZV6ZdAMsO5niZMHb/+KMxBGAp2NnJNIa5FSHY95NbdezG+tj25M/vjHZgaXLGOOHGONxT+Ba5B+oW4T80DoLuQAAAABJRU5ErkJggg=="),url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAABgCAYAAADcvRh2AAAAIElEQVR4nGP4////fyYGBgYGVIIRixjDKMEw2MMAPS4BNLoFuzI2RoMAAAAASUVORK5CYII=");
+  mask-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAABgCAYAAABv9TBsAAADWElEQVR4nNWbPYvUQBiAn7xuv3tiY3WeeoigWChYqHBw9w/UVrRyEVELwRNFDi3UQhBs7or7B9r50eyBCDZ+wFUWKncnNoLgF1iJvBKdwDiX7CabZPPeAyG7bzabh8xMZpK8E6kqJYhy/GYnMA1sA3YBE0DbfR9Ii3qYBmaAo05waKoUbANd4BLQqepPWxWJnQcuVCk2rGBY584BV4Etffb5BrwGXgFvgGXgO/Ah1xHjRlJgidwyqao9zearqt5X1RlVHfP2K3q8oQS7TiBLbDaQikYpeCtD7LOq3ugjVpug/+fzKWK/VPWhqu4Y5uBVCr7MKM4zdYkVEUw7c6uquqduuTyCsxly46raakLQr3PdPnKMaon+Wq6/EMf954ugZ1gDpnJfYCsiS/Bt0MnHvcFBFx8pkhI7nTICuQas0AT6f5lvV9WVoN7Nl7nQaslFUjr/eECZ8B64Q4OI9zke4Z4Mti86SROCU25sl7AK3KZhWl7LvRJsuxlXURpGvHuIsOU+wQDi1seC+ALwCQOIdwZ9HmGESFUnUi7Cm13vYaIO7g1iS07OBJIiGN99YUnwkHXBrUHMTPEmguHTgJGO9/K0Yu3T/ZloxaZppcQaP2sb6gwKxhGMIxhHMI5gHME4gnEE4wjGEYwjGEcwjmAcwTiCcQTjCMYRjCMYRzCOYBzBOIJxBOMIxhGMIxhHMI5gHGEDPh+MLD0rFIwjLlnCp1RCYh2C4WuHynMAywp+DGL7MSa4EsRyJb+OUnA5iB3AmOCzlCLuWBJcDTI7Opbqobj1gyAepxubEuwF8WkrxSwZb9k7LofLhKC65V6wbRYYc31zsjQimHDXJWAntC2cRfE+f3GSPpXm5VeR4Nh2b9z9HK64hR9vavglwfcfru75xFMuLgKbaAJNT7LtpeRM724iwTGynmQrGfG467ucMsp5CowzSrT45AI/0TsqO5mgaKJ3kVT5WNKEYL/JBl0rgllnUl18sinBPJMPkiKfGzDZxcSUoXdu+2RVguF1cBD+dfLxgHvoBTfO9IdyhbvKYQUTTgBzOe4El1xe4nPgp7uTXKtDcN3+/EutPwucqmPkU4VgwoTL5rxe5b11lYJ4I57DrviPlH3WU5dgwm8nuM+t40kzhabv/gF9/F4J7wSfswAAAABJRU5ErkJggg=="),url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABkAAABgCAYAAADoxNlqAAACv0lEQVR4nN2aP4sTQRjGn1ksUyymthD2rhX8AlfsdYeVwUKEfARrv4G1ncVZCkLSeFiK2lucrZ6ovZyLpB+ZXHLsvezOvP+28YUlmckkT96HeX+bzEyIMUbY4w+ALwDeAHjZ67/67Ogfz2OMYXelz59EpC+0FQlOdg3F7Z2NqAAEw1XtrvsAfhCR5f5JGuAR5wBekL573iLZ8BR5QNppSm9jOwMMEXaPDYCv5LVDAN88M2lJ+zOAi33DS2RB2qf9hoddzYhVKZPolUmbs8pLZJGzysOug4xV8LKrLVmV4payLvbxCDfj9fU9xGBX6D2/A+AXef0ugJ/0TZWjVedDAlaRJWm/GhuotavJscork5Yzq6wii1IBWu1qSqzyyKSVWKUVWUis0th1wGGVNZNWahWHXSpWSe1SscpiV8tllUVkyWWV1i4Rq7SZqGaVVERcgFK7xKzSZGKyiitisopjl4pV0kzMVg2xy4VVJbtcWCWxS80qiYiaVVy7TKziZuIyq0oi5gIs2WVmFSeT33COaqCvA/Ce9D30FkmxIu1ji8jYFK4BXE49hTsAH0nfE41ATiTFGWkfaUVygJwB+EvGNwC+e2ayAfCJ9D2WCgyJRHKldV5qWehdLrff+UBxHnrffl0Ks2KMWVsLMzB+3I0V5oXnjzuzZRVznIllgfnXwcSyivllTCyruAMtLJP8MZ1pWSbJZKNlWUnEhWVBuOwx17BMuuzRaQpTs0q0lhamZlGtlrJMk0kntUy7BrmSWKZdsq0lLNNm0klYZlnhPuOyzLIhMOOyzJLJhssyqUjUsMy63TTnsMy63dRxCtNjd25dKkyPzcy6xDKPTLqSZV57v6ucZV5b5XWOZV6ZdAMsO5niZMHb/+KMxBGAp2NnJNIa5FSHY95NbdezG+tj25M/vjHZgaXLGOOHGONxT+Ba5B+oW4T80DoLuQAAAABJRU5ErkJggg=="),url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAABgCAYAAADcvRh2AAAAIElEQVR4nGP4////fyYGBgYGVIIRixjDKMEw2MMAPS4BNLoFuzI2RoMAAAAASUVORK5CYII="); }
+/* TMP 26 in TT-RoGSanSrfStdN-Bd (not shipped; nearest bold rounded sans), 2 px #62628E @55 % outline */
+.gc .gc-gen b { position:relative; color:#fff; text-decoration:none; line-height:1;
+  font-family:"M PLUS Rounded 1c","LINE Seed Sans","Century Gothic",system-ui,sans-serif;
+  font-weight:800; font-size:11.61cqw; white-space:nowrap;
+  paint-order:stroke fill; -webkit-text-stroke:1.79cqw rgba(98,98,142,.55); }
+
+/* RarityEdgeDecoration: drawn band 84/100 of 47px = 39.4/320 = 12.31%. */
+.gc .gc-clip { position:absolute; inset:0; overflow:hidden; border-radius:inherit; pointer-events:none; }
+.gc .gc-rbar { position:absolute; left:0; right:0; bottom:0; width:100%; height:12.31%;
+  object-fit:fill; display:block; }
+
+/* Level 117x87.75 at (0,0): "Lv" 48x28 at (0,56) above value 140x56. */
+.gc .gc-lvl { position:absolute; left:0; bottom:0; width:62.5%; height:26.25%; z-index:2; pointer-events:none; }
+.gc .gc-lvl b, .gc .gc-lvl span { position:absolute; left:3%; right:0; display:flex; align-items:center;
+  color:#fff; line-height:1;
+  font-family:"LINE Seed Sans","Century Gothic","Futura","Trebuchet MS",system-ui,sans-serif;
+  font-weight:800; paint-order:stroke fill; }
+/* "Lv": TMP 28, TT-RoGSanSrfStdN-Bd, 2 px #43437B @55 % */
+.gc .gc-lvl span { bottom:66.667%; height:33.333%; font-size:12.5cqw; letter-spacing:.02em;
+  font-family:"M PLUS Rounded 1c","LINE Seed Sans",system-ui,sans-serif;
+  -webkit-text-stroke:1.79cqw rgba(67,67,123,.55); }
+/* value: TMP 56 LINE Seed Sans XBd, 4 px #43437B @65 % (stroke is centred, so 2x) */
+.gc .gc-lvl b { bottom:0; height:66.667%; font-size:25cqw; -webkit-text-stroke:3.57cqw rgba(67,67,123,.65); }
+
+/* Bloom flower 52x52 at (0,95). */
+.gc .gc-bloom { position:absolute; left:0; bottom:29.688%; width:23.214%; aspect-ratio:1; z-index:2; pointer-events:none; }
+.gc .gc-bloom img { width:100%; height:100%; display:block; filter:drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
+.gc .gc-bloom em { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-style:normal; color:#62628E; font-weight:800; font-size:14.29cqw; line-height:1;
+  paint-order:stroke fill; -webkit-text-stroke:.125em #fff;
+  font-family:"LINE Seed Sans","Century Gothic","Futura","Trebuchet MS",system-ui,sans-serif; }
+
+/* CardRarityStars: VerticalLayoutGroup spacing -16 -> pitch 32 px, stars OVERLAP ~10 px
+   (from the prefab). Cell k = 0 is the bottom star. Only 5* animates
+   (a 64-frame sprite sheet in game; a swept glint here). */
+.gc .gc-stars { position:absolute; inset:0; z-index:2; pointer-events:none; }
+.gc .gc-stars span { position:absolute; right:-2.77%; bottom:calc(5.94% + 10% * var(--k, 0)); width:19.82%;
+  aspect-ratio:148/141; overflow:hidden; filter:drop-shadow(0 1px 2px rgba(0,0,0,.55));
+  -webkit-mask-image:url(/chrome/rarity/ui_999_img_card_star.png); mask-image:url(/chrome/rarity/ui_999_img_card_star.png);
+  -webkit-mask-size:100% 100%; mask-size:100% 100%; }
+.gc .gc-stars img { width:100%; height:100%; display:block; }
+.gc .gc-stars i { display:none; }
+.gc.gc-r5 .gc-stars i { display:block; position:absolute; top:-25%; bottom:-25%; left:-60%; width:55%; pointer-events:none;
+  background:linear-gradient(100deg, transparent, rgba(255,255,255,.95), transparent);
+  animation:gc-glint 4.2s ease-in-out infinite; animation-delay:calc(var(--k,0) * .11s); }
+@keyframes gc-glint { 0%, 62% { transform:translateX(0); } 86%, 100% { transform:translateX(360%); } }
+@media (prefers-reduced-motion: reduce) { .gc .gc-stars i { animation:none !important; opacity:0; } }
+
+/* Leader mark: the leader is a ROLE, not a bigger card. It sits OUTSIDE the
+   face, above it, so nothing of the game's own face is covered. Ours, not the game's. */
+.gc .gc-role { padding:0; display:flex; align-items:center; gap:6px; height:20px; margin-bottom:6px;
+  font:700 11px/1 var(--gc-role-font, system-ui); letter-spacing:.06em; text-transform:uppercase;
+  color:var(--gc-role-ink, currentColor); }
+.gc .gc-role::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--gc-role-dot, #F5C451); }
+.gc .gc-role.gc-role-empty { visibility:hidden; }

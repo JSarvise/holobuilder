@@ -1,0 +1,162 @@
+syntax = "proto3";
+
+import "buf/validate/validate.proto";
+import "enums/provider_type.gen.proto";
+import "enums/region.gen.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "options/check_option.proto";
+import "options/zap.proto";
+import "rpc/api/common/response.gen.proto";
+
+package rpc.api;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/rpc/api";
+option csharp_namespace = "Vision.Common.Proto.Api";
+
+message AccountMigrationListResponse {
+	message ProviderLinkInfo {
+		.enums.ProviderType provider_type = 1;
+		bool is_linked = 2;
+	}
+
+	repeated AccountMigrationListResponse.ProviderLinkInfo provider_link_infos = 1;
+	string account_migration_id = 2;
+	common.Response common_response = 9999;
+}
+
+message AccountMigrationPrepareMigrationProviderWithoutAuthRequest {
+	string id_token = 1 [(options.zap.hidden) = true, (buf.validate.field).string.min_bytes = 1];
+	.enums.ProviderType provider_type = 2 [(buf.validate.field).enum.defined_only = true, (buf.validate.field).enum.not_in = 0];
+}
+
+message AccountMigrationPrepareMigrationProviderWithoutAuthResponse {
+	AccountMigrationLinkResult link_result = 1;
+	common.Response common_response = 9999;
+}
+
+message AccountMigrationMigrateRequest {
+	string previous_public_user_id = 1;
+	string target_public_user_id = 2 [(buf.validate.field).string.min_bytes = 1];
+	string one_time_token = 3 [(options.zap.hidden) = true, (buf.validate.field).string.min_bytes = 1];
+	.enums.Region region = 4;
+}
+
+message AccountMigrationMigrateResponse {
+	string credential = 1 [(options.zap.hidden) = true];
+	string account_migration_id = 2;
+}
+
+message AccountMigrationSetPasswordRequest {
+	string password = 1 [(options.zap.hidden) = true, (buf.validate.field).string.min_bytes = 1];
+}
+
+message AccountMigrationSetPasswordResponse {
+	string account_migration_id = 1;
+	common.Response common_response = 9999;
+}
+
+message AccountMigrationPrepareMigrationPasswordRequest {
+	string account_migration_id = 1 [(buf.validate.field).string.min_bytes = 1];
+	string password = 2 [(options.zap.hidden) = true, (buf.validate.field).string.min_bytes = 1];
+}
+
+message AccountMigrationPrepareMigrationPasswordResponse {
+	AccountMigrationLinkResult link_result = 1;
+}
+
+message AccountMigrationLinkAppleRequest {
+	string id_token = 1 [(options.zap.hidden) = true, (buf.validate.field).string.min_bytes = 1];
+}
+
+message AccountMigrationLinkAppleResponse {
+	AccountMigrationLinkResult link_result = 1;
+	common.Response common_response = 9999;
+}
+
+message AccountMigrationLinkGoogleRequest {
+	string id_token = 1 [(options.zap.hidden) = true, (buf.validate.field).string.min_bytes = 1];
+}
+
+message AccountMigrationLinkGoogleResponse {
+	AccountMigrationLinkResult link_result = 1;
+	common.Response common_response = 9999;
+}
+
+message AccountMigrationLinkResult {
+	message LinkedUserInfo {
+		string public_user_id = 1;
+		string user_name = 2;
+		int32 player_level = 3;
+		string one_time_token = 4 [(options.zap.hidden) = true];
+		.enums.Region region = 5;
+	}
+
+	bool is_already_linked = 1;
+	AccountMigrationLinkResult.LinkedUserInfo linked_user_info = 2;
+}
+
+message AccountMigrationUnlinkRequest {
+	.enums.ProviderType provider_type = 1 [(buf.validate.field).enum.defined_only = true, (buf.validate.field).enum.not_in = 0];
+}
+
+message AccountMigrationUnlinkResponse {
+	common.Response common_response = 9999;
+}
+
+service AccountMigration {
+	rpc List (.google.protobuf.Empty) returns (.rpc.api.AccountMigrationListResponse) {
+		option (google.api.http).post = "/AccountMigration/List";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_master_version = true;
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+
+	rpc SetPassword (.rpc.api.AccountMigrationSetPasswordRequest) returns (.rpc.api.AccountMigrationSetPasswordResponse) {
+		option (google.api.http).post = "/AccountMigration/SetPassword";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_master_version = true;
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+
+	rpc PrepareMigrationPassword (.rpc.api.AccountMigrationPrepareMigrationPasswordRequest) returns (.rpc.api.AccountMigrationPrepareMigrationPasswordResponse) {
+		option (google.api.http).post = "/AccountMigration/PrepareMigrationPassword";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_game_auth_token = true;
+		option (options.check_option.check).disabled_master_version = true;
+	}
+
+	rpc LinkApple (.rpc.api.AccountMigrationLinkAppleRequest) returns (.rpc.api.AccountMigrationLinkAppleResponse) {
+		option (google.api.http).post = "/AccountMigration/LinkApple";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_master_version = true;
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+
+	rpc LinkGoogle (.rpc.api.AccountMigrationLinkGoogleRequest) returns (.rpc.api.AccountMigrationLinkGoogleResponse) {
+		option (google.api.http).post = "/AccountMigration/LinkGoogle";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_master_version = true;
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+
+	rpc PrepareMigrationProviderWithoutAuth (.rpc.api.AccountMigrationPrepareMigrationProviderWithoutAuthRequest) returns (.rpc.api.AccountMigrationPrepareMigrationProviderWithoutAuthResponse) {
+		option (google.api.http).post = "/AccountMigration/PrepareMigrationProviderWithoutAuth";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_game_auth_token = true;
+		option (options.check_option.check).disabled_master_version = true;
+	}
+
+	rpc Migrate (.rpc.api.AccountMigrationMigrateRequest) returns (.rpc.api.AccountMigrationMigrateResponse) {
+		option (google.api.http).post = "/AccountMigration/Migrate";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_game_auth_token = true;
+		option (options.check_option.check).disabled_master_version = true;
+	}
+
+	rpc Unlink (.rpc.api.AccountMigrationUnlinkRequest) returns (.rpc.api.AccountMigrationUnlinkResponse) {
+		option (google.api.http).post = "/AccountMigration/Unlink";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_master_version = true;
+	}
+}

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Night Deck kit</title>
+<link rel="stylesheet" href="/hb.css"><link rel="stylesheet" href="/hb-card.css">
+<style>
+/* kit-only layout; every component style lives in hb.css */
+.kit{width:var(--col);margin:28px auto 80px;display:grid;gap:28px}
+.kit h1{font-size:28px;margin:0}
+.kit .row{display:flex;flex-wrap:wrap;gap:14px;align-items:center}
+.sw{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.sw div{border-radius:16px;overflow:hidden;border:1px solid var(--line);font:700 12px/1.3 var(--f-ui)}
+.sw i{display:block;height:44px}
+.sw span{display:block;padding:6px 10px;color:var(--ink-2)}
+.ts p{margin:4px 0}
+.grades{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:18px 12px}
+.grades figure{margin:0;display:grid;justify-items:center;gap:6px;font:700 12px/1 var(--f-ui);color:var(--ink-2)}
+.grades figure .hb-grade{background:rgb(255 255 255 / .03);border-radius:16px}
+.cmp{display:flex;gap:28px;align-items:flex-end}
+.cmp figure{margin:0;text-align:center;color:var(--ink-3);font:700 12px/1.3 var(--f-ui)}
+.hero3{display:flex;align-items:center}
+.lrows{display:grid;gap:8px;max-width:640px}
+</style></head>
+<body>
+<div class="app">
+  <nav class="rail" data-page="kit"></nav>
+  <main>
+  <div class="kit">
+    <div><h1>Night Deck — component sheet</h1>
+      <p class="sub">Every shared component, drawn by the real hb.css / hb-grade.js / hb-timeline.js / hb-card.js. Rules: docs/redesign/IDENTITY.md.</p></div>
+
+    <section class="dlg"><div class="dlg-h"><i class="ico" style="--ico:url(/ui/grade/ui_999_txt_score_s.png);background:none;-webkit-mask:none;mask:none;background-image:var(--ico);background-size:contain"></i><h2>Grade badge (RankIcon)</h2>
+      <span class="r">prefab RankIcon_180 · sprites ui_999_txt_score_* · thresholds GET /api/ranks</span></div>
+      <div class="dlg-b">
+        <p class="sub">Unit Score / Overall Power / Score Bonus ladder (LiveDeckEvaluationRank), 120 px:</p>
+        <div class="grades" id="g-unit"></div>
+        <p class="sub" style="margin-top:22px">Song score ladder extends to S+9 (LiveScoreEvaluationRank); <b>live</b> letters (ui_410, multi-live result) and the 120-variant prefab:</p>
+        <div class="grades" id="g-song"></div>
+        <p class="sub" style="margin-top:22px">Sizes in use: 28 (Unit Score Details columns), 48, 72 (the ONE large grade per view):</p>
+        <div class="cmp" id="g-sizes"></div>
+      </div></section>
+
+    <section class="dlg"><div class="dlg-h"><h2>Score readout</h2><span class="r">one score per team · padded to 8 digits · leading zeros dimmed by colour</span></div>
+      <div class="dlg-b"><div class="hero3" id="hero"></div></div></section>
+
+    <section class="dlg"><div class="dlg-h"><h2>Controls</h2><span class="r">only the primary action is filled · pills sink into their shadow on press · focus ring Active yellow</span></div>
+      <div class="dlg-b" style="display:grid;gap:18px">
+        <div class="row"><button class="btn primary btn-lg"><i class="ico" style="--ico:url(/ui/nav/ui_999_ico_search.png)"></i>Find best team</button>
+          <button class="btn"><i class="ico" style="--ico:url(/ui/nav/ui_999_ico_sync.png)"></i>Refresh</button>
+          <button class="btn">Options</button><button class="btn small">Copy team</button><button class="btn" disabled>Disabled</button></div>
+        <div class="row"><span class="field"><span>Goal</span><span class="seg" role="group"><button aria-pressed="true">Score</button><button aria-pressed="false">Event Pt</button></span></span>
+          <button class="chip on">My cards</button><button class="chip">Boards from scratch</button>
+          <span class="tag">SINGS</span><span class="tag muted">cached</span>
+          <span class="diff expert"><b>26</b>Expert</span><span class="diff hard"><b>21</b>Hard</span><span class="lbl">Unit Score</span></div>
+      </div></section>
+
+    <section class="dlg"><div class="dlg-h"><h2>Ranking list (hb-rank.js)</h2><span class="r">SAMPLE figures · p10–p90 on one shared axis · beats #1 from the pmfs · global top N (rows may share a leader) · diff vs #1 outlines swapped cards</span></div>
+      <div class="dlg-b" style="display:grid;grid-template-columns:1fr 1fr;gap:28px"><div><p class="sub">default</p><div id="rows"></div></div><div><p class="sub">diff vs #1 · a row without served spread degrades to a dashed track</p><div id="rows-diff"></div></div></div></section>
+
+    <section class="dlg"><div class="dlg-h"><h2>Search progress</h2><span class="r">SAMPLE · the cached answer stays visible below it</span></div>
+      <div class="dlg-b"><div id="prog"></div></div></section>
+
+    <section class="dlg"><div class="dlg-h"><h2>Team strip</h2><span class="r">leader + 5 equal game cards (hb-card.css), capped at 184 px</span></div>
+      <div class="dlg-b"><div class="team-strip" id="strip"><p class="sub">loading /api/collection…</p></div></div></section>
+
+    <section class="dlg"><div class="dlg-h wave"><h2>Unit Score Details</h2><span class="r">the game's terms and colours</span></div>
+      <div class="dlg-b"><div class="usd" id="usd"></div></div></section>
+
+    <section class="dlg"><div class="dlg-h"><img class="ic" src="/ui/skill/ui_800_thm_skill_sp_base.png" alt="" style="border-radius:8px"><h2>Skill uptime</h2><span class="r" id="tl-note">POST /api/timeline</span></div>
+      <div class="dlg-b"><div id="tl"><p class="sub">scoring the team…</p></div></div></section>
+
+    <section class="dlg"><div class="dlg-h"><h2>Tokens</h2></div>
+      <div class="dlg-b"><div class="sw" id="sw"></div>
+        <div class="ts" style="margin-top:22px"><p style="font-size:64px" class="n">02,311,415</p><p style="font:800 28px var(--f-ui)">Heading 28</p>
+          <p style="font:800 20px var(--f-ui)">Heading 20 · <span class="n">1,514,126</span></p><p style="font:800 15px var(--f-ui)">Section 15</p>
+          <p style="font:700 13.5px var(--f-ui)">Body 13.5 — M PLUS Rounded 1c</p><p style="font:700 12px var(--f-ui);color:var(--ink-2)">Note 12</p><p style="font:700 11px var(--f-ui);color:var(--ink-3)">Caption 11 (minimum)</p></div></div></section>
+  </div>
+  </main>
+</div>
+<script src="/hb-shell.js"></script><script src="/hb-gens.js"></script><script src="/hb-card.js"></script>
+<script type="module">
+import { badge, score, loadRanks, unitRows, rankOf } from "/hb-grade.js";
+import { render } from "/hb-timeline.js";
+import { list, progress } from "/hb-rank.js";
+const $ = id => document.getElementById(id);
+const L = ["D","D+","C","C+","B","B+","A","A+","S","S+","S+2","S+3","S+4","S+5"];
+$("g-unit").innerHTML = L.map(g => `<figure>${badge(g, { size: 120 })}<figcaption>${g}</figcaption></figure>`).join("");
+$("g-song").innerHTML = ["S+6","S+7","S+8","S+9"].map(g => `<figure>${badge(g, { size: 120 })}<figcaption>${g}</figcaption></figure>`).join("") +
+  ["S+2","A+"].map(g => `<figure>${badge(g, { size: 120, kind: "live" })}<figcaption>${g} live</figcaption></figure>`).join("") +
+  `<figure>${badge("S+2", { size: 120, variant: 120 })}<figcaption>S+2 · RankIcon_120</figcaption></figure>`;
+$("g-sizes").innerHTML = [28, 48, 72].map(s => `<figure>${badge("S+2", { size: s })}<br>${s}px</figure>`).join("");
+await loadRanks();
+const unit = 1514126, g = rankOf(unit, unitRows());
+$("hero").innerHTML = `<div class="stat-tile prime"><div><span class="lbl">Expected score</span>${score(2311415)}
+    <small>p10 2,181,193 · p90 2,426,251 · max 2,497,814</small></div></div>
+  <div class="stat-tile">${g ? badge(g, { size: 72 }) : ""}<div><span class="lbl">Unit Score</span>${score(unit)}
+    <small>${g && g.next ? g.next.short.toLocaleString("en-US") + " to " + g.next.grade : ""}</small></div></div>`;
+const col = (title, gr, total, list, pct) => { const sum = list.reduce((a, t) => a + t[1], 0) || 1;
+  return `<div><h4>${badge(gr, { size: 28 })}<span class="lbl">${title}</span><span class="n">${pct ? "+" + (total / 10).toFixed(1) + "%" : total.toLocaleString("en-US")}</span></h4>
+    <div class="stack">${list.map(t => `<i style="width:${t[1] / sum * 100}%;background:${t[2]}"></i>`).join("")}</div>
+    <div class="terms">${list.map(t => `<div class="term"><i style="background:${t[2]}"></i><span>${t[0]}</span><b class="n">${pct ? "+" + (t[1] / 10).toFixed(1) + "%" : t[1].toLocaleString("en-US")}</b></div>`).join("")}</div></div>`; };
+$("usd").innerHTML = col("Overall Power", "S+2", 290762, [["Member Parameter",120317,"var(--t-member)"],["Outfit Skill",54143,"var(--t-leader)"],["Holomem Board Bonus",94904,"var(--t-board)"],["Passive Skill",5791,"var(--t-passive)"],["Memory Bonus",7949,"var(--t-memory)"],["Member Power-Up Bonus",7652,"var(--t-powerup)"]], false) +
+  col("Score Bonus", "S+2", 1556, [["Outfit Skill",0,"var(--t-leader)"],["Active Skill",752,"var(--t-active)"],["Holomem Board Bonus",331,"var(--t-board)"],["Passive Skill",33,"var(--t-passive)"],["Special Skill",440,"var(--t-special)"]], true);
+$("prog").innerHTML = progress({ stage: "Stage 2 of 2 · exact leaf", done: 61240, total: 178889, elapsed_s: 41, eta_s: 79, best_so_far: 2190102, cached_score: 2187343 });
+const toks = ["deep","ground","sheet","sheet-2","ink","ink-2","ink-3","sky","violet","eb","easy","normal","hard","expert","t-member","t-leader","t-board","t-passive","t-memory","t-powerup","t-active","t-special","cute","pure","happy"];
+$("sw").innerHTML = toks.map(t => `<div><i style="background:var(--${t})"></i><span>--${t}</span></div>`).join("") + `<div><i style="background:var(--rank-s)"></i><span>--rank-s</span></div>`;
+try {
+  const c = await (await fetch("/api/collection")).json();
+  const all = c.cards || [], owned = all.filter(x => x.owned !== false && (x.owned || x.level || x.in_collection)).slice(0, 6);
+  const six = (owned.length === 6 ? owned : all.slice(0, 6));
+  const ids = six.map(x => x.id), alt = [ids[1], ids[0], ...ids.slice(2)], alt2 = [ids[0], ids[2], ids[1], ids[4], ids[3], ids[5]];
+  const pmf = (m, sd) => ({ start: m - 4 * sd, width: sd / 4, mass: Array.from({ length: 32 }, (_, k) => Math.exp(-(((k + .5) / 4 - 4) ** 2) / 2)) });
+  const L0 = { id: ids[0], name: six[0].member, outfit: six[0].costume_name }, L1 = { id: ids[1], name: six[1].member, outfit: six[1].costume_name };
+  const rows = [{ score: 2187343, p10: 2101000, p50: 2185000, p90: 2270000, max: 2350000, pmf: pmf(2187343, 65000), leader: L0, cards: ids },
+    { score: 2150962, p10: 2062000, p50: 2149000, p90: 2236000, max: 2310000, pmf: pmf(2150962, 65000), leader: L1, cards: alt, sings: true },
+    { score: 2133674, p10: 2050000, p50: 2131000, p90: 2214000, max: 2290000, pmf: pmf(2133674, 65000), leader: L0, cards: alt2 },
+    { score: 2099114, leader: { id: "x", name: "Row without spread", outfit: "" }, cards: alt }];
+  $("rows").innerHTML = list(rows, { selected: 0 });
+  $("rows-diff").innerHTML = list(rows, { selected: 1, diff: true });
+  $("strip").innerHTML = six.map((card, i) => `<div>${HBCard.face(card, { lead: i === 0, w: 400 })}<div class="meta"><b>${card.costume_name || card.title || ""}</b>${card.member || ""}</div></div>`).join("");
+  const r = await (await fetch("/api/timeline", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ song: "m0342", cards: six.map(x => x.id) }) })).json();
+  if (r.available) { const nm = Object.fromEntries(six.map(x => [x.id, x.member])); render($("tl"), r.timeline, { name: id => nm[id], pin: 47.5, leader: { name: six[0].member, text: "Leader Skill (from the card)" } });
+    $("tl-note").textContent = `m0342 ${r.difficulty} · ${r.timeline.notes} notes · slot order as scored · POST /api/timeline`; }
+  else $("tl").innerHTML = `<p class="sub">${r.reason || r.error || "no timeline"}</p>`;
+} catch (e) { $("strip").innerHTML = `<p class="sub">${e}</p>`; }
+</script>
+</body></html>

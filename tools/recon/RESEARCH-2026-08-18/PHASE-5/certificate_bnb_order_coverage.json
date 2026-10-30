@@ -1,0 +1,544 @@
+{
+ "status": "BOUNDED",
+ "objective": "OBJECTIVE-v2 S(T, C): plan-cache fast leaf (cached_team_plan + board_model_from_plan(plan_cache) + score_song_detailed), Connect assignment exact, bench boards from board.json",
+ "model_version": "objective-v2.0-draft",
+ "song": "m0334",
+ "chart_singers": [
+  "chr-04001"
+ ],
+ "singer_type": "solo",
+ "leader": "card-04001-5-uniq-0042-00",
+ "leader_name": "Mori Calliope / Poetic Death Waltz",
+ "sings": true,
+ "universe": "5star-maxed-catalogue",
+ "universe_size": 66,
+ "pool": [
+  "card-00001-5-uniq-0000-00",
+  "card-00002-5-uniq-0001-00",
+  "card-00004-5-uniq-0005-00",
+  "card-00005-5-uniq-0006-00",
+  "card-00006-5-uniq-0007-00",
+  "card-00007-5-uniq-0008-00",
+  "card-00010-5-uniq-0010-00",
+  "card-00010-5-uniq-0069-00",
+  "card-00011-5-uniq-0011-00",
+  "card-00012-5-uniq-0012-00",
+  "card-00012-5-uniq-0062-00",
+  "card-00013-5-uniq-0002-00",
+  "card-00014-5-uniq-0013-00",
+  "card-00015-5-uniq-0003-00",
+  "card-00015-5-uniq-0067-00",
+  "card-00016-5-uniq-0014-00",
+  "card-00017-5-uniq-0015-00",
+  "card-00018-5-uniq-0004-00",
+  "card-00018-5-uniq-0068-00",
+  "card-00019-5-uniq-0016-00",
+  "card-00021-5-uniq-0017-00",
+  "card-00021-5-uniq-0064-00",
+  "card-00022-5-uniq-0018-00",
+  "card-00022-5-uniq-0063-00",
+  "card-00023-5-uniq-0019-00",
+  "card-00026-5-uniq-0021-00",
+  "card-00026-5-uniq-0065-00",
+  "card-00027-5-uniq-0022-00",
+  "card-00028-5-uniq-0023-00",
+  "card-00028-5-uniq-0070-00",
+  "card-00030-5-uniq-0024-00",
+  "card-00031-5-uniq-0025-00",
+  "card-00032-5-uniq-0026-00",
+  "card-00034-5-uniq-0027-00",
+  "card-00035-5-uniq-0028-00",
+  "card-00036-5-uniq-0029-00",
+  "card-00037-5-uniq-0030-00",
+  "card-00039-5-uniq-0032-00",
+  "card-03001-5-uniq-0033-00",
+  "card-03002-5-uniq-0034-00",
+  "card-03003-5-uniq-0035-00",
+  "card-03004-5-uniq-0036-00",
+  "card-03004-5-uniq-0073-00",
+  "card-03005-5-uniq-0037-00",
+  "card-03006-5-uniq-0038-00",
+  "card-03007-5-uniq-0039-00",
+  "card-03008-5-uniq-0040-00",
+  "card-03009-5-uniq-0041-00",
+  "card-04001-5-uniq-0042-00",
+  "card-04001-5-uniq-0071-00",
+  "card-04002-5-uniq-0043-00",
+  "card-04003-5-uniq-0044-00",
+  "card-04003-5-uniq-0072-00",
+  "card-04007-5-uniq-0047-00",
+  "card-04010-5-uniq-0049-00",
+  "card-04012-5-uniq-0051-00",
+  "card-04013-5-uniq-0052-00",
+  "card-04014-5-uniq-0053-00",
+  "card-04015-5-uniq-0054-00",
+  "card-04016-5-uniq-0055-00",
+  "card-04017-5-uniq-0056-00",
+  "card-06002-5-uniq-0058-00",
+  "card-06002-5-uniq-0066-00",
+  "card-06003-5-uniq-0059-00",
+  "card-06004-5-uniq-0060-00",
+  "card-06005-5-uniq-0061-00"
+ ],
+ "dominated": [],
+ "basis": "maxed",
+ "budget_kind": "flat",
+ "budget": 447,
+ "uptime_model": "finite",
+ "platform": "pc",
+ "plan_cache_seed": {
+  "leader": "card-04001-5-uniq-0042-00",
+  "members": [
+   "card-04001-5-uniq-0042-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04003-5-uniq-0044-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00006-5-uniq-0007-00"
+  ]
+ },
+ "search": {
+  "kind": "branch-and-bound over 5-sets of distinct holomems, leader fixed, leader card may also be a member; DFS by depth-2 prefix per worker; children ordered by bound desc; every leaf bounded before scoring",
+  "bound": "hbuilder.solver.exact_row.RowBound (monotone relaxation of the leaf; see the module docstring)",
+  "p_mode": "tier",
+  "order": "coverage",
+  "workers": 16,
+  "prefixes_total": 2133,
+  "prefixes_done": 60
+ },
+ "n_rosters": 8441052,
+ "leaves_evaluated": 11081,
+ "nodes_pruned": 0,
+ "leaves_pruned_by_internal_nodes": 0,
+ "leaves_pruned_by_own_bound": 435585,
+ "rosters_accounted": 446666,
+ "rosters_accounted_equals_n": false,
+ "bound_evals": 484654,
+ "seconds": 17.01634170000034,
+ "wall_seconds_incl_pool": 17.0174463000003,
+ "bound_build_seconds": 1.4861188000068069,
+ "upper_bound": 5070296.0,
+ "gap": 0.5193928536967037,
+ "best": {
+  "score": 3337054.0,
+  "idx": [
+   23,
+   24,
+   32,
+   49,
+   52
+  ],
+  "ids": [
+   "card-00022-5-uniq-0063-00",
+   "card-00023-5-uniq-0019-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04001-5-uniq-0071-00",
+   "card-04003-5-uniq-0072-00"
+  ],
+  "members": [
+   "Shirogane Noel / Soleil Kiss",
+   "Houshou Marine / Crimson Captain",
+   "Shishiro Botan / WH Lion Vanguard",
+   "Mori Calliope / Radiant Summer Heatwave",
+   "Ninomae Ina'nis / Waterfront Monochrome"
+  ]
+ },
+ "top": [
+  {
+   "score": 3337054.0,
+   "idx": [
+    23,
+    24,
+    32,
+    49,
+    52
+   ],
+   "ids": [
+    "card-00022-5-uniq-0063-00",
+    "card-00023-5-uniq-0019-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0071-00",
+    "card-04003-5-uniq-0072-00"
+   ]
+  },
+  {
+   "score": 3303028.0,
+   "idx": [
+    23,
+    24,
+    32,
+    49,
+    50
+   ],
+   "ids": [
+    "card-00022-5-uniq-0063-00",
+    "card-00023-5-uniq-0019-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0071-00",
+    "card-04002-5-uniq-0043-00"
+   ]
+  },
+  {
+   "score": 3297969.0,
+   "idx": [
+    12,
+    16,
+    17,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00014-5-uniq-0013-00",
+    "card-00017-5-uniq-0015-00",
+    "card-00018-5-uniq-0004-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ]
+  },
+  {
+   "score": 3296701.0,
+   "idx": [
+    4,
+    12,
+    46,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00014-5-uniq-0013-00",
+    "card-03008-5-uniq-0040-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ]
+  },
+  {
+   "score": 3288470.0,
+   "idx": [
+    12,
+    16,
+    47,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00014-5-uniq-0013-00",
+    "card-00017-5-uniq-0015-00",
+    "card-03009-5-uniq-0041-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ]
+  },
+  {
+   "score": 3282928.0,
+   "idx": [
+    23,
+    24,
+    32,
+    48,
+    52
+   ],
+   "ids": [
+    "card-00022-5-uniq-0063-00",
+    "card-00023-5-uniq-0019-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0042-00",
+    "card-04003-5-uniq-0072-00"
+   ]
+  },
+  {
+   "score": 3282211.0,
+   "idx": [
+    4,
+    12,
+    15,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00014-5-uniq-0013-00",
+    "card-00016-5-uniq-0014-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ]
+  },
+  {
+   "score": 3281149.0,
+   "idx": [
+    4,
+    12,
+    31,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00014-5-uniq-0013-00",
+    "card-00031-5-uniq-0025-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ]
+  },
+  {
+   "score": 3278237.0,
+   "idx": [
+    4,
+    12,
+    47,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00014-5-uniq-0013-00",
+    "card-03009-5-uniq-0041-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ]
+  },
+  {
+   "score": 3277112.0,
+   "idx": [
+    4,
+    12,
+    50,
+    51,
+    65
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00014-5-uniq-0013-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00",
+    "card-06005-5-uniq-0061-00"
+   ]
+  },
+  {
+   "score": 3276505.0,
+   "idx": [
+    4,
+    12,
+    50,
+    52,
+    54
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00014-5-uniq-0013-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0072-00",
+    "card-04010-5-uniq-0049-00"
+   ]
+  },
+  {
+   "score": 3274779.0,
+   "idx": [
+    23,
+    24,
+    44,
+    49,
+    52
+   ],
+   "ids": [
+    "card-00022-5-uniq-0063-00",
+    "card-00023-5-uniq-0019-00",
+    "card-03006-5-uniq-0038-00",
+    "card-04001-5-uniq-0071-00",
+    "card-04003-5-uniq-0072-00"
+   ]
+  },
+  {
+   "score": 3274423.0,
+   "idx": [
+    12,
+    50,
+    51,
+    56,
+    58
+   ],
+   "ids": [
+    "card-00014-5-uniq-0013-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00",
+    "card-04013-5-uniq-0052-00",
+    "card-04015-5-uniq-0054-00"
+   ]
+  },
+  {
+   "score": 3274337.0,
+   "idx": [
+    23,
+    24,
+    32,
+    48,
+    51
+   ],
+   "ids": [
+    "card-00022-5-uniq-0063-00",
+    "card-00023-5-uniq-0019-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0042-00",
+    "card-04003-5-uniq-0044-00"
+   ]
+  },
+  {
+   "score": 3272254.0,
+   "idx": [
+    23,
+    50,
+    52,
+    63,
+    65
+   ],
+   "ids": [
+    "card-00022-5-uniq-0063-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0072-00",
+    "card-06003-5-uniq-0059-00",
+    "card-06005-5-uniq-0061-00"
+   ]
+  },
+  {
+   "score": 3272014.0,
+   "idx": [
+    4,
+    12,
+    35,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00014-5-uniq-0013-00",
+    "card-00036-5-uniq-0029-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ]
+  },
+  {
+   "score": 3269009.0,
+   "idx": [
+    4,
+    12,
+    40,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00014-5-uniq-0013-00",
+    "card-03003-5-uniq-0035-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ]
+  },
+  {
+   "score": 3264764.0,
+   "idx": [
+    12,
+    50,
+    51,
+    61,
+    64
+   ],
+   "ids": [
+    "card-00014-5-uniq-0013-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00",
+    "card-06002-5-uniq-0058-00",
+    "card-06004-5-uniq-0060-00"
+   ]
+  },
+  {
+   "score": 3264056.0,
+   "idx": [
+    12,
+    16,
+    22,
+    49,
+    50
+   ],
+   "ids": [
+    "card-00014-5-uniq-0013-00",
+    "card-00017-5-uniq-0015-00",
+    "card-00022-5-uniq-0018-00",
+    "card-04001-5-uniq-0071-00",
+    "card-04002-5-uniq-0043-00"
+   ]
+  },
+  {
+   "score": 3262554.0,
+   "idx": [
+    4,
+    12,
+    50,
+    51,
+    60
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00014-5-uniq-0013-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00",
+    "card-04017-5-uniq-0056-00"
+   ]
+  }
+ ],
+ "incumbent": {
+  "members": [
+   "card-00001-5-uniq-0000-00",
+   "card-00013-5-uniq-0002-00",
+   "card-04001-5-uniq-0042-00",
+   "card-04003-5-uniq-0072-00",
+   "card-04016-5-uniq-0055-00"
+  ],
+  "idx": [
+   0,
+   11,
+   48,
+   52,
+   59
+  ],
+  "score": 2748231.0,
+  "is_argmax": false
+ },
+ "inputs_hash": "db2ed31f94b8be60c72b92d5422821e473f523bb51659443c218c513cac401fa",
+ "inputs_hash_files": {
+  "cards": "98fd8133693a2816188dc7e5425a1cb103d4dce841733f1d08ca8a982e8af277",
+  "board": "2cc38f0667a5e915e7411f4f6060d29acbe428372d9f738b3ecf7b236d74c6cb",
+  "charts": "bdc9dc1c8b485ea8588d9fca7e778cc31bf71eecb4fdf06703f403a3b2b93c22",
+  "skilltree": "57245966f417632493a768db6684248f71cf533d8a1b0aa29a5779729dfeb29c",
+  "master_stn": "efbc636b23a619b4dd02d9adfaa8989e6bbfcf09f3fcae41d56fdcd7effe18c2",
+  "collection": "2a016c02efa56417e4c9e7511819d84098888bbeeaddc30a92e276c9404838c3",
+  "cfg": "beddd8cf4f6d99184f95e155123ba201127d7d21493de2c665158707bf1e2da1"
+ },
+ "git": {
+  "head": "e3117d68deb5f3eed194ab3143a1fdf480dde386",
+  "dirty": true,
+  "status_porcelain": [
+   "M TODO.md",
+   " M src/hbuilder/domain/scoring_config.py",
+   " M src/hbuilder/domain/song.py",
+   " M tests/test_score_song.py",
+   " M tools/recon/README.md",
+   " M tools/recon/SLOT-EXPOSURE.md",
+   " M tools/recon/proxy/active_lattice.py",
+   " M tools/recon/proxy/build_charts.py",
+   " M tools/recon/proxy/dumps/charts.json",
+   " M tools/recon/proxy/precompute_optimisations.py",
+   " M tools/web/server.py",
+   " M tools/web/static/app.js",
+   " M tools/web/static/index.html",
+   "?? src/hbuilder/solver/exact_row.py",
+   "?? tests/test_exact_row.py",
+   "?? tools/recon/OPTIMIZER-V2-STATUS.md",
+   "?? tools/recon/RESEARCH-2026-08-18/PHASE-5/",
+   "?? tools/recon/probes/exact_row_bnb_2026_08_18.py",
+   "?? tools/recon/probes/holodori_parity_2026_08_18.py",
+   "?? tools/web/test_solve_platform.py"
+  ],
+  "diff_head_sha256": "7237838cebdc4cfe5b7f5bb8abb000532012f60b99ca936cbb3445608412c100"
+ },
+ "python": "3.13.7",
+ "written": "2026-08-18T15:17:57"
+}

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Holomem Board · hololive builder</title>
+<link rel="stylesheet" href="/hb-card.css">
+<link rel="stylesheet" href="/hb.css">
+<link rel="stylesheet" href="/holoboard.css">
+<script src="/hb-gens.js"></script>
+<script src="/hb-card.js"></script>
+<script src="/hb-format.js"></script>
+</head>
+<body class="hbd">
+<div class="app">
+  <nav class="rail" data-page="board"></nav>
+
+  <main>
+    <header class="pg" aria-labelledby="hbdtitle">
+      <div class="wrap">
+        <h1 id="hbdtitle">Holomem Board</h1>
+        <p class="pg-meta" id="chips"><span>Loading the boards…</span></p>
+        <p class="pg-lede">Every holomem's board as the game draws it and the points each one holds.
+          A team's board plan is in the Optimizer, on each team's detail.</p>
+        <div class="pg-stats" id="stats"></div>
+      </div>
+    </header>
+
+    <div class="wrap" id="body">
+      <!-- 1. one holomem's board -->
+      <section class="hbd-sec" aria-labelledby="h-boards">
+        <header class="hbd-sh"><h2 id="h-boards">Boards</h2></header>
+        <div class="hbd-boards">
+          <aside class="hbd-roster" aria-label="Holomems">
+            <div class="hbd-find">
+              <i class="ico" style="--ico:url(/ui/nav/ui_999_ico_search.png)" aria-hidden="true"></i>
+              <input id="find" type="search" placeholder="Find a holomem" aria-label="Find a holomem" autocomplete="off">
+            </div>
+            <div class="seg hbd-sort" id="sort" role="group" aria-label="Sort holomems">
+              <button type="button" data-v="unspent" aria-pressed="true">Unspent Pt</button>
+              <button type="button" data-v="spent" aria-pressed="false">Spent</button>
+              <button type="button" data-v="name" aria-pressed="false">A–Z</button>
+            </div>
+            <ol class="hbd-list" id="roster"></ol>
+          </aside>
+
+          <div class="hbd-stage" id="stage">
+            <header class="hbd-stagehead" id="stagehead"></header>
+            <div class="hbd-viewbar">
+              <div class="hbd-legend" id="legend"></div>
+            </div>
+            <div class="hbd-viewport" id="viewport">
+              <div class="hbd-canvas" id="canvas" tabindex="0" aria-label="Board view: scroll or pinch to zoom, drag to move, double-click or 0 to fit, arrow keys to pan"></div>
+              <div class="hbd-zoombar" role="toolbar" aria-label="Zoom">
+                <button type="button" data-zoom="in" title="Zoom in (+)" aria-label="Zoom in"><span aria-hidden="true">+</span></button>
+                <span class="num" id="zoomlvl" title="Zoom">100%</span>
+                <button type="button" data-zoom="out" title="Zoom out (−)" aria-label="Zoom out"><span aria-hidden="true">−</span></button>
+                <button type="button" data-zoom="fit" title="Fit the board (0 or double-click)" aria-label="Fit the board"><span class="w" aria-hidden="true">Fit</span></button>
+                <button type="button" data-zoom="full" title="Full screen (F)" aria-label="Full screen"><span class="w" aria-hidden="true">Full</span></button>
+              </div>
+              <p class="hbd-howto">Scroll to zoom, drag to move, double-click to fit</p>
+            </div>
+            <div class="hbd-sockets" id="sockets"></div>
+          </div>
+
+          <aside class="hbd-info" id="nodeinfo" aria-live="polite"></aside>
+        </div>
+      </section>
+
+      <!-- 3. account-wide -->
+      <section class="hbd-sec" aria-labelledby="h-account">
+        <header class="hbd-sh"><h2 id="h-account">Across the account</h2><p>What helps every team, and where points sit unused.</p></header>
+        <div class="hbd-acct">
+          <section class="dlg hbd-idle"><div class="dlg-h"><h3>Unspent Holomem Board Pt</h3></div><div class="dlg-b" id="idle"></div></section>
+          <section class="dlg hbd-green"><div class="dlg-h"><h3>Overall Boost to All</h3></div><div class="dlg-b" id="greens"></div></section>
+          <section class="dlg hbd-group"><div class="dlg-h"><h3>Overall Boost to a group</h3></div><div class="dlg-b" id="groupings"></div></section>
+          <section class="dlg hbd-yellow"><div class="dlg-h"><h3>Per-song score bonus</h3></div><div class="dlg-b" id="yellows"></div></section>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- card picker for the team slots -->
+<dialog class="picker hbd-cardpick" id="cardpick" aria-labelledby="cptitle">
+  <div class="search">
+    <i class="ico" style="--ico:url(/ui/nav/ui_999_ico_search.png);color:var(--ink-3)" aria-hidden="true"></i>
+    <input id="cq" type="search" placeholder="Search your cards by holomem or outfit" aria-label="Search cards" autocomplete="off">
+    <span class="hbd-cpt" id="cptitle">Leader</span>
+    <button class="x" type="button" data-close aria-label="Close"><i class="ico" style="--ico:url(/ui/nav/ui_999_ico_cancel.png)" aria-hidden="true"></i></button>
+  </div>
+  <div class="hbd-cgrid" id="cgrid"></div>
+</dialog>
+
+<!-- song picker -->
+<dialog class="picker" id="songpick" aria-label="Choose a song">
+  <div class="search">
+    <i class="ico" style="--ico:url(/ui/nav/ui_999_ico_search.png);color:var(--ink-3)" aria-hidden="true"></i>
+    <input id="q" type="search" placeholder="Search by title or singer" aria-label="Search songs" autocomplete="off">
+    <button class="x" type="button" data-close aria-label="Close"><i class="ico" style="--ico:url(/ui/nav/ui_999_ico_cancel.png)" aria-hidden="true"></i></button>
+  </div>
+  <div class="jgrid" id="jgrid"></div>
+</dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/hb-shell.js"></script>
+<script src="/hb-combo.js"></script>
+<script type="module" src="/hbd-app.js"></script>
+</body>
+</html>

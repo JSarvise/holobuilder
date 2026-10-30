@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message ParkPositionGrouping {
+	option (options.master.table) = true;
+
+	string group_id = 1 [(options.master.pk) = true];
+	string park_position_id = 2 [(options.master.pk) = true, (options.master.fk) = "ParkPosition:id", (options.master.optional) = true];
+}

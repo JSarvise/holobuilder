@@ -1,0 +1,15 @@
+holobuilder -- unofficial fan-made team optimizer for hololive Dreams
+Copyright (C) 2026 JSarvise. Licensed under the GNU AGPL-3.0 (see LICENSE).
+
+Not affiliated with, endorsed or sponsored by COVER Corporation, QualiArts or hololive production.
+hololive and hololive Dreams are trademarks of their respective owners. No game assets (art, audio,
+charts, master data) are distributed in this repository; the app reads or downloads them on the
+user's own PC.
+
+Third-party material in this repository keeps its own license:
+  * tools/recon/protobufs/  -- protocol descriptions from yuvlian/symphytum-server (MIT, see the
+    LICENSE file in that folder). They describe a third party's API.
+  * tools/web/static/fonts/ -- Bricolage Grotesque, JetBrains Mono, Public Sans, Space Grotesk
+    (SIL Open Font License 1.1).
+  * The Live2D Cubism Core is NOT included: each PC downloads it from Live2D's own CDN and it is
+    governed by the Live2D Proprietary Software License Agreement.

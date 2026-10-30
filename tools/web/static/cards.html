@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collection · hololive builder</title>
+<link rel="stylesheet" href="/hb-card.css">
+<link rel="stylesheet" href="/hb.css">
+<link rel="stylesheet" href="/cards.css">
+<script src="/hb-format.js"></script>
+<script src="/hb-gens.js"></script>
+<script src="/hb-card.js"></script>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" data-page="collection"></nav>
+
+  <main>
+    <section class="cd-hero" aria-labelledby="cdtitle">
+      <div class="wrap cd-head">
+        <div>
+          <h1 id="cdtitle">Collection</h1>
+          <div class="chips" id="cdchips"><span>Loading the catalogue…</span></div>
+          <p class="cd-lede">Every card the game ships, at the level, Bloom and Limit Break your account had at the last refresh. Open a card for its skills, or to try other values before a run.</p>
+        </div>
+        <div class="cd-stats" id="cdstats"></div>
+      </div>
+    </section>
+
+    <div class="cd-bar" id="cdbar">
+      <div class="wrap cd-barin">
+        <label class="cd-search">
+          <i class="ico" style="--ico:url(/ui/nav/ui_999_ico_search.png)" aria-hidden="true"></i>
+          <input id="cdq" type="search" placeholder="Search holomem, outfit or card title" autocomplete="off" aria-label="Search cards">
+        </label>
+        <div class="seg" id="cdown" role="group" aria-label="Ownership">
+          <button type="button" data-v="" aria-pressed="true">All</button>
+          <button type="button" data-v="owned" aria-pressed="false">Owned</button>
+          <button type="button" data-v="unowned" aria-pressed="false">Not owned</button>
+        </div>
+        <div class="seg" id="cdrar" role="group" aria-label="Rarity"></div>
+        <div class="seg cd-els" id="cdel" role="group" aria-label="Attribute"></div>
+        <button type="button" class="btn cd-ftog" id="cdftog" aria-expanded="false" aria-controls="cdpanel">
+          <i class="ico" style="--ico:url(/ui/nav/ui_999_ico_menu.png)" aria-hidden="true"></i><span id="cdftxt">Filters</span></button>
+        <label class="cd-sort"><span>Sort</span>
+          <select id="cdsort" aria-label="Sort cards">
+            <option value="catalogue">Catalogue order</option>
+            <option value="holomem">holomem</option>
+            <option value="rarity">Rarity</option>
+            <option value="level">Level</option>
+            <option value="bloom">Bloom</option>
+            <option value="lb">Limit Break</option>
+            <option value="total">Total stats</option>
+            <option value="performance">Performance</option>
+            <option value="technique">Technique</option>
+            <option value="sense">Sense</option>
+            <option value="event">Event Bonus</option>
+          </select>
+        </label>
+      </div>
+      <div class="wrap cd-panel" id="cdpanel" hidden></div>
+    </div>
+
+    <div class="wrap">
+      <div class="cd-notes" id="cdnotes"></div>
+      <div class="cd-count"><span id="cdcount"></span><button type="button" class="cd-clear" id="cdclear" hidden>Clear filters</button></div>
+      <div class="card-grid cd-grid" id="cdgrid" aria-live="polite"></div>
+
+      <section class="cd-acctsec" aria-labelledby="h-acct">
+        <h2 class="sh" id="h-acct">Account values</h2><p class="cd-lede cd-acctnote">Three numbers the score reads from your account, plus the rule for cards the collection does not name.</p>
+        <div class="cd-acct" id="cdacct"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<aside class="cd-drawer" id="cddrawer" aria-labelledby="dr-title" hidden>
+  <div class="dr-top">
+    <button type="button" class="dr-nav" id="drprev" aria-label="Previous card"><i class="ico prev" style="--ico:url(/ui/nav/ui_999_ico_arrow.png)" aria-hidden="true"></i></button>
+    <button type="button" class="dr-nav" id="drnext" aria-label="Next card"><i class="ico" style="--ico:url(/ui/nav/ui_999_ico_arrow.png)" aria-hidden="true"></i></button>
+    <button type="button" class="dr-x" id="drclose" aria-label="Close"><i class="ico" style="--ico:url(/ui/nav/ui_999_ico_cancel.png)" aria-hidden="true"></i></button>
+  </div>
+  <div class="dr-body" id="drbody"><h2 id="dr-title" class="dr-title"></h2></div>
+</aside>
+
+<div class="cd-save" id="cdsave" hidden>
+  <div class="cd-savein">
+    <p id="cdsavemsg">Unsaved changes. Nothing on disk has changed yet.</p>
+    <button type="button" class="btn" id="cddiscard">Discard</button>
+    <button type="button" class="btn primary" id="cdsavebtn">Save to disk</button>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="/hb-shell.js"></script>
+<script src="/hb-combo.js"></script>
+<script type="module" src="/cards-app.js"></script>
+</body>
+</html>

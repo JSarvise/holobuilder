@@ -1,0 +1,5 @@
+line-seed-sans-xbd-latin.woff2
+  url    https://cdn.jsdelivr.net/fontsource/fonts/line-seed-jp@latest/latin-800-normal.woff2
+  sha256 8ab332892874f74a7c3d0ec6f2ed6e71315470eb5bdbad257d49c4124e8a87d7
+  bytes  35648
+  licence SIL Open Font License 1.1 -- LINE Seed, (c) LY Corporation

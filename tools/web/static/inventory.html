@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory · hololive builder</title>
+<link rel="stylesheet" href="/hb.css">
+<link rel="stylesheet" href="/inventory.css">
+<script src="/hb-format.js"></script>
+<script src="/hb-gens.js"></script>
+</head>
+<body class="inv">
+<div class="app">
+  <nav class="rail" data-page="resources"></nav>
+
+  <main>
+    <header class="pg" aria-labelledby="invtitle">
+      <div class="wrap">
+        <h1 id="invtitle">Inventory</h1>
+        <p class="pg-meta" id="invchips"><span>Loading the account's bag…</span></p>
+        <p class="pg-lede">What the account holds at the last refresh. Spend something in the game and these lag until the next refresh.</p>
+        <div class="pg-stats" id="invstats"></div>
+      </div>
+    </header>
+
+    <div class="wrap" id="invbody">
+      <section class="dlg inv-sec" aria-labelledby="h-board">
+        <div class="dlg-h"><h2 id="h-board">Holomem Board materials</h2><span class="r">Cubes and Hexas unlock nodes. Each colour feeds one branch of every holomem's board.</span></div>
+        <div class="dlg-b"><div class="inv-branches" id="branches"></div>
+          <div class="inv-reset" id="reset"></div></div>
+      </section>
+
+      <section class="dlg inv-sec" aria-labelledby="h-growth">
+        <div class="dlg-h"><h2 id="h-growth">Member growth</h2><span class="r">Level up, Member Training and Blooming.</span></div>
+        <div class="dlg-b"><div class="inv-growth" id="growth"></div></div>
+      </section>
+
+      <section class="dlg inv-sec" aria-labelledby="h-rest">
+        <div class="dlg-h"><h2 id="h-rest">Everything else</h2><span class="r">Every other item the account holds, under the game's own names.</span></div>
+        <div class="dlg-b"><div id="rest"></div></div>
+      </section>
+    </div>
+  </main>
+</div>
+<script src="/hb-shell.js"></script>
+<script src="/hb-combo.js"></script>
+<script type="module" src="/inv-app.js"></script>
+</body>
+</html>

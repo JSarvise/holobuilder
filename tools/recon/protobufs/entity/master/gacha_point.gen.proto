@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message GachaPoint {
+	option (options.master.table) = true;
+
+	string id = 1 [(options.master.pk) = true];
+	string name_lang_id = 2 [(options.master.fk) = "LangGachaPoint:id"];
+	string icon_asset_id = 3 [(options.master.optional) = true];
+	string exchange_booth_group_id = 6 [(options.master.fk) = "ExchangeBoothGroup:id", (options.master.optional) = true];
+	int32 order = 999;
+}

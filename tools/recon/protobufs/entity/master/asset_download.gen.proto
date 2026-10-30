@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+import "enums/asset_download_type.gen.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message AssetDownload {
+	option (options.master.table) = true;
+
+	string asset_id = 1 [(options.master.pk) = true];
+	.enums.AssetDownloadType type = 2;
+}

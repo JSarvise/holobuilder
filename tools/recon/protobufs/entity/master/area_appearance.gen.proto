@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message AreaAppearance {
+	option (options.master.table) = true;
+
+	string area_id = 1 [(options.master.pk) = true, (options.master.fk) = "Area:id"];
+	int32 priority = 2 [(options.master.pk) = true];
+	string asset_id = 3;
+	string bgm_asset_id = 4 [(options.master.optional) = true];
+	string condition_group_id = 7 [(options.master.fk) = "Condition:group_id", (options.master.optional) = true];
+}

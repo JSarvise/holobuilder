@@ -1,0 +1,416 @@
+{
+ "status": "EXACT",
+ "objective": "OBJECTIVE-v2 S(T, C): plan-cache fast leaf (cached_team_plan + board_model_from_plan(plan_cache) + score_song_detailed), Connect assignment exact, bench boards from board.json",
+ "model_version": "objective-v2.2",
+ "song": "m0334",
+ "chart_singers": [
+  "chr-04001"
+ ],
+ "singer_type": "solo",
+ "leader": "card-03001-5-uniq-0033-00",
+ "leader_name": "Ayunda Risu / Magical Forest",
+ "sings": false,
+ "universe": "5star-maxed-catalogue",
+ "universe_size": 66,
+ "pool": [
+  "card-00001-5-uniq-0000-00",
+  "card-00002-5-uniq-0001-00",
+  "card-00004-5-uniq-0005-00",
+  "card-00005-5-uniq-0006-00",
+  "card-00006-5-uniq-0007-00",
+  "card-00007-5-uniq-0008-00",
+  "card-00010-5-uniq-0010-00",
+  "card-00010-5-uniq-0069-00",
+  "card-00011-5-uniq-0011-00",
+  "card-00012-5-uniq-0012-00",
+  "card-00012-5-uniq-0062-00",
+  "card-00013-5-uniq-0002-00",
+  "card-00014-5-uniq-0013-00",
+  "card-00015-5-uniq-0003-00",
+  "card-00015-5-uniq-0067-00",
+  "card-00016-5-uniq-0014-00",
+  "card-00017-5-uniq-0015-00",
+  "card-00018-5-uniq-0004-00",
+  "card-00018-5-uniq-0068-00",
+  "card-00019-5-uniq-0016-00",
+  "card-00021-5-uniq-0017-00",
+  "card-00021-5-uniq-0064-00",
+  "card-00022-5-uniq-0018-00",
+  "card-00022-5-uniq-0063-00",
+  "card-00023-5-uniq-0019-00",
+  "card-00026-5-uniq-0021-00",
+  "card-00026-5-uniq-0065-00",
+  "card-00027-5-uniq-0022-00",
+  "card-00028-5-uniq-0023-00",
+  "card-00028-5-uniq-0070-00",
+  "card-00030-5-uniq-0024-00",
+  "card-00031-5-uniq-0025-00",
+  "card-00032-5-uniq-0026-00",
+  "card-00034-5-uniq-0027-00",
+  "card-00035-5-uniq-0028-00",
+  "card-00036-5-uniq-0029-00",
+  "card-00037-5-uniq-0030-00",
+  "card-00039-5-uniq-0032-00",
+  "card-03001-5-uniq-0033-00",
+  "card-03002-5-uniq-0034-00",
+  "card-03003-5-uniq-0035-00",
+  "card-03004-5-uniq-0036-00",
+  "card-03004-5-uniq-0073-00",
+  "card-03005-5-uniq-0037-00",
+  "card-03006-5-uniq-0038-00",
+  "card-03007-5-uniq-0039-00",
+  "card-03008-5-uniq-0040-00",
+  "card-03009-5-uniq-0041-00",
+  "card-04001-5-uniq-0042-00",
+  "card-04001-5-uniq-0071-00",
+  "card-04002-5-uniq-0043-00",
+  "card-04003-5-uniq-0044-00",
+  "card-04003-5-uniq-0072-00",
+  "card-04007-5-uniq-0047-00",
+  "card-04010-5-uniq-0049-00",
+  "card-04012-5-uniq-0051-00",
+  "card-04013-5-uniq-0052-00",
+  "card-04014-5-uniq-0053-00",
+  "card-04015-5-uniq-0054-00",
+  "card-04016-5-uniq-0055-00",
+  "card-04017-5-uniq-0056-00",
+  "card-06002-5-uniq-0058-00",
+  "card-06002-5-uniq-0066-00",
+  "card-06003-5-uniq-0059-00",
+  "card-06004-5-uniq-0060-00",
+  "card-06005-5-uniq-0061-00"
+ ],
+ "dominated": [],
+ "basis": "maxed",
+ "budget_kind": "flat",
+ "budget": 447,
+ "uptime_model": "finite",
+ "platform": "mobile",
+ "plan_cache_seed": {
+  "leader": "card-04001-5-uniq-0042-00",
+  "members": [
+   "card-04001-5-uniq-0042-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04003-5-uniq-0044-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00006-5-uniq-0007-00"
+  ]
+ },
+ "search": {
+  "kind": "branch-and-bound over 5-sets of distinct holomems, leader fixed, leader card may also be a member; DFS by depth-2 prefix per worker; children ordered by bound desc; every leaf bounded before scoring",
+  "bound": "hbuilder.solver.exact_row.RowBound (monotone relaxation of the leaf)",
+  "p_mode": "tier",
+  "order": "bound",
+  "workers": 12,
+  "prefixes_total": 2133,
+  "prefixes_done": 2133,
+  "row_deadline_seconds": 600.0
+ },
+ "heuristic": {
+  "kind": "1-swap best-improvement local search on the exact leaf from the table seed and from the leader's song-agnostic beam team; best of the two",
+  "starts": [
+   {
+    "from": "table_seed",
+    "idx": [
+     4,
+     5,
+     32,
+     48,
+     51
+    ],
+    "score": 2796493.0,
+    "local_opt": 2950391.0,
+    "passes": 2,
+    "rosters_scored": 599
+   },
+   {
+    "from": "beam_per_leader_best",
+    "idx": [
+     17,
+     28,
+     40,
+     44,
+     59
+    ],
+    "score": 2420637.0,
+    "local_opt": 2940588.0,
+    "passes": 5,
+    "rosters_scored": 1482
+   }
+  ],
+  "seed_score": 2796493.0,
+  "score": 2950391.0,
+  "idx": [
+   4,
+   5,
+   32,
+   40,
+   51
+  ],
+  "ids": [
+   "card-00006-5-uniq-0007-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00032-5-uniq-0026-00",
+   "card-03003-5-uniq-0035-00",
+   "card-04003-5-uniq-0044-00"
+  ],
+  "rosters_scored": 2081,
+  "seconds": 1.8223731000034604
+ },
+ "recall_loss_heuristic_vs_certified": 0.01344149931668979,
+ "n_rosters": 8441052,
+ "leaves_evaluated": 364707,
+ "nodes_pruned": 15976,
+ "leaves_pruned_by_internal_nodes": 178332,
+ "leaves_pruned_by_own_bound": 7898013,
+ "rosters_accounted": 8441052,
+ "rosters_accounted_equals_n": true,
+ "bound_evals": 9006505,
+ "seconds": 370.20271300000604,
+ "row_wall_seconds": 376.44628180001746,
+ "bound_build_seconds": 1.526490799995372,
+ "upper_bound": 2990589.0,
+ "gap": 0.0,
+ "resume_state": null,
+ "best": {
+  "score": 2990589.0,
+  "idx": [
+   4,
+   5,
+   32,
+   35,
+   46
+  ],
+  "ids": [
+   "card-00006-5-uniq-0007-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00032-5-uniq-0026-00",
+   "card-00036-5-uniq-0029-00",
+   "card-03008-5-uniq-0040-00"
+  ],
+  "members": [
+   "Shirakami Fubuki / Golden Petal Dew",
+   "Natsuiro Matsuri / Sweet Deception",
+   "Shishiro Botan / WH Lion Vanguard",
+   "Takane Lui / The holoX officer",
+   "Kaela Kovalskia / Destiny Anvil"
+  ],
+  "leader_also_member": false
+ },
+ "top": [
+  {
+   "score": 2990589.0,
+   "idx": [
+    4,
+    5,
+    32,
+    35,
+    46
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-00036-5-uniq-0029-00",
+    "card-03008-5-uniq-0040-00"
+   ]
+  },
+  {
+   "score": 2986323.0,
+   "idx": [
+    4,
+    5,
+    15,
+    32,
+    35
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00016-5-uniq-0014-00",
+    "card-00032-5-uniq-0026-00",
+    "card-00036-5-uniq-0029-00"
+   ]
+  },
+  {
+   "score": 2976502.0,
+   "idx": [
+    34,
+    35,
+    42,
+    43,
+    44
+   ],
+   "ids": [
+    "card-00035-5-uniq-0028-00",
+    "card-00036-5-uniq-0029-00",
+    "card-03004-5-uniq-0073-00",
+    "card-03005-5-uniq-0037-00",
+    "card-03006-5-uniq-0038-00"
+   ]
+  },
+  {
+   "score": 2974003.0,
+   "idx": [
+    4,
+    5,
+    15,
+    32,
+    46
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00016-5-uniq-0014-00",
+    "card-00032-5-uniq-0026-00",
+    "card-03008-5-uniq-0040-00"
+   ]
+  },
+  {
+   "score": 2965299.0,
+   "idx": [
+    21,
+    35,
+    42,
+    43,
+    44
+   ],
+   "ids": [
+    "card-00021-5-uniq-0064-00",
+    "card-00036-5-uniq-0029-00",
+    "card-03004-5-uniq-0073-00",
+    "card-03005-5-uniq-0037-00",
+    "card-03006-5-uniq-0038-00"
+   ]
+  },
+  {
+   "score": 2963600.0,
+   "idx": [
+    34,
+    35,
+    43,
+    44,
+    46
+   ],
+   "ids": [
+    "card-00035-5-uniq-0028-00",
+    "card-00036-5-uniq-0029-00",
+    "card-03005-5-uniq-0037-00",
+    "card-03006-5-uniq-0038-00",
+    "card-03008-5-uniq-0040-00"
+   ]
+  },
+  {
+   "score": 2963598.0,
+   "idx": [
+    21,
+    35,
+    43,
+    44,
+    46
+   ],
+   "ids": [
+    "card-00021-5-uniq-0064-00",
+    "card-00036-5-uniq-0029-00",
+    "card-03005-5-uniq-0037-00",
+    "card-03006-5-uniq-0038-00",
+    "card-03008-5-uniq-0040-00"
+   ]
+  },
+  {
+   "score": 2962388.0,
+   "idx": [
+    5,
+    34,
+    35,
+    44,
+    46
+   ],
+   "ids": [
+    "card-00007-5-uniq-0008-00",
+    "card-00035-5-uniq-0028-00",
+    "card-00036-5-uniq-0029-00",
+    "card-03006-5-uniq-0038-00",
+    "card-03008-5-uniq-0040-00"
+   ]
+  },
+  {
+   "score": 2961688.0,
+   "idx": [
+    21,
+    24,
+    35,
+    44,
+    46
+   ],
+   "ids": [
+    "card-00021-5-uniq-0064-00",
+    "card-00023-5-uniq-0019-00",
+    "card-00036-5-uniq-0029-00",
+    "card-03006-5-uniq-0038-00",
+    "card-03008-5-uniq-0040-00"
+   ]
+  },
+  {
+   "score": 2959830.0,
+   "idx": [
+    4,
+    5,
+    15,
+    34,
+    35
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00016-5-uniq-0014-00",
+    "card-00035-5-uniq-0028-00",
+    "card-00036-5-uniq-0029-00"
+   ]
+  }
+ ],
+ "inputs_hash": "044ea379239bfd24af77ac06f1536df63559895145ee689cf82e700268e91ab5",
+ "inputs_hash_files": {
+  "cards": "98fd8133693a2816188dc7e5425a1cb103d4dce841733f1d08ca8a982e8af277",
+  "board": "491823961414be84383a1156c14cb162a6bc3f9b25022cef54e9badf23d6adc8",
+  "charts": "bdc9dc1c8b485ea8588d9fca7e778cc31bf71eecb4fdf06703f403a3b2b93c22",
+  "skilltree": "57245966f417632493a768db6684248f71cf533d8a1b0aa29a5779729dfeb29c",
+  "master_stn": "efbc636b23a619b4dd02d9adfaa8989e6bbfcf09f3fcae41d56fdcd7effe18c2",
+  "collection": "2a016c02efa56417e4c9e7511819d84098888bbeeaddc30a92e276c9404838c3",
+  "cfg": "fdf97614d6e90a393dc8ee2c19683aa62f7f30b0dc17e15deb5f1c65be767823"
+ },
+ "git": {
+  "head": "75008bc5cb5a071435c7973d981e3ea730c7d5ec",
+  "dirty": true,
+  "status_porcelain": [
+   "M tools/recon/proxy/dumps/account_snapshot_main.json",
+   " M tools/recon/proxy/dumps/board_state.json",
+   " M tools/recon/proxy/dumps/card_params.json",
+   " M tools/recon/proxy/dumps/inventory.json"
+  ],
+  "untracked": [
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/certificate_bnb_m0334_0042_v22.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/exact_row_bnb_m0334_0042_v22.prefixes.jsonl",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00002-5-uniq-0001-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00017-5-uniq-0015-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00018-5-uniq-0068-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00022-5-uniq-0063-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00028-5-uniq-0070-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00030-5-uniq-0024-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00039-5-uniq-0032-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_03003-5-uniq-0035-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_04001-5-uniq-0042-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_04001-5-uniq-0071-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_04002-5-uniq-0043-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_04012-5-uniq-0051-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_04017-5-uniq-0056-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_06002-5-uniq-0058-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_06002-5-uniq-0066-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_06003-5-uniq-0059-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/per_leader_table_m0334.json"
+  ],
+  "diff_head_sha256": "28b348b8398e4ae76e31e0f5c7f42cb374732d7e7816d1247a44ffc270fc121e"
+ },
+ "python": "3.13.7",
+ "written": "2026-08-18T22:31:56"
+}

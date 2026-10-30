@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+import "enums/park_time_period_type.gen.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message ParkFishingSpot {
+	option (options.master.table) = true;
+
+	string group_id = 1 [(options.master.pk) = true];
+	.enums.ParkTimePeriodType park_time_period_type = 2 [(options.master.pk) = true];
+	string park_fishing_bait_id = 3 [(options.master.pk) = true, (options.master.fk) = "ParkFishingBait:id"];
+	string park_fishing_fish_id = 4 [(options.master.pk) = true, (options.master.fk) = "ParkFishingFish:id"];
+	int32 hit_ratio = 5 [(options.master.optional) = true];
+}

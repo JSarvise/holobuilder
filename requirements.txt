@@ -1,0 +1,13 @@
+# Everything the app, the tests and the data refresh need (versions the project runs).
+# The optimizer itself (src/hbuilder) needs none of these.
+pytest
+pycryptodome==3.23.0
+h2==4.3.0
+hpack==4.2.0
+hyperframe==6.1.0
+highspy==1.15.1
+pillow==12.3.0
+pywebview==5.4
+# the data refresh: reading the game's asset bundles, and the asset CDN
+UnityPy==1.25.3
+requests==2.34.2

@@ -1,0 +1,545 @@
+{
+  "cards": [
+    {
+      "costume_name": "Crimson Captain",
+      "costume_skill": {
+        "condition": {
+          "count": 2,
+          "kind": "generation",
+          "target": "3期生"
+        },
+        "duration": null,
+        "effect_type": "all_stats",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 50.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "3期生"
+      ],
+      "id": "card-00023-5-uniq-0019-00",
+      "member": "Houshou Marine",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 8.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 23.0,
+          "magnitude": 115.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": "High",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "count": 2,
+            "kind": "generation",
+            "target": "3期生"
+          },
+          "duration": null,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 12.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "generation",
+            "value": "3期生"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 12.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 120.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "condition": {
+              "kind": "ungated"
+            },
+            "effect_type": "activation_rate",
+            "family": "activation_rate_up",
+            "kind": "rider",
+            "magnitude": 40.0,
+            "target": null
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 7221,
+        "sense": 7844,
+        "technique": 10909
+      },
+      "title": "Siren Marine Blue",
+      "type": "Happy"
+    },
+    {
+      "costume_name": "Rhythmic Bloom",
+      "costume_skill": {
+        "condition": {
+          "kind": "ungated"
+        },
+        "duration": null,
+        "effect_type": "performance",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 120.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "5期生"
+      ],
+      "id": "card-00031-5-uniq-0025-00",
+      "member": "Momosuzu Nene",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 9.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 26.0,
+          "magnitude": 60.0,
+          "override": {
+            "condition": {
+              "count": 600,
+              "kind": "run_state",
+              "target": "life"
+            },
+            "kind": "override",
+            "magnitude": 120.0
+          },
+          "probability_tier": "High",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": null,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 11.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "type",
+            "value": "Cute"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 11.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 145.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 11380,
+        "sense": 7682,
+        "technique": 6803
+      },
+      "title": "Pureheart Song",
+      "type": "Cute"
+    },
+    {
+      "costume_name": "The holoX officer",
+      "costume_skill": {
+        "condition": {
+          "kind": "ungated"
+        },
+        "duration": null,
+        "effect_type": "all_stats",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 45.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "holoX"
+      ],
+      "id": "card-00036-5-uniq-0029-00",
+      "member": "Takane Lui",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 8.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 21.0,
+          "magnitude": 55.0,
+          "override": {
+            "condition": {
+              "count": 2,
+              "kind": "type",
+              "target": "Cute"
+            },
+            "kind": "override",
+            "magnitude": 115.0
+          },
+          "probability_tier": "Medium",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "count": 2,
+            "kind": "type",
+            "target": "Cute"
+          },
+          "duration": null,
+          "effect_type": "all_stats",
+          "family": "stat_up",
+          "interval": null,
+          "magnitude": 32.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "self"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 14.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 115.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 7991,
+        "sense": 7366,
+        "technique": 10672
+      },
+      "title": "Iron Executive",
+      "type": "Cute"
+    },
+    {
+      "costume_name": "Poetic Death Waltz",
+      "costume_skill": {
+        "condition": {
+          "count": 2,
+          "kind": "generation",
+          "target": "Myth"
+        },
+        "duration": null,
+        "effect_type": "all_stats",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 50.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "Myth"
+      ],
+      "id": "card-04001-5-uniq-0042-00",
+      "member": "Mori Calliope",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 11.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 33.0,
+          "magnitude": 120.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": "High",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "count": 2,
+            "kind": "generation",
+            "target": "Myth"
+          },
+          "duration": null,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 12.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "generation",
+            "value": "Myth"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 12.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 120.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "condition": {
+              "kind": "ungated"
+            },
+            "effect_type": "activation_rate",
+            "family": "activation_rate_up",
+            "kind": "rider",
+            "magnitude": 40.0,
+            "target": null
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 10909,
+        "sense": 7844,
+        "technique": 7221
+      },
+      "title": "Reaper’s Death Flow",
+      "type": "Pure"
+    },
+    {
+      "costume_name": "Deep-Sea Kimono",
+      "costume_skill": {
+        "condition": {
+          "kind": "ungated"
+        },
+        "duration": null,
+        "effect_type": "score",
+        "family": "score_support",
+        "interval": null,
+        "magnitude": 60.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "Myth"
+      ],
+      "id": "card-04003-5-uniq-0044-00",
+      "member": "Ninomae Ina'nis",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 14.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 32.0,
+          "magnitude": 45.0,
+          "override": {
+            "condition": {
+              "count": 2,
+              "kind": "type",
+              "target": "Pure"
+            },
+            "kind": "override",
+            "magnitude": 95.0
+          },
+          "probability_tier": "High",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "count": 2,
+            "kind": "type",
+            "target": "Pure"
+          },
+          "duration": null,
+          "effect_type": "all_stats",
+          "family": "stat_up",
+          "interval": null,
+          "magnitude": 32.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "self"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 14.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 115.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 7668,
+        "sense": 7981,
+        "technique": 10433
+      },
+      "title": "Warm Up and Recharge",
+      "type": "Pure"
+    }
+  ],
+  "schema_version": "2"
+}

@@ -1,0 +1,714 @@
+{
+  "basis": "actual",
+  "characters": {
+    "Houshou Marine": [
+      {
+        "connect_multiplier": 2.15,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-001"
+      },
+      {
+        "connect_multiplier": 2.15,
+        "effects": [
+          "skill_tree_effect-sense_up-100-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-002"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-005"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-006"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-60-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-007"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-008"
+      },
+      {
+        "connect_multiplier": 2.65,
+        "effects": [
+          "skill_tree_effect-technique_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-009"
+      },
+      {
+        "connect_multiplier": 2.65,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-20-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-010"
+      },
+      {
+        "connect_multiplier": 2.65,
+        "effects": [
+          "skill_tree_effect-technique_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-011"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-30-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-012"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_cool_time_shorten_permil_up-40-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-013"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-30-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-014"
+      }
+    ],
+    "Momosuzu Nene": [
+      {
+        "connect_multiplier": 2.15,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-001"
+      },
+      {
+        "connect_multiplier": 2.15,
+        "effects": [
+          "skill_tree_effect-sense_up-100-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-002"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-005"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-006"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-60-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-007"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-008"
+      },
+      {
+        "connect_multiplier": 1.85,
+        "effects": [
+          "skill_tree_effect-technique_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-009"
+      },
+      {
+        "connect_multiplier": 1.85,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-20-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-010"
+      },
+      {
+        "connect_multiplier": 1.85,
+        "effects": [
+          "skill_tree_effect-sense_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-016"
+      },
+      {
+        "connect_multiplier": 1.85,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-20-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-017"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-sense_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-018"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-30-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-019"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_cool_time_shorten_permil_up-40-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-020"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-30-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-021"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-sense_up_permil_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-022"
+      },
+      {
+        "connect_multiplier": 1.85,
+        "effects": [
+          "skill_tree_effect-performance_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-023"
+      },
+      {
+        "connect_multiplier": 1.85,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-024"
+      },
+      {
+        "connect_multiplier": 1.85,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-025"
+      },
+      {
+        "connect_multiplier": 1.85,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-20-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-026"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-performance_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-027"
+      }
+    ],
+    "Mori Calliope": [
+      {
+        "connect_multiplier": 2.5,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-001"
+      },
+      {
+        "connect_multiplier": 2.5,
+        "effects": [
+          "skill_tree_effect-sense_up-100-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-002"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-technique_up-100-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-003"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-performance_up-100-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-004"
+      },
+      {
+        "connect_multiplier": 2.5,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-005"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-006"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-60-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-007"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-008"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-technique_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-009"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-20-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-010"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-sense_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-016"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-20-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-017"
+      },
+      {
+        "connect_multiplier": 2.5,
+        "effects": [
+          "skill_tree_effect-performance_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-023"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-025"
+      },
+      {
+        "connect_multiplier": 2.5,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-20-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-026"
+      },
+      {
+        "connect_multiplier": 2.5,
+        "effects": [
+          "skill_tree_effect-performance_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-027"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-30-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-028"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-performance_up_permil_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-029"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-30-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-030"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_cool_time_shorten_permil_up-40-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-031"
+      }
+    ],
+    "Ninomae Ina'nis": [
+      {
+        "connect_multiplier": 2.4,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-001"
+      },
+      {
+        "connect_multiplier": 2.4,
+        "effects": [
+          "skill_tree_effect-live_active_skill_effect_up_permil_up-100-skill_tree_effect_target-all-skill_tree_effect_passive_trigger-music_skill_tree_character-set_live_leader"
+        ],
+        "node": "R-002"
+      },
+      {
+        "connect_multiplier": 2.4,
+        "effects": [
+          "skill_tree_effect-sense_up-100-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-003"
+      },
+      {
+        "connect_multiplier": 2.4,
+        "effects": [
+          "skill_tree_effect-performance_up-100-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-004"
+      },
+      {
+        "connect_multiplier": 2.4,
+        "effects": [
+          "skill_tree_effect-technique_up-100-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-005"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-006"
+      },
+      {
+        "connect_multiplier": 1.55,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-007"
+      },
+      {
+        "connect_multiplier": 1.55,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-008"
+      },
+      {
+        "connect_multiplier": 1.55,
+        "effects": [
+          "skill_tree_effect-sense_up-100-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-009"
+      },
+      {
+        "connect_multiplier": 1.55,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-010"
+      },
+      {
+        "connect_multiplier": 1.55,
+        "effects": [
+          "skill_tree_effect-performance_up-100-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-019"
+      },
+      {
+        "connect_multiplier": 1.55,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-020"
+      },
+      {
+        "connect_multiplier": 1.55,
+        "effects": [
+          "skill_tree_effect-technique_up-100-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-021"
+      },
+      {
+        "connect_multiplier": 1.55,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-022"
+      },
+      {
+        "connect_multiplier": 1.55,
+        "effects": [
+          "skill_tree_effect-live_active_skill_effect_up_permil_up-20-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-032"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-033"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_effect_up_permil_up-40-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-034"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-70-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-035"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-sense_up-150-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-036"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-70-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-037"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-sense_up-150-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-038"
+      },
+      {
+        "connect_multiplier": 1.55,
+        "effects": [
+          "skill_tree_effect-live_active_skill_effect_up_permil_up-40-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-049"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up_permil_up-10-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-050"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_effect_up_permil_up-40-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-051"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-technique_up_permil_up-30-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-052"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up_permil_up-10-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-054"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up_permil_up-30-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-055"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-sense_up_permil_up-30-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-056"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up_permil_up-10-skill_tree_effect_target-all-set_live_leader"
+        ],
+        "node": "R-060"
+      }
+    ],
+    "Takane Lui": [
+      {
+        "connect_multiplier": 2.5,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-001"
+      },
+      {
+        "connect_multiplier": 2.5,
+        "effects": [
+          "skill_tree_effect-sense_up-100-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-002"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-technique_up-100-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-003"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-performance_up-100-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-004"
+      },
+      {
+        "connect_multiplier": 2.5,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-005"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-006"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-live_active_skill_activation_probability_up_permil_up-60-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-007"
+      },
+      {
+        "connect_multiplier": 2.1,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-008"
+      },
+      {
+        "connect_multiplier": 2.1,
+        "effects": [
+          "skill_tree_effect-technique_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-009"
+      },
+      {
+        "connect_multiplier": 2.1,
+        "effects": [
+          "skill_tree_effect-sense_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-016"
+      },
+      {
+        "connect_multiplier": 2.1,
+        "effects": [
+          "skill_tree_effect-performance_up-150-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-023"
+      },
+      {
+        "connect_multiplier": 2.1,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-024"
+      },
+      {
+        "connect_multiplier": 2.1,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
+        ],
+        "node": "B-025"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-5-skill_tree_effect_target-all-always"
+        ],
+        "node": "G-001"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-sense_up-5-skill_tree_effect_target-all-always"
+        ],
+        "node": "G-002"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-technique_up-5-skill_tree_effect_target-all-always"
+        ],
+        "node": "G-003"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-performance_up-5-skill_tree_effect_target-all-always"
+        ],
+        "node": "G-004"
+      },
+      {
+        "connect_multiplier": 1.0,
+        "effects": [
+          "skill_tree_effect-all_parameter_up-5-skill_tree_effect_target-all-always"
+        ],
+        "node": "G-005"
+      }
+    ]
+  },
+  "connect_basis": {
+    "forced": 31
+  },
+  "connect_level": 1,
+  "generated_by": "carved from dumps/board.json for tests/test_leader_outfit_oracle.py",
+  "schema_version": "1"
+}

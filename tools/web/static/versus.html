@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compare · hololive builder</title>
+<link rel="stylesheet" href="/hb-card.css">
+<link rel="stylesheet" href="/hb.css">
+<link rel="stylesheet" href="/versus.css">
+<script src="/hb-gens.js"></script>
+<script src="/hb-card.js"></script>
+</head>
+<body class="vs">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.8v14.4a1 1 0 0 0 1.5.9l11.3-7.2a1 1 0 0 0 0-1.7L8.5 3.9A1 1 0 0 0 7 4.8z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.3-4.3"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 7h11l-3-3M17 17H6l3 3"/></symbol>
+  <symbol id="i-shirt" viewBox="0 0 24 24"><path d="M9 4l3 2 3-2 5 3-2 4-2-1v10H8V10l-2 1-2-4z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
+  <symbol id="i-erase" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 12.5h9l1-12.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4.5M12 17.3v.2"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.6 5.5 3.6 8.5s-1.1 5.9-3.6 8.5c-2.5-2.6-3.6-5.5-3.6-8.5s1.1-5.9 3.6-8.5z"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.5 17a8 8 0 1 1 15 0"/><path d="M12 13l4-4"/><circle cx="12" cy="13" r="1.2"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></symbol>
+</svg>
+
+<div class="app">
+  <nav class="rail" data-page="compare"></nav>
+
+  <main>
+    <header class="v-top" aria-labelledby="songtitle">
+      <img class="blur" id="blur" alt="" aria-hidden="true" hidden>
+      <div class="v-song">
+        <button class="v-jacket" id="jacket" type="button" aria-label="Change song">
+          <span id="jacketart"></span>
+          <span class="v-swap"><svg class="i s"><use href="#i-swap"/></svg>Change</span>
+        </button>
+        <div class="v-title">
+          <p class="eyebrow" id="eyebrow">Compare teams</p>
+          <h1 id="songtitle">Loading…</h1>
+          <p class="v-singer" id="singer"></p>
+        </div>
+        <div class="chips" id="chips"></div>
+        <div class="v-actions">
+          <span class="v-playhint" id="playhint"></span>
+          <button class="btn" id="change" type="button">Change song</button>
+          <button class="btn primary btn-lg" id="play" type="button"><span id="playlabel">Compare teams</span></button>
+        </div>
+      </div>
+    </header>
+
+    <div class="wrap">
+      <div class="v-opts" role="group" aria-label="Assumptions shared by every team">
+        <div class="field"><span>Difficulty</span>
+          <div class="seg" id="difficulty" role="group" aria-label="Difficulty"></div></div>
+        <div class="field"><span>Cards</span>
+          <div class="seg" id="cards" role="group" aria-label="Cards">
+            <button type="button" data-v="asis" aria-pressed="true" title="Your cards at their real level and bloom">My cards</button>
+            <button type="button" data-v="whatif" aria-pressed="false" title="Your cards at a level / bloom you choose (More options)">Upgraded</button>
+            <button type="button" data-v="maxed" aria-pressed="false" title="Every card in the game, maxed">Every card</button>
+            <button type="button" data-v="maxed-account" aria-pressed="false" title="Every card maxed on a maxed account: 54 Holomem Boards at 453 Pt, 37 posters, 11.58% Member Power-Up Bonus">Maxed account</button>
+          </div></div>
+        <div class="field"><span>Holomem Boards</span>
+          <div class="seg" id="boards" role="group" aria-label="Holomem Boards">
+            <button type="button" data-v="develop" aria-pressed="true" title="Plan the Holomem Boards for this song, one plan shared by every team">From scratch</button>
+            <button type="button" data-v="captured" aria-pressed="false" title="Your Holomem Boards exactly as they are">As they are</button>
+            <button type="button" data-v="off" aria-pressed="false" title="No Holomem Board at all">None</button>
+            <button type="button" data-v="state" aria-pressed="false" title="Each team on the board the Optimizer's search gives it on this song (its own leaf), not one shared plan. Song only.">As ranked</button>
+          </div></div>
+        <button class="btn small" id="moreopts" type="button"><svg class="i s"><use href="#i-sliders"/></svg>More options<span class="v-count" id="morecount" hidden></span></button>
+      </div>
+
+      <div id="start"></div>
+      <section class="v-editor" aria-labelledby="teamshead">
+        <div class="v-edhead">
+          <h2 id="teamshead">Teams</h2>
+          <p>Leader first, then five members. Team A is the reference.</p>
+          <div class="v-edtools">
+            <button class="btn small" id="fillbest" type="button"><svg class="i s"><use href="#i-spark"/></svg>Fill from the best teams</button>
+            <button class="btn small" id="addteam" type="button"><svg class="i s"><use href="#i-plus"/></svg>Add team</button>
+          </div>
+        </div>
+        <div class="v-teds" id="teams"></div>
+      </section>
+
+      <section id="results" class="v-results" aria-live="polite"><div id="out"></div></section>
+    </div>
+  </main>
+</div>
+
+<!-- More options -->
+<dialog class="v-sheet" id="more" aria-labelledby="mtitle">
+  <header>
+    <div><h3 id="mtitle">More options</h3><p>Applied to every team at the next comparison.</p></div>
+    <button class="v-x" type="button" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </header>
+  <div class="v-body">
+    <div class="v-group">
+      <h4>Cards</h4>
+      <div class="v-two" id="assumerow">
+        <label class="v-sel"><span>Upgraded: level</span><select id="alevel">
+          <option value="account">Real</option><option>20</option><option>30</option><option>40</option><option>50</option><option>60</option><option>70</option><option>80</option><option value="max">Max</option></select></label>
+        <label class="v-sel"><span>Upgraded: bloom</span><select id="abloom">
+          <option value="account">Real</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option value="max">Max</option></select></label>
+      </div>
+      <p class="v-muted">One card can also be set to its own level and bloom: open its slot.</p>
+    </div>
+    <div class="v-group">
+      <h4>Holomem Board</h4>
+      <label class="v-toggle"><span><b>Max Holomem Board Pt</b><small>Every holomem at level 50: 361 Pt each (From scratch only).</small></span><input class="v-switch" id="maxpoints" type="checkbox"></label>
+    </div>
+    <div class="v-group">
+      <h4>Play</h4>
+      <div class="v-sel"><span>Platform</span>
+        <div class="seg" id="platform" role="group" aria-label="Platform">
+          <button type="button" data-v="mobile" aria-pressed="true">Mobile</button>
+          <button type="button" data-v="pc" aria-pressed="false">PC</button>
+        </div></div>
+      <label class="v-toggle"><span><b>Score for AUTO</b><small>Score the teams for auto play.</small></span><input class="v-switch" id="auto" type="checkbox"></label>
+      <div class="v-sel"><span>Score model</span>
+        <div class="seg" id="model" role="group" aria-label="Score model">
+          <button type="button" data-v="finite" aria-pressed="true" title="What a live actually pays out (cooldown windows)">In a live</button>
+          <button type="button" data-v="steady" aria-pressed="false" title="Reproduces the deck screen's number">Deck screen</button>
+        </div></div>
+    </div>
+  </div>
+  <footer><button class="v-btn" type="button" data-close>Done</button></footer>
+</dialog>
+
+<!-- Song picker -->
+<dialog class="v-picker sp-dialog" id="picker" aria-label="Choose a song"></dialog>
+
+<!-- Card picker -->
+<dialog class="v-picker v-cardpick" id="cardpick" aria-labelledby="ctitle">
+  <div class="v-search">
+    <svg class="i" style="color:var(--ink-3)"><use href="#i-search"/></svg>
+    <div class="v-ctitle"><small id="ctitle"></small>
+      <input id="cq" type="search" placeholder="Search by holomem or outfit" aria-label="Search cards" autocomplete="off"></div>
+    <button class="v-x" type="button" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="v-cfilters">
+    <div class="seg" id="cown" role="group" aria-label="Owned">
+      <button type="button" data-v="owned" aria-pressed="true">Owned</button>
+      <button type="button" data-v="all" aria-pressed="false">Every card</button>
+    </div>
+    <div class="seg" id="celem" role="group" aria-label="Element">
+      <button type="button" data-v="" aria-pressed="true">All</button>
+      <button type="button" data-v="Cute" aria-pressed="false"><i class="v-el" style="--el:#F24068"></i>Cute</button>
+      <button type="button" data-v="Pure" aria-pressed="false"><i class="v-el" style="--el:#0DC134"></i>Pure</button>
+      <button type="button" data-v="Happy" aria-pressed="false"><i class="v-el" style="--el:#FFA712"></i>Happy</button>
+    </div>
+    <div class="seg" id="crar" role="group" aria-label="Rarity">
+      <button type="button" data-v="" aria-pressed="true">All</button>
+      <button type="button" data-v="5" aria-pressed="false">5★</button>
+      <button type="button" data-v="4" aria-pressed="false">4★</button>
+      <button type="button" data-v="3" aria-pressed="false">3★</button>
+    </div>
+    <span class="v-ccount" id="ccount"></span>
+  </div>
+  <div class="v-cgrid" id="cgrid"></div>
+  <footer class="v-cfoot" id="cfoot" hidden>
+    <span>This card in this slot only</span>
+    <label class="v-sel"><span>Level</span><select id="clevel"><option value="">As the Cards option</option>
+      <option>1</option><option>20</option><option>30</option><option>40</option><option>50</option><option>60</option><option>70</option><option>80</option></select></label>
+    <label class="v-sel"><span>Bloom</span><select id="cbloom"><option value="">As the Cards option</option>
+      <option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></label>
+    <button class="ghost" id="cremove" type="button"><svg class="i s"><use href="#i-erase"/></svg>Empty this slot</button>
+  </footer>
+</dialog>
+<div class="v-pop" id="pop" role="dialog" hidden></div>
+<div class="v-tip" id="tip" role="tooltip" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/hb-shell.js"></script>
+<script src="/hb-combo.js"></script>
+<script type="module" src="/vs-app.js"></script>
+</body>
+</html>

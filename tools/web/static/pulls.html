@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gacha · hololive builder</title>
+<link rel="stylesheet" href="/hb-card.css">
+<link rel="stylesheet" href="/hb.css">
+<link rel="stylesheet" href="/pulls.css">
+<script src="/hb-format.js"></script>
+<script src="/hb-gens.js"></script>
+<script src="/hb-card.js"></script>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" data-page="gacha"></nav>
+
+  <main>
+    <header class="pg" aria-labelledby="gtitle">
+      <div class="wrap g-pg">
+        <div class="g-pgmain">
+          <h1 id="gtitle">Gacha</h1>
+          <p class="pg-meta" id="herochips"><span>Loading the pull history…</span></p>
+          <p class="pg-lede" id="syncstatus">Your pull history, read from the account only when you press Sync.</p>
+          <div class="pg-stats g-stats" id="tiles" aria-live="polite" aria-label="Totals"></div>
+        </div>
+        <div class="g-side">
+          <figure class="g-open" id="herobanner" aria-hidden="true"></figure>
+            <div class="g-actions">
+              <button class="btn primary" id="sync" type="button">
+                <svg class="i s" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>Sync pulls
+              </button>
+              <button class="btn" id="export" type="button" title="Save this history as one self-contained HTML file">Export HTML</button>
+            </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="wrap">
+      <p class="g-alert" id="aliaserr" hidden></p>
+      <div class="g-limit" id="histlimit" hidden></div>
+
+      <section class="g-block" id="featblock" hidden aria-labelledby="h-feat">
+        <h2 class="sh" id="h-feat">Featured on open banners</h2>
+        <p class="sub" id="featnote"></p>
+        <div id="featured"></div>
+      </section>
+
+      <section class="g-block" id="ratesblock" hidden aria-labelledby="h-rates">
+        <h2 class="sh" id="h-rates">How the rates work</h2>
+        <p class="sub">Read off the rate tables the game serves for each banner, saved at every sync.</p>
+        <div id="rates"></div>
+      </section>
+
+      <section class="g-block" aria-labelledby="h-luck">
+        <h2 class="sh" id="h-luck">Luck against the rates</h2>
+        <p class="sub" id="lucknote"></p>
+        <div class="g-chartgrid">
+          <section class="dlg"><div class="dlg-h"><h3>Your ★5 as you pulled</h3><span class="r" id="curvenote"></span></div><div class="dlg-b" id="curve"></div></section>
+          <section class="dlg"><div class="dlg-h"><h3>Pulls between ★5</h3><span class="r" id="gapnote"></span></div><div class="dlg-b" id="gaps"></div></section>
+        </div>
+        <div class="g-luckgrid">
+          <section class="dlg"><div class="dlg-h"><h3>All compared pulls</h3><span class="r">90 % band · binomial, slightly wide on purpose</span></div><div class="dlg-b" id="luck"></div></section>
+          <section class="dlg"><div class="dlg-h"><h3>Per banner</h3><span class="r">few pulls per banner make wide ranges</span></div><div class="dlg-b" id="luckbanners"></div></section>
+        </div>
+        <details class="g-howto">
+          <summary>How these ranges are computed</summary>
+          <p>Expected counts come from each banner's own rate table, saved at sync time, with the guaranteed slot of a 10-pull
+            drawn from its own table (9 + 1). The shaded range is where 90 % of players making exactly the same pulls would land.
+            It uses a binomial with the same mean, which is slightly <em>wider</em> than the true spread, so these ranges never
+            overstate how unusual a result is. The rate interval is a 95 % Wilson interval on your own pulls.</p>
+          <p>Left out of the comparison: ticket and tutorial pulls (no rate roll was made) and banners whose rate table was never
+            saved. They still appear everywhere else on this page.</p>
+        </details>
+      </section>
+
+      <section class="g-block" aria-labelledby="h-banners">
+        <h2 class="sh" id="h-banners">Banners</h2>
+        <p class="sub" id="bannernote">Every banner you pulled on, newest first. Open one for its results.</p>
+        <div class="g-bgrid" id="banners"></div>
+        <div class="g-unid" id="unidblock" hidden>
+          <h3 class="g-subh">Pulls without a banner</h3>
+          <div class="g-bgrid" id="unidbanners"></div>
+        </div>
+        <div class="g-unpulled" id="unpulled" hidden></div>
+      </section>
+
+      <section class="g-block" aria-labelledby="h-hist">
+        <h2 class="sh" id="h-hist">History</h2>
+        <p class="sub" id="histnote"></p>
+        <section class="dlg g-days"><div class="dlg-h"><h3>Pulls per day</h3><span class="r" id="daysnote"></span></div><div class="dlg-b" id="days"></div></section>
+        <div class="g-filters" id="filters">
+          <label class="g-field"><span>Banner</span>
+            <select id="fbanner"><option value="">All banners</option></select></label>
+          <div class="g-field"><span>Rarity</span>
+            <div class="seg" id="frarity" role="group" aria-label="Rarity">
+              <button type="button" data-v="" aria-pressed="true">All</button>
+              <button type="button" data-v="5★" aria-pressed="false">★5</button>
+              <button type="button" data-v="4★" aria-pressed="false">★4</button>
+              <button type="button" data-v="3★" aria-pressed="false">★3</button>
+            </div></div>
+          <div class="g-field"><span>Show</span>
+            <div class="seg" id="fshow" role="group" aria-label="Show">
+              <button type="button" data-v="" aria-pressed="true">Every card</button>
+              <button type="button" data-v="pickup" aria-pressed="false">Featured</button>
+              <button type="button" data-v="dupe" aria-pressed="false">Drawn twice or more</button>
+            </div></div>
+          <p class="g-fcount n" id="fcount"></p>
+        </div>
+        <div class="card-grid g-cards" id="results"></div>
+      </section>
+
+      <section class="g-block" aria-labelledby="h-before" id="beforeblock">
+        <h2 class="sh" id="h-before">Owned before tracking</h2>
+        <p class="sub" id="beforenote"></p>
+        <div class="card-grid g-cards" id="before"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<dialog class="dlg g-bdlg" id="bdlg" aria-labelledby="bd-title">
+  <div class="dlg-h g-bd-h">
+    <div class="g-bd-t"><span class="lbl" id="bd-kind"></span><h2 id="bd-title"></h2><p class="g-facts" id="bd-chips"></p></div>
+    <button class="g-x" type="button" id="bd-close" aria-label="Close"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="dlg-b g-bd-b">
+    <div class="g-bd-art" id="bd-hero"></div>
+    <div id="bd-content"></div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/hb-shell.js"></script>
+<script src="/hb-combo.js"></script>
+<script type="module" src="/pulls-app.js"></script>
+</body>
+</html>

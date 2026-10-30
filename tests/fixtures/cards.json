@@ -1,0 +1,260 @@
+{
+  "schema_version": "2",
+  "cards": [
+    {
+      "id": "nene_01",
+      "member": "Momosuzu Nene",
+      "generation": ["5期生"],
+      "type": "Happy",
+      "rarity": "SSR",
+      "costume_name": "Nenechi Stage Outfit",
+      "stats": {"performance": 412, "technique": 388, "sense": 401},
+      "skills": {
+        "SPECIAL": {
+          "family": "score_support",
+          "effect_type": "score",
+          "duration": 8.0,
+          "interval": null,
+          "probability_tier": null,
+          "magnitude": 18.0,
+          "condition": {"kind": "generation", "target": "5期生", "count": 2},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        },
+        "ACTIVE": {
+          "family": "conditional_score_up",
+          "effect_type": "score",
+          "duration": 7.0,
+          "interval": 20.0,
+          "probability_tier": "Medium",
+          "magnitude": 25.0,
+          "condition": {"kind": "type", "target": "Happy", "count": 2},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        },
+        "PASSIVE": {
+          "family": "stat_up",
+          "effect_type": "technique",
+          "duration": null,
+          "interval": null,
+          "probability_tier": null,
+          "magnitude": 6.0,
+          "condition": {"kind": "ungated"},
+          "target": {"kind": "generation", "value": "5期生", "count": 2},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        }
+      },
+      "costume_skill": {
+        "family": "score_support",
+        "effect_type": "score",
+        "duration": null,
+        "interval": null,
+        "probability_tier": null,
+        "magnitude": 10.0,
+        "condition": {"kind": "type", "target": "Cute", "count": 3},
+        "target": {"kind": "all"},
+        "override": {"kind": "none"},
+        "rider": {"kind": "none"}
+      }
+    },
+    {
+      "id": "fubuki_01",
+      "member": "Shirakami Fubuki",
+      "generation": ["1期生", "ゲーマーズ"],
+      "type": "Cute",
+      "rarity": "SSR",
+      "costume_name": "Fox Shrine Stage Outfit",
+      "stats": {"performance": 405, "technique": 430, "sense": 377},
+      "skills": {
+        "SPECIAL": null,
+        "ACTIVE": {
+          "family": "activation_rate_up",
+          "effect_type": "activation_rate",
+          "duration": 10.0,
+          "interval": 25.0,
+          "probability_tier": "High",
+          "magnitude": 15.0,
+          "condition": {"kind": "generation", "target": "1期生", "count": 2},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        },
+        "PASSIVE": {
+          "family": "judgment_enhancement",
+          "effect_type": "judgment",
+          "duration": null,
+          "interval": null,
+          "probability_tier": null,
+          "magnitude": 8.0,
+          "condition": {"kind": "generation", "target": "ゲーマーズ", "count": 2},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        }
+      },
+      "costume_skill": null
+    },
+    {
+      "id": "mio_01",
+      "member": "Ookami Mio",
+      "generation": ["ゲーマーズ"],
+      "type": "Pure",
+      "rarity": "SR",
+      "costume_name": "Wolf Moon Stage Outfit",
+      "stats": {"performance": 361, "technique": 342, "sense": 398},
+      "skills": {
+        "SPECIAL": null,
+        "ACTIVE": {
+          "family": "score_support",
+          "effect_type": "score",
+          "duration": 6.0,
+          "interval": 18.0,
+          "probability_tier": "Low",
+          "magnitude": null,
+          "condition": {"kind": "ungated"},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        },
+        "PASSIVE": {
+          "family": "life_recovery",
+          "effect_type": "life",
+          "duration": null,
+          "interval": null,
+          "probability_tier": null,
+          "magnitude": 12.0,
+          "condition": {"kind": "type", "target": "Pure", "count": 2},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        }
+      },
+      "costume_skill": null
+    },
+    {
+      "id": "matsuri_01",
+      "member": "Natsuiro Matsuri",
+      "generation": ["1期生"],
+      "type": "Happy",
+      "rarity": "SR",
+      "costume_name": "Festival Stage Outfit",
+      "stats": {"performance": 379, "technique": 354, "sense": 366},
+      "skills": {
+        "SPECIAL": {
+          "family": "conditional_score_up",
+          "effect_type": "score",
+          "duration": 9.0,
+          "interval": null,
+          "probability_tier": null,
+          "magnitude": 22.0,
+          "condition": {"kind": "generation", "target": "1期生", "count": 2},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        },
+        "ACTIVE": {
+          "family": "score_support",
+          "effect_type": "score",
+          "duration": 5.0,
+          "interval": 15.0,
+          "probability_tier": "Medium",
+          "magnitude": 14.0,
+          "condition": {"kind": "ungated"},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        },
+        "PASSIVE": {
+          "family": "conditional_score_up",
+          "effect_type": "score",
+          "duration": null,
+          "interval": null,
+          "probability_tier": null,
+          "magnitude": 50.0,
+          "condition": {"kind": "run_state", "target": "life", "count": 600},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        }
+      },
+      "costume_skill": null
+    },
+    {
+      "id": "polka_01",
+      "member": "Omaru Polka",
+      "generation": ["5期生"],
+      "type": "Cute",
+      "rarity": "SSR",
+      "costume_name": "Circus Ringleader Outfit",
+      "stats": {"performance": 398, "technique": 371, "sense": 415},
+      "skills": {
+        "SPECIAL": {
+          "family": "score_support",
+          "effect_type": "score",
+          "duration": 12.0,
+          "interval": null,
+          "probability_tier": null,
+          "magnitude": 30.0,
+          "condition": {"kind": "generation", "target": "holoX", "count": 2},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        },
+        "ACTIVE": null,
+        "PASSIVE": {
+          "family": "stat_up",
+          "effect_type": "performance",
+          "duration": null,
+          "interval": null,
+          "probability_tier": null,
+          "magnitude": 7.0,
+          "condition": {"kind": "type", "target": "Cute", "count": 2},
+          "target": {"kind": "type", "value": "Cute", "count": 2},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        }
+      },
+      "costume_skill": null
+    },
+    {
+      "id": "lamy_01",
+      "member": "Yukihana Lamy",
+      "generation": ["5期生"],
+      "type": "Pure",
+      "rarity": "SSR",
+      "costume_name": "Snow Elf Stage Outfit",
+      "stats": {"performance": 421, "technique": 396, "sense": 0},
+      "skills": {
+        "SPECIAL": null,
+        "ACTIVE": {
+          "family": "conditional_score_up",
+          "effect_type": "score",
+          "duration": 8.0,
+          "interval": 22.0,
+          "probability_tier": "High",
+          "magnitude": 20.0,
+          "condition": {"kind": "generation", "target": "5期生", "count": 2},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        },
+        "PASSIVE": {
+          "family": "judgment_enhancement",
+          "effect_type": "judgment",
+          "duration": null,
+          "interval": null,
+          "probability_tier": null,
+          "magnitude": 5.0,
+          "condition": {"kind": "ungated"},
+          "target": {"kind": "all"},
+          "override": {"kind": "none"},
+          "rider": {"kind": "none"}
+        }
+      },
+      "costume_skill": null
+    }
+  ]
+}

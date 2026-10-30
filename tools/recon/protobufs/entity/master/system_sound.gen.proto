@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+import "enums/system_sound_type.gen.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message SystemSound {
+	option (options.master.table) = true;
+
+	.enums.SystemSoundType type = 1 [(options.master.pk) = true];
+	string sound_asset_id = 2;
+}

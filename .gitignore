@@ -1,0 +1,30 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.cache/
+.venv/
+extracted/
+
+# this PC's own: the account, its settings, credentials and keys
+state/
+data/owned.json
+data/gacha/
+tools/recon/proxy/_game_keys.py
+
+# built by the refresh from the game install and the account
+tools/recon/proxy/dumps/
+tools/recon/proxy/*.db
+tools/recon/proxy/*.dat
+tools/recon/proxy/*.txt
+tools/recon/proxy/*.mitm
+tools/recon/proxy/*key*.bin
+tools/recon/proxy/master_*.json
+tools/explorer/*.html
+tools/explorer/*_art/
+
+# compiled on first use from tools/web/kernel/*.c
+tools/web/kernel/*.dll
+tools/web/kernel/*.so
+
+# the desktop app's build output (tools/app/build_app.py)
+/build/

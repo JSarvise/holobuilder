@@ -1,0 +1,84 @@
+/* Inventory page (Resources), Night Deck (docs/redesign/IDENTITY.md). Page-local rules only; every colour
+   is an hb.css token. Nothing under 12 px. Radii 8 thumbs/bars · 16 rows · 32 dialogs · 999 pills.
+   Each section is one dialog (.dlg); inside it nothing is boxed again: columns and rows are split
+   by 1 px rules, the item art carries the weight. */
+
+/* ---------- page head: the shared .pg (hb.css) ---------- */
+.inv-stale{color:var(--bad)}
+.inv-lnk{color:var(--sky);text-decoration:none}
+.inv-lnk:hover{text-decoration:underline}
+
+/* ---------- sections ---------- */
+.inv-sec{margin-top:28px}
+.inv-sec:first-child{margin-top:36px}
+.inv .dlg-h h2{font:800 15px/1.1 var(--f-ui)}
+
+/* ---------- board branches: four columns split by rules ---------- */
+.inv-branches{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.branch{padding:0 22px;border-top:3px solid var(--bh)}
+.branch + .branch{border-left:1px solid var(--line)}
+.branch:first-child{padding-left:0}
+.branch:last-child{padding-right:0}
+.branch header{display:flex;align-items:center;gap:10px;padding:14px 0 12px}
+.branch .bm{width:30px;height:30px;object-fit:contain;flex:none}
+.branch h3{margin:0;font:800 15px/1.1 var(--f-ui)}
+.branch header p{margin:3px 0 0;font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
+.mat{display:grid;grid-template-columns:56px minmax(0,1fr);gap:14px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.mat .mi{width:56px;height:56px;object-fit:contain}
+.mline{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.mn{font:800 13.5px/1.2 var(--f-ui);color:var(--ink)}
+.mline b{font:800 20px/1 var(--f-num)}
+/* invested share of everything ever held: one fill, no glow */
+.mbar{height:6px;border-radius:8px;margin:9px 0 7px;background:var(--deep);overflow:hidden}
+.mbar i{display:block;height:100%;background:var(--bh)}
+.mleg{display:flex;justify-content:space-between;font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
+.mleg b{font-size:12px;color:var(--ink)}
+.inv-reset{display:flex;align-items:center;gap:14px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line);font:700 13.5px/1.45 var(--f-ui);color:var(--ink-2)}
+.inv-reset p{margin:0}
+.inv-reset b{color:var(--ink)}
+.inv-reset .ri{width:38px;height:38px;object-fit:contain;flex:none}
+
+/* ---------- member growth ---------- */
+.inv-growth{display:grid;grid-template-columns:1.1fr 1fr}
+.inv-sub{padding:0 24px}
+.inv-sub:first-child{padding-left:0}
+.inv-sub + .inv-sub{border-left:1px solid var(--line)}
+.inv-sub.wide{grid-column:1 / -1;border-left:0;padding:20px 0 0;margin-top:20px;border-top:1px solid var(--line)}
+.inv-sub h3{display:flex;align-items:baseline;gap:10px;margin:0 0 14px;font:800 13.5px/1.2 var(--f-ui)}
+.inv-sub h3 small{font:700 12px/1.2 var(--f-ui);color:var(--ink-2)}
+.attrs{display:grid;grid-template-columns:90px repeat(3,minmax(0,1fr));gap:8px 14px;align-items:center}
+.ah{font:800 13.5px/1.2 var(--f-ui);color:var(--ink);display:flex;align-items:center;gap:7px}
+.ah i{width:10px;height:10px;border-radius:50%;background:var(--ac)}
+.al{font:700 13.5px/1.2 var(--f-ui);color:var(--ink-2)}
+.ac{display:flex;align-items:center;gap:10px;padding:4px 0}
+.ac .ai{width:44px;height:44px;object-fit:contain;flex:none}
+.ac b{font:800 20px var(--f-num)}
+.inv-hint{margin:14px 0 0;font:700 13.5px/1.45 var(--f-ui);color:var(--ink-2)}
+.inv-hint b{color:var(--ink)}
+
+/* ---------- item rows ---------- */
+.its{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:4px 18px}
+.its.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.it{display:grid;grid-template-columns:56px minmax(0,1fr);gap:12px;align-items:center;padding:8px 0;min-width:0}
+.it .art{width:56px;height:56px;display:grid;place-items:center}
+.it .ii,.mat .mi,.ac .ai{display:block}
+.it .ii{width:56px;height:56px;object-fit:contain}
+.itx{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;align-items:baseline;min-width:0}
+.itx .in{font:800 13.5px/1.3 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.itx b{font:800 15px var(--f-num)}
+.itx small{grid-column:1 / -1;min-width:0;font:700 12px/1.4 var(--f-ui);color:var(--ink-2);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+/* a name the local item table lacks: said plainly, with the game's id under it, never guessed */
+.it.unnamed .in{color:var(--ink-2)}
+.it.unnamed small{font-family:var(--f-num);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* no art on disk: a deliberate empty slot, not a borrowed icon */
+.miss{display:grid!important;place-items:center;border-radius:50%;border:2px dashed var(--mc,var(--line-2));box-sizing:border-box}
+.miss i{font:700 12px/1 var(--f-ui);font-style:normal;color:var(--ink-2)}
+/* "Everything else": the groups flow into two columns so a 1-item group sits beside another */
+#rest{columns:2;column-gap:48px}
+#rest > .empty{column-span:all}
+.grp{break-inside:avoid;padding:16px 0 18px;border-top:1px solid var(--line)}
+#rest .its.four{grid-template-columns:repeat(2,minmax(0,1fr))}
+.grp h3{display:flex;align-items:baseline;gap:8px;margin:0 0 8px;font:800 13.5px/1.2 var(--f-ui);color:var(--ink)}
+.grp h3 .num{font-size:12px;color:var(--ink-2)}
+.inv .error{margin-top:32px}
+code{font-family:var(--f-num);font-size:12px}

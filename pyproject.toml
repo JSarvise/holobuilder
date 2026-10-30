@@ -1,0 +1,24 @@
+[project]
+name = "hbuilder"
+version = "0.1.0"
+description = "Team composition optimizer for hololive Dreams"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+hbuilder = "hbuilder.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests", "tools/web", "tools/explorer", "tools/pokajan", "tools/visual", "tools/app"]
+markers = [
+    "slow: deselected by default; measures rather than asserts",
+]
+addopts = "-m 'not slow'"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,26 @@
+// Message shapes the master tables use but the master .proto set does not carry
+// (master_json.py --compile-schema reads this directory next to the master protos; the
+// compiled result is schema.json here).
+//   common.Reward / SimplifiedReward / Consumption: fields as the rpc schema declares them
+//     (dumps/proto_rpc/merged.proto); renders SkillTreeNode/Card/MissionProgress EXACT.
+//   Lang: every Lang<X>_<Language> table -- id = 1, text = 1000 (read off the rows).
+syntax = "proto3";
+package common;
+message Reward {
+	.enums.ResourceType resource_type = 1;
+	string resource_id = 2;
+	int64 quantity = 3;
+}
+message SimplifiedReward {
+	.enums.ResourceType resource_type = 1;
+	string resource_id = 2;
+}
+message Consumption {
+	.enums.ResourceType resource_type = 1;
+	string resource_id = 2;
+	int64 quantity = 3;
+}
+message Lang {
+	string id = 1;
+	string text = 1000;
+}

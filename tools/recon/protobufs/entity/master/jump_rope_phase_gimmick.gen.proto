@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+import "enums/jump_rope_gimmick_type.gen.proto";
+import "enums/jump_rope_invisible_gimmick_type.gen.proto";
+import "enums/jump_rope_phase_type.gen.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message JumpRopePhaseGimmick {
+	option (options.master.table) = true;
+
+	string group_id = 1 [(options.master.pk) = true];
+	.enums.JumpRopePhaseType phase_type = 2 [(options.master.pk) = true];
+	int32 jump_count_from = 3 [(options.master.pk) = true, (options.master.optional) = true];
+	repeated .enums.JumpRopeGimmickType gimmick_types = 4 [(options.master.optional) = true];
+	int32 speed_coefficient_permil_multiply = 5 [(options.master.optional) = true];
+	int32 speed_up_coefficient_permil_multiply = 6 [(options.master.optional) = true];
+	int32 speed_down_coefficient_permil_multiply = 7 [(options.master.optional) = true];
+	int32 caution_wait_jump_count_min = 8 [(options.master.optional) = true];
+	int32 caution_wait_jump_count_max = 9 [(options.master.optional) = true];
+	int32 caution_active_jump_count_min = 10 [(options.master.optional) = true];
+	int32 caution_active_jump_count_max = 11 [(options.master.optional) = true];
+	int32 gimmick_active_jump_count_min = 12 [(options.master.optional) = true];
+	int32 gimmick_active_jump_count_max = 13 [(options.master.optional) = true];
+	.enums.JumpRopeInvisibleGimmickType invisible_gimmick_type = 14 [(options.master.optional) = true];
+	float min_steam_density = 15 [(options.master.optional) = true];
+	float max_steam_density = 16 [(options.master.optional) = true];
+	float min_fall_object_size = 17 [(options.master.optional) = true];
+	float max_fall_object_size = 18 [(options.master.optional) = true];
+}

@@ -1,0 +1,139 @@
+syntax = "proto3";
+
+import "buf/validate/validate.proto";
+import "enums/friend_status_type.gen.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "options/check_option.proto";
+import "options/zap.proto";
+import "rpc/api/common/profile.gen.proto";
+import "rpc/api/common/response.gen.proto";
+
+package rpc.api;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/rpc/api";
+option csharp_namespace = "Vision.Common.Proto.Api";
+
+message FriendTopResponse {
+	message LatestPlayedUserInfo {
+		common.BasicUserInfo user_info = 1;
+		.enums.FriendStatusType friend_status_type = 2;
+	}
+
+	repeated common.BasicUserInfo friend_user_infos = 1 [(options.zap.hidden) = true];
+	repeated common.BasicUserInfo offer_user_infos = 2 [(options.zap.hidden) = true];
+	repeated common.BasicUserInfo offer_received_user_infos = 3 [(options.zap.hidden) = true];
+	repeated FriendTopResponse.LatestPlayedUserInfo latest_played_user_infos = 4 [(options.zap.hidden) = true];
+	common.Response common_response = 9999;
+}
+
+message FriendTopReloadResponse {
+	repeated common.BasicUserInfo friend_user_infos = 1 [(options.zap.hidden) = true];
+	repeated common.BasicUserInfo offer_user_infos = 2 [(options.zap.hidden) = true];
+	repeated common.BasicUserInfo offer_received_user_infos = 3 [(options.zap.hidden) = true];
+	common.Response common_response = 9999;
+}
+
+message FriendSearchUserRequest {
+	string public_user_id = 1 [(buf.validate.field).string.min_bytes = 1];
+}
+
+message FriendSearchUserResponse {
+	common.BasicUserInfo user_info = 1;
+	common.Response common_response = 9999;
+}
+
+message FriendDeleteFriendRequest {
+	string public_user_id = 1 [(buf.validate.field).string.min_bytes = 1];
+}
+
+message FriendOfferRequest {
+	string public_user_id = 1 [(buf.validate.field).string.min_bytes = 1];
+}
+
+message FriendApproveOfferRequest {
+	string public_user_id = 1 [(buf.validate.field).string.min_bytes = 1];
+}
+
+message FriendCancelOfferRequest {
+	string public_user_id = 1 [(buf.validate.field).string.min_bytes = 1];
+}
+
+message FriendRejectOfferRequest {
+	string public_user_id = 1 [(buf.validate.field).string.min_bytes = 1];
+}
+
+message FriendDeleteFriendResponse {
+	common.Response common_response = 9999;
+}
+
+message FriendOfferResponse {
+	common.Response common_response = 9999;
+}
+
+message FriendApproveOfferResponse {
+	common.Response common_response = 9999;
+}
+
+message FriendCancelOfferResponse {
+	common.Response common_response = 9999;
+}
+
+message FriendRejectOfferResponse {
+	common.Response common_response = 9999;
+}
+
+service Friend {
+	rpc Top (.google.protobuf.Empty) returns (.rpc.api.FriendTopResponse) {
+		option (google.api.http).post = "/Friend/Top";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+
+	rpc TopReload (.google.protobuf.Empty) returns (.rpc.api.FriendTopReloadResponse) {
+		option (google.api.http).post = "/Friend/TopReload";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+
+	rpc SearchUser (.rpc.api.FriendSearchUserRequest) returns (.rpc.api.FriendSearchUserResponse) {
+		option (google.api.http).post = "/Friend/SearchUser";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+
+	rpc DeleteFriend (.rpc.api.FriendDeleteFriendRequest) returns (.rpc.api.FriendDeleteFriendResponse) {
+		option (google.api.http).post = "/Friend/DeleteFriend";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_master_version = true;
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+
+	rpc Offer (.rpc.api.FriendOfferRequest) returns (.rpc.api.FriendOfferResponse) {
+		option (google.api.http).post = "/Friend/Offer";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_master_version = true;
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+
+	rpc ApproveOffer (.rpc.api.FriendApproveOfferRequest) returns (.rpc.api.FriendApproveOfferResponse) {
+		option (google.api.http).post = "/Friend/ApproveOffer";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_master_version = true;
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+
+	rpc CancelOffer (.rpc.api.FriendCancelOfferRequest) returns (.rpc.api.FriendCancelOfferResponse) {
+		option (google.api.http).post = "/Friend/CancelOffer";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_master_version = true;
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+
+	rpc RejectOffer (.rpc.api.FriendRejectOfferRequest) returns (.rpc.api.FriendRejectOfferResponse) {
+		option (google.api.http).post = "/Friend/RejectOffer";
+		option (google.api.http).body = "*";
+		option (options.check_option.check).disabled_master_version = true;
+		option (options.check_option.check).enabled_response_cache = true;
+	}
+}

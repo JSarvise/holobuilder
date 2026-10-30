@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message SkillTreePoint {
+	option (options.master.table) = true;
+
+	string id = 1 [(options.master.pk) = true];
+	string name_lang_id = 2 [(options.master.fk) = "LangSkillTreePoint:id"];
+	string character_id = 1000 [(options.master.fk) = "Character:id", (options.master.optional) = true];
+}

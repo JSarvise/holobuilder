@@ -1,0 +1,64 @@
+/* The Solve page's steps (steps.js). Only what the folding needs —
+   the cards themselves keep style.css's .stepcard / .step-head look. */
+.stepcard.st > .step-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.stepcard.st > .step-head:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+.stepcard.st .st-sum {
+  margin-left: auto;
+  max-width: 58%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.72;
+}
+.stepcard.st:not(.st-closed) .st-sum { visibility: hidden; }
+.stepcard.st .st-chev {
+  flex: none;
+  opacity: 0.6;
+  transition: transform 0.15s ease;
+}
+.stepcard.st.st-closed .st-chev { transform: rotate(-90deg); }
+.stepcard.st.st-closed > .st-body { display: none; }
+.stepcard.st.st-closed > .step-head { margin-bottom: 0; }
+.stepcard.st.st-closed { padding-top: 14px; padding-bottom: 14px; }
+.stepcard.st.st-closed:not(:hover) { opacity: 0.82; }
+.st-tools { display: flex; justify-content: flex-end; margin: 0 0 8px; }
+.st-all {
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.st-all:hover { opacity: 1; }
+.stepcard.st .st-body > .ts-panel { margin-bottom: 0; }
+/* Solve: pinned to the bottom of the viewport for as long as the steps are on
+   screen, so it is reachable with any step folded or open. */
+.st-go {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin: var(--s3) 0;
+  padding: var(--s3) var(--s4);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 -8px 20px rgba(3, 10, 30, 0.45);
+}
+.st-go .go-row { flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) { .stepcard.st .st-chev { transition: none; } }

@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>hbuilder — Solve</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/steps.css">
+</head>
+<body>
+
+<div class="app" id="app">
+<aside class="side" id="side">
+  <div class="side-head">
+    <span class="wordmark"><i class="wm-node" aria-hidden="true"></i><span class="wm-text">hbuilder</span></span>
+    <button class="side-collapse" id="side-collapse" type="button" aria-label="Collapse sidebar">&laquo;</button>
+  </div>
+  <!-- One screen at a time: an editor, a board and a ranking are three tasks,
+       not three sections of one scroll. The collection and board panels stay
+       <details> so their lazy-load on `toggle` keeps working; the nav just
+       opens the active one and hides the rest. -->
+  <nav id="views">
+    <p class="side-group">Tools</p>
+    <button data-view="solve" class="vtab on"><span class="vt-ic">◆</span><span class="vt-label">Solve</span></button>
+    <p class="side-group">Data</p>
+    <button data-view="collection" class="vtab"><span class="vt-ic">▦</span><span class="vt-label">Collection</span></button>
+    <button data-view="board" class="vtab"><span class="vt-ic">⌗</span><span class="vt-label">Board</span></button>
+    <button data-view="park" class="vtab"><span class="vt-ic">❋</span><span class="vt-label">Park</span></button>
+    <button data-view="resources" class="vtab"><span class="vt-ic">◈</span><span class="vt-label">Resources</span></button>
+    <button data-view="gacha" class="vtab"><span class="vt-ic">✦</span><span class="vt-label">Gacha</span></button>
+    <button data-view="compare" class="vtab"><span class="vt-ic">⇄</span><span class="vt-label">Compare</span></button>
+  </nav>
+  <div class="side-foot">
+    <button id="refresh" class="ghost side-refresh" type="button"><span class="vt-ic">↻</span><span class="vt-label">Refresh account</span></button>
+  </div>
+</aside>
+<div class="main" id="main">
+
+<div id="view-solve" class="view">
+
+<!-- The freshness strip. The inputs are files on disk, not the live game, and
+     a ranking against a stale account is a correct answer to an old question
+     -- so the page says where its inputs come from before anything else. -->
+<div class="setup">
+<section class="controls">
+
+  <header class="page-head">
+    <h1>Team Optimizer</h1>
+    <p>Find the optimal team to raise your score — boards, sockets, song charts, memories and card levels all modelled.</p>
+  </header>
+  <p class="ctrl-fresh">Ranked against your last <b>Refresh account</b> — refresh if the game changed.</p>
+  <!-- The account facts every score silently includes, said before any run —
+       the answer to "why doesn't this match my deck screen". Filled by
+       /api/meta. -->
+  <p class="ctrl-meta" id="metastrip" hidden></p>
+
+  <div class="stepcard">
+  <div class="step-head"><span class="step-n">1</span> What to build</div>
+  <!-- The three questions this page can answer, mutually exclusive and
+       named. -->
+  <div class="mode-cards" data-seg="mode">
+    <button type="button" data-val="best" class="mode-card on">
+      <b>Best team</b>
+      <span>Search every combination for the highest-scoring team you can field.</span>
+    </button>
+    <button type="button" data-val="around" class="mode-card">
+      <b>Build around cards</b>
+      <span>Lock cards and/or a leader into every team, then find the best rest.</span>
+    </button>
+    <button type="button" data-val="acquire" class="mode-card">
+      <b>Next best card</b>
+      <span>Rank every card you do NOT own by how much it would raise your best score.</span>
+    </button>
+  </div>
+  <select id="mode" hidden>
+    <option value="best" selected>best</option>
+    <option value="around">around</option>
+    <option value="acquire">acquire</option>
+  </select>
+  <p class="ctrl-hint" id="modehint"></p>
+  <!-- In-panel pin strip: four owned-card slots (a view of the same
+       `require` set the drawer edits), shown for the two modes that take
+       pins. -->
+  <div id="pinwrap" hidden>
+    <p class="pin-lead" id="pinlead"></p>
+    <div id="pinslots"></div>
+  </div>
+  </div>
+
+  <div class="stepcard">
+  <div class="step-head"><span class="step-n">2</span> Options</div>
+  <div class="ctrl-grid">
+
+    <div class="ctrl ctrl-wide">
+      <span class="ctrl-lab">Cards</span>
+      <!-- ONE axis for "whose cards, at what level", so "Every card" /
+           "Assume Max" / "full tree" do not read as three ways of saying
+           maxed. -->
+      <select id="cardsmode" class="planmode">
+        <option value="asis" selected>My cards, as they are</option>
+        <option value="whatif">My cards, at a level/bloom I choose&hellip;</option>
+        <option value="maxed">Every card in the game, maxed</option>
+        <!-- The basis comparable with the community tool holodori.best: maxed
+             cards on a fully maxed ACCOUNT — every bench board at 453 with
+             level-2 Connect cards, the master's 37 posters, the 11.58 %
+             power-up ceiling. Server: basis "maxed-account"; the Board control
+             is forced to develop / full tree (a maxed account has every point). -->
+        <option value="maxed-account"
+                title="holodori-comparable: 54 boards fully developed at 453 with level-2 connect cards, memories 37, power-up 11.58 %">Every card maxed + maxed account (all boards 453, memories 37, power-up 11.58 %)</option>
+      </select>
+      <!-- Value holder the solve request reads; #cardsmode drives it. -->
+      <select id="basis" hidden>
+        <option value="account" selected>My account, as it is</option>
+        <option value="maxed">Every card in the game, maxed</option>
+        <option value="maxed-account">Every card maxed + maxed account</option>
+      </select>
+      <div id="assumerow" class="assume-row" hidden>
+        <label>level
+          <select id="assume_level">
+            <option value="account" selected>real</option>
+            <option value="20">20</option>
+            <option value="30">30</option>
+            <option value="40">40</option>
+            <option value="50">50</option>
+            <option value="60">60</option>
+            <option value="max">Max</option>
+          </select>
+        </label>
+        <label>bloom
+          <select id="assume_bloom">
+            <option value="account" selected>real</option>
+            <option value="0">0</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+          </select>
+        </label>
+      </div>
+      <p class="ctrl-hint" data-hint="basis"></p>
+    </div>
+
+    <div class="ctrl">
+      <span class="ctrl-lab">Card pool</span>
+      <div class="seg" data-seg="pool">
+        <button type="button" data-val="all" class="on">All</button>
+        <button type="button" data-val="5star">5&#9733; only</button>
+      </div>
+      <select id="pool" hidden>
+        <option value="all" selected>all</option>
+        <option value="5star">5star</option>
+      </select>
+      <p class="ctrl-hint">Which cards may enter the search at all.</p>
+    </div>
+
+    <div class="ctrl" id="sortctrl">
+      <label class="ctrl-lab" for="sortby">Sort by</label>
+      <select id="sortby">
+        <option value="avg" selected>Estimated average score</option>
+        <option value="max">Estimated max score (every active fires)</option>
+      </select>
+      <p class="ctrl-hint">holodori's two orders: what a run pays on average, or its ceiling.</p>
+    </div>
+
+    <div class="ctrl" id="topctrl">
+      <label class="ctrl-lab" for="top">Teams to keep</label>
+      <input id="top" type="number" min="1" max="50" value="5">
+      <p class="ctrl-hint">How many of the best teams to list.</p>
+    </div>
+
+    <!-- Board: which board the ranking scores each team against. The default
+         DEVELOPS each team's best board (fast Engine-A) BEFORE ranking, so a team
+         that only wins once its board is built ranks correctly — "my account" uses
+         each character's real earned points, "level 50" the full tree. "My current
+         board" scores the captured state as-is; "Off" scores bare. -->
+    <div class="ctrl ctrl-wide">
+      <span class="ctrl-lab">Board</span>
+      <!-- One primary axis, then per-choice sub-controls. #boardmode (hidden)
+           is the value the request logic reads; syncBoardMode() computes it. -->
+      <select id="boardprimary" class="planmode">
+        <option value="develop" selected>Optimise each team's boards (planned from scratch)</option>
+        <option value="current">Use my boards exactly as they are</option>
+      </select>
+      <!-- Two board assumptions: Max points = every character at level 50
+           (361 points); unlimited cubes/hexas also spends the OTHER
+           characters' idle points on account-wide green. -->
+      <label class="dev-check dev-row" id="maxpointsrow"
+             title="Plan every board as if its character were level 50: 361 points (the whole board costs 447-453). Off: the points each character has earned.">
+        <input id="maxpoints" type="checkbox"> Assume max board points (every character at level 50)
+      </label>
+      <label class="dev-check dev-row" id="infmatsrow"
+             title="Ignore cube/hexa costs. The characters off the team then spend their idle points on account-wide green, which raises every team. With your own materials the bench stays as captured.">
+        <input id="infmats" type="checkbox"> Assume unlimited cubes and hexas
+      </label>
+      <div id="devopts" class="dev-opts" hidden>
+        <div class="dev-row" id="budgetrow">
+          <label class="dev-check" title="ON: each character spends the tree points their level has actually earned. OFF: pick a flat per-character budget with the slider — 453 is the full tree.">
+            <input id="budgetreal" type="checkbox" checked> my real points
+          </label>
+          <input id="budgetslider" type="range" min="0" max="453" step="1" value="453" disabled>
+          <b id="budgetval" class="mono">real</b>
+        </div>
+        <label class="dev-check dev-row" id="leadersrow"
+               title="One beam, then the best team of EVERY leader, each developed — breaks the one-leader monoculture. Uses the full tree. Slower (~30 s).">
+          <input id="leaders" type="checkbox"> Best team of EVERY leader (slower)
+        </label>
+        <label class="dev-check dev-row" id="refinewrap"
+               title="After developing, hill-climb each shown team's five member slots by the target metric (leader fixed): the per-song score, the across mean, or the developed Unit Score in Any-song mode. Adds ~40 s (song) to ~2 min (across).">
+          <input id="refine" type="checkbox"> Refine members (slow)
+        </label>
+        <label class="dev-check dev-row" id="developtoprow"
+               title="How many stage-1 rosters are developed (and refined) before the final rank — the funnel. Bigger costs time linearly; a rank-6+ team that wins developed is otherwise never developed. Only the /api/run path (localStorage.newrun='1') reads it today.">
+          Develop <input id="developtop" type="number" min="1" max="150" step="1" value="25" class="dev-num"> candidates
+        </label>
+        <label class="dev-check dev-row" id="refinewidewrap"
+               title="Wider refine for the top leaders: 20 candidates per slot (not 8), rounds until it converges, and extra starting rosters (other leaders&#39; teams, leader-as-member) so it is not stuck in the beam seed&#39;s own valley. MEASURED +3.4 % on NIGHTBREAK. Roughly 3-4x the refine time (the exact stage runs across all cores).">
+          <input id="refinewide" type="checkbox"> Wide refine (slower)
+        </label>
+      </div>
+      <select id="boardmode" hidden>
+        <option value="develop-account" selected>develop-account</option>
+        <option value="develop-max">develop-max</option>
+        <option value="develop-leaders">develop-leaders</option>
+        <option value="current">current</option>
+        <option value="off">off</option>
+      </select>
+      <p class="ctrl-hint" id="boardhint"></p>
+    </div>
+
+    <!-- ACTIVE-uptime model: "In-run" (finite cooldown window — what you actually
+         score in a live, the realistic default) vs "Deck screen" (steady-state,
+         only to reproduce the in-game deck-screen number). Mirrors the CLI's
+         --uptime-model; the generic seg-wiring above drives #uptime. -->
+    <div class="ctrl" hidden>
+      <span class="ctrl-lab">Score model</span>
+      <div class="seg" data-seg="uptime">
+        <button type="button" data-val="finite" class="on">In-run (real)</button>
+        <button type="button" data-val="steady">Deck screen</button>
+      </div>
+      <select id="uptime" hidden>
+        <option value="finite" selected>finite</option>
+        <option value="steady">steady</option>
+      </select>
+      <p class="ctrl-hint">In-run = what a live actually pays out (cooldown windows). Deck screen only reproduces the in-game panel number.</p>
+    </div>
+
+    <!-- Platform: which LiveNote PERFECT column weighs the notes. The master's 38 rows
+         differ in ONE cell — a FLICK is 1050 permil on mobile and 1000 on PC (Steam) —
+         and charts.json stores a per-note flick flag, not a platform, so this is a
+         scoring-time what-if. Default mobile. Same seg-wiring drives #platform;
+         app.js sends it with /solve, /acquire, the develop and the timeline. -->
+    <div class="ctrl">
+      <span class="ctrl-lab">Platform</span>
+      <div class="seg" data-seg="platform">
+        <button type="button" data-val="mobile" class="on">Mobile</button>
+        <button type="button" data-val="pc">PC</button>
+      </div>
+      <select id="platform" hidden>
+        <option value="mobile" selected>mobile</option>
+        <option value="pc">pc</option>
+      </select>
+      <p class="ctrl-hint">Flick notes weigh 1050 on mobile and 1000 on PC (Steam); every other note is the same. Under 0.15 % on a song, sign varies.</p>
+    </div>
+
+    <div class="ctrl ctrl-wide">
+      <span class="ctrl-lab">Song</span>
+      <!-- songpicker.js mounts a trigger over this select; it stays the value holder. -->
+      <select id="song">
+        <option value="">All songs (average over every chart)</option>
+      </select>
+      <label class="across-toggle" hidden title="Rank by the mean expected score over EVERY chart, with a wins count. Ignores the single song above.">
+        <!-- ON by default: "Any song" averages every real chart (as the
+             community tool holodori.best does); a chosen song still overrides.
+             Untick for the abstract song-agnostic Unit Score. -->
+        <input id="across" type="checkbox" checked> Across all songs (mean&nbsp;+&nbsp;wins)
+      </label>
+      <label class="across-toggle" title="Rank for an AUTO run instead of manual play: the AUTO judgement column AND combo=0, because a 'combo >= N' magnitude override never fires on AUTO (measured from a live trace).">
+        <input id="autorun" type="checkbox"> Rank for AUTO play
+      </label>
+      <p class="ctrl-hint">One song ranks on its exact chart; no song ranks by the average over every EXPERT chart. AUTO scores the auto-play column with combo&nbsp;0 — cards whose magnitude needs a combo threshold score at their base there.</p>
+    </div>
+
+  </div>
+
+  <details class="ctrl-constraints" id="cstrwrap">
+    <summary>Locked cards &amp; leader <span id="cstr-count" class="cstr-count"></span></summary>
+    <div id="constraints" class="constraints"></div>
+  </details>
+  </div>
+
+  <div class="stepcard">
+  <div class="step-head"><span class="step-n">3</span> Find your teams</div>
+  <div class="go-row">
+    <button id="solve" class="primary">Solve</button>
+    <button id="estimate" class="ghost" hidden>Estimate cost</button>
+    <button id="cancel" class="ghost" disabled>Cancel</button>
+    <label class="exact-toggle" title="Force the exhaustive search instead of the beam above the size threshold">
+      <input id="exact" type="checkbox"> Exhaustive
+    </label>
+  </div>
+
+  <details class="ctrl-help">
+    <summary>How this works &mdash; and what this run assumed</summary>
+    <div class="ctrl-help-in">
+      <p>Solve ranks every 1&nbsp;leader + 5&nbsp;member team the chosen pool can field. It states its own cost as it starts, and where exact search can't finish it switches to a beam search and marks the result <b>APPROXIMATE</b>.</p>
+      <p>Inputs are files on disk: your collection from <code>state/collection.json</code>, the catalogue from <code>data/cards.json</code>, and your captured boards. Edit the first on <b>Collection</b>, the boards on <b>Board</b>, and pull them fresh with <b>Refresh account</b>.</p>
+      <details id="assumewrap">
+        <summary>What this run assumed &mdash; and where it approximated</summary>
+        <pre id="assume" class="mono"></pre>
+      </details>
+    </div>
+  </details>
+  </div><!-- /.stepcard 3 -->
+
+</section>
+</div><!-- /.setup -->
+
+<!-- The reading column. On wide screens #view-solve is a two-column grid —
+     choices on the left, result on the right — because the rail keeps a
+     reading measure (~591px) and everything else on the page runs the full
+     1680px shell: side by side they agree, stacked they read as a mistake.
+     This wrapper exists so the grid has exactly two children to place; only
+     one of #idle/#result is ever visible, and the column keeps its width
+     either way because the grid template sets it, not the content. Below
+     1100px it all stacks back into the single column. -->
+<div class="outcol">
+  <!-- twostage.js: the cached best team for the selected song / in general.
+       Outside <main id="result">, which stays hidden until a run has rows. -->
+  <div id="twostage"></div>
+
+<h2 class="resline"><span class="step-n">4</span> Your teams</h2>
+
+<section id="progress" class="progress" hidden>
+  <div class="bar"><div id="fill"></div></div>
+  <div class="pline">
+    <span id="pstate">idle</span>
+    <span id="pcount" class="mono"></span>
+    <span id="ptime" class="mono"></span>
+  </div>
+  <p id="pnote" class="note"></p>
+</section>
+
+<p id="err" class="err" hidden></p>
+
+<!-- The empty state: says what Solve will do and what the answer will and
+     will not be worth, rather than a blank page while a long projection runs. -->
+<section id="idle" class="idle">
+  <div class="idle-in">
+    <p class="idle-k">Ranking</p>
+    <h2 class="idle-h">Your ranked teams appear here.</h2>
+    <p class="idle-p idle-cav">Ranks <em>the model</em>, not one night — a team
+      swings ~21.4&#8202;% run to run, wider than the gaps here. Read it as a
+      direction to build.</p>
+  </div>
+</section>
+
+<main id="result" hidden>
+
+  <section class="scorebar">
+    <div class="bigwrap">
+      <div class="big">
+        <span class="lbl">best</span>
+        <b id="score" class="mono"></b>
+        <span id="lower" class="tag" hidden>&ge; lower bound</span>
+      </div>
+      <!-- The number needs a unit and a reference. One line here; the fuller
+           caveat lives in the tooltip. -->
+      <p class="say" title="Model points, not the game's deck-screen figure — use it to compare teams with each other. Open Score terms on any rank to see how it is built.">Model
+        points to compare teams — not the deck-screen number.</p>
+    </div>
+    <div class="meta">
+      <span id="teamcount" class="tag"></span>
+      <span id="gatecount" class="tag"></span>
+      <span id="elapsed" class="tag mono"></span>
+      <span id="scanned" class="tag mono"></span>
+    </div>
+  </section>
+
+  <p id="board" class="banner" hidden></p>
+  <p id="approx" class="banner" hidden></p>
+  <p id="noise" class="band"></p>
+
+  <h2>Ranking <span id="rankhint" class="hint"></span></h2>
+  <!-- A key for the summary row, so a bare bar and a bare `gates 3/4` say
+       what they count. -->
+  <p class="lede" id="ranklede">One row per team, best first. Click a row to open its six
+    cards, its skill conditions and what each skill contributed.</p>
+  <!-- Generic labels, never sample numbers: a key printing 415.611,0 beside a
+       run whose best is 439.065,1 reads as a contradiction. -->
+  <ul class="keyline" id="rankkey">
+    <li><b>#n</b> rank</li>
+    <!-- ⛔ The column carries a per-song score in song mode and model points
+         otherwise, so this defers to the banner the server's own `sorted_by`
+         writes: a key naming the wrong quantity one line above the table is
+         exactly the failure to avoid, and this cannot go stale when a new
+         ranking mode arrives. -->
+    <li><b>score</b> the quantity this table is sorted by &mdash; the line
+      above the table names which one, and every figure in this key is that
+      same quantity</li>
+    <li><b>vs&nbsp;#1</b> how far below the best team it lands</li>
+    <li><b>%</b> that gap as a share of the score &mdash; grey when it is
+      smaller than the 21.4&#8202;% a replay swings by anyway</li>
+    <li><b class="keybar"><i></i></b> the same gap, scaled to this list's own
+      spread</li>
+    <li><b>n of m conditions met</b> skill gates that fired</li>
+  </ul>
+  <div id="ranking" class="ranking"></div>
+
+  <details id="diagwrap">
+    <summary>What the beam search did &mdash; diagnostics, not warnings</summary>
+    <div class="diagbody">
+      <p class="note" id="diagcaveat"></p>
+      <pre id="diag" class="mono"></pre>
+    </div>
+  </details>
+
+</main>
+
+</div><!-- /.outcol -->
+
+</div><!-- /#view-solve -->
+
+<details id="cwrap" class="cwrap view" hidden>
+  <summary>My collection &mdash; level, bloom, limit break</summary>
+  <div class="cbody">
+    <p class="lede">
+      Tell the tool what your cards actually are. Click a card, type its real
+      level and bloom, then <b>Save to disk</b> &mdash; from then on the
+      ranking scores your collection instead of a maxed one.
+    </p>
+    <p class="note">
+      Nothing you type here touches <code>data/cards.json</code> or
+      <code>data/owned.json</code>. The only file this page writes is
+      <code>state/collection.json</code>, and only when you press Save.
+    </p>
+    <!-- Filled by collection.js once the cards are in, because the count is a
+         fact about the loaded document and not something to hardcode, and a
+         phrase like "ACTIVE/SPECIAL/PASSIVE overstated" on card footers needs
+         an explanation of what it means and what to do. -->
+    <p id="coverstated" class="banner" hidden></p>
+    <details class="why">
+      <summary>How we know</summary>
+      <div class="why-in">
+        <p><code>data/cards.json</code> carries fully-maxed stats for every
+        card, so every ranking this tool produced before you edited here
+        assumed a maxed collection. Levels, caps and blooms are resolved
+        server-side by <code>hbuilder.domain.collection</code> and reported
+        back &mdash; this page invents no bound of its own, so a level it
+        accepts is a level the solver will honour.</p>
+      </div>
+    </details>
+    <p id="cwarnbanner" class="banner warn" hidden>
+      dumps/card_level_curve.json is missing, so no level can be resolved. Run
+      <code>python tools/recon/proxy/card_level_curve.py</code>.
+    </p>
+    <div class="crow chead">
+      <input id="cfilter" type="search" placeholder="Search by holomem or id">
+      <button id="cftoggle" class="ghost sm" type="button">Filters</button>
+      <button id="cfreset" class="ghost sm" hidden>Clear</button>
+      <span id="ccount" class="tag mono"></span>
+      <label class="fld chead-default">default
+        <select id="cdefault">
+          <option value="max">max</option>
+          <option value="unknown">unknown</option>
+        </select>
+      </label>
+      <button id="csave" class="primary">Save to disk</button>
+    </div>
+    <!-- Compact multi-select filter panel. collection.js builds the chip
+         groups FROM THE ROSTER (Ownership · Holomem faces · Attribute · Rarity ·
+         Generation · Values) — a value no card has can never appear, and
+         generation keeps its raw gate key while showing the English label. -->
+    <div id="cfpanel" class="cfpanel" hidden></div>
+    <div class="cacct">
+      <div class="crow">
+        <label class="fld" for="cposters">Posters collected</label>
+        <input id="cposters" type="number" min="0" step="1" placeholder="—" class="cnum">
+        <span id="cmemory" class="chint"></span>
+      </div>
+      <div class="crow">
+        <label class="fld" for="cpowerup">Member Power-Up %</label>
+        <input id="cpowerup" type="number" min="0" step="0.01" placeholder="—" class="cnum">
+        <span id="cpowerhint" class="chint"></span>
+      </div>
+      <div class="crow">
+        <label class="fld" for="clevel">Account level</label>
+        <input id="clevel" type="number" min="1" step="1" placeholder="—" class="cnum">
+        <span id="clevelhint" class="chint"></span>
+      </div>
+      <p class="note">
+        Three numbers you read off your own account &mdash; the game shows the
+        Power-Up figure on the Members list. An untouched slider means
+        &ldquo;not told us&rdquo;, which is not the same as zero.
+      </p>
+      <details class="why">
+        <summary>How we know &mdash; and what each one changes</summary>
+        <div class="why-in">
+          <p><b>Posters</b> and <b>Power-Up</b> are shown in the score
+          breakdown and never summed into the ranking: MATH.md &sect;7.2
+          measured both as ranking-safe to drop, so they are reported rather
+          than silently omitted.</p>
+          <p><b>Account level</b> adds nothing to any score. It decides which
+          Holomem Board nodes you may take at all &mdash; 127 of the 152 carry
+          a level gate. Left unset, the board editor gates nothing.</p>
+        </div>
+      </details>
+    </div>
+    <p id="cstatus" class="cstatus"></p>
+    <div id="clist" class="clist"></div>
+  </div>
+</details>
+
+<details id="bwrap" class="cwrap view" hidden>
+  <summary>My board &mdash; nodes per character</summary>
+  <div class="cbody">
+    <p class="lede">
+      Plan a character's board. Pick a character, click nodes to spend points
+      on them, then <b>Save to disk</b>. Clicking a node also buys every node
+      on the path to it &mdash; that is what the game charges you.
+    </p>
+    <p class="note">
+      Your real board is <b>captured</b> from the game where a capture covers
+      the character; editing here is planning on top of it. Each board says
+      whether it is captured, edited or empty, and the three are never shown
+      alike.
+    </p>
+    <details class="why">
+      <summary>How we know</summary>
+      <div class="why-in">
+        <p>A capture cannot give you two things. <b>Planning</b>:
+        TREE-VERDICT.md &sect;2 measured <b>478 points already earned and
+        sitting unspent</b>, 1.3&times; everything ever spent. And the
+        <b>28 of 54 characters</b> that appear in no capture at all.</p>
+        <p>Adjacency is the orthogonal 4-neighbour grid (BOARD-SOCKETS.md
+        &sect;1, MEASURED &mdash; diagonals are not edges), and a node cannot be
+        bought without its path: the 82 stat nodes cost 228 points in isolation
+        and <b>293 connected</b>. The figure below the picker is the connected
+        cost, which is the one the game charges.</p>
+      </div>
+    </details>
+    <div class="crow chead">
+      <label class="fld">character
+        <select id="bchr"></select>
+      </label>
+      <button id="bsave" class="primary">Save to disk</button>
+    </div>
+    <div id="binfo"></div>
+    <p id="bstatus" class="cstatus"></p>
+    <div id="btree" class="btree"></div>
+    <!-- The legend: the board is a grid of coloured rings, so the page says
+         what a colour, a ring or a halo means. Built in JS, not written out
+         here, because every hue below is the GAME'S and arrives from
+         /api/board; typing them in would be a second copy free to drift. -->
+    <div id="blegend" class="blegend"></div>
+    <div id="bsocket" class="bsocket" hidden></div>
+  </div>
+</details>
+
+<!-- The park screen. Fourth task, same <details class="cwrap view"> shape as
+     the collection and board panels so `showView` and the existing
+     lazy-load-on-`toggle` need no special case.
+
+     What it answers: WHERE ARE TODAY'S HIDDEN COLLECTABLES. There is no RNG to
+     reverse -- the server rolls 7 random symbols a day, 3/2/2 across three
+     areas, and hands the chosen list to the client in plaintext on
+     `/rpc.api.User/Get`. Reading it is a field access.
+
+     ⛔ Two facts the screen must not flatten. `last_refreshed_time` is PER AREA
+     and areas can diverge (one area can be a full day behind), so there is no
+     single "today's roll" to print. And the roll is LAZY -- it happens on first
+     contact after 05:00 JST, not at the boundary -- so an area you have not
+     entered can still be showing yesterday's pick.
+
+     `park.js` fills `#pbody`. The 42 fixed chests are background here, never
+     the headline. -->
+<details id="pwrap" class="cwrap view" hidden>
+  <summary>The park &mdash; today's hidden collectables</summary>
+  <div class="cbody" id="pbody"></div>
+</details>
+
+<!-- Resources: everything the account holds — board materials (cubes/hexas, spent
+     + wallet) and the upgrade currencies (beads/crystals, hololium, lesson points,
+     hologold), bundles converted. Read from the captured account state; refresh
+     with "Refresh account". resources.js fills #rbody lazily on first open. -->
+<details id="rwrap" class="cwrap view" hidden>
+  <summary>Resources &mdash; board materials &amp; upgrade currencies</summary>
+  <div class="cbody" id="rbody"></div>
+</details>
+
+<!-- Gacha tracker. Manual Sync only: the button shells out to
+     tools/recon/proxy/gacha_sync.py, which appends to data/gacha/. gacha.js fills #gbody
+     lazily on first open from /api/gacha. -->
+<details id="gwrap" class="cwrap view" hidden>
+  <summary>Gacha &mdash; pulls, rates &amp; banners</summary>
+  <div class="cbody" id="gbody"></div>
+</details>
+
+<!-- Compare teams. Two hand-picked rosters scored side by side by
+     POST /api/compare (compare_view.py) under ONE set of assumptions. compare.js
+     builds the pickers, controls and result inside #xbody on first open. -->
+<details id="xwrap" class="cwrap view" hidden>
+  <summary>Compare &mdash; two teams, same assumptions</summary>
+  <div class="cbody" id="xbody"></div>
+</details>
+
+</div><!-- /.main -->
+</div><!-- /.app -->
+
+<!-- The song picker: a click that opens a panel, with a search by title and
+     filters. A
+     native <dialog>, same reasoning as #cedit below: focus trap, Escape,
+     inert background and the backdrop are the platform's, not a fourth
+     hand-rolled popover. The panel is a FACE over <select id="song"> —
+     songpicker.js writes the chosen music id into that select and fires its
+     `change`; nothing else on the page knows the panel exists.
+     The filter <select>s ship holding only "any" because every option is
+     BUILT FROM THE DATA (same rule as the collection filters): a member who
+     sings no listed song cannot be offered, and the panel needs no edit when
+     the catalogue grows. A filter whose data is absent is hidden and the
+     line below the row says why — never an empty menu. -->
+<dialog id="songdlg" class="dlg spdlg" aria-labelledby="sp-title">
+  <div class="dlg-in sp-in">
+    <button type="button" class="dlg-x" id="sp-close" aria-label="Close">&times;</button>
+    <header class="dlg-head">
+      <p class="dlg-k">Song</p>
+      <h3 class="dlg-t" id="sp-title">Choose the chart</h3>
+    </header>
+    <div class="sp-tools">
+      <input id="sp-search" type="search" placeholder="Search by title or singer"
+             autocomplete="off" aria-label="Search songs">
+      <div class="sp-filters" id="sp-filters" role="group" aria-label="Filter the songs">
+        <div class="fld sp-memberfld">
+          <span class="sp-memlab">member</span>
+          <div id="sp-member" class="sp-memchips" role="group" aria-label="Filter by singing member"></div>
+        </div>
+        <label class="fld">sung by
+          <select id="sp-stype"><option value="">any</option></select>
+        </label>
+        <label class="fld">category
+          <select id="sp-cat"><option value="">any</option></select>
+        </label>
+        <label class="fld">level
+          <select id="sp-level"><option value="">any</option></select>
+        </label>
+        <button type="button" id="sp-clear" class="ghost sm" hidden>Clear filters</button>
+      </div>
+      <!-- Absent metadata is a STATE with a reason: when main_Music.json is
+           not on disk the search still works and this line says why the
+           filter menus are gone. songpicker.js fills it. -->
+      <p id="sp-nofilters" class="sp-note" hidden></p>
+      <div class="sp-below">
+        <p id="sp-count" class="sp-note" aria-live="polite"></p>
+        <p class="sp-note sp-keys">type to search &middot; &#8593;&#8595; move
+          &middot; Enter chooses &middot; Esc closes</p>
+      </div>
+    </div>
+    <div id="sp-list" class="sp-list"></div>
+  </div>
+</dialog>
+
+<!-- The gacha banner popup: one banner's cards, grouped by rarity.
+     Built by gacha.js; a native <dialog> for the same reason as the two around it. -->
+<!-- The Compare view's card picker: one <dialog> for all twelve slots; compare.js fills it. -->
+<dialog id="xpick" class="dlg xpick" aria-label="Pick a card"></dialog>
+
+<dialog id="gachadlg" class="dlg gdlg" aria-labelledby="gd-title">
+  <div class="dlg-in gd-in">
+    <div class="gd-head"><h3 id="gd-title"></h3><button type="button" class="gd-close" aria-label="Close">&times;</button></div>
+    <div id="gd-body"></div>
+  </div>
+</dialog>
+
+<!-- The level/bloom editor. A native <dialog>, so focus trap, Escape, inert
+     background and the backdrop are the platform's and not three more
+     hand-rolled behaviours to get wrong.
+
+     The LOOK is the game's own level-up confirm dialog: the before value in
+     `Blk`, the `»` in `Blu2nd`, the after value in `Blu1st`, and the field on
+     `BluLight`. Those four are the only new hexes on this page and every one
+     of them is the game's. -->
+<dialog id="cedit" class="dlg" aria-labelledby="cedit-title">
+  <form method="dialog" class="dlg-in">
+    <div class="dlg-wave" aria-hidden="true"></div>
+    <button value="cancel" class="dlg-x" aria-label="Close">&times;</button>
+    <header class="dlg-head">
+      <p class="dlg-k" id="cedit-kicker"></p>
+      <h3 class="dlg-t" id="cedit-title"></h3>
+    </header>
+    <div class="dlg-body">
+      <div class="dlg-card" id="cedit-card"></div>
+      <div class="dlg-fields">
+
+        <div class="dlg-field">
+          <label class="dlg-lab" for="cedit-lvl">Level</label>
+          <div class="dlg-step">
+            <b class="dlg-before" id="cedit-lvl-before">--</b>
+            <span class="dlg-chev" aria-hidden="true">&raquo;</span>
+            <input class="dlg-input" id="cedit-lvl" type="number" min="1"
+                   inputmode="numeric">
+          </div>
+          <p class="dlg-hint" id="cedit-lvl-hint"></p>
+        </div>
+
+        <div class="dlg-field">
+          <label class="dlg-lab" for="cedit-bloom">Bloom</label>
+          <div class="dlg-step">
+            <b class="dlg-before" id="cedit-bloom-before">--</b>
+            <span class="dlg-chev" aria-hidden="true">&raquo;</span>
+            <select class="dlg-input dlg-sel" id="cedit-bloom"></select>
+          </div>
+          <p class="dlg-hint" id="cedit-bloom-hint"></p>
+        </div>
+
+        <p class="dlg-warn" id="cedit-warn" hidden></p>
+      </div>
+    </div>
+    <!-- The card's skills at the chosen bloom. Rendered from the maxed
+         magnitudes data/cards.json carries; each ACTIVE/SPECIAL/PASSIVE is
+         flagged "scored maxed" while the selected bloom is below the step that
+         upgrades it to full magnitude, so the user SEES what a low bloom costs. -->
+    <div class="dlg-skills" id="cedit-skills"></div>
+    <footer class="dlg-foot">
+      <button value="cancel" class="ghost">Cancel</button>
+      <button value="clear" class="ghost" id="cedit-clear">Use the default</button>
+      <button value="apply" class="sky" id="cedit-apply">Apply</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- Shell + control enhancements. Progressive, id-preserving: the
+     segmented buttons drive the hidden <select>/<checkbox> app.js already reads,
+     so the contract is unchanged. Runs before the app.js module so initial
+     state is set when the app reads it. -->
+<script>
+(function () {
+  // Sidebar collapse
+  var col = document.getElementById("side-collapse");
+  if (col) col.addEventListener("click", function () {
+    document.getElementById("app").classList.toggle("side-collapsed");
+  });
+
+  // Segmented controls -> the underlying input/select app.js reads.
+  document.querySelectorAll("[data-seg]").forEach(function (seg) {
+    var target = document.getElementById(seg.getAttribute("data-seg"));
+    seg.querySelectorAll("button[data-val]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        seg.querySelectorAll("button").forEach(function (b) { b.classList.remove("on"); });
+        btn.classList.add("on");
+        if (!target) return;
+        if (target.type === "checkbox") target.checked = btn.dataset.val === "1";
+        else target.value = btn.dataset.val;
+        target.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    });
+  });
+
+  // The one-line hint under "What to build", following the chosen basis.
+  var basis = document.getElementById("basis");
+  var hint = document.querySelector('[data-hint="basis"]');
+  var HINTS = {
+    "account": "What you can field tonight, at real levels & blooms.",
+    "maxed": "The best team in the game — scores cards you don't own.",
+    "maxed-account": "The best team on a FULLY MAXED account, on holodori.best's basis: every card maxed, all 54 boards fully developed at 453 with level-2 Connect cards, memories 37, power-up 11.58 %. Board is forced to develop / full tree.",
+  };
+  function setHint() { if (basis && hint) hint.textContent = HINTS[basis.value] || ""; }
+  if (basis) { basis.addEventListener("change", setHint); }
+  setHint();
+})();
+</script>
+<script type="module" src="/app.js"></script>
+<script type="module" src="/twostage.js"></script>
+<script type="module" src="/leader.js"></script>
+<script type="module" src="/steps.js"></script>
+</body>
+</html>

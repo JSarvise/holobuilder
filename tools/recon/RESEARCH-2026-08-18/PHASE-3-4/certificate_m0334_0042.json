@@ -1,0 +1,737 @@
+{
+ "status": "EXACT",
+ "stop_reason": null,
+ "objective": "OBJECTIVE-v2 S(T, C): plan-cache fast leaf (cached_team_plan + board_model_from_plan(plan_cache) + score_song_detailed), Connect assignment exact (Hungarian), bench boards from board.json",
+ "model_version": "objective-v2.0-draft",
+ "song": "m0334",
+ "chart_singers": [
+  "chr-04001"
+ ],
+ "singer_type": "solo",
+ "leader": "card-04001-5-uniq-0042-00",
+ "leader_name": "Mori Calliope / Poetic Death Waltz",
+ "sings": true,
+ "universe": "5star-maxed-catalogue",
+ "universe_size": 66,
+ "pool": [
+  "card-00001-5-uniq-0000-00",
+  "card-00002-5-uniq-0001-00",
+  "card-00004-5-uniq-0005-00",
+  "card-00005-5-uniq-0006-00",
+  "card-00006-5-uniq-0007-00",
+  "card-00007-5-uniq-0008-00",
+  "card-00010-5-uniq-0010-00",
+  "card-00010-5-uniq-0069-00",
+  "card-00011-5-uniq-0011-00",
+  "card-00012-5-uniq-0012-00",
+  "card-00012-5-uniq-0062-00",
+  "card-00013-5-uniq-0002-00",
+  "card-00014-5-uniq-0013-00",
+  "card-00015-5-uniq-0003-00",
+  "card-00015-5-uniq-0067-00",
+  "card-00016-5-uniq-0014-00",
+  "card-00017-5-uniq-0015-00",
+  "card-00018-5-uniq-0004-00",
+  "card-00018-5-uniq-0068-00",
+  "card-00019-5-uniq-0016-00",
+  "card-00021-5-uniq-0017-00",
+  "card-00021-5-uniq-0064-00",
+  "card-00022-5-uniq-0018-00",
+  "card-00022-5-uniq-0063-00",
+  "card-00023-5-uniq-0019-00",
+  "card-00026-5-uniq-0021-00",
+  "card-00026-5-uniq-0065-00",
+  "card-00027-5-uniq-0022-00",
+  "card-00028-5-uniq-0023-00",
+  "card-00028-5-uniq-0070-00",
+  "card-00030-5-uniq-0024-00",
+  "card-00031-5-uniq-0025-00",
+  "card-00032-5-uniq-0026-00",
+  "card-00034-5-uniq-0027-00",
+  "card-00035-5-uniq-0028-00",
+  "card-00036-5-uniq-0029-00",
+  "card-00037-5-uniq-0030-00",
+  "card-00039-5-uniq-0032-00",
+  "card-03001-5-uniq-0033-00",
+  "card-03002-5-uniq-0034-00",
+  "card-03003-5-uniq-0035-00",
+  "card-03004-5-uniq-0036-00",
+  "card-03004-5-uniq-0073-00",
+  "card-03005-5-uniq-0037-00",
+  "card-03006-5-uniq-0038-00",
+  "card-03007-5-uniq-0039-00",
+  "card-03008-5-uniq-0040-00",
+  "card-03009-5-uniq-0041-00",
+  "card-04001-5-uniq-0042-00",
+  "card-04001-5-uniq-0071-00",
+  "card-04002-5-uniq-0043-00",
+  "card-04003-5-uniq-0044-00",
+  "card-04003-5-uniq-0072-00",
+  "card-04007-5-uniq-0047-00",
+  "card-04010-5-uniq-0049-00",
+  "card-04012-5-uniq-0051-00",
+  "card-04013-5-uniq-0052-00",
+  "card-04014-5-uniq-0053-00",
+  "card-04015-5-uniq-0054-00",
+  "card-04016-5-uniq-0055-00",
+  "card-04017-5-uniq-0056-00",
+  "card-06002-5-uniq-0058-00",
+  "card-06002-5-uniq-0066-00",
+  "card-06003-5-uniq-0059-00",
+  "card-06004-5-uniq-0060-00",
+  "card-06005-5-uniq-0061-00"
+ ],
+ "dominated": [],
+ "basis": "maxed",
+ "budget_kind": "flat",
+ "budget": 447,
+ "uptime_model": "finite",
+ "connect_cards": 115,
+ "bench_characters": 54,
+ "plan_cache_seed": {
+  "leader": "card-04001-5-uniq-0042-00",
+  "members": [
+   "card-04001-5-uniq-0042-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04003-5-uniq-0044-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00006-5-uniq-0007-00"
+  ]
+ },
+ "search": {
+  "kind": "exhaustive enumeration, leader fixed, 5-sets of distinct holomems, leader card may also be a member",
+  "order": "lexicographic combinations(range(len(pool)),5), pool sorted by id, distinct holomems",
+  "chunk": 20000,
+  "workers": 16
+ },
+ "n_rosters": 8441052,
+ "leaves_evaluated": 8441052,
+ "nodes_pruned": 0,
+ "fraction_covered": 1.0,
+ "upper_bound": 3439270.0,
+ "gap": 0.0,
+ "seconds": 3698.132270299975,
+ "seconds_this_run_incl_resume_skip": 3687.909223499999,
+ "ms_per_leaf_wall": 0.43822808975473293,
+ "ms_per_leaf_wall_warmup_5000": 0.42917580000066663,
+ "estimate_min_from_warmup": 60.378254082453786,
+ "best": {
+  "rank": 1,
+  "score": 3439270.0,
+  "idx": [
+   4,
+   5,
+   32,
+   48,
+   51
+  ],
+  "ids": [
+   "card-00006-5-uniq-0007-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04001-5-uniq-0042-00",
+   "card-04003-5-uniq-0044-00"
+  ],
+  "members": [
+   "Shirakami Fubuki / Golden Petal Dew",
+   "Natsuiro Matsuri / Sweet Deception",
+   "Shishiro Botan / WH Lion Vanguard",
+   "Mori Calliope / Poetic Death Waltz",
+   "Ninomae Ina'nis / Deep-Sea Kimono"
+  ],
+  "leader_also_member": true,
+  "vs_incumbent_pct": 0.0
+ },
+ "top": [
+  {
+   "rank": 1,
+   "score": 3439270.0,
+   "idx": [
+    4,
+    5,
+    32,
+    48,
+    51
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0042-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Shirakami Fubuki / Golden Petal Dew",
+    "Natsuiro Matsuri / Sweet Deception",
+    "Shishiro Botan / WH Lion Vanguard",
+    "Mori Calliope / Poetic Death Waltz",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": true,
+   "vs_incumbent_pct": 0.0
+  },
+  {
+   "rank": 2,
+   "score": 3431203.0,
+   "idx": [
+    6,
+    50,
+    51,
+    64,
+    65
+   ],
+   "ids": [
+    "card-00010-5-uniq-0010-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00",
+    "card-06004-5-uniq-0060-00",
+    "card-06005-5-uniq-0061-00"
+   ],
+   "members": [
+    "Nakiri Ayame / Demon Spider Lily",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono",
+    "Juufuutei Raden / Vintage Romantic",
+    "Todoroki Hajime / Sweet Badass Style"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -0.2345555888313533
+  },
+  {
+   "rank": 3,
+   "score": 3419144.0,
+   "idx": [
+    17,
+    50,
+    51,
+    64,
+    65
+   ],
+   "ids": [
+    "card-00018-5-uniq-0004-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00",
+    "card-06004-5-uniq-0060-00",
+    "card-06005-5-uniq-0061-00"
+   ],
+   "members": [
+    "Hoshimachi Suisei / Starry Night",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono",
+    "Juufuutei Raden / Vintage Romantic",
+    "Todoroki Hajime / Sweet Badass Style"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -0.5851823206668882
+  },
+  {
+   "rank": 4,
+   "score": 3410802.0,
+   "idx": [
+    4,
+    5,
+    32,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Shirakami Fubuki / Golden Petal Dew",
+    "Natsuiro Matsuri / Sweet Deception",
+    "Shishiro Botan / WH Lion Vanguard",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -0.8277337923454642
+  },
+  {
+   "rank": 5,
+   "score": 3408824.0,
+   "idx": [
+    6,
+    20,
+    23,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00010-5-uniq-0010-00",
+    "card-00021-5-uniq-0017-00",
+    "card-00022-5-uniq-0063-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Nakiri Ayame / Demon Spider Lily",
+    "Shiranui Flare / Azure Ribbon Chic",
+    "Shirogane Noel / Soleil Kiss",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -0.8852459969702853
+  },
+  {
+   "rank": 6,
+   "score": 3404736.0,
+   "idx": [
+    6,
+    22,
+    32,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00010-5-uniq-0010-00",
+    "card-00022-5-uniq-0018-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Nakiri Ayame / Demon Spider Lily",
+    "Shirogane Noel / Aile Blanche",
+    "Shishiro Botan / WH Lion Vanguard",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.0041084299865943
+  },
+  {
+   "rank": 7,
+   "score": 3400465.0,
+   "idx": [
+    27,
+    28,
+    50,
+    51,
+    65
+   ],
+   "ids": [
+    "card-00027-5-uniq-0022-00",
+    "card-00028-5-uniq-0023-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00",
+    "card-06005-5-uniq-0061-00"
+   ],
+   "members": [
+    "Tokoyami Towa / Tactical Little Devil",
+    "Himemori Luna / Sovereign Luna",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono",
+    "Todoroki Hajime / Sweet Badass Style"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.1282917595885178
+  },
+  {
+   "rank": 8,
+   "score": 3399460.0,
+   "idx": [
+    4,
+    5,
+    32,
+    48,
+    52
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0042-00",
+    "card-04003-5-uniq-0072-00"
+   ],
+   "members": [
+    "Shirakami Fubuki / Golden Petal Dew",
+    "Natsuiro Matsuri / Sweet Deception",
+    "Shishiro Botan / WH Lion Vanguard",
+    "Mori Calliope / Poetic Death Waltz",
+    "Ninomae Ina'nis / Waterfront Monochrome"
+   ],
+   "leader_also_member": true,
+   "vs_incumbent_pct": -1.1575130769029496
+  },
+  {
+   "rank": 9,
+   "score": 3398752.0,
+   "idx": [
+    4,
+    5,
+    12,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00014-5-uniq-0013-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Shirakami Fubuki / Golden Petal Dew",
+    "Natsuiro Matsuri / Sweet Deception",
+    "Ookami Mio / Crimson Camellia",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.1780988407423698
+  },
+  {
+   "rank": 10,
+   "score": 3397600.0,
+   "idx": [
+    17,
+    20,
+    23,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00018-5-uniq-0004-00",
+    "card-00021-5-uniq-0017-00",
+    "card-00022-5-uniq-0063-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Hoshimachi Suisei / Starry Night",
+    "Shiranui Flare / Azure Ribbon Chic",
+    "Shirogane Noel / Soleil Kiss",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.2115943208878655
+  },
+  {
+   "rank": 11,
+   "score": 3396667.0,
+   "idx": [
+    6,
+    10,
+    50,
+    51,
+    65
+   ],
+   "ids": [
+    "card-00010-5-uniq-0010-00",
+    "card-00012-5-uniq-0062-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00",
+    "card-06005-5-uniq-0061-00"
+   ],
+   "members": [
+    "Nakiri Ayame / Demon Spider Lily",
+    "Oozora Subaru / The Longing Sun",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono",
+    "Todoroki Hajime / Sweet Badass Style"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.2387221706931961
+  },
+  {
+   "rank": 12,
+   "score": 3396230.0,
+   "idx": [
+    6,
+    35,
+    46,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00010-5-uniq-0010-00",
+    "card-00036-5-uniq-0029-00",
+    "card-03008-5-uniq-0040-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Nakiri Ayame / Demon Spider Lily",
+    "Takane Lui / The holoX officer",
+    "Kaela Kovalskia / Destiny Anvil",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.2514283554358907
+  },
+  {
+   "rank": 13,
+   "score": 3395776.0,
+   "idx": [
+    17,
+    22,
+    32,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00018-5-uniq-0004-00",
+    "card-00022-5-uniq-0018-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Hoshimachi Suisei / Starry Night",
+    "Shirogane Noel / Aile Blanche",
+    "Shishiro Botan / WH Lion Vanguard",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.2646288311182308
+  },
+  {
+   "rank": 14,
+   "score": 3395293.0,
+   "idx": [
+    6,
+    50,
+    51,
+    63,
+    65
+   ],
+   "ids": [
+    "card-00010-5-uniq-0010-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00",
+    "card-06003-5-uniq-0059-00",
+    "card-06005-5-uniq-0061-00"
+   ],
+   "members": [
+    "Nakiri Ayame / Demon Spider Lily",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono",
+    "Ichijou Ririka / Executive Glam",
+    "Todoroki Hajime / Sweet Badass Style"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.2786725089917295
+  },
+  {
+   "rank": 15,
+   "score": 3394526.0,
+   "idx": [
+    30,
+    32,
+    44,
+    48,
+    51
+   ],
+   "ids": [
+    "card-00030-5-uniq-0024-00",
+    "card-00032-5-uniq-0026-00",
+    "card-03006-5-uniq-0038-00",
+    "card-04001-5-uniq-0042-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Yukihana Lamy / Crystal Winter Flowers",
+    "Shishiro Botan / WH Lion Vanguard",
+    "Pavolia Reine / Regal Crest Finery",
+    "Mori Calliope / Poetic Death Waltz",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": true,
+   "vs_incumbent_pct": -1.3009737531511023
+  },
+  {
+   "rank": 16,
+   "score": 3394237.0,
+   "idx": [
+    27,
+    28,
+    31,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00027-5-uniq-0022-00",
+    "card-00028-5-uniq-0023-00",
+    "card-00031-5-uniq-0025-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Tokoyami Towa / Tactical Little Devil",
+    "Himemori Luna / Sovereign Luna",
+    "Momosuzu Nene / Rhythmic Bloom",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.3093766991251088
+  },
+  {
+   "rank": 17,
+   "score": 3391917.0,
+   "idx": [
+    6,
+    32,
+    48,
+    51,
+    62
+   ],
+   "ids": [
+    "card-00010-5-uniq-0010-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0042-00",
+    "card-04003-5-uniq-0044-00",
+    "card-06002-5-uniq-0066-00"
+   ],
+   "members": [
+    "Nakiri Ayame / Demon Spider Lily",
+    "Shishiro Botan / WH Lion Vanguard",
+    "Mori Calliope / Poetic Death Waltz",
+    "Ninomae Ina'nis / Deep-Sea Kimono",
+    "Otonose Kanade / Sunflower Symphony"
+   ],
+   "leader_also_member": true,
+   "vs_incumbent_pct": -1.3768328744181213
+  },
+  {
+   "rank": 18,
+   "score": 3391632.0,
+   "idx": [
+    6,
+    8,
+    32,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00010-5-uniq-0010-00",
+    "card-00011-5-uniq-0011-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Nakiri Ayame / Demon Spider Lily",
+    "Yuzuki Choco / Coquette Temptation",
+    "Shishiro Botan / WH Lion Vanguard",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.3851195166416086
+  },
+  {
+   "rank": 19,
+   "score": 3390278.0,
+   "idx": [
+    27,
+    28,
+    32,
+    50,
+    51
+   ],
+   "ids": [
+    "card-00027-5-uniq-0022-00",
+    "card-00028-5-uniq-0023-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00"
+   ],
+   "members": [
+    "Tokoyami Towa / Tactical Little Devil",
+    "Himemori Luna / Sovereign Luna",
+    "Shishiro Botan / WH Lion Vanguard",
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.4244883361876237
+  },
+  {
+   "rank": 20,
+   "score": 3390121.0,
+   "idx": [
+    50,
+    51,
+    61,
+    64,
+    65
+   ],
+   "ids": [
+    "card-04002-5-uniq-0043-00",
+    "card-04003-5-uniq-0044-00",
+    "card-06002-5-uniq-0058-00",
+    "card-06004-5-uniq-0060-00",
+    "card-06005-5-uniq-0061-00"
+   ],
+   "members": [
+    "Takanashi Kiara / Everlasting Phoenix",
+    "Ninomae Ina'nis / Deep-Sea Kimono",
+    "Otonose Kanade / Girly Distortion",
+    "Juufuutei Raden / Vintage Romantic",
+    "Todoroki Hajime / Sweet Badass Style"
+   ],
+   "leader_also_member": false,
+   "vs_incumbent_pct": -1.4290532583949522
+  }
+ ],
+ "incumbent": {
+  "members": [
+   "card-04001-5-uniq-0042-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04003-5-uniq-0044-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00006-5-uniq-0007-00"
+  ],
+  "idx": [
+   4,
+   5,
+   32,
+   48,
+   51
+  ],
+  "score": 3439270.0,
+  "rank_in_top": 1
+ },
+ "checksum": {
+  "fsum_all_scores": 19815974221774.0,
+  "chunks": 423
+ },
+ "inputs_hash": "f44a1851537c81c6d2673570d639d3676eeb5594d06e560c4ba1c547fc66201b",
+ "inputs_hash_files": {
+  "cards": "98fd8133693a2816188dc7e5425a1cb103d4dce841733f1d08ca8a982e8af277",
+  "board": "2cc38f0667a5e915e7411f4f6060d29acbe428372d9f738b3ecf7b236d74c6cb",
+  "charts": "2e500bc27bb15495e066d7b60fa5bb5b0503a010c67ae17b28741016c76066ff",
+  "skilltree": "57245966f417632493a768db6684248f71cf533d8a1b0aa29a5779729dfeb29c",
+  "master_stn": "efbc636b23a619b4dd02d9adfaa8989e6bbfcf09f3fcae41d56fdcd7effe18c2",
+  "collection": "2a016c02efa56417e4c9e7511819d84098888bbeeaddc30a92e276c9404838c3",
+  "cfg": "0c40943da4ba3fb295ab54c1f79afdabb09dfb29aa823adecc604f1a619e4b49"
+ },
+ "git": {
+  "head": "5fb7d8b7b0cacf3f44b90c4dc239534fa3b6f0d2",
+  "dirty": true,
+  "status_porcelain": [
+   "M src/hbuilder/domain/board.py",
+   " M src/hbuilder/domain/board_plan.py",
+   " M src/hbuilder/solver/parallel_refine.py",
+   " M tools/recon/ADDITIVITY.md",
+   " M tools/recon/MATH.md",
+   "?? tests/test_connect_exact.py",
+   "?? tests/test_fast_leaf.py",
+   "?? tools/recon/RESEARCH-2026-08-18/PHASE-3-4/",
+   "?? tools/recon/probes/exact_row_2026_08_18.py"
+  ],
+  "diff_head_sha256": "8ae06b5182ad7a1064e6ee221f3f7ce175c15002a851173edbc937d053d63153"
+ },
+ "python": "3.13.7",
+ "written": "2026-08-18T12:49:57"
+}

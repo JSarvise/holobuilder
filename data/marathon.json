@@ -1,0 +1,155 @@
+{
+ "name": "marathon_event-relay-001 Spotlight Event, CHAPTER 01 (Calli/chr-04001 spotlight). Holomem bonus rotates per chapter; card_id + bloom rows are event-wide. Captured 2026-08-20 from Event/ListEventInfo.",
+ "channels": {
+  "live": [
+   {
+    "permil": 500,
+    "character_id": "chr-04001"
+   },
+   {
+    "permil": 500,
+    "card_id": "card-00010-5-uniq-0069-00"
+   },
+   {
+    "permil": 500,
+    "card_id": "card-00028-5-uniq-0070-00"
+   },
+   {
+    "permil": 500,
+    "card_id": "card-03004-5-uniq-0073-00"
+   },
+   {
+    "permil": 500,
+    "card_id": "card-04001-5-uniq-0071-00"
+   },
+   {
+    "permil": 500,
+    "card_id": "card-04003-5-uniq-0072-00"
+   },
+   {
+    "permil": 10,
+    "rarity": 3,
+    "bloom": 1
+   },
+   {
+    "permil": 10,
+    "rarity": 3,
+    "bloom": 2
+   },
+   {
+    "permil": 20,
+    "rarity": 3,
+    "bloom": 3
+   },
+   {
+    "permil": 20,
+    "rarity": 3,
+    "bloom": 4
+   },
+   {
+    "permil": 30,
+    "rarity": 3,
+    "bloom": 5
+   },
+   {
+    "permil": 60,
+    "rarity": 4,
+    "bloom": 1
+   },
+   {
+    "permil": 70,
+    "rarity": 4,
+    "bloom": 2
+   },
+   {
+    "permil": 80,
+    "rarity": 4,
+    "bloom": 3
+   },
+   {
+    "permil": 90,
+    "rarity": 4,
+    "bloom": 4
+   },
+   {
+    "permil": 100,
+    "rarity": 4,
+    "bloom": 5
+   },
+   {
+    "permil": 150,
+    "rarity": 5,
+    "bloom": 1
+   },
+   {
+    "permil": 180,
+    "rarity": 5,
+    "bloom": 2
+   },
+   {
+    "permil": 220,
+    "rarity": 5,
+    "bloom": 3
+   },
+   {
+    "permil": 260,
+    "rarity": 5,
+    "bloom": 4
+   },
+   {
+    "permil": 300,
+    "rarity": 5,
+    "bloom": 5
+   }
+  ],
+  "minigame": [
+   {
+    "permil": 200,
+    "card_id": "card-00010-5-uniq-0069-00"
+   },
+   {
+    "permil": 200,
+    "card_id": "card-00028-5-uniq-0070-00"
+   },
+   {
+    "permil": 200,
+    "card_id": "card-03004-5-uniq-0073-00"
+   },
+   {
+    "permil": 200,
+    "card_id": "card-04001-5-uniq-0071-00"
+   },
+   {
+    "permil": 200,
+    "card_id": "card-04003-5-uniq-0072-00"
+   }
+  ],
+  "music": [
+   {
+    "permil": 100,
+    "card_id": "card-04001-5-uniq-0071-00",
+    "music_id": "m0334"
+   },
+   {
+    "permil": 100,
+    "card_id": "card-00010-5-uniq-0069-00",
+    "music_id": "m0332"
+   },
+   {
+    "permil": 100,
+    "card_id": "card-03004-5-uniq-0073-00",
+    "music_id": "m0335"
+   },
+   {
+    "permil": 100,
+    "card_id": "card-00028-5-uniq-0070-00",
+    "music_id": "m0333"
+   },
+   {
+    "permil": 100,
+    "card_id": "card-04003-5-uniq-0072-00",
+    "music_id": "m0336"
+   }
+  ]
+ }
+}

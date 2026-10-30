@@ -1,0 +1,38 @@
+[
+  {
+    "leader": "card-00022-5-uniq-0063-00",
+    "members": [
+      "card-00007-5-uniq-0008-00",
+      "card-00022-5-uniq-0063-00",
+      "card-00021-5-uniq-0017-00",
+      "card-00006-5-uniq-0007-00",
+      "card-06005-5-uniq-0061-00"
+    ],
+    "note": "holodori.best v3.1.1 recommended roster: Noel Soleil Kiss (leader+member), Matsuri VCS, Flare EGG, Fubuki KR, Ina'nis",
+    "source": "holodori-v3.1.1"
+  },
+  {
+    "leader": "card-00022-5-uniq-0063-00",
+    "members": [
+      "card-00007-5-uniq-0008-00",
+      "card-00022-5-uniq-0063-00",
+      "card-00021-5-uniq-0017-00",
+      "card-00006-5-uniq-0007-00",
+      "card-03009-5-uniq-0041-00"
+    ],
+    "note": "holodori roster with Kobo Kanaeru Rain-Dance Oracle in the fifth slot: the 1-swap local optimum of PHASE-6 across_ranking (2026-08-18)",
+    "source": "noel-kobo-across-2026-08-18"
+  },
+  {
+    "leader": "card-04001-5-uniq-0042-00",
+    "members": [
+      "card-04001-5-uniq-0042-00",
+      "card-00032-5-uniq-0026-00",
+      "card-04003-5-uniq-0044-00",
+      "card-00007-5-uniq-0008-00",
+      "card-00006-5-uniq-0007-00"
+    ],
+    "note": "NIGHTBREAK m0334 EXACT row incumbent: Calli PDW (leader+member), Botan, Kiara, Matsuri, Fubuki (PHASE-5 certificate)",
+    "source": "m0334-calli-pdw-exact"
+  }
+]

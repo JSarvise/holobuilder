@@ -1,0 +1,13 @@
+{
+  "//": "Hand-authored card state: LEVEL and BLOOM. Edited by hand; nothing writes to it.",
+  "// why": "Neither number appears in any captured endpoint (all 6 captures, 29 endpoints, re-checked 2026-08-02) and neither can be inverted out of the stats. See tools/recon/CARD-UI-ASSETS.md section 5b.",
+  "// default": "'max' renders every card at the game's own ceiling; 'unknown' draws no Lv or bloom badge at all; an object such as {\"level\": 30, \"bloom\": 1} applies to every card with no entry of its own.",
+  "// entries": "Per card: 'max', 'unknown', or an object. A partial object is fine -- {\"bloom\": 3} takes its level from the default. Optional 'limit_break' (0-4) caps the level the way the game does; without it the level is only checked against the limit-break-4 ceiling.",
+  "// ceilings": "level 60/70/80 and bloom 5 for 3*/4*/5*, from master CardLevelLimit + CardPotential via tools/recon/proxy/card_caps.py -> dumps/card_caps.json.",
+  "// example": "\"card-00031-5-uniq-0025-00\": {\"level\": 27, \"bloom\": 2}",
+
+  "default": "max",
+
+  "cards": {
+  }
+}

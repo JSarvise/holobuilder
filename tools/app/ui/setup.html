@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>holobuilder setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&display=swap">
+<link rel="stylesheet" href="app.css">
+<script src="tour.js"></script>
+<style>
+/* setup-only: the three views of the right side (installer.py drives them) */
+.view{display:none;flex-direction:column;gap:24px}
+body[data-view=start] #v-start, body[data-view=run] #v-run, body[data-view=done] #v-done,
+body[data-view=remove] #v-remove{display:flex}
+.where{display:flex;gap:12px;align-items:center}
+.where .in{flex:1;font-weight:500}
+.facts{display:flex;gap:28px;color:var(--ink-2)}
+.facts b{color:var(--ink);font-family:var(--f-num)}
+.big{font-size:15px;padding:12px 34px}
+.done-mark{width:96px;height:96px;border-radius:50%;background:var(--good);display:grid;place-items:center;
+  animation:pop .6s var(--ease);box-shadow:0 0 0 0 rgb(79 219 149/.5);animation:pop .6s var(--ease),ring 1.6s .4s ease-out 2}
+.done-mark::after{content:"";width:34px;height:18px;border:8px solid var(--deep);border-top:0;border-right:0;transform:translate(0,-5px) rotate(-45deg)}
+@keyframes ring{to{box-shadow:0 0 0 26px rgb(79 219 149/0)}}
+.rate{color:var(--ink-3);font-size:12px}
+label.chk{display:flex;gap:10px;align-items:center;color:var(--ink-2)}
+.btn.g{background:#fff;color:#1f1f1f;display:inline-flex;align-items:center;gap:10px;text-shadow:none}
+.gl{width:18px;height:18px;border-radius:50%;background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0)}
+.priv{margin:14px 0 0;color:var(--ink-3);font-size:12px;font-weight:500;max-width:64ch}
+.spin{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid transparent;border-top-color:var(--sky);border-right-color:var(--violet);animation:spin .8s linear infinite;vertical-align:-2px;margin-right:8px}
+</style>
+</head>
+<body data-view="start">
+<div class="stage">
+  <aside class="tour" id="tour" style="--slide:6s">
+    <div class="shots" id="shots"></div>
+    <div class="caption" id="caption"><div class="k" id="ck"></div><h2 id="ch"></h2><p id="cp"></p></div>
+    <div class="nav">
+      <button class="arrow" id="prev" aria-label="Previous"></button>
+      <div class="dots" id="dots"></div>
+      <button class="arrow next" id="next" aria-label="Next"></button>
+    </div>
+  </aside>
+
+  <main class="work">
+    <div class="brand"><h1>holo<i>builder</i></h1><span class="chip n" id="ver"></span></div>
+
+    <section class="view" id="v-start">
+      <p class="lede" id="lede">The team optimizer for hololive Dreams, on this PC. Installs for your Windows user only: no administrator, nothing outside its folder but two shortcuts.</p>
+      <div class="notice" id="notice"></div>
+      <div class="panel" id="acct">
+        <h2>Your account</h2>
+        <div class="row" id="acct-row"><button class="btn g" id="google"><span class="gl"></span>Sign in with Google</button>
+          <span id="acct-msg" style="color:var(--ink-2)"></span></div>
+        <div class="row" id="uname-row" style="display:none;margin-top:12px">
+          <input class="in" id="uname" maxlength="20" placeholder="a username" style="max-width:260px" autocomplete="off" spellcheck="false">
+          <button class="btn primary" id="uname-ok">Use this name</button>
+          <span id="uname-msg" style="color:var(--ink-2)"></span></div>
+        <p class="priv">You pick a username: it is how the admin sees you. Google only confirms your email; your real name is not kept. Your game account and its file stay on this PC: the app reads them here and talks to the game directly. No IP address is kept.</p>
+      </div>
+      <div class="panel">
+        <h2>Install to</h2>
+        <div class="where"><input class="in" id="dir" readonly><button class="btn ghost" id="change">Change…</button></div>
+        <div class="facts" style="margin-top:16px">
+          <span>Download <b id="dl">–</b></span><span>On disk <b>≈ 130 MB</b> + the game data</span><span>Free here <b id="free">–</b></span>
+        </div>
+      </div>
+      <div class="row"><button class="btn primary big" id="go">Install</button></div>
+    </section>
+
+    <section class="view" id="v-run">
+      <p class="lede" id="runlede">Setting up holobuilder…</p>
+      <div class="notice" id="notice2"></div>
+      <section class="panel">
+        <ol class="steps">
+          <li class="step" data-step="wait" hidden><span class="dot"></span><span><b>Waiting for holobuilder to close</b><small></small></span><span class="r"></span></li>
+          <li class="step" data-step="pc"><span class="dot"></span><span><b>Checking this PC</b><small></small></span><span class="r"></span></li>
+          <li class="step" data-step="download"><span class="dot"></span><span><b>Downloading holobuilder</b><small></small></span><span class="r n"></span></li>
+          <li class="step" data-step="unpack"><span class="dot"></span><span><b>Unpacking</b><small></small></span><span class="r n"></span></li>
+          <li class="step" data-step="keep" hidden><span class="dot"></span><span><b>Keeping your data</b><small>settings, account, downloaded data</small></span><span class="r"></span></li>
+          <li class="step" data-step="switch"><span class="dot"></span><span><b>Putting it in place</b><small></small></span><span class="r"></span></li>
+          <li class="step" data-step="shortcuts"><span class="dot"></span><span><b>Shortcuts</b><small>Desktop and Start menu</small></span><span class="r"></span></li>
+        </ol>
+        <div class="bar"><i id="bar"></i></div>
+      </section>
+      <div class="row"><button class="btn" id="retry" style="display:none">Try again</button></div>
+    </section>
+
+    <section class="view" id="v-done">
+      <div class="done-mark"></div>
+      <h2 style="margin:0;font-size:28px;font-weight:800" id="donetitle">holobuilder is ready</h2>
+      <p class="lede" style="margin:0" id="donelede">The first start asks for your account file, reads your account and downloads the game data. It takes about a minute, once.</p>
+      <div class="row"><button class="btn primary big" id="open">Open holobuilder</button><button class="btn ghost" id="close">Close</button></div>
+    </section>
+
+    <section class="view" id="v-remove">
+      <p class="lede">Remove holobuilder from this PC: the app, its shortcuts, its settings and the data it downloaded. Your game and its account file are not touched.</p>
+      <div class="notice" id="notice3"></div>
+      <section class="panel"><ol class="steps">
+        <li class="step" data-step="remove"><span class="dot"></span><span><b>Removing holobuilder</b><small id="rmdir"></small></span><span class="r"></span></li>
+      </ol></section>
+      <div class="row"><button class="btn primary big" id="rm">Remove</button><button class="btn ghost" id="keep">Keep it</button></div>
+    </section>
+  </main>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const MB = b => (b / 1e6).toFixed(b < 1e7 ? 1 : 0);
+const ORDER = ["wait", "pc", "download", "unpack", "keep", "switch", "shortcuts"];
+let info = null;
+
+function view(v) { document.body.dataset.view = v; }
+function step(name, state, detail, right) {
+  const el = document.querySelector(`.step[data-step="${name}"]`);
+  if (!el) return;
+  el.hidden = false;
+  el.classList.remove("on", "done", "fail");
+  if (state) el.classList.add(state);
+  if (detail != null) el.querySelector("small").textContent = detail;
+  if (right != null) el.querySelector(".r").textContent = right;
+  const shown = ORDER.filter(n => !document.querySelector(`.step[data-step="${n}"]`).hidden);
+  const done = shown.filter(n => document.querySelector(`.step[data-step="${n}"]`).classList.contains("done")).length;
+  $("#bar").style.width = Math.max(3, done / shown.length * 100) + "%";
+}
+function notice(sel, kind, text) { const n = $(sel); n.className = "notice show " + kind; n.textContent = text; }
+
+window.hb = {
+  progress(ev) {
+    const s = ev.step;
+    if (s === "error") {
+      const cur = ORDER.find(n => document.querySelector(`.step[data-step="${n}"]`).classList.contains("on"));
+      if (cur) step(cur, "fail");
+      if (document.body.dataset.view === "remove") return notice("#notice3", "err", ev.message);
+      notice("#notice2", "err", ev.message); $("#retry").style.display = ""; return;
+    }
+    if (s === "wait") step("wait", ev.state === "done" ? "done" : "on", ev.state === "done" ? "closed" : "");
+    else if (s === "pc") step("pc", ev.state === "done" ? "done" : "on", ev.detail || "free space");
+    else if (s === "download") {
+      if (ev.state === "done") step("download", "done", `version ${ev.version}`, `${MB(ev.bytes)} MB`);
+      else {
+        step("download", "on", `${(ev.rate / 1e6).toFixed(1)} MB/s`, `${MB(ev.bytes)} / ${MB(ev.total)} MB`);
+        const shown = ORDER.filter(n => !document.querySelector(`.step[data-step="${n}"]`).hidden);
+        const base = shown.indexOf("download") / shown.length * 100;
+        $("#bar").style.width = (base + ev.bytes / Math.max(1, ev.total) * 100 / shown.length) + "%";
+      }
+    }
+    else if (s === "unpack") step("unpack", ev.state === "done" ? "done" : "on", ev.state === "done" ? `${ev.n} files` : "", ev.i ? `${ev.i} / ${ev.n}` : "");
+    else if (s === "keep") step("keep", ev.state === "done" ? "done" : "on");
+    else if (s === "switch") step("switch", ev.state === "done" ? "done" : "on", ev.state === "done" ? "in place" : "");
+    else if (s === "shortcuts") step("shortcuts", ev.state === "done" ? "done" : "on");
+    else if (s === "done") {
+      $("#bar").style.width = "100%";
+      $("#donetitle").textContent = info.mode === "update" ? `Updated to ${ev.version}` : "holobuilder is ready";
+      if (info.mode === "update") $("#donelede").textContent = "Your settings, account and downloaded data are kept. Opening holobuilder…";
+      setTimeout(() => { view("done"); if (info.mode === "update") setTimeout(() => pywebview.api.launch(), 1400); }, 700);
+    }
+    else if (s === "auth") return account(ev);
+    else if (s === "remove") step("remove", ev.state === "done" ? "done" : "on");
+    else if (s === "removed") { $("#rm").style.display = "none"; $("#keep").textContent = "Close"; notice("#notice3", "info", "holobuilder was removed."); setTimeout(() => pywebview.api.close(), 1500); }
+  },
+};
+
+function account(ev) {
+  const msg = $("#acct-msg"), g = $("#google");
+  const st = ev.state || ev.status;
+  g.style.display = ["approved", "pending", "browser", "username"].includes(st) ? "none" : "";
+  $("#uname-row").style.display = st === "username" ? "" : "none";
+  if (st === "username") { msg.textContent = "Signed in. Choose a username: 3 to 20 letters, digits, _ - or ."; $("#uname").focus(); }
+  else if (st === "browser") msg.innerHTML = "<span class=spin></span>Finish signing in in your browser…";
+  else if (st === "pending") msg.innerHTML = `<span class=spin></span>Signed in as <b>${ev.name || ""}</b>. Waiting for an admin to approve you… you can leave this open.`;
+  else if (st === "approved") { msg.innerHTML = `✓ <b>${ev.name || "Approved"}</b> ${ev.email ? "· " + ev.email : ""}`; refresh(); }
+  else if (st === "revoked") msg.textContent = "This account's access was withdrawn by an admin.";
+  else if (st === "error") msg.textContent = ev.message || "Sign-in failed.";
+  else msg.textContent = "Sign in to ask for access.";
+  $("#go").disabled = st !== "approved";
+}
+$("#uname-ok").onclick = async () => {
+  const b = $("#uname-ok"); b.disabled = true;
+  const r = await pywebview.api.set_username($("#uname").value.trim());
+  b.disabled = false;
+  $("#uname-msg").innerHTML = r.ok ? "" : `<span style="color:var(--bad)">${r.error}</span>`;
+};
+$("#uname").onkeydown = e => { if (e.key === "Enter") $("#uname-ok").click(); };
+async function refresh() {
+  info = await pywebview.api.info();
+  $("#ver").textContent = info.latest ? info.latest.latest : "";
+  $("#dl").textContent = info.latest ? `${MB(info.latest.size)} MB` : "–";
+  if (info.error) notice("#notice", "err", info.error);
+}
+
+function start() {
+  view("run");
+  $("#retry").style.display = "none"; $("#notice2").className = "notice";
+  if (info.mode === "update") { $("#runlede").textContent = `Updating holobuilder ${info.installed || ""} to ${info.latest.latest}…`; }
+  if (info.installed) document.querySelector('.step[data-step="keep"]').hidden = false;
+  pywebview.api.run();
+}
+
+window.addEventListener("pywebviewready", async () => {
+  HBTour.build();
+  info = await pywebview.api.info();
+  $("#ver").textContent = info.latest ? info.latest.latest : "";
+  if (info.mode === "uninstall") { $("#rmdir").textContent = info.dir; return view("remove"); }
+  $("#dir").value = info.dir;
+  $("#free").textContent = `${info.free_gb} GB`;
+  $("#dl").textContent = info.latest ? `${MB(info.latest.size)} MB` : "–";
+  if (info.error) notice("#notice", "err", info.error);
+  account({ state: info.status });
+  if (info.installed && info.mode === "install") {
+    $("#lede").textContent = `holobuilder ${info.installed} is installed here. Install ${info.latest ? info.latest.latest : "again"} over it: your settings and data stay.`;
+    $("#go").textContent = "Update";
+  }
+  if (info.mode === "update" && info.latest) start();
+});
+$("#change").onclick = async () => { const d = await pywebview.api.choose_dir(); if (d) $("#dir").value = d; };
+$("#go").onclick = start;
+$("#google").onclick = () => pywebview.api.sign_in();
+$("#retry").onclick = start;
+$("#open").onclick = () => pywebview.api.launch();
+$("#close").onclick = () => pywebview.api.close();
+$("#rm").onclick = () => { $("#rm").disabled = true; pywebview.api.uninstall(); };
+$("#keep").onclick = () => pywebview.api.close();
+</script>
+</body>
+</html>

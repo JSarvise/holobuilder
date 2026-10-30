@@ -1,0 +1,156 @@
+{
+  "ablation": [
+    {
+      "gap_max": 0.2809466492003812,
+      "gap_mean": 0.1668959300828735,
+      "label": "baseline (every mechanism off)",
+      "options": {
+        "beam_width": 4,
+        "branch": 3,
+        "feature_branch": 0,
+        "open_condition_weight": 0.0,
+        "polish_teams": 0,
+        "quota": 0,
+        "seeds": 1
+      },
+      "pools": 6,
+      "seconds": 0.04074289998970926,
+      "top10_overlap_mean": 1.3333333333333333,
+      "top1_identity": 2,
+      "top1_score": 2
+    },
+    {
+      "gap_max": 0.2809466492003812,
+      "gap_mean": 0.1660689078873073,
+      "label": "+ open-condition bonus",
+      "options": {
+        "beam_width": 4,
+        "branch": 3,
+        "feature_branch": 0,
+        "open_condition_weight": 0.35,
+        "polish_teams": 0,
+        "quota": 0,
+        "seeds": 1
+      },
+      "pools": 6,
+      "seconds": 0.039836600015405566,
+      "top10_overlap_mean": 1.3333333333333333,
+      "top1_identity": 2,
+      "top1_score": 2
+    },
+    {
+      "gap_max": 0.2809466492003812,
+      "gap_mean": 0.1660689078873073,
+      "label": "+ per-feature quota",
+      "options": {
+        "beam_width": 4,
+        "branch": 3,
+        "feature_branch": 0,
+        "open_condition_weight": 0.0,
+        "polish_teams": 0,
+        "quota": 2,
+        "seeds": 1
+      },
+      "pools": 6,
+      "seconds": 0.08437830000184476,
+      "top10_overlap_mean": 1.8333333333333333,
+      "top1_identity": 2,
+      "top1_score": 2
+    },
+    {
+      "gap_max": null,
+      "gap_mean": null,
+      "label": "+ per-feature branch",
+      "options": {
+        "beam_width": 4,
+        "branch": 3,
+        "feature_branch": 2,
+        "open_condition_weight": 0.0,
+        "polish_teams": 0,
+        "quota": 0,
+        "seeds": 1
+      },
+      "pools": 6,
+      "seconds": 0.08332149998750538,
+      "top10_overlap_mean": 5.5,
+      "top1_identity": 6,
+      "top1_score": 6
+    },
+    {
+      "gap_max": 0.21026880059282296,
+      "gap_mean": 0.1482171633786019,
+      "label": "+ four seeds",
+      "options": {
+        "beam_width": 4,
+        "branch": 3,
+        "feature_branch": 0,
+        "open_condition_weight": 0.0,
+        "polish_teams": 0,
+        "quota": 0,
+        "seeds": 4
+      },
+      "pools": 6,
+      "seconds": 0.1516946000047028,
+      "top10_overlap_mean": 1.5,
+      "top1_identity": 2,
+      "top1_score": 2
+    },
+    {
+      "gap_max": null,
+      "gap_mean": null,
+      "label": "+ swap polish",
+      "options": {
+        "beam_width": 4,
+        "branch": 3,
+        "feature_branch": 0,
+        "open_condition_weight": 0.0,
+        "polish_teams": 3,
+        "quota": 0,
+        "seeds": 1
+      },
+      "pools": 6,
+      "seconds": 1.1933898000279441,
+      "top10_overlap_mean": 10.0,
+      "top1_identity": 6,
+      "top1_score": 6
+    },
+    {
+      "gap_max": null,
+      "gap_mean": null,
+      "label": "all mechanisms on",
+      "options": {
+        "beam_width": 4,
+        "branch": 3,
+        "feature_branch": 2,
+        "open_condition_weight": 0.35,
+        "polish_teams": 3,
+        "quota": 2,
+        "seeds": 4
+      },
+      "pools": 6,
+      "seconds": 1.552309899998363,
+      "top10_overlap_mean": 10.0,
+      "top1_identity": 6,
+      "top1_score": 6
+    },
+    {
+      "gap_max": null,
+      "gap_mean": null,
+      "label": "shipped defaults",
+      "options": {
+        "beam_width": 96,
+        "branch": 24,
+        "feature_branch": 2,
+        "open_condition_weight": 0.35,
+        "polish_teams": 3,
+        "quota": 2,
+        "seeds": 4
+      },
+      "pools": 6,
+      "seconds": 5.980954099970404,
+      "top10_overlap_mean": 10.0,
+      "top1_identity": 6,
+      "top1_score": 6
+    }
+  ]
+}

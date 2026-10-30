@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+import "enums/mini_game_type.gen.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message MiniGameNpcLotteryPeriod {
+	option (options.master.table) = true;
+
+	.enums.MiniGameType mini_game_type = 1 [(options.master.pk) = true];
+	int64 start_time = 2 [(options.master.pk) = true];
+	repeated string mini_game_npc_ids = 5 [(options.master.fk) = "MiniGameNpc:id"];
+}

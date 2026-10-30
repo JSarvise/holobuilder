@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hbuilder — client-side optimizer (two WASM engines)</title>
+<style>
+  :root{
+    --bg:#0e1320; --panel:#161d2e; --panel2:#1c2438; --line:#2a3448;
+    --fg:#e7ecf4; --dim:#8a93a8; --dim2:#6b7488;
+    --dori:#5ab2fa; --accent:#35c0ee; --good:#37c98a; --warn:#f2b73c; --hot:#f2555a;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:'Public Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.5;
+    background-image:radial-gradient(1200px 600px at 80% -10%, rgba(90,178,250,.08), transparent);}
+  .wrap{max-width:1120px;margin:0 auto;padding:28px clamp(16px,4vw,40px) 60px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px}
+  h1{font-size:clamp(22px,3.2vw,30px);font-weight:800;letter-spacing:-.02em;margin:0}
+  h1 .di{display:inline-block;width:11px;height:11px;border-radius:2px;background:var(--dori);
+    transform:rotate(45deg);margin-right:12px;vertical-align:3px}
+  .tag{font-family:var(--mono);font-size:12px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:3px 11px}
+  .lede{color:var(--dim);max-width:70ch;margin:8px 0 22px;font-size:14.5px}
+  .lede b{color:var(--fg);font-weight:600}
+  /* boot log */
+  .boot{background:#0a0e18;border:1px solid var(--line);border-radius:12px;padding:12px 15px;
+    font-family:var(--mono);font-size:12.5px;color:var(--dim);margin-bottom:24px;min-height:44px}
+  .boot .step{display:flex;gap:9px;align-items:center;padding:1px 0}
+  .boot .ic{width:15px;text-align:center;flex:none}
+  .boot .ok{color:var(--good)} .boot .run{color:var(--warn)} .boot .err{color:var(--hot)}
+  .boot .t{margin-left:auto;color:var(--dim2)}
+  /* panels */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px 22px;
+    box-shadow:0 1px 0 rgba(255,255,255,.02) inset}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;
+    color:var(--dim);display:flex;align-items:center;gap:8px}
+  .engine{font-weight:700;font-size:11px;padding:2px 8px;border-radius:6px}
+  .engine.py{background:rgba(90,178,250,.14);color:var(--dori)}
+  .engine.hi{background:rgba(55,201,138,.14);color:var(--good)}
+  h2{font-size:18px;font-weight:700;letter-spacing:-.01em;margin:6px 0 4px}
+  .sub{color:var(--dim);font-size:13px;margin:0 0 16px}
+  .big{font-family:var(--mono);font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;
+    letter-spacing:-.02em;margin:4px 0}
+  .big small{font-size:13px;color:var(--dim);font-weight:400;font-family:var(--sans)}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:13px;margin:12px 0}
+  .kv dt{color:var(--dim)} .kv dd{margin:0;font-variant-numeric:tabular-nums}
+  .mono{font-family:var(--mono)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
+  .chip{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;
+    background:var(--panel2);border:1px solid var(--line);color:var(--dim)}
+  .chip.red{color:#ff8f93;border-color:rgba(242,85,90,.3)}
+  .chip.sock{color:#67e8f9;border-color:rgba(53,192,238,.35)}
+  button{font-family:var(--sans);font-weight:600;font-size:13.5px;color:var(--fg);cursor:pointer;
+    background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 15px;
+    transition:.15s}
+  button:hover:not(:disabled){border-color:var(--dori);background:#212b42}
+  button:disabled{opacity:.45;cursor:default}
+  button.primary{background:linear-gradient(180deg,#2f76c7,#255ea8);border-color:#2f76c7}
+  button.primary:hover:not(:disabled){background:linear-gradient(180deg,#3785e0,#2a6bc0)}
+  .row{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}
+  .note{font-size:11.5px;color:var(--dim2);margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+  .foot{margin-top:26px;color:var(--dim);font-size:12.5px;text-align:center}
+  .foot b{color:var(--fg)}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--good);background:rgba(55,201,138,.1);border:1px solid rgba(55,201,138,.25);
+    border-radius:999px;padding:3px 10px}
+  .spin{width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--dori);
+    border-radius:50%;display:inline-block;animation:s .7s linear infinite}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="di"></span>hbuilder — client-side optimizer</h1>
+    <span class="tag">two WASM engines · zero server</span>
+  </header>
+  <p class="lede">
+    The whole optimizer running in your browser: the <b>real Python scorer</b> on
+    Pyodide (CPython→WASM) and the <b>HiGHS</b> integer-programming solver (WASM).
+    No backend — the scorer values a team, the solver picks the provably-optimal board,
+    both entirely client-side. This is the feasibility proof made live.
+  </p>
+
+  <div class="boot" id="boot"><div class="step"><span class="ic run"><span class="spin"></span></span>booting the two WASM engines…</div></div>
+
+  <div class="grid">
+    <!-- SCORER -->
+    <section class="card" id="scorerCard">
+      <div class="eyebrow">Engine 1 · scoring <span class="engine py">Pyodide · CPython→WASM</span></div>
+      <h2>The real hbuilder scorer</h2>
+      <p class="sub"><code>src/hbuilder</code> runs verbatim — same Python, same gate resolution &amp; EV math as native.</p>
+      <div class="big" id="scoreVal">—</div>
+      <dl class="kv">
+        <dt>leader</dt><dd class="mono" id="scLeader">—</dd>
+        <dt>members</dt><dd class="mono" id="scMembers" style="font-size:11px">—</dd>
+        <dt>score time</dt><dd id="scTime">—</dd>
+      </dl>
+      <div class="row">
+        <button class="primary" id="btnScore" disabled>Score a random team</button>
+        <button id="btnFixed" disabled>Score the reference team</button>
+      </div>
+      <p class="note" id="scNote">Reference team scores <b>214106.56707666052</b> — byte-identical to native Python.</p>
+    </section>
+
+    <!-- SOLVER -->
+    <section class="card" id="solverCard">
+      <div class="eyebrow">Engine 2 · optimization <span class="engine hi">HiGHS · WASM</span></div>
+      <h2>Provably-optimal board</h2>
+      <p class="sub">The 152-node leader board as an integer program — budget, connectivity, sockets — solved to the guaranteed optimum.</p>
+      <div class="big" id="objVal">—</div>
+      <dl class="kv">
+        <dt>status</dt><dd id="soStatus">—</dd>
+        <dt>points used</dt><dd id="soPts">—</dd>
+        <dt>solve time</dt><dd id="soTime">—</dd>
+      </dl>
+      <div class="chips" id="soChips"></div>
+      <div class="row">
+        <button class="primary" id="btnSolve" disabled>Solve the board</button>
+      </div>
+      <p class="note">Model exported as a standard LP; solved by the same <code>highs.wasm</code> a browser loads. Node values come from the scorer.</p>
+    </section>
+  </div>
+
+  <p class="foot">
+    <span class="badge" id="foot">● offline · 100% client-side</span><br>
+    Both engines loaded from local files. Scorer float-identical to native; solver provably optimal.
+  </p>
+</div>
+<script type="module" src="./demo.js"></script>
+</body>
+</html>

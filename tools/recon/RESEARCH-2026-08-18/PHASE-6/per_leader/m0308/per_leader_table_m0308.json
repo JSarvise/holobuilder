@@ -1,0 +1,216 @@
+{
+ "song": "m0308",
+ "chart_singers": [
+  "chr-06004",
+  "chr-06005"
+ ],
+ "model_version": "objective-v2.2",
+ "inputs_hash": "044ea379239bfd24af77ac06f1536df63559895145ee689cf82e700268e91ab5",
+ "inputs_hash_files": {
+  "cards": "98fd8133693a2816188dc7e5425a1cb103d4dce841733f1d08ca8a982e8af277",
+  "board": "491823961414be84383a1156c14cb162a6bc3f9b25022cef54e9badf23d6adc8",
+  "charts": "bdc9dc1c8b485ea8588d9fca7e778cc31bf71eecb4fdf06703f403a3b2b93c22",
+  "skilltree": "57245966f417632493a768db6684248f71cf533d8a1b0aa29a5779729dfeb29c",
+  "master_stn": "efbc636b23a619b4dd02d9adfaa8989e6bbfcf09f3fcae41d56fdcd7effe18c2",
+  "collection": "2a016c02efa56417e4c9e7511819d84098888bbeeaddc30a92e276c9404838c3",
+  "cfg": "fdf97614d6e90a393dc8ee2c19683aa62f7f30b0dc17e15deb5f1c65be767823"
+ },
+ "universe": "5star-maxed-catalogue",
+ "basis": "maxed",
+ "budget_kind": "flat",
+ "budget": 447,
+ "uptime_model": "finite",
+ "platform": "mobile",
+ "plan_cache_seed": {
+  "leader": "card-04001-5-uniq-0042-00",
+  "members": [
+   "card-04001-5-uniq-0042-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04003-5-uniq-0044-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00006-5-uniq-0007-00"
+  ]
+ },
+ "objective_note": "one plan-cache seed for the whole table so every row is the same objective (PlanCache.from_team nominal context; O5)",
+ "row_deadline_seconds": 900.0,
+ "p_mode": "tier",
+ "leaders_total": 4,
+ "rows_done": 4,
+ "rows_exact": 4,
+ "rows_bounded": 0,
+ "complete": true,
+ "git": {
+  "head": "3937981875473a0cb260a2db27d54ccaa5264697",
+  "dirty": true,
+  "status_porcelain": [
+   "M tools/recon/probes/members_first_2026_08_19.py"
+  ],
+  "untracked": [
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0144/certificate_m0144_00018-5-uniq-0068-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0144/certificate_m0144_00022-5-uniq-0063-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0144/certificate_m0144_04001-5-uniq-0042-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0144/certificate_m0144_04012-5-uniq-0051-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0144/per_leader_table_m0144.json"
+  ],
+  "diff_head_sha256": "30a35e26365859427f6820b07e657069e852d9569b368b6669a01b57fe193b45"
+ },
+ "written": "2026-08-19T15:49:41",
+ "rows": [
+  {
+   "leader": "card-06005-5-uniq-0061-00",
+   "leader_name": "Todoroki Hajime / Sweet Badass Style",
+   "sings": true,
+   "status": "EXACT",
+   "score": 3422012.0,
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00011-5-uniq-0011-00",
+    "card-00012-5-uniq-0012-00",
+    "card-00032-5-uniq-0026-00"
+   ],
+   "members": [
+    "Shirakami Fubuki / Golden Petal Dew",
+    "Natsuiro Matsuri / Sweet Deception",
+    "Yuzuki Choco / Coquette Temptation",
+    "Oozora Subaru / Duckie Bounce!",
+    "Shishiro Botan / WH Lion Vanguard"
+   ],
+   "leader_also_member": false,
+   "upper_bound": 3422012.0,
+   "gap": 0.0,
+   "heuristic_score": 3422012.0,
+   "recall_loss_heuristic_vs_certified": 0.0,
+   "leaves_evaluated": 231761,
+   "n_rosters": 8441052,
+   "rosters_accounted_equals_n": true,
+   "prefixes_done": 2133,
+   "prefixes_total": 2133,
+   "seconds": 301.39596210001037,
+   "row_wall_seconds": 309.41007129999343,
+   "inputs_hash": "044ea379239bfd24af77ac06f1536df63559895145ee689cf82e700268e91ab5",
+   "model_version": "objective-v2.2",
+   "git_head": "3937981875473a0cb260a2db27d54ccaa5264697",
+   "git_dirty": true,
+   "certificate": "tools\\recon\\RESEARCH-2026-08-18\\PHASE-6\\per_leader\\m0308\\certificate_m0308_06005-5-uniq-0061-00.json",
+   "written": "2026-08-19T15:39:50"
+  },
+  {
+   "leader": "card-04002-5-uniq-0043-00",
+   "leader_name": "Takanashi Kiara / Everlasting Phoenix",
+   "sings": false,
+   "status": "EXACT",
+   "score": 2866912.0,
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00021-5-uniq-0017-00",
+    "card-00022-5-uniq-0063-00",
+    "card-03008-5-uniq-0040-00"
+   ],
+   "members": [
+    "Shirakami Fubuki / Golden Petal Dew",
+    "Natsuiro Matsuri / Sweet Deception",
+    "Shiranui Flare / Azure Ribbon Chic",
+    "Shirogane Noel / Soleil Kiss",
+    "Kaela Kovalskia / Destiny Anvil"
+   ],
+   "leader_also_member": false,
+   "upper_bound": 2866912.0,
+   "gap": 0.0,
+   "heuristic_score": 2866912.0,
+   "recall_loss_heuristic_vs_certified": 0.0,
+   "leaves_evaluated": 48987,
+   "n_rosters": 8441052,
+   "rosters_accounted_equals_n": true,
+   "prefixes_done": 2133,
+   "prefixes_total": 2133,
+   "seconds": 175.4052204999898,
+   "row_wall_seconds": 182.96449650000432,
+   "inputs_hash": "044ea379239bfd24af77ac06f1536df63559895145ee689cf82e700268e91ab5",
+   "model_version": "objective-v2.2",
+   "git_head": "3937981875473a0cb260a2db27d54ccaa5264697",
+   "git_dirty": true,
+   "certificate": "tools\\recon\\RESEARCH-2026-08-18\\PHASE-6\\per_leader\\m0308\\certificate_m0308_04002-5-uniq-0043-00.json",
+   "written": "2026-08-19T15:42:53"
+  },
+  {
+   "leader": "card-00015-5-uniq-0067-00",
+   "leader_name": "Sakura Miko / Radiance Smile",
+   "sings": false,
+   "status": "EXACT",
+   "score": 2847047.0,
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00010-5-uniq-0010-00",
+    "card-00012-5-uniq-0012-00",
+    "card-00032-5-uniq-0026-00"
+   ],
+   "members": [
+    "Shirakami Fubuki / Golden Petal Dew",
+    "Natsuiro Matsuri / Sweet Deception",
+    "Nakiri Ayame / Demon Spider Lily",
+    "Oozora Subaru / Duckie Bounce!",
+    "Shishiro Botan / WH Lion Vanguard"
+   ],
+   "leader_also_member": false,
+   "upper_bound": 2847047.0,
+   "gap": 0.0,
+   "heuristic_score": 2847047.0,
+   "recall_loss_heuristic_vs_certified": 0.0,
+   "leaves_evaluated": 48508,
+   "n_rosters": 8441052,
+   "rosters_accounted_equals_n": true,
+   "prefixes_done": 2133,
+   "prefixes_total": 2133,
+   "seconds": 175.7538760000025,
+   "row_wall_seconds": 183.3934067999944,
+   "inputs_hash": "044ea379239bfd24af77ac06f1536df63559895145ee689cf82e700268e91ab5",
+   "model_version": "objective-v2.2",
+   "git_head": "c449bdd3f4b59a7bf6f6a69fa35ed429bd108552",
+   "git_dirty": false,
+   "certificate": "tools\\recon\\RESEARCH-2026-08-18\\PHASE-6\\per_leader\\m0308\\certificate_m0308_00015-5-uniq-0067-00.json",
+   "written": "2026-08-19T15:49:41"
+  },
+  {
+   "leader": "card-04001-5-uniq-0071-00",
+   "leader_name": "Mori Calliope / Radiant Summer Heatwave",
+   "sings": false,
+   "status": "EXACT",
+   "score": 2823163.0,
+   "ids": [
+    "card-03004-5-uniq-0073-00",
+    "card-04010-5-uniq-0049-00",
+    "card-06002-5-uniq-0058-00",
+    "card-06004-5-uniq-0060-00",
+    "card-06005-5-uniq-0061-00"
+   ],
+   "members": [
+    "Kureiji Ollie / CRAZY SHOCK!",
+    "Ouro Kronii / Timeless Sentinel",
+    "Otonose Kanade / Girly Distortion",
+    "Juufuutei Raden / Vintage Romantic",
+    "Todoroki Hajime / Sweet Badass Style"
+   ],
+   "leader_also_member": false,
+   "upper_bound": 2823163.0,
+   "gap": 0.0,
+   "heuristic_score": 2823163.0,
+   "recall_loss_heuristic_vs_certified": 0.0,
+   "leaves_evaluated": 103784,
+   "n_rosters": 8441052,
+   "rosters_accounted_equals_n": true,
+   "prefixes_done": 2133,
+   "prefixes_total": 2133,
+   "seconds": 216.94334950001212,
+   "row_wall_seconds": 224.88274130001082,
+   "inputs_hash": "044ea379239bfd24af77ac06f1536df63559895145ee689cf82e700268e91ab5",
+   "model_version": "objective-v2.2",
+   "git_head": "3937981875473a0cb260a2db27d54ccaa5264697",
+   "git_dirty": true,
+   "certificate": "tools\\recon\\RESEARCH-2026-08-18\\PHASE-6\\per_leader\\m0308\\certificate_m0308_04001-5-uniq-0071-00.json",
+   "written": "2026-08-19T15:46:38"
+  }
+ ]
+}

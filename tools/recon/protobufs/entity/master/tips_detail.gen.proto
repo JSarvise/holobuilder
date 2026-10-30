@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+import "enums/tips_asset_type.gen.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message TipsDetail {
+	option (options.master.table) = true;
+
+	string tips_id = 1 [(options.master.pk) = true, (options.master.fk) = "Tips:id"];
+	int32 number = 2 [(options.master.pk) = true];
+	.enums.TipsAssetType asset_type = 3;
+	string asset_id = 4 [(options.master.optional) = true];
+	string description_lang_id = 5 [(options.master.fk) = "LangTipsDetail:id"];
+	string condition_group_id = 7 [(options.master.fk) = "Condition:group_id", (options.master.optional) = true];
+}

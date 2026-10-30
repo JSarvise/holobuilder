@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Users · hololive builder</title>
+<link rel="stylesheet" href="/hb.css">
+<style>
+/* The admin console: who signed in with Google, and the admin's yes / no.
+   Approvals live on the server (hb-auth); this page only asks it, through /api/admin/*. */
+.u-wrap{width:var(--col);margin:28px auto 64px;display:grid;gap:28px}
+.u-sec h2{margin:0 0 12px;font-size:15px;font-weight:800;color:var(--ink-2);text-transform:uppercase;letter-spacing:.08em}
+/* ONE column template for the header and every row, fixed where the content varies (status,
+   actions), so a row with three buttons and the admin's row with none line up exactly */
+.u-list{display:grid;gap:8px;--ucols:minmax(240px,1.4fr) minmax(220px,1.2fr) 104px 104px 84px 112px 196px}
+.u-head,.u-row{display:grid;grid-template-columns:var(--ucols);align-items:center;gap:16px;padding:0 18px}
+.u-head{color:var(--ink-3);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding-bottom:2px}
+.u-head .r,.u-row .r{text-align:right;justify-self:end}
+.u-row{min-height:68px;background:var(--sheet);border:1px solid var(--line);border-radius:16px;animation:rise .35s var(--ease-out) both}
+.u-row.pending{border-color:rgb(255 187 84/.55);box-shadow:inset 3px 0 0 var(--warn)}
+.u-who{display:flex;align-items:center;gap:14px;min-width:0}
+.u-av{flex:none;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff;
+  background:linear-gradient(135deg,var(--sky),var(--violet))}
+.u-who b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.u-who small{color:var(--ink-3);font-size:12px}
+.u-you{margin-left:6px;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:800;background:rgb(255 255 255/.08);color:var(--ink-2)}
+.u-mail{display:flex;align-items:center;gap:8px;min-width:0;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.u-mail span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.u-eye{flex:none;border:0;background:none;color:var(--ink-3);font:inherit;font-size:12px;cursor:pointer;padding:2px 4px;border-radius:6px}
+.u-eye:hover{color:var(--ink);background:rgb(255 255 255/.06)}
+.u-cell{font-size:14px;white-space:nowrap}
+.u-cell.muted{color:var(--ink-3)}
+.u-st{justify-self:start;border-radius:999px;padding:3px 12px;font-size:12px;font-weight:800}
+.u-st.pending{background:rgb(255 187 84/.16);color:var(--warn)}
+.u-st.approved{background:rgb(79 219 149/.14);color:var(--good)}
+.u-st.revoked{background:rgb(255 107 139/.14);color:var(--bad)}
+.u-act{display:flex;gap:8px;justify-content:flex-end}
+.u-empty{color:var(--ink-3);padding:18px}
+.btn.danger{border-color:var(--bad);color:var(--bad);background:transparent;box-shadow:none}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" data-page="users"></nav>
+  <main>
+    <header class="pg" aria-labelledby="utitle">
+      <div class="wrap">
+        <h1 id="utitle">Users</h1>
+        <p class="pg-meta" id="umeta"><span>Asking the server…</span></p>
+        <p class="pg-lede">Everyone who signed in from the installer. Nobody gets the app or the game data until you approve them; revoking takes effect on their next request. The server keeps the username each person chose, their email and the app version they run: never their real name, never anything about their game account. Emails stay hidden until you click show.</p>
+        <div class="pg-stats" id="ustats"></div>
+      </div>
+    </header>
+    <div class="u-wrap">
+      <section class="u-sec"><h2>Waiting for you</h2><div class="u-list" id="pending"></div></section>
+      <section class="u-sec"><h2>Everyone</h2><div class="u-list" id="others"></div></section>
+    </div>
+  </main>
+</div>
+<script src="/hb-shell.js"></script>
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const ago = t => { if (!t) return "never"; const s = Date.now() / 1000 - t;
+  return s < 120 ? "just now" : s < 7200 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
+const day = t => t ? new Date(t * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "–";
+
+// An email is personal data the page needs only to tell two people apart: masked
+// ("j•••@gmail.com") until asked, per row, for this view only.
+const shown = new Set();
+const mask = e => { const [n, d] = String(e || "").split("@"); return d ? `${n[0] || ""}•••@${d}` : "–"; };
+// 'setup' is what the installer registered with; an app that has run since reports its version
+const appCell = a => !a ? `<div class="u-cell muted">–</div>` :
+  a === "setup" ? `<div class="u-cell muted" title="Installed; the app has not reported its version yet">installer</div>` :
+  `<div class="u-cell">${esc(a)}</div>`;
+
+function row(u) {
+  const initials = (u.username || "?").slice(0, 2).toUpperCase();
+  const act = u.admin ? "" :
+    (u.status !== "approved" ? `<button class="btn primary small" data-a="approve" data-id="${u.id}">Approve</button>` : "") +
+    (u.status === "approved" ? `<button class="btn small" data-a="revoke" data-id="${u.id}">Revoke</button>` : "") +
+    `<button class="btn small danger" data-a="delete" data-id="${u.id}" title="Forget this user">Delete</button>`;
+  const open = shown.has(u.id);
+  return `<div class="u-row ${u.status}">
+    <div class="u-who"><div class="u-av">${esc(initials)}</div><div style="min-width:0">
+      <b>${u.username ? esc(u.username) : '<span style="color:var(--ink-3)">no username yet</span>'}${u.admin ? '<span class="u-you">you</span>' : ""}</b><small>${u.admin ? "admin" : "user #" + u.id}</small></div></div>
+    <div class="u-mail"><span>${esc(open ? u.email : mask(u.email))}</span>
+      <button class="u-eye" data-eye="${u.id}" title="${open ? "Hide" : "Show"} the email">${open ? "hide" : "show"}</button></div>
+    <div class="u-cell">${day(u.created)}</div>
+    <div class="u-cell">${ago(u.last_seen)}</div>
+    ${appCell(u.app)}
+    <span class="u-st ${u.status}">${u.status}</span>
+    <div class="u-act">${act}</div></div>`;
+}
+const head = `<div class="u-head"><span>User</span><span>Email</span><span>Joined</span><span>Last seen</span><span>App</span><span>Status</span><span class="r">Actions</span></div>`;
+
+async function load() {
+  const r = await fetch("/api/admin/users");
+  const d = await r.json();
+  if (!r.ok) { document.getElementById("umeta").innerHTML = `<span>${esc(d.error || "not available")}: this page needs the admin key</span>`; return; }
+  const users = d.users || [];
+  const pend = users.filter(u => u.status === "pending");
+  document.getElementById("umeta").innerHTML = `<span>${users.length} signed in</span><span>${pend.length} waiting</span>`;
+  const n = s => users.filter(u => u.status === s).length;
+  document.getElementById("ustats").innerHTML = [["Waiting", pend.length], ["Approved", n("approved")], ["Revoked", n("revoked")]]
+    .map(([k, v]) => `<div class="stat-tile"><span class="lbl">${k}</span><b class="n">${v}</b></div>`).join("");
+  const rest = users.filter(u => u.status !== "pending");
+  document.getElementById("pending").innerHTML = pend.length ? head + pend.map(row).join("") : `<div class="u-empty">No one is waiting.</div>`;
+  document.getElementById("others").innerHTML = rest.length ? head + rest.map(row).join("") : `<div class="u-empty">No one yet.</div>`;
+}
+document.addEventListener("click", async e => {
+  const eye = e.target.closest("button[data-eye]");
+  if (eye) { const id = +eye.dataset.eye; shown.has(id) ? shown.delete(id) : shown.add(id); load(); return; }
+  const b = e.target.closest("button[data-a]"); if (!b) return;
+  if (b.dataset.a === "delete" && !b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "Sure?"; return; }
+  b.disabled = true;
+  await fetch(`/api/admin/user?id=${b.dataset.id}&action=${b.dataset.a}`, { method: "POST" });
+  load();
+});
+load();
+setInterval(() => { if (!document.hidden) load(); }, 30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Event · hololive builder</title>
+<link rel="stylesheet" href="/hb-card.css">
+<link rel="stylesheet" href="/hb.css">
+<link rel="stylesheet" href="/event.css">
+<script src="/hb-format.js"></script>
+<script src="/hb-gens.js"></script>
+<script src="/hb-card.js"></script>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" data-page="event"></nav>
+
+  <main>
+    <!-- the shared page head (hb.css .pg): title, one meta line, the account's figures as stat tiles;
+         the event's key visual as a thumb at the right, uncropped and unblurred -->
+    <header class="pg" aria-labelledby="evtitle">
+      <div class="wrap ev-pg">
+        <div class="ev-pgmain">
+          <h1 id="evtitle">Loading the event…</h1>
+          <p class="pg-meta" id="evchips"></p>
+          <div class="seg ev-chapters" id="evchapters" role="group" aria-label="Chapter" hidden></div>
+          <div class="pg-stats" id="evstats"></div>
+        </div>
+        <div class="ev-kvcol">
+          <button type="button" class="ev-kv" id="banner" title="Past events" aria-haspopup="dialog" aria-controls="histdlg"></button>
+          <button type="button" class="btn small" id="histopen" aria-haspopup="dialog" aria-controls="histdlg"><img class="ic" src="/ui/nav/ui_999_ico_trophy.png" alt="" style="width:16px;height:16px">Past events · your results</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="wrap ev-flow">
+      <!-- 1. The target: which tier, and how far away it is. -->
+      <section class="dlg" aria-labelledby="h-cut">
+        <div class="dlg-h"><img class="ic" src="/ui/nav/ui_999_ico_trophy.png" alt=""><h2 id="h-cut">Ranking target</h2>
+          <div class="seg ev-kind" id="rkind" role="group" aria-label="Ranking"></div>
+          <span class="r" id="cutage"></span>
+          <div class="seg ev-region" id="region" role="group" aria-label="Region">
+            <button type="button" data-v="us" aria-pressed="true">US</button>
+            <button type="button" data-v="as" aria-pressed="false">Asia</button>
+            <button type="button" data-v="jp" aria-pressed="false">Japan</button>
+          </div></div>
+        <div class="dlg-b">
+          <div class="ev-songs" id="rsongs" role="group" aria-label="Song" hidden></div>
+          <div class="ev-target">
+            <div class="ev-gap" id="evgap"></div>
+          </div>
+          <div class="ev-tiers" id="tiers" role="list" aria-label="Reward tiers. Pick one as your target."></div>
+        </div>
+      </section>
+
+      <!-- 1b. The top 100 of the chapter, read every couple of minutes by the 24/7 tracker. -->
+      <section class="dlg" aria-labelledby="h-top" id="topsec" hidden>
+        <div class="dlg-h"><img class="ic" src="/ui/nav/ui_999_ico_trophy.png" alt=""><h2 id="h-top">Top 100</h2>
+          <span class="r" id="topnote"></span></div>
+        <div class="dlg-b ev-tablewrap"><table class="ev-table ev-top" id="top"></table></div>
+      </section>
+
+      <!-- 4. Reference: the bonus rules and every card that carries a bonus. -->
+      <section class="dlg" aria-labelledby="h-bonus">
+        <div class="dlg-h"><h2 id="h-bonus">Event Bonus rules</h2><span class="r">Adds Event Pt per Live</span></div>
+        <div class="dlg-b ev-rules">
+          <div class="ev-rule"><h3 class="sh">holomem Bonus</h3><div class="ev-mems" id="mems"></div></div>
+          <div class="ev-rule"><h3 class="sh">Bloom Bonus</h3><table class="ev-bloom" id="bloomt"></table></div>
+          <div class="ev-rule wide" id="musicpanel"><h3 class="sh">Song Score Bonus</h3><div id="music"></div></div>
+          <div class="ev-rule wide"><h3 class="sh">Event cards</h3><div class="ev-evcards" id="evcards"></div></div>
+        </div>
+      </section>
+
+      <section class="dlg" aria-labelledby="h-mine">
+        <div class="dlg-h"><h2 id="h-mine">Your bonus cards</h2><span class="r" id="minenote"></span></div>
+        <div class="dlg-b ev-tablewrap"><table class="ev-table" id="mine"></table></div>
+      </section>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<!-- One tier's cutoff as a chart: Line / Heatmap -->
+<dialog class="dlg ev-chartdlg" id="chartdlg" aria-labelledby="charttitle">
+  <div class="dlg-h"><h2 id="charttitle">Cutoff</h2>
+    <div class="seg" id="chartview" role="group" aria-label="View">
+      <button type="button" data-v="line" aria-pressed="true">Line</button>
+      <button type="button" data-v="heat" aria-pressed="false">Heatmap</button>
+    </div>
+    <label class="ev-check" id="chartyoulbl"><input type="checkbox" id="chartyou"> Show you</label>
+    <span class="r" id="chartnote"></span>
+    <button type="button" class="btn small" id="chartclose">Close</button></div>
+  <div class="dlg-b"><div class="evc-wrap" id="chartbody"></div><div class="evc-tip" id="charttip" hidden></div></div>
+</dialog>
+<!-- Past events: the current event stays the page; its banner opens this list -->
+<dialog class="dlg ev-hist" id="histdlg" aria-labelledby="histtitle">
+  <div class="dlg-h"><img class="ic" src="/ui/nav/ui_999_ico_trophy.png" alt=""><h2 id="histtitle">Past events</h2>
+    <span class="r" id="histnote"></span>
+    <button type="button" class="btn small" id="histclose">Close</button></div>
+  <div class="dlg-b" id="histbody"></div>
+</dialog>
+<script src="/hb-shell.js"></script>
+<script src="/hb-combo.js"></script>
+<script type="module" src="/ev-app.js"></script>
+</body>
+</html>

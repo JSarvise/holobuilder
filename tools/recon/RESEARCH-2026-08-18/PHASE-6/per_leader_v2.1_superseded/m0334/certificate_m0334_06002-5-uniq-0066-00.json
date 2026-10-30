@@ -1,0 +1,405 @@
+{
+ "status": "EXACT",
+ "objective": "OBJECTIVE-v2 S(T, C): plan-cache fast leaf (cached_team_plan + board_model_from_plan(plan_cache) + score_song_detailed), Connect assignment exact, bench boards from board.json",
+ "model_version": "objective-v2.1",
+ "song": "m0334",
+ "chart_singers": [
+  "chr-04001"
+ ],
+ "singer_type": "solo",
+ "leader": "card-06002-5-uniq-0066-00",
+ "leader_name": "Otonose Kanade / Sunflower Symphony",
+ "sings": false,
+ "universe": "5star-maxed-catalogue",
+ "universe_size": 66,
+ "pool": [
+  "card-00001-5-uniq-0000-00",
+  "card-00002-5-uniq-0001-00",
+  "card-00004-5-uniq-0005-00",
+  "card-00005-5-uniq-0006-00",
+  "card-00006-5-uniq-0007-00",
+  "card-00007-5-uniq-0008-00",
+  "card-00010-5-uniq-0010-00",
+  "card-00010-5-uniq-0069-00",
+  "card-00011-5-uniq-0011-00",
+  "card-00012-5-uniq-0012-00",
+  "card-00012-5-uniq-0062-00",
+  "card-00013-5-uniq-0002-00",
+  "card-00014-5-uniq-0013-00",
+  "card-00015-5-uniq-0003-00",
+  "card-00015-5-uniq-0067-00",
+  "card-00016-5-uniq-0014-00",
+  "card-00017-5-uniq-0015-00",
+  "card-00018-5-uniq-0004-00",
+  "card-00018-5-uniq-0068-00",
+  "card-00019-5-uniq-0016-00",
+  "card-00021-5-uniq-0017-00",
+  "card-00021-5-uniq-0064-00",
+  "card-00022-5-uniq-0018-00",
+  "card-00022-5-uniq-0063-00",
+  "card-00023-5-uniq-0019-00",
+  "card-00026-5-uniq-0021-00",
+  "card-00026-5-uniq-0065-00",
+  "card-00027-5-uniq-0022-00",
+  "card-00028-5-uniq-0023-00",
+  "card-00028-5-uniq-0070-00",
+  "card-00030-5-uniq-0024-00",
+  "card-00031-5-uniq-0025-00",
+  "card-00032-5-uniq-0026-00",
+  "card-00034-5-uniq-0027-00",
+  "card-00035-5-uniq-0028-00",
+  "card-00036-5-uniq-0029-00",
+  "card-00037-5-uniq-0030-00",
+  "card-00039-5-uniq-0032-00",
+  "card-03001-5-uniq-0033-00",
+  "card-03002-5-uniq-0034-00",
+  "card-03003-5-uniq-0035-00",
+  "card-03004-5-uniq-0036-00",
+  "card-03004-5-uniq-0073-00",
+  "card-03005-5-uniq-0037-00",
+  "card-03006-5-uniq-0038-00",
+  "card-03007-5-uniq-0039-00",
+  "card-03008-5-uniq-0040-00",
+  "card-03009-5-uniq-0041-00",
+  "card-04001-5-uniq-0042-00",
+  "card-04001-5-uniq-0071-00",
+  "card-04002-5-uniq-0043-00",
+  "card-04003-5-uniq-0044-00",
+  "card-04003-5-uniq-0072-00",
+  "card-04007-5-uniq-0047-00",
+  "card-04010-5-uniq-0049-00",
+  "card-04012-5-uniq-0051-00",
+  "card-04013-5-uniq-0052-00",
+  "card-04014-5-uniq-0053-00",
+  "card-04015-5-uniq-0054-00",
+  "card-04016-5-uniq-0055-00",
+  "card-04017-5-uniq-0056-00",
+  "card-06002-5-uniq-0058-00",
+  "card-06002-5-uniq-0066-00",
+  "card-06003-5-uniq-0059-00",
+  "card-06004-5-uniq-0060-00",
+  "card-06005-5-uniq-0061-00"
+ ],
+ "dominated": [],
+ "basis": "maxed",
+ "budget_kind": "flat",
+ "budget": 447,
+ "uptime_model": "finite",
+ "platform": "mobile",
+ "plan_cache_seed": {
+  "leader": "card-04001-5-uniq-0042-00",
+  "members": [
+   "card-04001-5-uniq-0042-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04003-5-uniq-0044-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00006-5-uniq-0007-00"
+  ]
+ },
+ "search": {
+  "kind": "branch-and-bound over 5-sets of distinct holomems, leader fixed, leader card may also be a member; DFS by depth-2 prefix per worker; children ordered by bound desc; every leaf bounded before scoring",
+  "bound": "hbuilder.solver.exact_row.RowBound (monotone relaxation of the leaf)",
+  "p_mode": "tier",
+  "order": "bound",
+  "workers": 12,
+  "prefixes_total": 2133,
+  "prefixes_done": 2133,
+  "row_deadline_seconds": 600.0
+ },
+ "heuristic": {
+  "kind": "1-swap best-improvement local search on the exact leaf from the table seed and from the leader's song-agnostic beam team; best of the two",
+  "starts": [
+   {
+    "from": "table_seed",
+    "idx": [
+     4,
+     5,
+     32,
+     48,
+     51
+    ],
+    "score": 2921958.0,
+    "local_opt": 2921958.0,
+    "passes": 1,
+    "rosters_scored": 298
+   },
+   {
+    "from": "beam_per_leader_best",
+    "idx": [
+     4,
+     5,
+     6,
+     9,
+     32
+    ],
+    "score": 2881708.0,
+    "local_opt": 2921958.0,
+    "passes": 3,
+    "rosters_scored": 892
+   }
+  ],
+  "seed_score": 2921958.0,
+  "score": 2921958.0,
+  "idx": [
+   4,
+   5,
+   32,
+   48,
+   51
+  ],
+  "ids": [
+   "card-00006-5-uniq-0007-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04001-5-uniq-0042-00",
+   "card-04003-5-uniq-0044-00"
+  ],
+  "rosters_scored": 1190,
+  "seconds": 1.105559000003268
+ },
+ "recall_loss_heuristic_vs_certified": 0.0,
+ "n_rosters": 8441052,
+ "leaves_evaluated": 735663,
+ "nodes_pruned": 983,
+ "leaves_pruned_by_internal_nodes": 9841,
+ "leaves_pruned_by_own_bound": 7695548,
+ "rosters_accounted": 8441052,
+ "rosters_accounted_equals_n": true,
+ "bound_evals": 9174996,
+ "seconds": 541.9564844999986,
+ "row_wall_seconds": 547.3997984000016,
+ "bound_build_seconds": 1.4662695000006352,
+ "upper_bound": 2921958.0,
+ "gap": 0.0,
+ "resume_state": null,
+ "best": {
+  "score": 2921958.0,
+  "idx": [
+   4,
+   5,
+   32,
+   48,
+   51
+  ],
+  "ids": [
+   "card-00006-5-uniq-0007-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04001-5-uniq-0042-00",
+   "card-04003-5-uniq-0044-00"
+  ],
+  "members": [
+   "Shirakami Fubuki / Golden Petal Dew",
+   "Natsuiro Matsuri / Sweet Deception",
+   "Shishiro Botan / WH Lion Vanguard",
+   "Mori Calliope / Poetic Death Waltz",
+   "Ninomae Ina'nis / Deep-Sea Kimono"
+  ],
+  "leader_also_member": false
+ },
+ "top": [
+  {
+   "score": 2921958.0,
+   "idx": [
+    4,
+    5,
+    32,
+    48,
+    51
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0042-00",
+    "card-04003-5-uniq-0044-00"
+   ]
+  },
+  {
+   "score": 2918407.0,
+   "idx": [
+    4,
+    5,
+    32,
+    49,
+    54
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0071-00",
+    "card-04010-5-uniq-0049-00"
+   ]
+  },
+  {
+   "score": 2916921.0,
+   "idx": [
+    4,
+    5,
+    32,
+    47,
+    48
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-03009-5-uniq-0041-00",
+    "card-04001-5-uniq-0042-00"
+   ]
+  },
+  {
+   "score": 2910714.0,
+   "idx": [
+    4,
+    5,
+    32,
+    49,
+    65
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0071-00",
+    "card-06005-5-uniq-0061-00"
+   ]
+  },
+  {
+   "score": 2909868.0,
+   "idx": [
+    4,
+    5,
+    6,
+    32,
+    48
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00010-5-uniq-0010-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0042-00"
+   ]
+  },
+  {
+   "score": 2907397.0,
+   "idx": [
+    4,
+    5,
+    31,
+    32,
+    49
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00031-5-uniq-0025-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0071-00"
+   ]
+  },
+  {
+   "score": 2905466.0,
+   "idx": [
+    4,
+    5,
+    32,
+    35,
+    49
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-00036-5-uniq-0029-00",
+    "card-04001-5-uniq-0071-00"
+   ]
+  },
+  {
+   "score": 2905427.0,
+   "idx": [
+    4,
+    5,
+    14,
+    32,
+    48
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00015-5-uniq-0067-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0042-00"
+   ]
+  },
+  {
+   "score": 2904405.0,
+   "idx": [
+    4,
+    5,
+    32,
+    48,
+    50
+   ],
+   "ids": [
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0042-00",
+    "card-04002-5-uniq-0043-00"
+   ]
+  },
+  {
+   "score": 2902498.0,
+   "idx": [
+    32,
+    48,
+    50,
+    63,
+    65
+   ],
+   "ids": [
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0042-00",
+    "card-04002-5-uniq-0043-00",
+    "card-06003-5-uniq-0059-00",
+    "card-06005-5-uniq-0061-00"
+   ]
+  }
+ ],
+ "inputs_hash": "30472eccdc82619480c81851b15302385ea9512ad9cc670f842218b8ff820d0b",
+ "inputs_hash_files": {
+  "cards": "98fd8133693a2816188dc7e5425a1cb103d4dce841733f1d08ca8a982e8af277",
+  "board": "2cc38f0667a5e915e7411f4f6060d29acbe428372d9f738b3ecf7b236d74c6cb",
+  "charts": "bdc9dc1c8b485ea8588d9fca7e778cc31bf71eecb4fdf06703f403a3b2b93c22",
+  "skilltree": "57245966f417632493a768db6684248f71cf533d8a1b0aa29a5779729dfeb29c",
+  "master_stn": "efbc636b23a619b4dd02d9adfaa8989e6bbfcf09f3fcae41d56fdcd7effe18c2",
+  "collection": "2a016c02efa56417e4c9e7511819d84098888bbeeaddc30a92e276c9404838c3",
+  "cfg": "fdf97614d6e90a393dc8ee2c19683aa62f7f30b0dc17e15deb5f1c65be767823"
+ },
+ "git": {
+  "head": "248f88cd6f42356f39bc74390da21680724bf059",
+  "dirty": false,
+  "status_porcelain": [],
+  "untracked": [
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/PHASE-6.md",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00002-5-uniq-0001-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00017-5-uniq-0015-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00018-5-uniq-0068-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_04002-5-uniq-0043-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_04012-5-uniq-0051-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_06002-5-uniq-0058-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/per_leader_m0334.log",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/per_leader_table_m0334.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/prefixes_m0334_00017-5-uniq-0015-00.jsonl",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/prefixes_m0334_06002-5-uniq-0058-00.jsonl",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader_m0334_stderr.log",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader_m0334_stdout.log"
+  ],
+  "diff_head_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+ },
+ "python": "3.13.7",
+ "written": "2026-08-18T17:22:29"
+}

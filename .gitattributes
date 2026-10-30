@@ -1,0 +1,2 @@
+# the Windows launchers keep CRLF line endings in every checkout and download
+*.cmd text eol=crlf

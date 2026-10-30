@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+import "entity/transaction/options/transaction.proto";
+
+package entity.transaction;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/transaction";
+option csharp_namespace = "Vision.Common.Proto.Transaction";
+
+message UserGachaButton {
+	string gacha_button_id = 2 [(options.transaction.pk) = true, (options.master.fk) = "GachaButton:id"];
+	int32 draw_count = 3;
+	int64 last_draw_time = 4;
+}

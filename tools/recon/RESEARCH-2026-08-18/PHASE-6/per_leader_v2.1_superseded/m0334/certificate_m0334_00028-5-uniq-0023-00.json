@@ -1,0 +1,433 @@
+{
+ "status": "BOUNDED",
+ "objective": "OBJECTIVE-v2 S(T, C): plan-cache fast leaf (cached_team_plan + board_model_from_plan(plan_cache) + score_song_detailed), Connect assignment exact, bench boards from board.json",
+ "model_version": "objective-v2.1",
+ "song": "m0334",
+ "chart_singers": [
+  "chr-04001"
+ ],
+ "singer_type": "solo",
+ "leader": "card-00028-5-uniq-0023-00",
+ "leader_name": "Himemori Luna / Sovereign Luna",
+ "sings": false,
+ "universe": "5star-maxed-catalogue",
+ "universe_size": 66,
+ "pool": [
+  "card-00001-5-uniq-0000-00",
+  "card-00002-5-uniq-0001-00",
+  "card-00004-5-uniq-0005-00",
+  "card-00005-5-uniq-0006-00",
+  "card-00006-5-uniq-0007-00",
+  "card-00007-5-uniq-0008-00",
+  "card-00010-5-uniq-0010-00",
+  "card-00010-5-uniq-0069-00",
+  "card-00011-5-uniq-0011-00",
+  "card-00012-5-uniq-0012-00",
+  "card-00012-5-uniq-0062-00",
+  "card-00013-5-uniq-0002-00",
+  "card-00014-5-uniq-0013-00",
+  "card-00015-5-uniq-0003-00",
+  "card-00015-5-uniq-0067-00",
+  "card-00016-5-uniq-0014-00",
+  "card-00017-5-uniq-0015-00",
+  "card-00018-5-uniq-0004-00",
+  "card-00018-5-uniq-0068-00",
+  "card-00019-5-uniq-0016-00",
+  "card-00021-5-uniq-0017-00",
+  "card-00021-5-uniq-0064-00",
+  "card-00022-5-uniq-0018-00",
+  "card-00022-5-uniq-0063-00",
+  "card-00023-5-uniq-0019-00",
+  "card-00026-5-uniq-0021-00",
+  "card-00026-5-uniq-0065-00",
+  "card-00027-5-uniq-0022-00",
+  "card-00028-5-uniq-0023-00",
+  "card-00028-5-uniq-0070-00",
+  "card-00030-5-uniq-0024-00",
+  "card-00031-5-uniq-0025-00",
+  "card-00032-5-uniq-0026-00",
+  "card-00034-5-uniq-0027-00",
+  "card-00035-5-uniq-0028-00",
+  "card-00036-5-uniq-0029-00",
+  "card-00037-5-uniq-0030-00",
+  "card-00039-5-uniq-0032-00",
+  "card-03001-5-uniq-0033-00",
+  "card-03002-5-uniq-0034-00",
+  "card-03003-5-uniq-0035-00",
+  "card-03004-5-uniq-0036-00",
+  "card-03004-5-uniq-0073-00",
+  "card-03005-5-uniq-0037-00",
+  "card-03006-5-uniq-0038-00",
+  "card-03007-5-uniq-0039-00",
+  "card-03008-5-uniq-0040-00",
+  "card-03009-5-uniq-0041-00",
+  "card-04001-5-uniq-0042-00",
+  "card-04001-5-uniq-0071-00",
+  "card-04002-5-uniq-0043-00",
+  "card-04003-5-uniq-0044-00",
+  "card-04003-5-uniq-0072-00",
+  "card-04007-5-uniq-0047-00",
+  "card-04010-5-uniq-0049-00",
+  "card-04012-5-uniq-0051-00",
+  "card-04013-5-uniq-0052-00",
+  "card-04014-5-uniq-0053-00",
+  "card-04015-5-uniq-0054-00",
+  "card-04016-5-uniq-0055-00",
+  "card-04017-5-uniq-0056-00",
+  "card-06002-5-uniq-0058-00",
+  "card-06002-5-uniq-0066-00",
+  "card-06003-5-uniq-0059-00",
+  "card-06004-5-uniq-0060-00",
+  "card-06005-5-uniq-0061-00"
+ ],
+ "dominated": [],
+ "basis": "maxed",
+ "budget_kind": "flat",
+ "budget": 447,
+ "uptime_model": "finite",
+ "platform": "mobile",
+ "plan_cache_seed": {
+  "leader": "card-04001-5-uniq-0042-00",
+  "members": [
+   "card-04001-5-uniq-0042-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04003-5-uniq-0044-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00006-5-uniq-0007-00"
+  ]
+ },
+ "search": {
+  "kind": "branch-and-bound over 5-sets of distinct holomems, leader fixed, leader card may also be a member; DFS by depth-2 prefix per worker; children ordered by bound desc; every leaf bounded before scoring",
+  "bound": "hbuilder.solver.exact_row.RowBound (monotone relaxation of the leaf)",
+  "p_mode": "tier",
+  "order": "bound",
+  "workers": 12,
+  "prefixes_total": 2133,
+  "prefixes_done": 538,
+  "row_deadline_seconds": 600.0
+ },
+ "heuristic": {
+  "kind": "1-swap best-improvement local search on the exact leaf from the table seed and from the leader's song-agnostic beam team; best of the two",
+  "starts": [
+   {
+    "from": "table_seed",
+    "idx": [
+     4,
+     5,
+     32,
+     48,
+     51
+    ],
+    "score": 2758088.0,
+    "local_opt": 2758088.0,
+    "passes": 1,
+    "rosters_scored": 298
+   },
+   {
+    "from": "beam_per_leader_best",
+    "idx": [
+     15,
+     17,
+     40,
+     46,
+     59
+    ],
+    "score": 2529536.0,
+    "local_opt": 2760963.0,
+    "passes": 6,
+    "rosters_scored": 1803
+   }
+  ],
+  "seed_score": 2758088.0,
+  "score": 2760963.0,
+  "idx": [
+   34,
+   35,
+   36,
+   49,
+   57
+  ],
+  "ids": [
+   "card-00035-5-uniq-0028-00",
+   "card-00036-5-uniq-0029-00",
+   "card-00037-5-uniq-0030-00",
+   "card-04001-5-uniq-0071-00",
+   "card-04014-5-uniq-0053-00"
+  ],
+  "rosters_scored": 2101,
+  "seconds": 1.6833819000021322
+ },
+ "recall_loss_heuristic_vs_certified": 0.0,
+ "n_rosters": 8441052,
+ "leaves_evaluated": 957759,
+ "nodes_pruned": 0,
+ "leaves_pruned_by_internal_nodes": 0,
+ "leaves_pruned_by_own_bound": 1221538,
+ "rosters_accounted": 2179297,
+ "rosters_accounted_equals_n": false,
+ "bound_evals": 2380617,
+ "seconds": 601.0664764999965,
+ "row_wall_seconds": 607.0646215000015,
+ "bound_build_seconds": 1.4798023000039393,
+ "upper_bound": 4261839.0,
+ "gap": 0.5436059809566445,
+ "resume_state": "tools\\recon\\RESEARCH-2026-08-18\\PHASE-6\\per_leader\\m0334\\prefixes_m0334_00028-5-uniq-0023-00.jsonl",
+ "best": {
+  "score": 2760963.0,
+  "idx": [
+   34,
+   35,
+   36,
+   49,
+   57
+  ],
+  "ids": [
+   "card-00035-5-uniq-0028-00",
+   "card-00036-5-uniq-0029-00",
+   "card-00037-5-uniq-0030-00",
+   "card-04001-5-uniq-0071-00",
+   "card-04014-5-uniq-0053-00"
+  ],
+  "members": [
+   "La+ Darknesss / Purple Supremacy",
+   "Takane Lui / The holoX officer",
+   "Hakui Koyori / Mystic Science Lab",
+   "Mori Calliope / Radiant Summer Heatwave",
+   "Koseki Bijou / Radiant Mana Gem"
+  ],
+  "leader_also_member": false
+ },
+ "top": [
+  {
+   "score": 2742805.0,
+   "idx": [
+    17,
+    34,
+    35,
+    36,
+    49
+   ],
+   "ids": [
+    "card-00018-5-uniq-0004-00",
+    "card-00035-5-uniq-0028-00",
+    "card-00036-5-uniq-0029-00",
+    "card-00037-5-uniq-0030-00",
+    "card-04001-5-uniq-0071-00"
+   ]
+  },
+  {
+   "score": 2742098.0,
+   "idx": [
+    22,
+    24,
+    32,
+    35,
+    49
+   ],
+   "ids": [
+    "card-00022-5-uniq-0018-00",
+    "card-00023-5-uniq-0019-00",
+    "card-00032-5-uniq-0026-00",
+    "card-00036-5-uniq-0029-00",
+    "card-04001-5-uniq-0071-00"
+   ]
+  },
+  {
+   "score": 2740181.0,
+   "idx": [
+    3,
+    5,
+    17,
+    35,
+    49
+   ],
+   "ids": [
+    "card-00005-5-uniq-0006-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00018-5-uniq-0004-00",
+    "card-00036-5-uniq-0029-00",
+    "card-04001-5-uniq-0071-00"
+   ]
+  },
+  {
+   "score": 2738001.0,
+   "idx": [
+    3,
+    5,
+    32,
+    35,
+    49
+   ],
+   "ids": [
+    "card-00005-5-uniq-0006-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-00036-5-uniq-0029-00",
+    "card-04001-5-uniq-0071-00"
+   ]
+  },
+  {
+   "score": 2736997.0,
+   "idx": [
+    21,
+    24,
+    32,
+    35,
+    49
+   ],
+   "ids": [
+    "card-00021-5-uniq-0064-00",
+    "card-00023-5-uniq-0019-00",
+    "card-00032-5-uniq-0026-00",
+    "card-00036-5-uniq-0029-00",
+    "card-04001-5-uniq-0071-00"
+   ]
+  },
+  {
+   "score": 2736294.0,
+   "idx": [
+    22,
+    24,
+    32,
+    49,
+    54
+   ],
+   "ids": [
+    "card-00022-5-uniq-0018-00",
+    "card-00023-5-uniq-0019-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0071-00",
+    "card-04010-5-uniq-0049-00"
+   ]
+  },
+  {
+   "score": 2730642.0,
+   "idx": [
+    3,
+    5,
+    35,
+    49,
+    57
+   ],
+   "ids": [
+    "card-00005-5-uniq-0006-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00036-5-uniq-0029-00",
+    "card-04001-5-uniq-0071-00",
+    "card-04014-5-uniq-0053-00"
+   ]
+  },
+  {
+   "score": 2730488.0,
+   "idx": [
+    21,
+    44,
+    49,
+    64,
+    65
+   ],
+   "ids": [
+    "card-00021-5-uniq-0064-00",
+    "card-03006-5-uniq-0038-00",
+    "card-04001-5-uniq-0071-00",
+    "card-06004-5-uniq-0060-00",
+    "card-06005-5-uniq-0061-00"
+   ]
+  },
+  {
+   "score": 2730444.0,
+   "idx": [
+    3,
+    5,
+    17,
+    49,
+    65
+   ],
+   "ids": [
+    "card-00005-5-uniq-0006-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00018-5-uniq-0004-00",
+    "card-04001-5-uniq-0071-00",
+    "card-06005-5-uniq-0061-00"
+   ]
+  },
+  {
+   "score": 2729933.0,
+   "idx": [
+    3,
+    5,
+    32,
+    49,
+    54
+   ],
+   "ids": [
+    "card-00005-5-uniq-0006-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0071-00",
+    "card-04010-5-uniq-0049-00"
+   ]
+  }
+ ],
+ "inputs_hash": "30472eccdc82619480c81851b15302385ea9512ad9cc670f842218b8ff820d0b",
+ "inputs_hash_files": {
+  "cards": "98fd8133693a2816188dc7e5425a1cb103d4dce841733f1d08ca8a982e8af277",
+  "board": "2cc38f0667a5e915e7411f4f6060d29acbe428372d9f738b3ecf7b236d74c6cb",
+  "charts": "bdc9dc1c8b485ea8588d9fca7e778cc31bf71eecb4fdf06703f403a3b2b93c22",
+  "skilltree": "57245966f417632493a768db6684248f71cf533d8a1b0aa29a5779729dfeb29c",
+  "master_stn": "efbc636b23a619b4dd02d9adfaa8989e6bbfcf09f3fcae41d56fdcd7effe18c2",
+  "collection": "2a016c02efa56417e4c9e7511819d84098888bbeeaddc30a92e276c9404838c3",
+  "cfg": "fdf97614d6e90a393dc8ee2c19683aa62f7f30b0dc17e15deb5f1c65be767823"
+ },
+ "git": {
+  "head": "72aafea7c7d71f290f6422d659586a7417edb25d",
+  "dirty": true,
+  "status_porcelain": [
+   "M src/hbuilder/domain/card.py",
+   " M src/hbuilder/domain/gates.py",
+   " M src/hbuilder/domain/scoring.py",
+   " M src/hbuilder/domain/song.py",
+   " M src/hbuilder/domain/team.py",
+   " M tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/per_leader_table_m0334.json",
+   " M tools/recon/proxy/dumps/account_snapshot_main.json",
+   " M tools/recon/proxy/dumps/board_state.json",
+   " M tools/recon/proxy/dumps/card_params.json",
+   " M tools/recon/proxy/dumps/inventory.json",
+   " M tools/web/server.py",
+   " M tools/web/static/app.js",
+   " M tools/web/static/ranking.js",
+   " M tools/web/static/style.css"
+  ],
+  "untracked": [
+   "tests/test_costume_support_rider.py",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00001-5-uniq-0000-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00005-5-uniq-0006-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00006-5-uniq-0007-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00007-5-uniq-0008-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00012-5-uniq-0012-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00016-5-uniq-0014-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00018-5-uniq-0004-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00021-5-uniq-0017-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00027-5-uniq-0022-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00028-5-uniq-0070-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00030-5-uniq-0024-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00031-5-uniq-0025-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_00039-5-uniq-0032-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_03001-5-uniq-0033-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_03002-5-uniq-0034-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_03003-5-uniq-0035-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_03005-5-uniq-0037-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_04003-5-uniq-0072-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_04013-5-uniq-0052-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_04017-5-uniq-0056-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_06003-5-uniq-0059-00.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/certificate_m0334_06005-5-uniq-0061-00.json",
+   "tools/web/seed_rosters.json",
+   "tools/web/seed_rosters.py",
+   "tools/web/test_seed_rosters.py"
+  ],
+  "diff_head_sha256": "f3d88fe0d8e9028f23269c0462dd6849d176763b50e5f21921c613e99928af4d"
+ },
+ "python": "3.13.7",
+ "written": "2026-08-18T21:10:33"
+}

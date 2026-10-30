@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+import "entity/transaction/options/transaction.proto";
+
+package entity.transaction;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/transaction";
+option csharp_namespace = "Vision.Common.Proto.Transaction";
+
+message UserMissionPassPoint {
+	string mission_pass_point_id = 2 [(options.transaction.pk) = true, (options.master.fk) = "MissionPassPoint:id"];
+	int64 quantity = 3;
+}

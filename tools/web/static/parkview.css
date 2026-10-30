@@ -1,0 +1,110 @@
+/* The Park page (/parkview), Night Deck (docs/redesign/IDENTITY.md). Shared tokens, .btn, .chip,
+   .dlg come from hb.css; everything here is page-only and prefixed .pv-. No legacy page classes.
+   Marker colours, all hb.css tokens: still out = --warn (the one thing to go and find), collected =
+   --ink-3, fixed chests = --blk (background), possible spots = --sky at low weight.
+   No decorative motion: the old rise-in and ping animations are gone (IDENTITY §7). */
+body.pv{ --out:var(--warn); --got:var(--ink-3); --chest:var(--blk); --cand:var(--sky); }
+
+/* header: the shared .pg band; "Still out" is the first stat tile, in the marker colour */
+.pv-head{display:flex;align-items:flex-start;gap:32px;justify-content:space-between}
+.pv-pgmain{min-width:0}
+.pg-stats .n.out{color:var(--out)}
+.pv-act{display:grid;justify-items:end;gap:8px;flex:none}
+.pv-reread.armed{background:var(--out);color:var(--ink-on-white)}
+.pv-reread[disabled]{cursor:progress}
+.pv-quiet{margin:14px 0 0;font:700 12px/1.4 var(--f-ui);color:var(--ink-2)}
+
+/* legend + optional layers: one flat line, no box */
+.pv-bar{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:22px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.pv-legend{display:flex;gap:18px;margin:0;padding:0;list-style:none;font:700 12px/1.3 var(--f-ui);color:var(--ink-2);margin-right:auto}
+.pv-legend li{display:inline-flex;align-items:center;gap:7px}
+.pv-legend li[hidden]{display:none}
+.pv-layers{display:flex;gap:8px}
+.pv-dot{width:12px;height:12px;border-radius:50%;display:inline-block}
+.pv-dot.out{background:var(--out);box-shadow:0 0 0 2px #fff}
+.pv-dot.got{background:transparent;box-shadow:inset 0 0 0 2px var(--got)}
+.pv-dot.chest{width:9px;height:9px;border-radius:2px;background:var(--chest)}
+.pv-dot.cand{width:7px;height:7px;background:var(--cand)}
+
+/* areas */
+/* auto-fit: the areas with symbols share the full row; flat blocks under a 1 px rule (no panels) */
+.pv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,480px),1fr));gap:28px 40px;margin-top:22px;align-items:start}
+.pv-area{padding-top:16px;border-top:1px solid var(--line);display:grid;gap:12px;min-width:0}
+.pv-area.has-out{border-top:3px solid var(--out);padding-top:14px}
+.pv-area header{display:flex;align-items:center;gap:10px;justify-content:space-between}
+.pv-area h2{font:800 20px/1.15 var(--f-ui);margin:0}
+.pv-pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 12px;border-radius:999px;font:800 12px/1 var(--f-ui);white-space:nowrap}
+.pv-pill.out{background:var(--out);color:var(--ink-on-white)}
+.pv-pill.out b{font-size:13.5px}
+.pv-pill.done{background:rgb(79 219 149 / .14);color:var(--good)}
+.pv-pill.none{background:rgb(255 255 255 / .05);color:var(--ink-3)}
+.pv-roll{display:flex;align-items:center;gap:7px;font:700 12px/1.3 var(--f-ui);color:var(--ink-3);flex-wrap:wrap}
+.pv-roll em{font-style:normal;font-weight:800;color:var(--warn);padding:2px 8px;border-radius:999px;background:rgb(255 187 84 / .12)}
+.pv-roll.stale{color:var(--warn)}
+.pv-mapbtn{position:relative;display:grid;place-items:center;width:100%;aspect-ratio:4 / 3;border-radius:var(--r-art);overflow:hidden;cursor:zoom-in;background:var(--sheet)}
+.pv-mapbtn:hover .pv-map{box-shadow:inset 0 0 0 2px var(--line-2)}
+.pv-exp{position:absolute;right:10px;top:10px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--deep);
+  color:var(--ink);opacity:0;transition:opacity .15s}
+.pv-mapbtn:hover .pv-exp,.pv-mapbtn:focus-visible .pv-exp{opacity:1}
+.pv-map{position:relative;width:100%;background:var(--sheet-2);border-radius:var(--r-art);overflow:hidden}
+.pv-map.wide{width:100%;height:auto}
+.pv-map.tall{height:100%;width:auto}
+.pv-map img{width:100%;height:100%;object-fit:fill;filter:brightness(.8)}
+.pv-mk{position:absolute;transform:translate(-50%,-50%);border-radius:50%;pointer-events:auto}
+.pv-mk.out{width:22px;height:22px;background:var(--out);box-shadow:0 0 0 2px #fff,0 0 0 4px rgb(20 19 42 / .7);display:grid;place-items:center;z-index:3}
+.pv-mk b{font:800 11px/1 var(--f-num);color:var(--ink-on-white)}
+.pv-mk.got{width:16px;height:16px;background:rgb(20 19 42 / .7);box-shadow:inset 0 0 0 2px var(--got);z-index:2;display:grid;place-items:center}
+.pv-mk.got b{color:var(--ink-2);font-size:11px}
+.pv-mk.chest{width:8px;height:8px;border-radius:2px;background:var(--chest);opacity:.7;z-index:1}
+.pv-mk.chest.open-no{background:var(--ink);opacity:1;box-shadow:0 0 0 2px rgb(20 19 42 / .7)}
+.pv-mk.cand{width:6px;height:6px;background:var(--cand);opacity:.6;z-index:1}
+.pv-map.big .pv-mk.out{width:30px;height:30px}
+.pv-map.big .pv-mk b{font-size:13.5px}
+.pv-map.big .pv-mk.got{width:22px;height:22px}
+.pv-map.big .pv-mk.got b{font-size:11px}
+.pv-map.big .pv-mk.chest{width:11px;height:11px}
+.pv-map.big .pv-mk.cand{width:8px;height:8px}
+.pv-list{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:4px 18px}
+.pv-list li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line);
+  font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
+.pv-list li i{font:800 11px/20px var(--f-num);font-style:normal;text-align:center;border-radius:50%;width:20px;height:20px;background:var(--sheet-3);color:var(--ink-2)}
+.pv-list li.out i{background:var(--out);color:var(--ink-on-white)}
+.pv-list li span{color:var(--ink-3)}
+.pv-list li.out span{color:var(--out);font-weight:800}
+.pv-warn{display:flex;gap:8px;align-items:center;margin:0;font:700 12px/1.4 var(--f-ui);color:var(--warn)}
+.pv-error{margin-top:22px;padding:16px 18px;border-radius:var(--r-row);border:1px solid rgb(255 107 139 / .45);background:rgb(255 107 139 / .08)}
+.pv-error pre{margin:10px 0 0;font:700 12px/1.5 var(--f-ui);color:var(--ink-2);white-space:pre-wrap}
+
+/* chests: the game's own map icon (img_park_map_icon_treasure). A closed one sits on a dark
+   disc so it reads on any map; an opened one (optional layer) is small, grey and faded */
+.pv-chest{position:absolute;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;display:grid;place-items:center;
+  background:rgb(20 19 42 / .78);box-shadow:0 0 0 2px var(--warn);z-index:2}
+.pv-chest img{width:22px;height:22px}
+.pv-chest b{position:absolute;right:-9px;top:-9px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;display:grid;place-items:center;
+  font:800 10.5px/1 var(--f-num);background:var(--warn);color:var(--ink-on-white)}
+.pv-chest.opened{width:16px;height:16px;background:rgb(20 19 42 / .55);box-shadow:inset 0 0 0 1px var(--line-2);z-index:1}
+.pv-chest.opened img{width:13px;height:13px;filter:grayscale(1);opacity:.55}
+.pv-map.big .pv-chest{width:34px;height:34px}
+.pv-map.big .pv-chest img{width:28px;height:28px}
+.pv-map.big .pv-chest.opened{width:20px;height:20px}
+.pv-map.big .pv-chest.opened img{width:16px;height:16px}
+.pv-pills{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.pv-pill.chest{background:rgb(255 187 84 / .14);color:var(--warn)}
+.pv-pill.chest img{width:18px;height:18px;margin-left:-4px}
+.pv-li-chest{width:18px;height:18px}
+.pv-li-chest.opened{filter:grayscale(1);opacity:.55;width:14px;height:14px}
+.pv-chests{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
+.pv-chests .lbl{color:var(--ink-3);margin-right:4px}
+.pv-ct{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 9px 0 4px;border-radius:999px;background:rgb(255 187 84 / .1);color:var(--warn);font:800 12px/1 var(--f-num)}
+.pv-ct img{width:18px;height:18px}
+.pv-cof{margin-left:auto;color:var(--ink-3)}
+
+/* the larger map: the game's dialog */
+dialog.pv-zoom:not([open]){display:none !important}
+.pv-zoom{padding:0;color:var(--ink);width:min(1100px,92vw);max-height:calc(100dvh - 40px);display:flex;flex-direction:column;border:1px solid var(--line-2)}
+.pv-zoom::backdrop{background:rgb(8 7 20 / .72)}
+.pv-zsub{font:700 12px/1.3 var(--f-ui);color:var(--ink-3)}
+.pv-x{margin-left:auto;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:var(--ink-2);background:rgb(255 255 255 / .06)}
+.pv-x:hover{background:rgb(255 255 255 / .12);color:var(--ink)}
+.pv-zbody{padding:18px;overflow:auto;min-height:0;display:grid;justify-items:center}
+.pv-zbody .pv-map{height:calc(100dvh - 150px);width:auto;max-width:100%}

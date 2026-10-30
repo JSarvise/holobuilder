@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Optimizer · hololive builder</title>
+<link rel="stylesheet" href="/hb-card.css">
+<link rel="stylesheet" href="/hb.css">
+<link rel="stylesheet" href="/holoboard.css">
+<link rel="stylesheet" href="/optimizer.css">
+<!-- the leader's Live2D figure (hb-live2d.js): the engine imports the bare name "pixi.js";
+     the search's runner chibi (hb-runner.js): three.js's GLTFLoader imports the bare name "three" -->
+<script type="importmap">{"imports":{"pixi.js":"https://cdn.jsdelivr.net/npm/pixi.js@8.22.0/dist/pixi.min.mjs","three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<script src="/hb-format.js"></script>
+<script src="/hb-gens.js"></script>
+<script src="/hb-card.js"></script>
+</head>
+<body class="opt">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.8v14.4a1 1 0 0 0 1.5.9l11.3-7.2a1 1 0 0 0 0-1.7L8.5 3.9A1 1 0 0 0 7 4.8z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.3-4.3"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 7h11l-3-3M17 17H6l3 3"/></symbol>
+  <symbol id="i-shirt" viewBox="0 0 24 24"><path d="M9 4l3 2 3-2 5 3-2 4-2-1v10H8V10l-2 1-2-4z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4.5M12 17.3v.2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.2"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.6 5.5 3.6 8.5s-1.1 5.9-3.6 8.5c-2.5-2.6-3.6-5.5-3.6-8.5s1.1-5.9 3.6-8.5z"/></symbol>
+</svg>
+
+<div class="app">
+  <nav class="rail" data-page="optimizer"></nav>
+
+  <main>
+    <header class="o-top" aria-labelledby="songtitle">
+      <img class="blur" id="blur" alt="" aria-hidden="true" hidden>
+      <div class="o-song">
+        <button class="o-jacket" id="jacket" type="button" aria-label="Change song">
+          <span id="jacketart"></span>
+        </button>
+        <div class="o-title">
+          <h1 id="songtitle">Loading…</h1>
+          <p class="o-singer" id="singer"></p>
+        </div>
+        <div class="o-ctl" role="group" aria-label="Search">
+          <!-- the options sheet, where people look for it (a summary pill under the header
+               does not read as something to click) -->
+          <button class="btn o-opts" id="moreopts" type="button" aria-haspopup="dialog" aria-controls="more"><svg class="i s"><use href="#i-sliders"/></svg>Options<span class="o-count" id="optcount" hidden></span></button>
+          <div class="seg" id="goal" role="group" aria-label="Goal">
+            <button type="button" data-v="score" aria-pressed="true">Score</button>
+            <button type="button" data-v="event" aria-pressed="false">Event</button>
+          </div>
+          <div class="seg" id="difficulty" role="group" aria-label="Difficulty"></div>
+        </div>
+        <div class="o-actions">
+          <button class="btn" id="change" type="button">Change song</button>
+          <button class="btn primary btn-lg" id="play" type="button"><span id="playlabel">Find best team</span></button>
+        </div>
+      </div>
+    </header>
+
+    <div class="wrap">
+      <div class="o-bar" id="fresh"></div>
+      <div id="out" aria-live="polite"></div>
+    </div>
+  </main>
+</div>
+
+<!-- More options -->
+<dialog class="o-sheet" id="more" aria-labelledby="mtitle">
+  <header>
+    <div><h3 id="mtitle">More options</h3><p>Applied to the next search.</p></div>
+    <button class="o-x" type="button" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </header>
+  <div class="o-body">
+    <!-- the order follows the community tool holodori.best's optimizer: what to optimise, cards, boards, song,
+         leader, pinned cards, search. A group without data-goal applies to every goal. -->
+    <div class="o-group" data-goal="event">
+      <h4>Event</h4>
+      <div class="o-sel"><span>Rank by</span>
+        <div class="seg" id="evgoal" role="group" aria-label="Rank event teams by">
+          <button type="button" data-v="event_points" aria-pressed="true">Event Points</button>
+          <button type="button" data-v="event_song" aria-pressed="false">Event Song Score</button>
+        </div></div>
+      <div class="o-two">
+        <div class="o-sel"><span>Live Boost</span>
+          <div class="stepper"><select id="boosts" aria-label="Live Boost"></select><em id="boostx"></em></div></div>
+        <div class="o-sel" data-goal="event_points"><span>HoloPass</span>
+          <div class="seg" id="holopass" role="group" aria-label="HoloPass">
+            <button type="button" data-v="1" aria-pressed="true">On</button>
+            <button type="button" data-v="0" aria-pressed="false">Off</button>
+          </div></div>
+      </div>
+      <p class="o-muted">The leader adds no Event Bonus: it counts the five members only.</p>
+    </div>
+    <div class="o-group">
+      <h4>Cards</h4>
+      <div class="o-sel"><span>Which cards</span>
+        <div class="seg" id="cards" role="group" aria-label="Cards">
+          <button type="button" data-v="asis" aria-pressed="true" title="Your cards at their real level, bloom and SP training">My cards</button>
+          <button type="button" data-v="whatif" aria-pressed="false" title="Your cards at a level, bloom or SP training you choose">My cards, upgraded</button>
+          <button type="button" data-v="maxed" aria-pressed="false" title="Your account maxed: every card in the game at max level and bloom, every holomem at max level, complete Holomem Boards, no material limit (Score and Event)">Maxed account</button>
+        </div></div>
+      <p class="o-muted" id="scenario" hidden></p>
+      <div id="assumerow">
+        <div class="o-three">
+          <label class="o-sel"><span>Level</span><select id="alevel">
+            <option value="account">Real</option><option>20</option><option>30</option><option>40</option><option>50</option><option>60</option><option>70</option><option value="max">Max</option></select></label>
+          <label class="o-sel"><span>Bloom</span><select id="abloom">
+            <option value="account">Real</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+          <label class="o-sel"><span>SP training</span><select id="aspt" title="The limit break: each card's level cap by rarity">
+            <option value="account">Real</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+        </div>
+        <label class="o-toggle" id="keeprow"><span><b>Do not lower cards</b><small>A card already above the chosen level, bloom or SP training keeps its own.</small></span><input class="o-switch" id="keephigher" type="checkbox"></label>
+      </div>
+      <div class="o-two">
+        <div class="o-sel" data-goal="score"><span>Card pool</span>
+          <div class="seg" id="pool" role="group" aria-label="Card pool">
+            <button type="button" data-v="all" aria-pressed="true">All</button>
+            <button type="button" data-v="5star" aria-pressed="false">5★ only</button>
+          </div></div>
+        <div class="o-sel"><span>Platform</span>
+          <div class="seg" id="platform" role="group" aria-label="Platform">
+            <button type="button" data-v="mobile" aria-pressed="true">Mobile</button>
+            <button type="button" data-v="pc" aria-pressed="false">PC</button>
+          </div></div>
+      </div>
+    </div>
+    <div class="o-group" id="boardgroup">
+      <h4>Holomem Boards</h4>
+      <label class="o-toggle"><span><b>Optimize Holomem Boards</b><small>On: every team's boards are planned for it, within the options below. Off: every team plays on your boards as they are now (bought nodes and socketed cards); nothing is planned.</small></span><input class="o-switch" id="optboards" type="checkbox" checked></label>
+      <div id="planrows">
+        <label class="o-toggle"><span><b>Max Holomem Board Pt</b><small>Every holomem at level 50, 361 Pt each.</small></span><input class="o-switch" id="maxpoints" type="checkbox"></label>
+        <label class="o-toggle"><span><b>Every holomem invited</b><small>A holomem you have not invited plans at max level.</small></span><input class="o-switch" id="allinvited" type="checkbox"></label>
+        <label class="o-toggle"><span><b>Unlimited Cubes and Hexas</b><small>Ignore cubes and hexas (the other holomems' spare points go to green too). Off: the best teams are re-planned within your cubes and hexas.</small></span><input class="o-switch" id="infmats" type="checkbox"></label>
+        <label class="o-toggle" id="refundrow"><span><b>Don't refund resets</b><small>A reset returns no cubes or hexas.</small></span><input class="o-switch" id="norefund" type="checkbox"></label>
+        <label class="o-sel" id="resetrow"><span>Resets allowed (1,000 Hologold each)</span><select id="maxresets">
+          <option value="-1">No limit</option><option>0</option><option>5</option><option>10</option><option>20</option><option>50</option></select></label>
+        <label class="o-sel" id="resetgainrow" title="Removing a node you own (a reset) costs 1,000 Hologold, and the node is lost for every other song and team. With this set, a node is reset only when what it frees raises this team's score by at least this much. Example: 0.05 % on a 2.4M team means about 1,200 points per node reset. Nothing = reset whenever it gains even 1 point."><span>Minimum gain per reset <svg class="i s o-help" aria-hidden="true"><use href="#i-info"/></svg></span><select id="resetgain" aria-label="Minimum gain per reset">
+          <option value="0">Nothing (resets are free)</option><option value="0.01">0.01 % of the score</option><option value="0.05">0.05 % of the score</option><option value="0.2">0.2 % of the score</option></select></label>
+        <div class="o-sel"><span>Branches the plan may change</span>
+          <div class="seg" id="branches" role="group" aria-label="Branches the plan may change">
+            <button type="button" data-b="G" aria-pressed="true">Green</button>
+            <button type="button" data-b="B" aria-pressed="true">Blue</button>
+            <button type="button" data-b="R" aria-pressed="true">Red</button>
+            <button type="button" data-b="Y" aria-pressed="true">Yellow</button>
+          </div></div>
+        <div class="o-sel"><span>Secondary targets</span>
+          <button type="button" class="btn" id="tgopen">Choose on the board</button>
+          <div class="o-pins" id="tglist"></div></div>
+      </div>
+    </div>
+    <div class="o-group" data-goal="score" id="lvgroup">
+      <h4>Song: in general</h4>
+      <div class="o-sel"><span>Charts averaged</span>
+        <div class="seg" id="lvmode" role="group" aria-label="Charts averaged">
+          <button type="button" data-v="expert" aria-pressed="true">Every chart at the chosen difficulty</button>
+          <button type="button" data-v="range" aria-pressed="false">A level range, any difficulty</button>
+        </div></div>
+      <div class="o-two" id="lvrow">
+        <label class="o-sel"><span>From level</span><input type="number" id="lvlo" min="1" max="40"></label>
+        <label class="o-sel"><span>To level</span><input type="number" id="lvhi" min="1" max="40"></label>
+      </div>
+    </div>
+    <div class="o-group">
+      <h4>Leader</h4>
+      <label class="o-sel"><span>Holomem</span><select id="lmember"><option value="">Any holomem</option></select></label>
+      <label class="o-sel"><span>Outfit</span><select id="loutfit" disabled><option value="">The best outfit she has</option></select></label>
+      <label class="o-toggle"><span><b>No leader overlap</b><small>No member card of the leader’s own holomem.</small></span><input class="o-switch" id="nooverlap" type="checkbox"></label>
+    </div>
+    <div class="o-group">
+      <h4>Pinned cards</h4>
+      <div class="o-sel"><span>Must include</span><div class="o-pins" id="pin-require"></div></div>
+      <div class="o-sel"><span>Ban</span><div class="o-pins" id="pin-exclude"></div></div>
+      <datalist id="cardlist"></datalist>
+    </div>
+    <div class="o-group">
+      <h4>Search</h4>
+      <div class="o-sel" data-goal="score"><span>Sort by</span>
+        <div class="seg" id="sort" role="group" aria-label="Sort by">
+          <button type="button" data-v="avg" aria-pressed="true">Expected</button>
+          <button type="button" data-v="max" aria-pressed="false">Max</button>
+        </div></div>
+      <div class="o-sel" data-goal="score"><span>Teams to show</span>
+        <div class="seg" id="top" role="group" aria-label="Teams to show">
+          <button type="button" data-v="3" aria-pressed="false">3</button>
+          <button type="button" data-v="5" aria-pressed="true">5</button>
+          <button type="button" data-v="10" aria-pressed="false">10</button>
+          <button type="button" data-v="20" aria-pressed="false">20</button>
+        </div></div>
+      <div class="o-sel" data-goal="event"><span>Teams to show</span>
+        <div class="seg" id="evtop" role="group" aria-label="Teams to show">
+          <button type="button" data-v="5" aria-pressed="true">5</button>
+          <button type="button" data-v="10" aria-pressed="false">10</button>
+          <button type="button" data-v="20" aria-pressed="false">20</button>
+        </div></div>
+      <label class="o-toggle"><span><b>Score for AUTO</b><small>Rank teams for auto play: notes score like a GREAT and combo-gated skills stay at their base value.</small></span><input class="o-switch" id="auto" type="checkbox"></label>
+      <label class="o-toggle" data-goal="score"><span><b>Exhaustive search</b><small>Slower; checks every combination in the first stage.</small></span><input class="o-switch" id="exact" type="checkbox"></label>
+    </div>
+    <div class="o-group">
+      <h4>Your account</h4>
+      <dl class="o-acct" id="acct"></dl>
+    </div>
+  </div>
+  <footer><button class="o-btn" type="button" data-close>Done</button></footer>
+</dialog>
+
+<!-- Secondary targets, picked on the holomem's board -->
+<dialog class="o-tgb" id="tgboard" aria-labelledby="tgbtitle">
+  <header>
+    <div><h3 id="tgbtitle">Secondary targets</h3><p>Click a node to mark it. Click it again to clear it.</p></div>
+    <label class="o-sel"><span>Holomem</span><select id="tgbchr" aria-label="Holomem"></select></label>
+    <div class="o-sel"><span>A click marks</span>
+      <div class="seg" id="tgbmode" role="group" aria-label="A click marks">
+        <button type="button" data-v="buy" aria-pressed="true">Buy if possible</button>
+        <button type="button" data-v="keep" aria-pressed="false">Keep only</button>
+      </div></div>
+    <button class="o-x" type="button" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </header>
+  <div class="o-tgb-body">
+    <div class="o-tgb-board" id="tgbcanvas"></div>
+    <aside class="o-tgb-side">
+      <div id="tgbinfo" class="o-tgb-info"></div>
+      <div class="o-tgb-legend">
+        <span><i class="lg own"></i>Owned now</span>
+        <span><i class="lg buy"></i>Buy if possible</span>
+        <span><i class="lg keep"></i>Keep only: never bought, kept if owned</span>
+        <span><i class="lg off"></i>Branch the plan may not change</span>
+      </div>
+      <div id="tgbmine" class="o-pins"></div>
+    </aside>
+  </div>
+  <footer><button class="o-btn" type="button" data-close>Done</button></footer>
+</dialog>
+
+<!-- Song picker -->
+<dialog class="o-picker sp-dialog" id="picker" aria-label="Choose a song"></dialog>
+<div class="o-pop" id="pop" role="dialog" hidden></div>
+<div class="o-tip" id="tip" role="tooltip" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/hb-shell.js"></script>
+<script src="/hb-combo.js"></script>
+<script type="module" src="/opt-app.js"></script>
+</body>
+</html>

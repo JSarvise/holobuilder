@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+import "entity/master/options/master.proto";
+import "enums/park_notice_type.gen.proto";
+
+package entity.master;
+
+option go_package = "github.com/qua-vision/vision-server/pkg/pb/master";
+option csharp_namespace = "Vision.Common.Proto.Master";
+
+message ParkNotice {
+	option (options.master.table) = true;
+
+	.enums.ParkNoticeType type = 1 [(options.master.pk) = true];
+	string target_id = 2 [(options.master.pk) = true, (options.master.optional) = true];
+	int32 order = 999;
+}

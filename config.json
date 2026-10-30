@@ -1,0 +1,32 @@
+{
+  "schema_version": "1",
+  "probability_tiers": {
+    "Low": 0.37,
+    "Medium": 0.46,
+    "High": 0.55
+  },
+  "family_weights": {
+    "score_support": 1.0,
+    "conditional_score_up": 1.0,
+    "stat_up": 1.0,
+    "activation_rate_up": 0.0,
+    "life_recovery": 0.0,
+    "judgment_enhancement": 0.0
+  },
+  "special": {
+    "expected_fires_per_run": 1.0
+  },
+  "model": {
+    "stacking": "additive",
+    "activation_rate": "multiplicative",
+    "active_uptime": "steady"
+  },
+  "target_selection": {
+    "strategy": "top_n_by_stat",
+    "under_supply": "apply_to_available"
+  },
+  "assumed_run_state": {
+    "life": 1000,
+    "combo": 100
+  }
+}

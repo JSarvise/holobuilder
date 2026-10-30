@@ -1,0 +1,464 @@
+{
+ "status": "EXACT",
+ "objective": "OBJECTIVE-v2 S(T, C): plan-cache fast leaf (cached_team_plan + board_model_from_plan(plan_cache) + score_song_detailed), Connect assignment exact, bench boards from board.json",
+ "model_version": "objective-v2.1",
+ "song": "m0334",
+ "chart_singers": [
+  "chr-04001"
+ ],
+ "singer_type": "solo",
+ "leader": "card-00018-5-uniq-0068-00",
+ "leader_name": "Hoshimachi Suisei / Melody of the Tides",
+ "sings": false,
+ "universe": "5star-maxed-catalogue",
+ "universe_size": 66,
+ "pool": [
+  "card-00001-5-uniq-0000-00",
+  "card-00002-5-uniq-0001-00",
+  "card-00004-5-uniq-0005-00",
+  "card-00005-5-uniq-0006-00",
+  "card-00006-5-uniq-0007-00",
+  "card-00007-5-uniq-0008-00",
+  "card-00010-5-uniq-0010-00",
+  "card-00010-5-uniq-0069-00",
+  "card-00011-5-uniq-0011-00",
+  "card-00012-5-uniq-0012-00",
+  "card-00012-5-uniq-0062-00",
+  "card-00013-5-uniq-0002-00",
+  "card-00014-5-uniq-0013-00",
+  "card-00015-5-uniq-0003-00",
+  "card-00015-5-uniq-0067-00",
+  "card-00016-5-uniq-0014-00",
+  "card-00017-5-uniq-0015-00",
+  "card-00018-5-uniq-0004-00",
+  "card-00018-5-uniq-0068-00",
+  "card-00019-5-uniq-0016-00",
+  "card-00021-5-uniq-0017-00",
+  "card-00021-5-uniq-0064-00",
+  "card-00022-5-uniq-0018-00",
+  "card-00022-5-uniq-0063-00",
+  "card-00023-5-uniq-0019-00",
+  "card-00026-5-uniq-0021-00",
+  "card-00026-5-uniq-0065-00",
+  "card-00027-5-uniq-0022-00",
+  "card-00028-5-uniq-0023-00",
+  "card-00028-5-uniq-0070-00",
+  "card-00030-5-uniq-0024-00",
+  "card-00031-5-uniq-0025-00",
+  "card-00032-5-uniq-0026-00",
+  "card-00034-5-uniq-0027-00",
+  "card-00035-5-uniq-0028-00",
+  "card-00036-5-uniq-0029-00",
+  "card-00037-5-uniq-0030-00",
+  "card-00039-5-uniq-0032-00",
+  "card-03001-5-uniq-0033-00",
+  "card-03002-5-uniq-0034-00",
+  "card-03003-5-uniq-0035-00",
+  "card-03004-5-uniq-0036-00",
+  "card-03004-5-uniq-0073-00",
+  "card-03005-5-uniq-0037-00",
+  "card-03006-5-uniq-0038-00",
+  "card-03007-5-uniq-0039-00",
+  "card-03008-5-uniq-0040-00",
+  "card-03009-5-uniq-0041-00",
+  "card-04001-5-uniq-0042-00",
+  "card-04001-5-uniq-0071-00",
+  "card-04002-5-uniq-0043-00",
+  "card-04003-5-uniq-0044-00",
+  "card-04003-5-uniq-0072-00",
+  "card-04007-5-uniq-0047-00",
+  "card-04010-5-uniq-0049-00",
+  "card-04012-5-uniq-0051-00",
+  "card-04013-5-uniq-0052-00",
+  "card-04014-5-uniq-0053-00",
+  "card-04015-5-uniq-0054-00",
+  "card-04016-5-uniq-0055-00",
+  "card-04017-5-uniq-0056-00",
+  "card-06002-5-uniq-0058-00",
+  "card-06002-5-uniq-0066-00",
+  "card-06003-5-uniq-0059-00",
+  "card-06004-5-uniq-0060-00",
+  "card-06005-5-uniq-0061-00"
+ ],
+ "dominated": [],
+ "basis": "maxed",
+ "budget_kind": "flat",
+ "budget": 447,
+ "uptime_model": "finite",
+ "platform": "mobile",
+ "plan_cache_seed": {
+  "leader": "card-04001-5-uniq-0042-00",
+  "members": [
+   "card-04001-5-uniq-0042-00",
+   "card-00032-5-uniq-0026-00",
+   "card-04003-5-uniq-0044-00",
+   "card-00007-5-uniq-0008-00",
+   "card-00006-5-uniq-0007-00"
+  ]
+ },
+ "search": {
+  "kind": "branch-and-bound over 5-sets of distinct holomems, leader fixed, leader card may also be a member; DFS by depth-2 prefix per worker; children ordered by bound desc; every leaf bounded before scoring",
+  "bound": "hbuilder.solver.exact_row.RowBound (monotone relaxation of the leaf)",
+  "p_mode": "tier",
+  "order": "bound",
+  "workers": 12,
+  "prefixes_total": 2133,
+  "prefixes_done": 2133,
+  "row_deadline_seconds": 600.0
+ },
+ "heuristic": {
+  "kind": "1-swap best-improvement local search on the exact leaf from the table seed and from the leader's song-agnostic beam team; best of the two",
+  "starts": [
+   {
+    "from": "table_seed",
+    "idx": [
+     4,
+     5,
+     32,
+     48,
+     51
+    ],
+    "score": 2325983.0,
+    "local_opt": 2325983.0,
+    "passes": 1,
+    "rosters_scored": 298
+   },
+   {
+    "from": "beam_per_leader_best",
+    "idx": [
+     11,
+     18,
+     36,
+     61,
+     64
+    ],
+    "score": 2697187.0,
+    "local_opt": 2873328.0,
+    "passes": 2,
+    "rosters_scored": 591
+   }
+  ],
+  "seed_score": 2325983.0,
+  "score": 2873328.0,
+  "idx": [
+   11,
+   18,
+   49,
+   61,
+   64
+  ],
+  "ids": [
+   "card-00013-5-uniq-0002-00",
+   "card-00018-5-uniq-0068-00",
+   "card-04001-5-uniq-0071-00",
+   "card-06002-5-uniq-0058-00",
+   "card-06004-5-uniq-0060-00"
+  ],
+  "rosters_scored": 889,
+  "seconds": 0.9621799000015017
+ },
+ "recall_loss_heuristic_vs_certified": 0.0,
+ "n_rosters": 8441052,
+ "leaves_evaluated": 220513,
+ "nodes_pruned": 90,
+ "leaves_pruned_by_internal_nodes": 794,
+ "leaves_pruned_by_own_bound": 8219745,
+ "rosters_accounted": 8441052,
+ "rosters_accounted_equals_n": true,
+ "bound_evals": 9184043,
+ "seconds": 299.34259140001086,
+ "row_wall_seconds": 304.7172894000105,
+ "bound_build_seconds": 1.470631100004539,
+ "upper_bound": 2873328.0,
+ "gap": 0.0,
+ "resume_state": null,
+ "best": {
+  "score": 2873328.0,
+  "idx": [
+   11,
+   18,
+   49,
+   61,
+   64
+  ],
+  "ids": [
+   "card-00013-5-uniq-0002-00",
+   "card-00018-5-uniq-0068-00",
+   "card-04001-5-uniq-0071-00",
+   "card-06002-5-uniq-0058-00",
+   "card-06004-5-uniq-0060-00"
+  ],
+  "members": [
+   "AZKi / Graceful Scent",
+   "Hoshimachi Suisei / Melody of the Tides",
+   "Mori Calliope / Radiant Summer Heatwave",
+   "Otonose Kanade / Girly Distortion",
+   "Juufuutei Raden / Vintage Romantic"
+  ],
+  "leader_also_member": true
+ },
+ "top": [
+  {
+   "score": 2873328.0,
+   "idx": [
+    11,
+    18,
+    49,
+    61,
+    64
+   ],
+   "ids": [
+    "card-00013-5-uniq-0002-00",
+    "card-00018-5-uniq-0068-00",
+    "card-04001-5-uniq-0071-00",
+    "card-06002-5-uniq-0058-00",
+    "card-06004-5-uniq-0060-00"
+   ]
+  },
+  {
+   "score": 2837553.0,
+   "idx": [
+    11,
+    18,
+    32,
+    49,
+    64
+   ],
+   "ids": [
+    "card-00013-5-uniq-0002-00",
+    "card-00018-5-uniq-0068-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0071-00",
+    "card-06004-5-uniq-0060-00"
+   ]
+  },
+  {
+   "score": 2835746.0,
+   "idx": [
+    11,
+    18,
+    49,
+    57,
+    64
+   ],
+   "ids": [
+    "card-00013-5-uniq-0002-00",
+    "card-00018-5-uniq-0068-00",
+    "card-04001-5-uniq-0071-00",
+    "card-04014-5-uniq-0053-00",
+    "card-06004-5-uniq-0060-00"
+   ]
+  },
+  {
+   "score": 2832543.0,
+   "idx": [
+    11,
+    18,
+    49,
+    64,
+    65
+   ],
+   "ids": [
+    "card-00013-5-uniq-0002-00",
+    "card-00018-5-uniq-0068-00",
+    "card-04001-5-uniq-0071-00",
+    "card-06004-5-uniq-0060-00",
+    "card-06005-5-uniq-0061-00"
+   ]
+  },
+  {
+   "score": 2821054.0,
+   "idx": [
+    11,
+    13,
+    18,
+    32,
+    49
+   ],
+   "ids": [
+    "card-00013-5-uniq-0002-00",
+    "card-00015-5-uniq-0003-00",
+    "card-00018-5-uniq-0068-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0071-00"
+   ]
+  },
+  {
+   "score": 2820305.0,
+   "idx": [
+    11,
+    18,
+    49,
+    54,
+    57
+   ],
+   "ids": [
+    "card-00013-5-uniq-0002-00",
+    "card-00018-5-uniq-0068-00",
+    "card-04001-5-uniq-0071-00",
+    "card-04010-5-uniq-0049-00",
+    "card-04014-5-uniq-0053-00"
+   ]
+  },
+  {
+   "score": 2817695.0,
+   "idx": [
+    11,
+    18,
+    32,
+    49,
+    52
+   ],
+   "ids": [
+    "card-00013-5-uniq-0002-00",
+    "card-00018-5-uniq-0068-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0071-00",
+    "card-04003-5-uniq-0072-00"
+   ]
+  },
+  {
+   "score": 2813316.0,
+   "idx": [
+    11,
+    18,
+    22,
+    32,
+    49
+   ],
+   "ids": [
+    "card-00013-5-uniq-0002-00",
+    "card-00018-5-uniq-0068-00",
+    "card-00022-5-uniq-0018-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04001-5-uniq-0071-00"
+   ]
+  },
+  {
+   "score": 2813295.0,
+   "idx": [
+    0,
+    11,
+    49,
+    61,
+    64
+   ],
+   "ids": [
+    "card-00001-5-uniq-0000-00",
+    "card-00013-5-uniq-0002-00",
+    "card-04001-5-uniq-0071-00",
+    "card-06002-5-uniq-0058-00",
+    "card-06004-5-uniq-0060-00"
+   ]
+  },
+  {
+   "score": 2813065.0,
+   "idx": [
+    11,
+    18,
+    32,
+    42,
+    49
+   ],
+   "ids": [
+    "card-00013-5-uniq-0002-00",
+    "card-00018-5-uniq-0068-00",
+    "card-00032-5-uniq-0026-00",
+    "card-03004-5-uniq-0073-00",
+    "card-04001-5-uniq-0071-00"
+   ]
+  }
+ ],
+ "inputs_hash": "30472eccdc82619480c81851b15302385ea9512ad9cc670f842218b8ff820d0b",
+ "inputs_hash_files": {
+  "cards": "98fd8133693a2816188dc7e5425a1cb103d4dce841733f1d08ca8a982e8af277",
+  "board": "2cc38f0667a5e915e7411f4f6060d29acbe428372d9f738b3ecf7b236d74c6cb",
+  "charts": "bdc9dc1c8b485ea8588d9fca7e778cc31bf71eecb4fdf06703f403a3b2b93c22",
+  "skilltree": "57245966f417632493a768db6684248f71cf533d8a1b0aa29a5779729dfeb29c",
+  "master_stn": "efbc636b23a619b4dd02d9adfaa8989e6bbfcf09f3fcae41d56fdcd7effe18c2",
+  "collection": "2a016c02efa56417e4c9e7511819d84098888bbeeaddc30a92e276c9404838c3",
+  "cfg": "fdf97614d6e90a393dc8ee2c19683aa62f7f30b0dc17e15deb5f1c65be767823"
+ },
+ "git": {
+  "head": "01c91b8160bf569bb36311ba8cea1a8667f68f26",
+  "dirty": true,
+  "status_porcelain": [
+   "M  .claude/CLAUDE.md",
+   "M  CONTINUE-HERE.md",
+   "M  TODO.md",
+   "M  tests/test_chart_library.py",
+   "M  tests/test_refresh_all_song_chain.py",
+   " M tools/jumprope/run_tap.ps1",
+   "M  tools/recon/ACTIVE-SKILL.md",
+   "M  tools/recon/BOARD-VALIDATION.md",
+   "M  tools/recon/CHARTS.md",
+   "M  tools/recon/CONTRADICTIONS.md",
+   "M  tools/recon/CROSSCHECK.md",
+   "M  tools/recon/DECK-SCORE.md",
+   "M  tools/recon/EXTERNAL-ASSET-TOOLS.md",
+   "M  tools/recon/EXTERNAL-FORMULA-2026-08-05.md",
+   "M  tools/recon/EXTERNAL-MODELS.md",
+   "M  tools/recon/EXTRACTION.md",
+   "M  tools/recon/FIELD-NAMES.md",
+   "M  tools/recon/HOLODORIDB-FINDINGS.md",
+   "M  tools/recon/MATH.md",
+   "M  tools/recon/MISSING-MECHANICS.md",
+   "M  tools/recon/MODE-B.md",
+   "M  tools/recon/MODEL.md",
+   "M  tools/recon/OPTIMISATION-EXPORTS.md",
+   "M  tools/recon/RANKING-TOOL-SPEC.md",
+   "M  tools/recon/README.md",
+   "M  tools/recon/REGION-ROUTING.ES.md",
+   "M  tools/recon/REGION-ROUTING.md",
+   "M  tools/recon/SCORE-DISTRIBUTION.md",
+   "M  tools/recon/SCORE-SONG.md",
+   "M  tools/recon/SEARCH-PLAN.md",
+   "M  tools/recon/SEARCH-STRATEGY.md",
+   "M  tools/recon/SKILL-RUNTIME.md",
+   "M  tools/recon/SLOT-EXPOSURE.md",
+   "M  tools/recon/SONG-ASSIGNMENT.md",
+   "M  tools/recon/SONGS.md",
+   "M  tools/recon/SPECIAL-COLLAPSE.md",
+   "M  tools/recon/STATE-2026-08-03.md",
+   "M  tools/recon/TOOLS-INVENTORY.md",
+   "M  tools/recon/chart-scoring/README.md",
+   "M  tools/recon/probes/hygiene_audit.py",
+   "M  tools/recon/proxy/README.md",
+   " M tools/recon/proxy/band_probe.py",
+   " M tools/recon/proxy/capture_board.ps1",
+   " M tools/recon/proxy/capture_deck.ps1",
+   " M tools/recon/proxy/capture_deck_screens.ps1",
+   " M tools/recon/proxy/capture_gacha.ps1",
+   " M tools/recon/proxy/capture_jumprope.ps1",
+   " M tools/recon/proxy/capture_marathon.ps1",
+   " M tools/recon/proxy/capture_park_symbols.ps1",
+   "M  tools/recon/proxy/chart_download.py",
+   " M tools/recon/proxy/cleanup_restore.ps1",
+   " M tools/recon/proxy/keycap8.ps1",
+   " M tools/recon/proxy/run_live_tap.ps1",
+   "M  tools/recon/proxy/song_audio.py",
+   "M  tools/recon/proxy/song_jackets.py",
+   "M  tools/recon/proxy/songs_view.py",
+   "M  tools/recon/proxy/sus_parse.py",
+   "M  tools/recon/proxy/verify_formula.py",
+   "M  tools/web/REDESIGN-PLAN.md",
+   " M tools/web/certificate.py",
+   " M tools/web/server.py"
+  ],
+  "untracked": [
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/holodori_parity.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/holodori_parity.log",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/holodori_parity_noseed.json",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/holodori_parity_noseed.log",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader/m0334/per_leader_m0334.log",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader_m0334_stderr.log",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-6/per_leader_m0334_stdout.log",
+   "tools/recon/RESEARCH-2026-08-18/PHASE-7/hygiene_purge_untracked.ps1",
+   "tools/recon/probes/across_ranking_2026_08_18.py",
+   "tools/web/certindex.py"
+  ],
+  "diff_head_sha256": "dd5a0c5bca5ec7a234f3f160cb5e1c54a8dfdba2cfef95f4b64b95301c522560"
+ },
+ "python": "3.13.7",
+ "written": "2026-08-18T16:28:25"
+}

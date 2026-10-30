@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>holobuilder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&display=swap">
+<link rel="stylesheet" href="app.css">
+<script src="tour.js"></script>
+</head>
+<body>
+<div class="stage">
+  <aside class="tour" id="tour" style="--slide:6s">
+    <div class="shots" id="shots"></div>
+    <div class="caption" id="caption"><div class="k" id="ck"></div><h2 id="ch"></h2><p id="cp"></p></div>
+    <div class="nav">
+      <button class="arrow" id="prev" aria-label="Previous"></button>
+      <div class="dots" id="dots"></div>
+      <button class="arrow next" id="next" aria-label="Next"></button>
+    </div>
+  </aside>
+
+  <main class="work" id="run">
+    <div class="brand"><img class="face" alt=""><h1>holo<i>builder</i></h1><span class="chip n" id="ver"></span></div>
+    <p class="lede">Your account, the game's data and the optimizer, getting ready.</p>
+    <div class="notice" id="notice"></div>
+
+    <section class="panel" id="uname-panel" style="display:none">
+      <h2>Choose a username</h2>
+      <p class="hint" style="margin:0 0 12px">holobuilder now asks everyone for a username: it is how the admin sees you, and your real name from Google is no longer kept. 3 to 20 letters, digits, _ - or .</p>
+      <div class="row">
+        <input class="in" id="uname" maxlength="20" placeholder="a username" style="max-width:260px" autocomplete="off" spellcheck="false">
+        <button class="btn primary" id="uname-ok">Use this name</button>
+        <span id="uname-msg"></span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>This PC</h2>
+      <div class="pc">
+        <div><label>Cores</label><b class="n" id="cores">–</b><em id="threads"></em></div>
+        <div><label>Memory</label><b class="n" id="ram">–</b><em>RAM</em></div>
+        <div><label>Search</label><b class="n" id="workers">–</b><em>parallel workers</em></div>
+        <div><label>Graphics</label><b id="gpushort">–</b><em id="gpu"></em></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Starting</h2>
+      <ol class="steps">
+        <li class="step" data-step="pc"><span class="dot"></span><span><b>Reading this PC</b><small></small></span><span class="r"></span></li>
+        <li class="step" data-step="update"><span class="dot"></span><span><b>Checking for updates</b><small></small></span><span class="r"></span></li>
+        <li class="step" data-step="sync"><span class="dot"></span><span><b>Game data</b><small>cards, songs, charts, the open event</small></span><span class="r n"></span></li>
+        <li class="step" data-step="profile"><span class="dot"></span><span><b>Your client profile</b><small></small></span><span class="r"></span></li>
+        <li class="step" data-step="account"><span class="dot"></span><span><b>Your account</b><small></small></span><span class="r"></span></li>
+        <li class="step" data-step="server"><span class="dot"></span><span><b>Starting the optimizer</b><small></small></span><span class="r"></span></li>
+      </ol>
+      <div class="bar"><i id="bar"></i></div>
+    </section>
+
+    <div class="row">
+      <button class="btn ghost" id="toSettings">Settings</button>
+      <button class="btn" id="retry" style="display:none">Try again</button>
+    </div>
+  </main>
+
+  <main class="work" id="settings">
+    <div class="brand"><img class="face" alt=""><h1>Settings</h1><span class="chip n" id="ver2"></span></div>
+    <p class="lede">Stored on this PC only. The account file is read where it is, at each refresh, and never sent anywhere.</p>
+    <section class="panel">
+      <h2>Account</h2>
+      <div class="form">
+        <label for="cred">Account file</label>
+        <div class="row"><input class="in" id="cred" placeholder="…\LocalLow\QualiArts, Inc_\hololive-Dreams\…" style="flex:1">
+          <button class="btn ghost" id="find">Find</button><button class="btn ghost" id="browse">Browse…</button></div>
+        <div class="hint" id="cred-bad"></div>
+        <label>Region</label>
+        <div class="seg" id="region"><button data-v="us">Worldwide (US)</button><button data-v="jp">Japan</button><button data-v="as">Asia</button></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>App</h2>
+      <div class="form">
+        <label>Face of the app</label><div class="mems" id="mems"></div>
+        <label for="wk">Search workers</label>
+        <div class="row"><input type="range" id="wk" min="0" style="flex:1"><b class="n" id="wkv"></b></div>
+        <div class="hint">“All” uses every thread, the fastest measured; fewer keeps the PC responsive while it searches.</div>
+        <label for="cache">Art cache</label>
+        <div class="row"><input class="in n" id="cache" type="number" min="0" step="50" style="width:120px"><span>MB kept on disk · <b>0 = unlimited</b> (recommended)</span></div>
+        <div class="hint">Live2D figures, chibis and card art come from the server the first time they are shown and stay on this PC. Card art is fetched in the background at start, so Collection never waits.</div>
+      </div>
+    </section>
+    <details class="panel adv" id="adv">
+      <summary><h2>Advanced</h2></summary>
+      <div class="form">
+        <label for="url">Server</label><input class="in" id="url">
+        <label for="token">Access key</label><input class="in n" id="token" placeholder="set by the installer">
+        <div class="hint" id="token-bad">The password of the holobuilder server: only an app that holds it can download the game data. The installer sets it; you never need to type it.</div>
+        <label for="steam">Steam ID</label><input class="in n" id="steam" placeholder="read from Steam">
+        <div class="hint" id="steam-bad">Your SteamID64: 17 digits starting 7656119. The game sends it with every request, so the app does too, to ask exactly as the game does. Left empty, it is read from the Steam signed in on this PC. To type it: Steam &rarr; your name &rarr; Account details, or the number in your profile link (steamcommunity.com/profiles/7656119&hellip;).</div>
+      </div>
+    </details>
+    <div class="row actions">
+      <button class="btn primary" id="save">Save</button>
+      <button class="btn ghost" id="back" title="Leave without saving">Cancel</button>
+      <span id="saved" style="color:var(--good)"></span>
+      <button class="btn ghost" id="diag" style="margin-left:auto" title="Versions, this PC and the end of the log, without your account file, Steam ID or access key: paste it into a bug report">Copy diagnostics</button>
+    </div>
+  </main>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const fmtMB = b => (b / 1e6).toFixed(b < 1e7 ? 1 : 0);
+const ORDER = ["pc", "update", "sync", "profile", "account", "server"];
+let boot = null, settings = null, threads = 1, required = false;
+
+function step(name, state, detail, right) {
+  const el = document.querySelector(`.step[data-step="${name}"]`);
+  if (!el) return;
+  el.classList.remove("on", "done", "fail");
+  if (state) el.classList.add(state);
+  if (detail != null) el.querySelector("small").textContent = detail;
+  if (right != null) el.querySelector(".r").textContent = right;
+  const done = ORDER.filter(n => document.querySelector(`.step[data-step="${n}"]`).classList.contains("done")).length;
+  $("#bar").style.width = Math.max(4, done / ORDER.length * 100) + "%";
+}
+function notice(kind, text, update = false) {
+  const n = $("#notice");
+  n.className = "notice show " + kind;
+  n.textContent = text;
+  if (update) pywebview.api.can_update().then(ok => {
+    if (!ok) return;
+    const b = document.createElement("button");
+    b.className = "btn primary"; b.textContent = "Update now"; b.style.marginLeft = "14px";
+    b.onclick = () => { b.disabled = true; b.textContent = "Updating…"; pywebview.api.update_now(); };
+    n.appendChild(b);
+  });
+}
+
+$("#uname-ok").onclick = async () => {
+  const b = $("#uname-ok"); b.disabled = true;
+  const r = await pywebview.api.set_username($("#uname").value.trim());
+  b.disabled = false;
+  $("#uname-msg").innerHTML = r.ok ? "" : `<span class="bad">${r.error}</span>`;
+};
+$("#uname").onkeydown = e => { if (e.key === "Enter") $("#uname-ok").click(); };
+window.hb = {
+  progress(ev) {
+    if (ev.step === "error") {
+      const cur = ORDER.find(n => document.querySelector(`.step[data-step="${n}"]`).classList.contains("on"));
+      if (cur) step(cur, "fail");
+      notice("err", ev.message);
+      $("#retry").style.display = "";
+      return;
+    }
+    if (ev.step === "sync") {
+      if (ev.state === "run" && ev.n) {
+        step("sync", "on", `${ev.i} / ${ev.n} files`, `${fmtMB(ev.bytes)} / ${fmtMB(ev.total)} MB`);
+        $("#bar").style.width = (40 + 40 * ev.bytes / Math.max(1, ev.total)) + "%";
+      } else if (ev.state === "run") step("sync", "on", "comparing with the server…");
+      else {
+        step("sync", "done", ev.note || (ev.files ? `${ev.files} files updated` : "up to date"),
+             ev.files ? `${fmtMB(ev.bytes)} MB` : "");
+        showArt(boot);                       // a first install gets the faces with this sync
+      }
+    } else if (ev.step === "username") {
+      $("#uname-panel").style.display = ev.state === "ask" ? "" : "none";
+      if (ev.state === "ask") $("#uname").focus();
+    } else if (ev.step === "profile") {
+      step("profile", ev.state === "done" ? "done" : "on", ev.state === "done" ? (ev.note || "ready") : "reading this PC's hardware…");
+      if (ev.note) notice("info", "No Steam ID found on this PC. The app works without it, but the game sends it with every request: sign in to Steam and restart, or type it in Settings → Advanced.");
+    } else if (ev.step === "account") {
+      step("account", ev.state === "done" ? "done" : "on", ev.detail || "");
+    } else if (ev.step === "server") {
+      step("account", "done");                 // already read: nothing to do this start
+      if (ev.state === "done") {
+        step("server", "done", "ready");
+        setTimeout(() => pywebview.api.open_app(), 650);
+      } else step("server", "on", "loading cards, boards and charts…");
+    }
+  },
+};
+
+async function run() {
+  $("#retry").style.display = "none";
+  $("#notice").className = "notice";
+  step("pc", "done", `${boot.hardware.cores} cores · ${boot.hardware.threads} threads`);
+  step("update", "on", "asking the server…");
+  const up = await pywebview.api.check_update();
+  if (up.state === "required") {
+    step("update", "fail", `version ${up.latest} is required`);
+    notice("req", `This version (${up.local}) is too old for the server's data. Update required: ${up.latest}. ${up.notes || ""}`, true);
+    required = true;
+    return;
+  }
+  step("update", "done", up.state === "available" ? `version ${up.latest} available` :
+       up.state === "unknown" ? "server not reachable, starting anyway" :
+       up.state === "dev" ? "development copy" : "up to date");
+  if (up.state === "available") notice("info", `Update available: ${up.latest}. ${up.notes || ""}`, true);
+  step("sync", "on", "comparing with the server…");
+  await pywebview.api.start();
+}
+
+function showPC(h, s) {
+  threads = h.threads;
+  $("#cores").textContent = h.cores;
+  $("#threads").textContent = `${h.threads} threads`;
+  $("#ram").textContent = h.ram_gb ? `${Math.round(h.ram_gb)} GB` : "–";
+  $("#workers").textContent = s.workers > 0 ? s.workers : h.threads;
+  $("#gpu").textContent = h.gpu || "";
+  $("#gpushort").textContent = (h.gpu || "–").replace(/^(NVIDIA|AMD|Intel\(R\))\s+/, "").replace(/GeForce\s+/, "").slice(0, 16);
+}
+
+HBTour.build();
+
+async function showArt(b) {
+  // the chosen holomem: the window's icon (launcher.py) and her face beside the title
+  const url = b.holomem?.chr ? await pywebview.api.holomem_icon(b.holomem.chr) : null;
+  document.querySelectorAll(".face").forEach(f => { if (url) f.src = url; f.title = b.holomem?.name || ""; });
+}
+
+// ---- settings
+function pressed(seg, v) { seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v))); }
+async function fillSettings() {
+  const s = settings;
+  $("#ver2").textContent = boot.version;
+  $("#cred").value = s.credential_path || "";
+  pressed($("#region"), s.region);
+  $("#steam").value = s.steam_id || "";
+  $("#url").value = s.server_url;
+  $("#token").value = s.server_token;
+  $("#cache").value = s.cache_mb;
+  const wk = $("#wk"); wk.max = threads; wk.value = s.workers || 0;
+  const wkl = () => $("#wkv").textContent = +wk.value === 0 ? `All (${threads})` : wk.value;
+  wk.oninput = wkl; wkl();
+  showProblems(boot.problems || {});
+  const list = await pywebview.api.holomem_list();
+  const box = $("#mems"); box.innerHTML = "";
+  for (const h of list) {
+    const b = document.createElement("button");
+    b.className = "mem"; b.title = h.name; b.dataset.chr = h.chr;
+    b.setAttribute("aria-pressed", String(h.chr === s.holomem));
+    b.innerHTML = "<img alt=''>";
+    b.onclick = () => box.querySelectorAll(".mem").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    box.appendChild(b);
+  }
+  // the chosen face in view (Nene by default sorts low in the alphabetical grid)
+  const chosen = box.querySelector(".mem[aria-pressed=true]");
+  if (chosen) box.scrollTop = chosen.offsetTop - box.offsetTop - 4;
+  // icons arrive one by one: never block the form on 50 images
+  for (const b of box.children) pywebview.api.holomem_icon(b.dataset.chr).then(u => { if (u) b.firstChild.src = u; });
+}
+function showProblems(p) {
+  $("#cred-bad").innerHTML = p.credential_path ? `<span class="bad">${p.credential_path}</span>` : "The file named with 32 hex characters in the game's LocalLow folder. “Find” looks there.";
+  if (p.steam_id) { $("#steam-bad").insertAdjacentHTML("afterbegin", `<span class="bad">Steam ID: ${p.steam_id}.</span> `); $("#adv").open = true; }
+  if (p.server_token) { $("#token-bad").innerHTML = `<span class="bad">access key ${p.server_token}</span>`; $("#adv").open = true; }
+}
+async function save() {
+  const sel = $("#mems .mem[aria-pressed=true]");
+  const r = await pywebview.api.save_settings({
+    credential_path: $("#cred").value.trim(),
+    region: $("#region button[aria-pressed=true]")?.dataset.v || "us",
+    steam_id: $("#steam").value.trim(),
+    server_url: $("#url").value.trim(), server_token: $("#token").value.trim(),
+    workers: +$("#wk").value, cache_mb: +$("#cache").value || 0,
+    holomem: sel ? sel.dataset.chr : settings.holomem,
+  });
+  if (!r.ok) { showProblems(r.problems); $("#saved").textContent = ""; return; }
+  $("#saved").textContent = "Saved";
+  boot = await pywebview.api.boot(); settings = boot.settings; showArt(boot); showPC(boot.hardware, settings);
+  if (r.restart) { $("#saved").textContent = "Saved · restarting the optimizer…"; await pywebview.api.restart_engine(); }
+  // saved: back where Settings was opened from (otherwise the only way out after Save
+  // is Back, which reads like "discard")
+  await leave();
+}
+// back to the app (or to the start, when Settings opened before it): Save's last step, and
+// Cancel's whole job
+async function leave() {
+  if (boot.url) return pywebview.api.open_app();
+  boot = await pywebview.api.boot();
+  if (Object.keys(boot.problems).length) return showProblems(boot.problems);
+  location.hash = ""; document.body.classList.remove("settings"); $("#saved").textContent = ""; run();
+}
+$("#region").onclick = e => { if (e.target.dataset.v) pressed($("#region"), e.target.dataset.v); };
+// a path chosen or typed is judged again on Save: the start's "missing" must not linger
+const credSet = p => { $("#cred").value = p; showProblems({}); };
+$("#cred").oninput = () => showProblems({});
+$("#browse").onclick = async () => { const p = await pywebview.api.browse_credential(); if (p) credSet(p); };
+$("#find").onclick = async () => { const p = await pywebview.api.suggest_credential(); if (p) credSet(p); else $("#cred-bad").innerHTML = "<span class='bad'>not found: is the game installed on this PC? Copy the file from the PC that has it and Browse to it.</span>"; };
+$("#save").onclick = save;
+$("#back").onclick = leave;
+$("#toSettings").onclick = () => { location.hash = "settings"; document.body.classList.add("settings"); fillSettings(); };
+$("#retry").onclick = run;
+$("#diag").onclick = async () => {
+  const text = await pywebview.api.diagnostics();
+  try { await navigator.clipboard.writeText(text); $("#saved").textContent = "Diagnostics copied"; }
+  catch { $("#saved").textContent = "Could not reach the clipboard"; }
+};
+
+window.addEventListener("pywebviewready", async () => {
+  boot = await pywebview.api.boot();
+  settings = boot.settings;
+  if (boot.font) { const f = new FontFace("LINE Seed Sans", `url(${boot.font})`); f.load().then(x => document.fonts.add(x)); }
+  $("#ver").textContent = boot.version;
+  showArt(boot); showPC(boot.hardware, settings);
+  const first = Object.keys(boot.problems).length > 0;
+  if (location.hash === "#settings" || first) {
+    document.body.classList.add("settings");
+    await fillSettings();
+    if (first && !settings.credential_path) { const p = await pywebview.api.suggest_credential(); if (p) credSet(p); }
+  } else run();
+});
+</script>
+</body>
+</html>
