@@ -18,7 +18,7 @@ the game's data (master tables, charts, pictures) from the game's own servers, o
 second, the way the client downloads them. Using third-party tools may go against the game's
 terms of service; use holobuilder at your own risk.
 
-## Running it yourself
+## Running from source
 
 Nothing at all is sent to the holobuilder server: there is no sign-in, and the game data and
 pictures come from your game install and the game's own servers. The other downloads are the
@@ -49,4 +49,4 @@ protects the server and, like any network provider, sees the address a request c
 
 - **The app:** uninstall it from Windows' *Apps* list. To have your user removed from the server,
   open an issue or contact the maintainer.
-- **Running it yourself:** delete the folder. Nothing was ever registered anywhere.
+- **From source:** delete the folder. Nothing was ever registered anywhere.

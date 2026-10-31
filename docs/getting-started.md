@@ -2,7 +2,7 @@
 
 This page is about the installer, `holobuilder-setup.exe`: the easy way, with the game data and
 pictures served by the holobuilder server. To run holobuilder from this repository on your own
-PC instead, with no server and no sign-in, see [Run it yourself](run-locally.md).
+PC instead, with no server and no sign-in, see [Run it from source](run-locally.md).
 
 ## Install
 

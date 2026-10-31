@@ -3,7 +3,7 @@
 Find the message you see, then the fix.
 
 - [The app](#the-app) (installed with `holobuilder-setup.exe`)
-- [Running it yourself](#running-it-yourself) (`setup.cmd`, `refresh.cmd`, `start.cmd`)
+- [Running from source](#running-from-source) (`setup.cmd`, `refresh.cmd`, `start.cmd`)
 
 ## The app
 
@@ -22,7 +22,7 @@ when you report a problem.
 | The leader is shown as a card instead of an animated figure | The Live2D engine could not be downloaded from Live2D's site. | Check the internet connection; it is downloaded once and kept. |
 | Scores look out of date | Results use your account as of the last refresh. | Press **Refresh**. |
 
-## Running it yourself
+## Running from source
 
 Everything prints to the script's own window; copy the last lines from there when you report a
 problem. `setup.cmd` can be run again at any time to see what is missing.
@@ -51,7 +51,7 @@ Open an issue on this repository with:
 
 - what you did and what you expected,
 - the message, word for word,
-- the app version (Settings) and the last lines of `server.log`, or, when you run it yourself,
+- the app version (Settings) and the last lines of `server.log`, or, when you run from source,
   the last lines of the script's window and the commit (`git log -1 --oneline`).
 
 Never post your account file, access key or anything from the `state` folder: they are private.

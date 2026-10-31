@@ -4,7 +4,7 @@ Thanks for helping. Issues and pull requests are welcome.
 
 ## Setup
 
-See [Run it yourself](docs/run-locally.md): Python 3.13, `gcc` on the PATH (the C kernels in
+See [Run it from source](docs/run-locally.md): Python 3.13, `gcc` on the PATH (the C kernels in
 `tools/web/kernel` are compiled on this PC), and `setup.cmd`, which makes the `.venv` and runs
 `pip install -e . -r requirements.txt`. How the pieces fit: [ARCHITECTURE.md](ARCHITECTURE.md).
 

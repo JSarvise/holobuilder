@@ -1,8 +1,8 @@
-# Run it yourself
+# Run it from source
 
-holobuilder can run entirely on your own PC: your game install provides the game's data, your
-account is read straight from the game's servers, and the pages are served on `127.0.0.1`. There
-is no holobuilder server in the way, nothing to sign in to and nobody to approve you.
+holobuilder can run entirely on your PC: the game data comes from your own install, your account
+is read from the game's servers, and the pages are served on `127.0.0.1`. No holobuilder server,
+no sign-in and no approval are involved.
 
 Prefer an installer? See [Getting started with the app](getting-started.md) instead.
 
@@ -93,8 +93,7 @@ the game has not been opened since, the server refuses part of the account read 
 `DATE_CHANGED` until the game runs its daily reset. The refresh says so, keeps what it could read,
 and the next refresh after opening the game completes it.
 
-Every download from the game's servers is polite: one request per second, cached on disk, and
-never asked for again once it is there.
+Downloads from the game's servers go at one request per second and are cached on disk.
 
 Any other option goes to `refresh_all.py`, for example `refresh.cmd --skip chibi`;
 `.venv\Scripts\python tools\recon\proxy\refresh_all.py --help` lists them all.
@@ -206,4 +205,4 @@ set HB_ACCOUNT_HOST=us.game-hololive-dreams.com
 `.venv\Scripts\python -m pytest` runs the test suite. Without the game data the tests that need
 it are skipped, with the reason; after a refresh they run too.
 
-Something not working? [Troubleshooting](troubleshooting.md#running-it-yourself).
+Something not working? [Troubleshooting](troubleshooting.md#running-from-source).

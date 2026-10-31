@@ -4,7 +4,7 @@ This page is for building and serving **your own installer**: the official app d
 updates and the shared game data from a server, and you can run your own.
 
 To simply use holobuilder on your PC without any server, you do not need this:
-see [Run it yourself](run-locally.md).
+see [Run it from source](run-locally.md).
 
 ## The pieces
 
@@ -21,7 +21,7 @@ They are all in this repository:
 
 ## Typical order
 
-1. Set up a clone on a PC with the game and refresh it, as in [Run it yourself](run-locally.md):
+1. Set up a clone on a PC with the game and refresh it, as in [Run it from source](run-locally.md):
    the shared data you publish is what that refresh builds.
 2. Create a Google OAuth *desktop* client and put it in `state/google_oauth.json`.
 3. Make your signing key (`signing.py --new-key`).
