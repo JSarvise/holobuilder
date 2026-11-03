@@ -52,8 +52,10 @@ export function connectStripHTML(ch, mode) {
   return `<h4>Connect</h4><div class="hbd-socks">${rows}</div>`;
 }
 
-/** One socket read out: its card and effect, and every node in range, base -> boosted. */
-export function connectInfoHTML(ch, id, mode) {
+/** One socket read out: its card and effect, and every node in range, base -> boosted.
+ *  `compact` (the Optimizer's side panel): no tag line, the effect and level on one line, and
+ *  identical nodes in range (same effect, same values, same state) as one row with a count. */
+export function connectInfoHTML(ch, id, mode, { compact = false } = {}) {
   const s = (ch.sockets || []).find(x => x.socket === id) || {};
   const V2 = viewSets(ch, mode);
   const cardOf = socketCardFn(ch, mode);
@@ -69,19 +71,35 @@ export function connectInfoHTML(ch, id, mode) {
       <p>${card ? "This card has no Connect effect." : esc(WHO.S)}</p>${where}</div>`;
   }
   const byIdN = new Map((ch.nodes || []).map(n => [n.id, n]));
-  const items = con.covers.map(nid => {
+  const rows = con.covers.map(nid => {
     const n = byIdN.get(nid) || {}, bn = baseNode(ch, nid);
     const b = BRANCH[n.branch] || BRANCH.S;
     const has = V2.final.has(nid);
     const permil = CV.permil.get(nid) || 0;
     const val = bn.value != null && bn.value_unit
       ? `${esc(fmtValue(bn.value, bn.value_unit))} → <b>${esc(fmtValue(boosted(bn.value, permil), bn.value_unit))}</b>` : `<span class="dim">no value</span>`;
-    return `<li class="${has ? "" : "off"}" data-goto="${esc(nid)}" style="--g1:${b.g1};--g2:${b.g2};--bh:${b.ink}" title="${has ? "Unlocked" : "Not unlocked: the boost applies once it is"}">
-      <i></i><span>${esc(effectShort(bn.effect || n.effect, ch.name, fmtValue(bn.value, bn.value_unit)))}</span><em>${val}</em></li>`;
-  }).join("");
+    const label = esc(effectShort(bn.effect || n.effect, ch.name, fmtValue(bn.value, bn.value_unit)));
+    return { nid, has, key: `${has}|${b.ink}|${label}|${val}`,
+      html: n2 => `<li class="${has ? "" : "off"}" data-goto="${esc(nid)}" style="--g1:${b.g1};--g2:${b.g2};--bh:${b.ink}" title="${has ? "Unlocked" : "Not unlocked: the boost applies once it is"}">
+      <i></i><span>${n2 > 1 ? `<b class="x">×${n2}</b> ` : ""}${label}</span><em>${val}</em></li>` };
+  });
+  const groups = new Map();
+  for (const r of rows) {
+    const k = compact ? r.key : r.nid;
+    groups.set(k, { r, n: ((groups.get(k) || {}).n || 0) + 1 });
+  }
+  const items = [...groups.values()].map(({ r, n }) => r.html(n)).join("");
   const lv = con.info.level_basis === "assumed" ? " (bloom not recorded: base level assumed)" : con.info.level_basis === "maxed" ? " (maxed account)" : "";
   const owned = con.covers.filter(x => V2.final.has(x)).length;
   const mult = (1 + con.info.permil / 1000).toFixed(2).replace(/0$/, "");
+  if (compact) {
+    return `<div class="hbd-ni compact" style="--bh:${CONNECT_COLOR}">
+    <div class="card"><img src="/cardart/thumb/${encodeURIComponent(card)}?w=160" alt="" onerror="this.style.visibility='hidden'">
+      <span><b>${esc(nm ? nm.title || card : card)}</b><small>${esc(nm ? nm.member : "")}</small></span></div>
+    <p class="eff">${esc(con.info.text)} <span class="dim">Connect Lv ${con.info.level}${esc(lv)} · ×${mult}</span></p>
+    <h5>${plural(con.covers.length, "node")} in range · ${owned} ${mode === "plan" ? "on the target board" : "unlocked"}</h5>
+    <ul class="hbd-cov">${items}</ul></div>`;
+  }
   return `<div class="hbd-ni" style="--bh:${CONNECT_COLOR}"><span class="tag">Connect · ${esc(id)}</span>
     <div class="card"><img src="/cardart/thumb/${encodeURIComponent(card)}?w=160" alt="" onerror="this.style.visibility='hidden'">
       <span><b>${esc(nm ? nm.title || card : card)}</b><small>${esc(nm ? nm.member : "")}</small></span></div>

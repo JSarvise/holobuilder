@@ -8,7 +8,7 @@
 // the exact plan under the search's board levers) or, without it, the team's six boards
 // (/api/board-doc). Every node figure is the server's; this file only draws.
 import { esc, fmt } from "/opt-util.js";
-import { drawBoard, initPanZoom, zoomBy, fit, markSelected } from "/hbd-draw.js";
+import { drawBoard, initPanZoom, zoomBy, fit, markSelected, focusConnect } from "/hbd-draw.js";
 import { D as HBD, BRANCH, effectText } from "/hbd-util.js";
 import { connectStripHTML, connectInfoHTML } from "/hbd-connect.js";
 
@@ -110,26 +110,45 @@ export async function wireBoardPlan(root, key, doc, team) {
     HBD.doc = doc;                                    // the Connect catalogue hbd-util reads
     const values = {};
     for (const n of ch.nodes || []) values[n.id] = { value: n.value ?? null, unit: n.value_unit || null };
-    // the side panel redraws only when the pointer reaches ANOTHER node or socket (mouseover
-    // fires on every child it crosses), and clears a moment after it leaves, so crossing the
-    // gap between two sockets does not flash the empty text (no flicker when hovering fast)
-    let showing = null, clear = 0;
+    // a node reads on hover; the side panel redraws only when the pointer reaches ANOTHER node
+    // (mouseover fires on every child it crosses) and clears a moment after it leaves (no
+    // flicker when hovering fast). A socket reads on CLICK and stays (its range list scrolls):
+    // its whole range is drawn on the board, another socket's click moves to it, a second
+    // click on it, Escape or another holomem closes it
+    let showing = null, clear = 0, pinned = null;
     const hover = id => {
+      if (pinned) return;
       clearTimeout(clear);
       if (id === showing) return;
       showing = id;
       nodeInfo(el, ch, id, SOCKS.get(doc));
     };
-    const leave = () => { clearTimeout(clear); clear = setTimeout(() => hover(null), LEAVE_MS); };
+    const leave = () => { if (pinned) return; clearTimeout(clear); clear = setTimeout(() => hover(null), LEAVE_MS); };
+    const socks = el.querySelector(".o-bp-socks");
+    const pin = id => {
+      clearTimeout(clear);
+      pinned = id && id !== pinned ? id : null;
+      showing = pinned;
+      markSelected(svg, pinned);
+      focusConnect(svg, pinned);
+      socks.querySelectorAll("[data-socket]").forEach(s => s.classList.toggle("sel", s.dataset.socket === pinned));
+      el.classList.toggle("pinned", !!pinned);     // the legend steps aside for the socket's read-out
+      nodeInfo(el, ch, pinned, SOCKS.get(doc));
+    };
+    const isSocket = id => !!id && (ch.sockets || []).some(s => s.socket === id);
     const svg = drawBoard(canvas, ch, {
       mode: "plan", glyphs: g, values,
-      onPick: (id, click) => { hover(id); if (click) markSelected(svg, id); },
+      onPick: (id, click) => {
+        if (isSocket(id)) { if (click) pin(id); return; }
+        if (click && pinned) pin(null);
+        hover(id);
+        if (click) markSelected(svg, id);
+      },
     });
     canvas.onmouseleave = leave;
-    const socks = el.querySelector(".o-bp-socks");
     socks.innerHTML = connectStripHTML(ch, "plan");
-    socks.onmouseover = e => { const t = e.target.closest("[data-socket]"); if (t) hover(t.dataset.socket); };
-    socks.onmouseleave = leave;
+    socks.onclick = e => { const t = e.target.closest("[data-socket]"); if (t) pin(t.dataset.socket); };
+    el.onkeydown = e => { if (e.key === "Escape" && pinned) pin(null); };
     head(el, ch, teamSet.has(chr));
     nodeInfo(el, ch, null);
   };
@@ -173,11 +192,13 @@ function socketInfo(box, ch, s, at) {
     const from = (at || {}).now?.[s.recommended_card];
     notes.push(`${esc(s.recommended_card_name || s.recommended_card)} comes ${from ? `from ${esc(from)}` : "from your collection (not socketed now)"}.`);
   }
-  box.innerHTML = `<p class="br">Socket ${esc(s.socket)}</p>
-    <dl class="o-bp-sock"><div><dt>Now</dt><dd>${now}</dd></div><div><dt>Plan</dt><dd>${then}</dd></div></dl>
-    <p class="st ${s.change === "remove" ? "s" : s.change ? "b" : ""}">${s.change ? CHANGE[s.change] : open ? "Unchanged" : "Locked"}</p>
-    ${notes.length ? `<p class="o-cap">${notes.join(" ")}</p>` : ""}
-    ${connectInfoHTML(ch, s.socket, "plan")}`;
+  const st = s.change ? CHANGE[s.change] : open ? "Unchanged" : "Locked";
+  // one line each: the socket and what happens to it; now -> plan when the card changes
+  // (the plan's card is read out below, so it is not named twice)
+  box.innerHTML = `<p class="br">Socket ${esc(s.socket)} · <span class="st ${s.change === "remove" ? "s" : s.change ? "b" : ""}">${esc(st)}</span>${s.point_cost ? ` <small>· ${s.point_cost} Pt</small>` : ""}</p>
+    ${s.change ? `<p class="o-bp-move"><span>${now}</span> → <span>${then}</span></p>` : ""}
+    ${notes.length ? `<p class="o-cap o-bp-note">${notes.join(" ")}</p>` : ""}
+    ${connectInfoHTML(ch, s.socket, "plan", { compact: true })}`;
 }
 
 function nodeInfo(el, ch, id, at) {
@@ -186,7 +207,7 @@ function nodeInfo(el, ch, id, at) {
   if (sock) { socketInfo(box, ch, sock, at); return; }
   const n = id && (ch.nodes || []).find(x => x.id === id);
   if (!n) {
-    box.innerHTML = `<p class="o-cap">Point at a node to read it. Click a holomem above to see her board.</p>`;
+    box.innerHTML = `<p class="o-cap">Point at a node to read it, click a socket to see its card and range. Click a holomem above to see her board.</p>`;
     return;
   }
   const p = ch.plan || {};

@@ -619,6 +619,23 @@ dialog.o-tgb::backdrop{background:rgb(5 6 10 / .62);backdrop-filter:blur(4px)}
 .o-bp-socks{grid-column:1;grid-row:2}
 .o-bp-side{grid-column:2;grid-row:1 / span 2}
 .o-bp-socks h4{margin:0 0 8px;font:800 13.5px/1.2 var(--f-ui)}
+.o-bp-socks .hbd-sock{cursor:pointer}
+/* a socket read-out fits the panel: the legend steps aside, one line per fact, a tighter list */
+.o-bp.pinned .o-bp-legend{display:none}
+.o-bp-node .br .st{text-transform:none;letter-spacing:0;font-size:12px;margin:0}
+.o-bp-node .br small{text-transform:none;letter-spacing:0;color:var(--ink-3);font-weight:600}
+.o-bp-move{margin:0 0 4px;font-size:12.5px;color:var(--ink-3)}
+.o-bp-move span:last-child{color:var(--ink)}
+.o-bp-note{margin:0 0 8px;font-size:11.5px;line-height:1.35}
+.hbd-ni.compact{gap:6px}
+.hbd-ni.compact .card{grid-template-columns:40px minmax(0,1fr);gap:9px}
+.hbd-ni.compact .card img{width:40px;height:40px}
+.hbd-ni.compact .eff{font-size:12.5px;line-height:1.35;white-space:normal}
+.hbd-ni.compact h5{margin:2px 0 0;font-size:12px;color:var(--ink-2)}
+.hbd-ni.compact .hbd-cov{gap:3px}
+.hbd-ni.compact .hbd-cov li{padding:4px 8px;font-size:12px}
+.hbd-cov .x{color:var(--connect);font:800 11px var(--f-num)}
+.o-bp-socks .hbd-sock.sel{border-color:var(--connect);box-shadow:inset 0 0 0 1px var(--connect)}
 .o-bp-view .hbd-canvas{height:clamp(420px,62vh,760px)}
 /* the side panel never sizes the rows it spans: a taller socket read-out would grow row 1, push
    the strip out from under the pointer, clear the read-out and bring the strip back -- a
