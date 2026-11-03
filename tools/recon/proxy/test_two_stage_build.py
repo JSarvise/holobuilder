@@ -112,24 +112,6 @@ def test_chart_digests_pick_the_requested_difficulty(tmp_path):
     assert expert == build.chart_digests(path, "EXPERT") and expert["m0001"] != hard["m0001"]
 
 
-def test_two_stage_view_reads_the_difficultys_own_file(tmp_path):
-    sys.path.insert(0, str(HERE.parents[2] / "tools" / "web"))
-    import two_stage_view  # noqa: PLC0415
-
-    (tmp_path / "song_m0001.json").write_text(json.dumps({"key": "k-expert", "rows": []}),
-                                              encoding="utf-8")
-    (tmp_path / "song_m0001_hard.json").write_text(json.dumps({"key": "k-hard", "rows": []}),
-                                                   encoding="utf-8")
-    keys = {"EXPERT": ({"m0001": "k-expert"}, "g"), "HARD": ({"m0001": "k-hard"}, "g")}
-    out = two_stage_view.payload("m0001", keys=lambda: keys["EXPERT"], cache_dir=tmp_path)
-    assert out["state"] == "fresh" and out["difficulty"] == "EXPERT"
-    out = two_stage_view.payload("m0001", keys=lambda: keys["HARD"], cache_dir=tmp_path,
-                                 difficulty="hard")
-    assert out["state"] == "fresh" and out["difficulty"] == "HARD"
-    assert two_stage_view.payload("m0002", keys=lambda: keys["HARD"], cache_dir=tmp_path,
-                                  difficulty="HARD")["state"] == "missing"
-
-
 def test_the_maxed_basis_scores_every_bench_holomem_on_a_complete_board():
     """The web's "Maxed account" (basis `maxed`): every holomem off the team has its
     whole tree, not the account's captured board (`dumps/board.json`, 5-66 nodes a

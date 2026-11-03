@@ -44,6 +44,7 @@ from hbuilder.domain.gates import resolve_card_set_gates               # noqa: E
 from hbuilder.domain.loader import load_cards, load_owned              # noqa: E402
 from hbuilder.domain.scoring import (                                  # noqa: E402
     _bucket_entry,
+    active_magnitude_by_card,
     _fold_activation_rate_up,
     _is_score_up_effect,
     _pool_for,
@@ -180,6 +181,7 @@ def sides(members, cfg, song_seconds):
     for card in members:
         resolved_all.extend(card_set_gates.normal_by_card_id[card.id])
     team_rate_up = _fold_activation_rate_up(tuple(resolved_all), cfg)
+    active_rank = active_magnitude_by_card(resolved_all)
     index_by_id = {card.id: i for i, card in enumerate(members)}
 
     ratio_entries, boost_entries, exact_terms = [], [], []
@@ -191,7 +193,7 @@ def sides(members, cfg, song_seconds):
         if pool == "score" and not _is_score_up_effect(resolved):
             continue
         if pool == "support":
-            state = _support_state(resolved, members, cfg, state)
+            state = _support_state(resolved, members, cfg, state, active_rank)
         weight = cfg.family_weights[resolved.family]
         entry = _bucket_entry(resolved, cfg, team_rate_up, weight, state)
         is_boost = pool == "support" or _score_up_implements_boost(resolved)

@@ -54,8 +54,7 @@ export function matchLine(T, det) {
   if (Math.round(f.value) === Math.round(T.expected)) {
     return `<p class="o-match ok" title="${tip}"><svg class="i s"><use href="#i-check"/></svg><span>The detail below matches the row: <span class="num">${fmt(f.value)}</span> on the row's own board.</span>${info("match")}</p>`;
   }
-  const why = T.source === "cached" && f.row_matches === false ? " The cached search was computed from older data; the detail is today's figure for this team."
-    : T.infmats ? " This row was developed with unlimited materials; the detail rebuilds its board on your real bench." : "";
+  const why = T.infmats ? " This row was developed with unlimited materials; the detail rebuilds its board on your real bench." : "";
   return `<p class="o-match off" title="${tip}"><svg class="i s"><use href="#i-alert"/></svg><span>${esc(cap(T.route))} ranked this team at <span class="num">${fmt(T.expected)}</span>; the detail (${esc(f.route)}) gives <span class="num">${fmt(f.value)}</span> (<b>${sgn((f.value / T.expected - 1) * 100, 2)}</b>).${why}</span>${info("match")}</p>`;
 }
 

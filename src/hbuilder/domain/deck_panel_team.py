@@ -36,6 +36,7 @@ from hbuilder.domain.deck_panel import DeckPanel, PanelCard, deck_panel
 from hbuilder.domain.gates import resolve_card_set_gates, resolve_leader_costume_skills
 from hbuilder.domain.scoring import (
     _effective_magnitude,
+    active_magnitude_by_card,
     _fold_activation_rate_up,
     _pool_for,
     _resolve_skill,
@@ -124,6 +125,7 @@ def panel_cards_for_team(
     gates = resolve_card_set_gates(members, cfg.run_state)
     normal = [r for card in members for r in gates.normal_by_card_id[card.id]]
     team_rate_up = _fold_activation_rate_up(tuple(normal), cfg)
+    active_rank = active_magnitude_by_card(normal)
     unmodelled: list[str] = []
 
     outfit = {cid: 0 for cid in by_id}
@@ -132,7 +134,7 @@ def panel_cards_for_team(
     active: dict[str, dict] = {}
 
     def _give(bucket: dict, resolved, state: str) -> None:
-        support_state, recipients = _support_state(resolved, members, cfg, state)
+        support_state, recipients = _support_state(resolved, members, cfg, state, active_rank)
         if support_state != "applied":
             return
         value = _permil(_effective_magnitude(resolved))

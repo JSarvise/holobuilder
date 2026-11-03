@@ -12,6 +12,8 @@ becomes a concrete `frozenset[str]` of card ids. Both scoring drivers
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from hbuilder.domain.card import Card, EffectTarget
 from hbuilder.domain.scoring_models import TargetSelectionModel
 
@@ -23,6 +25,7 @@ def resolve_target_card_ids(
     stat_names: tuple[str, ...],
     model: TargetSelectionModel,
     under_supply: str,
+    rank_values: Mapping[str, float] | None = None,
 ) -> frozenset[str]:
     """Resolve `target` against the assembled 6-card `cards` set.
 
@@ -34,7 +37,10 @@ def resolve_target_card_ids(
       (matching `card.type` / `target.value in card.generations`) are
       ranked and `model.select(...)` picks `target.count` of them.
 
-    Ranking value: the card's BASE value of the stat(s) the effect raises —
+    Ranking value: `rank_values[card id]` when given (a Score Support passes each
+    member's ACTIVE magnitude, `scoring.active_magnitude_by_card`: it raises no stat,
+    and the game pays the qualifiers whose ACTIVE is the strongest); otherwise the
+    card's BASE value of the stat(s) the effect raises —
     `stat_names`, summed. A single-stat buff ranks its matchers by that one
     stat; an all-stats effect (and a score effect, whose callers pass all
     three names) ranks by total parameter. Checked against 690 server
@@ -88,7 +94,8 @@ def resolve_target_card_ids(
     # this rule and not total parameter. Ties keep deck slot order: `candidates` is built in `cards` order and
     # `TopNByBuffedStat.select` is a stable sort.
     candidates = [
-        (card.id, sum(getattr(card.stats, name) for name in stat_names))
+        (card.id, rank_values.get(card.id, 0.0) if rank_values is not None
+         else sum(getattr(card.stats, name) for name in stat_names))
         for card in qualifying
     ]
 

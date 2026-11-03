@@ -66,12 +66,27 @@ import pytest
 
 from hbuilder.cli import apply_collection, build_parser
 from hbuilder.domain.loader import load_cards, load_owned
+from hbuilder.domain import scoring
 from hbuilder.domain.scoring import score_with_breakdown
 from hbuilder.domain.scoring_config import load_scoring_config
 from hbuilder.domain.team import Team, TeamError
 
 _REPO = Path(__file__).resolve().parents[1]
 _ORACLE = _REPO / "tools" / "recon" / "proxy" / "dumps" / "deck_oracle.json"
+
+
+
+@pytest.fixture(autouse=True)
+def _recipients_as_when_captured(monkeypatch):
+    """`deck_oracle.json` was captured while the server still paid a count-limited stat
+    buff to the highest TOTAL parameter (its row 9 pays the two highest-total members);
+    today it pays the buffed stat, and a Score Support the strongest ACTIVE. Each row is
+    compared with the game it was captured from, so a Score Support here ranks its
+    qualifiers by total parameter as well (`active_magnitude_by_card` -> None falls
+    back to it): the one row where the two rules differ sits inside the band under the
+    old rule (+1.7 %) and outside it under today's (+2.5 %)."""
+    monkeypatch.setattr(scoring, "active_magnitude_by_card", lambda _resolved: None)
+
 
 _BONUS_KEYS = {
     "A": "by_live_active_skill [Active Skill]",

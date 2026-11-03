@@ -102,11 +102,11 @@
         <option value="maxed">Every card in the game, maxed</option>
         <!-- The basis comparable with the community tool holodori.best: maxed
              cards on a fully maxed ACCOUNT — every bench board at 453 with
-             level-2 Connect cards, the master's 37 posters, the 11.58 %
+             level-2 Connect cards, every poster the game has, the roster's
              power-up ceiling. Server: basis "maxed-account"; the Board control
              is forced to develop / full tree (a maxed account has every point). -->
         <option value="maxed-account"
-                title="holodori-comparable: 54 boards fully developed at 453 with level-2 connect cards, memories 37, power-up 11.58 %">Every card maxed + maxed account (all boards 453, memories 37, power-up 11.58 %)</option>
+                title="holodori-comparable: 54 boards fully developed at 453 with level-2 connect cards, every poster the game has, the roster's power-up ceiling">Every card maxed + maxed account (all boards 453, every poster, power-up ceiling)</option>
       </select>
       <!-- Value holder the solve request reads; #cardsmode drives it. -->
       <select id="basis" hidden>
@@ -325,9 +325,6 @@
      either way because the grid template sets it, not the content. Below
      1100px it all stacks back into the single column. -->
 <div class="outcol">
-  <!-- twostage.js: the cached best team for the selected song / in general.
-       Outside <main id="result">, which stays hidden until a run has rows. -->
-  <div id="twostage"></div>
 
 <h2 class="resline"><span class="step-n">4</span> Your teams</h2>
 
@@ -761,7 +758,7 @@
   var HINTS = {
     "account": "What you can field tonight, at real levels & blooms.",
     "maxed": "The best team in the game — scores cards you don't own.",
-    "maxed-account": "The best team on a FULLY MAXED account, on holodori.best's basis: every card maxed, all 54 boards fully developed at 453 with level-2 Connect cards, memories 37, power-up 11.58 %. Board is forced to develop / full tree.",
+    "maxed-account": "The best team on a FULLY MAXED account, on holodori.best's basis: every card maxed, all 54 boards fully developed at 453 with level-2 Connect cards, every poster the game has, the roster's power-up ceiling. Board is forced to develop / full tree.",
   };
   function setHint() { if (basis && hint) hint.textContent = HINTS[basis.value] || ""; }
   if (basis) { basis.addEventListener("change", setHint); }
@@ -769,7 +766,6 @@
 })();
 </script>
 <script type="module" src="/app.js"></script>
-<script type="module" src="/twostage.js"></script>
 <script type="module" src="/leader.js"></script>
 <script type="module" src="/steps.js"></script>
 </body>

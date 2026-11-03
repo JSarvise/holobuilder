@@ -579,38 +579,6 @@ def _pyexe(args: argparse.Namespace) -> str:
     return args.python or sys.executable
 
 
-def start_two_stage_build(pyexe: str) -> str:
-    """Start `two_stage_build.py` DETACHED and return one line saying so.
-
-    The per-song and in-general answers (best leader + five members) are a
-    function of the inputs this refresh just rewrote, and recomputing the ones
-    whose key changed is minutes of every core — not something to make the
-    refresh wait for. The builder computes only what is stale, holds a lock so
-    two refreshes do not start two builders, and starts over by itself if the
-    inputs move under it. It writes under `dumps/two_stage/` only; nothing the
-    data guards watch. A failure to start is reported, never raised: the
-    refresh itself has already succeeded."""
-    script = HERE / "two_stage_build.py"
-    out_dir = HERE / "dumps" / "two_stage"
-    try:
-        out_dir.mkdir(parents=True, exist_ok=True)
-        env = dict(os.environ)
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["PYTHONPATH"] = os.pathsep.join(
-            str(REPO / part) for part in ("src", "tools/web", "tools/recon/proxy"))
-        flags = 0
-        if sys.platform == "win32":
-            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        with open(out_dir / "build.stdout.log", "ab") as sink:
-            proc = subprocess.Popen(
-                [pyexe, str(script)], cwd=str(REPO), env=env, stdin=subprocess.DEVNULL,
-                stdout=sink, stderr=subprocess.STDOUT, creationflags=flags, close_fds=True)
-    except Exception as exc:  # noqa: BLE001 - never fail a finished refresh over this
-        return f"two-stage answers: could NOT start the background build ({exc!r})"
-    return (f"two-stage answers: background build started (pid {proc.pid}); "
-            f"progress in {out_dir / 'status.json'}")
-
-
 PICTURES_LOCK_MAX_S = 6 * 3600     # a picture run's lock older than this is a stopped run's leftover
 
 
@@ -1674,18 +1642,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--verbose", action="store_true", help="print full output of every step"
     )
-    ap.add_argument(
-        "--no-two-stage",
-        action="store_true",
-        help="(the default since 2026-10-16; kept so older callers still parse)",
-    )
-    # The optimiser answers ON DEMAND (tools/web/ondemand.py), so a refresh does not
-    # start the hours-long two-stage cache build unless asked to.
-    ap.add_argument(
-        "--two-stage",
-        action="store_true",
-        help="also start the background two-stage answers cache build when the refresh ends",
-    )
+    # The optimiser answers ON DEMAND (tools/web/ondemand.py): there is no answers cache to
+    # build. Kept so older callers still parse.
+    ap.add_argument("--no-two-stage", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
 
     # Print in UTF-8 whatever the console/pipe claims to be.
@@ -1917,8 +1876,6 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("all steps ok")
     print(f"({time.time() - started:.0f}s total)")
-    if args.two_stage and not args.no_two_stage and not args.only:
-        print(start_two_stage_build(_pyexe(args)))
     if deferred:
         print(start_pictures(_pyexe(args), deferred, args.offline))
     return 0

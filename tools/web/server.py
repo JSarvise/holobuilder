@@ -375,8 +375,8 @@ MAXED_ACCOUNT_NOMINAL_TEAM = (
      "card-06005-5-uniq-0061-00"),
 )
 MAXED_ACCOUNT_BUDGET = 453          # the full tree, every team character
-MAXED_ACCOUNT_LABEL = ("maxed account · 54 bench boards @453 · memories 37 · "
-                       "power-up 11.58 %")
+MAXED_ACCOUNT_LABEL = ("maxed account · 54 bench boards @453 · every poster · "
+                       "power-up ceiling")
 
 
 @dataclass(frozen=True)
@@ -1430,7 +1430,7 @@ def run_solve_job(
         #   maxed          what is the best team in the game right now (every card, maxed)
         #   maxed-account  the best team on a FULLY MAXED ACCOUNT, comparable with
         #                  holodori.best: maxed cards + every bench board at 453 +
-        #                  the master's poster count + the 11.58 % power-up ceiling
+        #                  every poster the game has + the roster's power-up ceiling
         #
         # There is no "my cards, maxed" basis: it is exactly `account` + Assume
         # level Max + Assume bloom Max, which the level/bloom what-if filters
@@ -4474,7 +4474,6 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for=None) -> None:
     `error` then `end`. `engine_for(basis, difficulty)` replaces the engine
     (tests)."""
     import ondemand  # noqa: PLC0415
-    import two_stage_view  # noqa: PLC0415
     from job_progress import JobProgress  # noqa: PLC0415
 
     emit = JobProgress(job.events.put)
@@ -4500,8 +4499,7 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for=None) -> None:
                 eng = ondemand.engine(
                     basis, difficulty, workers=_web_workers(), levels=levels,
                     play=opts.get("play") or ("mobile", False),
-                    current_key=lambda: (two_stage_view.current_keys(basis, difficulty)
-                                         or (None, None))[1])
+                    current_key=lambda: ondemand.basis_key(basis, difficulty))
         else:
             eng = engine_for(basis, difficulty)
         emit({"type": "stage", "stage": "build", "state": "done"})
@@ -4929,8 +4927,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._serve_songs()
         elif path == "/api/ranks":
             self._json(200, row_detail.load_ranks(PROXY_DIR / "dumps" / "holodori"))
-        elif path == "/api/two-stage":
-            self._serve_two_stage()
         elif path == "/api/event":
             self._serve_event()
         elif path == "/api/event/songs":
@@ -5106,30 +5102,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if group is not None and group not in costs:
                 costs[group] = int((data.get("9") or [0])[0])
         return costs
-
-    def _serve_two_stage(self) -> None:
-        """The cached two-stage answer for `?song=<music id>`, or in general
-        with no song (`two_stage_view.payload`). Read-only: the cache is built
-        by `two_stage_build.py`, which a refresh starts in the background."""
-        import two_stage_view  # noqa: PLC0415
-
-        query = parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
-        basis = (query.get("basis") or ["maxed"])[0]
-        try:
-            difficulty = _parse_difficulty({"difficulty": (query.get("difficulty") or [""])[0]})
-        except _HttpError as exc:
-            self._json(exc.code, exc.obj)
-            return
-        if (query.get("scope") or [""])[0] == "singers":
-            self._json(200, two_stage_view.singers_payload(basis=basis, difficulty=difficulty))
-            return
-        try:
-            top = max(1, int((query.get("top") or [two_stage_view.RANKING])[0]))
-        except ValueError:
-            self._json(400, {"error": "top must be a positive integer"})
-            return
-        self._json(200, two_stage_view.payload((query.get("song") or [""])[0], basis=basis,
-                                               difficulty=difficulty, top=top))
 
     def _serve_songs(self) -> None:
         """The songs the page may rank against, with what each one is.
@@ -5447,8 +5419,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         the Score Bonus split and, on request, the timeline and the run law.
 
         Body: `{"song", "difficulty"?, "basis": "account"|"maxed"|"account-max",
-        "cards": [leader, m1..m5], "refine"?: bool (default: the cached row's own
-        flag; event rows pass false), "member_order"?, "timeline"?: bool,
+        "cards": [leader, m1..m5], "refine"?: bool (default false: the row was ranked
+        with the activation refinement), "member_order"?, "timeline"?: bool,
         "distribution"?: bool, "as_is"?: bool (default true: `song_est_as_is` on the
         account's captured boards + `plan_cost` of the planned boards vs the
         wallet, `row_detail._as_is`), "reset_price"?: bool (a within-wallet row
@@ -5477,7 +5449,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except _HttpError as exc:
             self._json(exc.code, exc.obj)
             return
-        refine = body.get("refine") if isinstance(body.get("refine"), bool) else None
+        refine = body.get("refine") is True
         order = body.get("member_order") if isinstance(body.get("member_order"), list) else None
         assumptions = None
         if isinstance(body.get("assumptions"), dict):
@@ -5493,7 +5465,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # a Highlight row on the WHOLE pool: one board, one slot order
                 # (`row_detail.pool_detail`); `song` is any pool song (the difficulty's)
                 out = row_detail.pool_detail(basis, pool, difficulty, ids[0], ids[1:],
-                                             assumptions=assumptions, refine=refine is not False)
+                                             assumptions=assumptions,
+                                             refine=body.get("refine") is not False)
                 out.update({"available": True, "difficulty": difficulty, "basis": basis,
                             "leader_id": ids[0], "member_ids": ids[1:]})
                 self._json(200, out)
@@ -7210,7 +7183,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         difficulty?, leader_member?, leader_card?, no_leader_overlap?, require?,
         exclude?, top?}` -- the optimiser ON DEMAND (`ondemand.py`): 202
         `{job_id}`; events on `/events/<id>`; cancel with `POST /cancel/<id>`.
-        The result payload has the shape of `GET /api/two-stage`. Read-only."""
+        Read-only."""
         import ondemand  # noqa: PLC0415
         import two_stage_build as tsb  # noqa: PLC0415
 
@@ -7321,6 +7294,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._json(202, {"job_id": job.job_id, "plan": [dict(s) for s in EVENT_STAGES],
                          "opts": opts})
 
+    def _meta_assumed(self) -> dict | None:
+        """`/api/meta`'s `assumed`: the account bonuses under the query's card levers
+        (`ondemand.account_bonuses`), or with `?basis=maxed` the Maxed account's
+        (`ondemand.maxed_bonuses`); None when the query sets neither."""
+        import ondemand  # noqa: PLC0415
+
+        query = parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+        raw = {k: query[k][0] for k in ("level", "bloom", "sp_training", "keep_higher") if k in query}
+        if (query.get("basis") or [""])[0] == "maxed":
+            b = ondemand.maxed_bonuses()
+        elif raw:
+            raw["keep_higher"] = raw.get("keep_higher") in ("1", "true")
+            b = ondemand.account_bonuses(ondemand.parse_assumptions(raw))
+        else:
+            return None
+        if b is None:
+            return None
+        return {"power_up_permyriad": b.power_up_permyriad, "memory_permil": b.memory_permil}
+
     def _serve_meta(self) -> None:
         """The one-line facts the page shows before any run: how many cards the
         account owns of the catalogue, how many boards the capture carries, and
@@ -7364,8 +7356,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "chart_count": chart_count,
                 # the chart difficulties a run may ask for (`difficulty` on
                 # /solve, /acquire, /api/run, /api/optimize-rerank,
-                # /api/compare, /api/timeline, ?difficulty= on /api/songs and
-                # /api/two-stage): the default, what is on disk, how many
+                # /api/compare, /api/timeline, ?difficulty= on /api/songs): the default, what is on disk, how many
                 # charts each holds, and — only when they vary — the EXPERT
                 # songs with no chart at a difficulty
                 "difficulties": difficulties,
@@ -7383,6 +7374,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     # scoring itself uses, never a hand-typed stale one.
                     else getattr(basis.derived_power_up, "permyriad", None)),
                 "owned_arrangements": arrangements,
+                # `?level=&bloom=&sp_training=&keep_higher=` (the Optimizer's "Upgraded
+                # cards") or `?basis=maxed`: the bonuses that search scores with, else None
+                "assumed": self._meta_assumed(),
             })
         except Exception as exc:  # noqa: BLE001 — an info strip must never 500 the page
             # `load_inputs` raises `_LoadFailure(exit code)` from the real error: say that one

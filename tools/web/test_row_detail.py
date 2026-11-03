@@ -76,8 +76,8 @@ def test_modal_order_is_the_order_best_on_most_charts():
 
 
 def _put(path: Path, obj) -> None:
-    # through the builder's own writer (tools/recon/proxy), as
-    # test_two_stage_view does: nothing in tools/web writes to disk
+    # through the builder's own writer (tools/recon/proxy): nothing in tools/web
+    # writes to disk
     import two_stage_build  # noqa: PLC0415
 
     two_stage_build._write(path, obj)
@@ -195,23 +195,15 @@ def test_a_rows_board_gives_the_same_numbers_on_every_route(web_base):
     assert tl["board_rebuild"]
 
 
-def test_row_detail_route_on_a_two_stage_row(web_base):
-    """A cached two-stage row re-developed on its own leaf: board, slot order,
-    split and law from ONE board (the law reproduces the figure exactly)."""
-    import two_stage_build as tsb
-
-    cached = tsb._read(tsb.CACHE / tsb.song_file(SONG, "account")) or {}
-    if not cached.get("rows"):
-        pytest.skip("no cached account two-stage answer for m0334 (dumps gitignored)")
-    row = cached["rows"][0]
+def test_row_detail_route_on_a_searched_row(web_base):
+    """A searched row re-developed on its own leaf: board, slot order, split and law
+    from ONE board (the law reproduces the figure exactly)."""
     status, doc = _req(web_base + "/api/row-detail", {
-        "song": SONG, "basis": "account", "cards": [row["leader"], *row["members"]],
-        "distribution": True, "timeline": True})
+        "song": SONG, "basis": "maxed", "cards": _TEAM, "distribution": True, "timeline": True})
     _skip_without_dumps(status, doc)
     assert status == 200, doc
-    assert doc["refined"] == bool(row.get("refined"))
-    assert sorted(doc["member_order"]) == sorted(row["members"])
+    assert doc["refined"] is False                  # no `refine`: the plain leaf
+    assert sorted(doc["member_order"]) == sorted(_MEMBERS)
     assert doc["board_state"] and doc["timeline"]["lanes"]
     assert doc["distribution"]["verified"] is True
     assert doc["song_max"] >= doc["song_est"]
-    assert "row_matches" in doc          # false only when the cache is stale

@@ -412,33 +412,23 @@ _POSTER_MASTER = to.DUMPS / "holodori" / "main_Poster.json"
 
 
 def master_poster_count() -> int | None:
-    """Rows of the master `Poster` table (the `main_Poster.json` export) — the
-    number of posters an account that owns every
-    poster holds, i.e. its Memory Bonus input (`memory_bonus_permil(37)`).
-    `PosterCollectEffect` runs to 50 thresholds, but only the posters that EXIST
-    can be collected. `None` if the export is absent (say so; do not guess)."""
-    try:
-        rows = to._load(_POSTER_MASTER)
-    except (OSError, ValueError):
-        return None
-    if isinstance(rows, dict):
-        rows = rows.get("rows") or rows.get("data") or []
-    return len(rows) if isinstance(rows, list) else None
+    """How many posters the game has (`hbuilder.cli.master_poster_count` on the
+    master's `main_Poster.json` export): what an account owning every poster
+    holds. `None` if the export is absent."""
+    from hbuilder.cli import master_poster_count as count  # noqa: PLC0415
+    return count(_POSTER_MASTER)
 
 
 def maxed_account_bonuses(basis, *, posters: int | None = None):
-    """`AccountBonuses` for the maxed-account scenario: the roster's power-up
-    ceiling (`max_member_power_up_permyriad`, 1158 permyriad on the 192-card
-    catalogue = 11.58 %) and memory posters = the master's poster
-    count, NOT `MEMORY_BONUS_MAX_POSTERS`.
-    `basis` is the `CollectionBasis` `apply_collection(maxed=True)` returned;
-    its `bonuses` already carry the power-up ceiling and level 50."""
+    """`AccountBonuses` for the maxed-account scenario. `basis` is the
+    `CollectionBasis` `apply_collection(maxed=True)` returned: its `bonuses`
+    already carry the roster's power-up ceiling, level 50 and every poster the
+    game has; `posters` overrides the poster count."""
     import dataclasses  # noqa: PLC0415
-    n = master_poster_count() if posters is None else posters
     bonuses = basis.bonuses
-    if n is None or bonuses is None:
+    if posters is None or bonuses is None:
         return bonuses
-    return dataclasses.replace(bonuses, posters=int(n))
+    return dataclasses.replace(bonuses, posters=int(posters))
 
 
 def maxed_account_board_state(skilltree: dict | None = None) -> dict:

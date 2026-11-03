@@ -10,7 +10,7 @@ Two kinds, by how the app reads them:
 
 NOT here, on purpose:
   - the account: account_snapshot_main.json, board_state.json, card_params.json,
-    inventory.json, board.json, board_export.json, two_stage/account_* -- the app's own
+    inventory.json, board.json, board_export.json -- the app's own
     account refresh writes them on the PC that holds the credential. The server never sees it.
   - cutoffs/: the 24/7 tracker serves them itself (/tracker/*).
   - research captures, decompilation output, and the 888 MB of song jackets that sit next
@@ -51,8 +51,6 @@ SYNC: list[str] = [
         "Live", "LiveDeckEvaluationRank", "LiveNote", "LiveScoreEvaluationRank",
         "MarathonRankingGrade", "Music", "Poster", "Setting", "SkillTreeEffectValueLimit",
         "SkillTreeNode")),
-    # two-stage screens on the maxed bases (the account basis is built locally)
-    D + "two_stage/song_*.json", D + "two_stage/accountmax_*.json",
     # small art every page draws, and the indexes the pages list
     D + "card_chrome/*", D + "ui_official/*", D + "member_icons/*", D + "item_icons/*",
     D + "song_jackets/*", D + "park_export/*",
@@ -76,7 +74,6 @@ LAZY: list[str] = [
 # Never published, whatever a pattern above matches: the account, and files being written.
 EXCLUDE: list[str] = [
     "*.tmp", "*.bak", "*.stale", "*.log", "*.err", "*.out", "*/.*",
-    D + "two_stage/account_*",
 ]
 
 

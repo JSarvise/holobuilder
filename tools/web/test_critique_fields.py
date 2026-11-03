@@ -19,10 +19,8 @@ for extra in (HERE, HERE / "kernel", HERE.parents[1] / "src", HERE.parent / "rec
 
 import event_mode  # noqa: E402
 import row_detail  # noqa: E402
-import two_stage_view as view  # noqa: E402
+import two_stage_build as tsb  # noqa: E402
 from job_progress import JobProgress  # noqa: E402
-
-tsb = view.build
 
 
 # ---------------------------------------------------------------------------
@@ -144,43 +142,6 @@ def test_search_song_rows_all_carry_a_ranking_led_by_their_own_set():
         assert ranking and len(ranking) <= 100
         assert ranking[0] == (row["best"], row["members"])
         assert [v for v, _s in ranking] == sorted((v for v, _s in ranking), reverse=True)
-
-
-# ---------------------------------------------------------------------------
-# /api/two-stage serves them (two_stage_view)
-# ---------------------------------------------------------------------------
-def _row(i, **extra):
-    return {"leader": f"card-{i}", "leader_name": f"L{i}", "status": "searched",
-            "best": 100.0 - i, "members": [f"m{k}" for k in range(5)],
-            "member_names": [f"N{k}" for k in range(5)], **extra}
-
-
-def test_the_view_serves_the_global_ranking_alternatives_and_quantiles(tmp_path):
-    ranking = [_row(0, p10=90, p50=99, p90=108, song_max=130, dist_mean=100.0,
-                    dist_verified=True, refined=True, best_plain=99.5)] + \
-              [_row(0, best=99.0 - i) for i in range(5)]
-    rows = [_row(0, alternatives=[{"members": ["x"] * 5, "best": 99.0, "refined": False}]),
-            _row(1)]
-    tsb._write(tmp_path / "song_m0001.json", {"key": "k", "song": "m0001", "rows": rows,
-                                              "ranking": ranking})
-    keys = lambda: ({"m0001": "k"}, "g")  # noqa: E731
-    got = view.payload("m0001", keys=keys, cache_dir=tmp_path)
-    assert got["ranking_size"] == 6 and len(got["ranking"]) == 6
-    assert [r["leader"] for r in got["ranking"]] == ["card-0"] * 6     # one leader may fill it
-    top = got["ranking"][0]
-    assert (top["p10"], top["p50"], top["p90"], top["song_max"]) == (90, 99, 108, 130)
-    assert top["refined"] is True and top["best_plain"] == 99.5
-    assert got["ranking"][1]["p10"] is None
-    assert got["rows"][0]["alternatives"][0]["best"] == 99.0
-    assert got["rows"][1]["alternatives"] == []
-    assert len(view.payload("m0001", keys=keys, cache_dir=tmp_path, top=2)["ranking"]) == 2
-
-
-def test_an_older_file_has_no_ranking(tmp_path):
-    tsb._write(tmp_path / "song_m0001.json", {"key": "k", "song": "m0001", "rows": [_row(0)]})
-    got = view.payload("m0001", keys=lambda: ({"m0001": "k"}, "g"), cache_dir=tmp_path)
-    assert got["ranking"] is None and got["ranking_size"] is None
-    assert got["rows"][0]["p10"] is None and got["rows"][0]["alternatives"] == []
 
 
 # ---------------------------------------------------------------------------

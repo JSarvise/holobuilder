@@ -17,7 +17,8 @@ A maxed account is a specific, computable thing, not a vibe:
 * max bloom means **no skill down-levelling**: level-2 magnitudes are correct
   there, so the open question of how ACTIVE/SPECIAL magnitudes down-level
   cannot affect this basis at all
-* Memory Bonus at its ceiling — 50 posters, `MEMORY_BONUS_MAX_POSTERS`
+* Memory Bonus of every poster the game HAS (the master's `Poster` rows), never
+  the 50 thresholds `PosterCollectEffect` runs to: no account collects more than exist
 * Member Power-Up at the **roster** ceiling: the ladder summed over every card
   at its own max level, `max_member_power_up_permyriad`, which is derived from
   the card list and grows the day a card ships
@@ -62,8 +63,17 @@ def _basis() -> StatBasis:
     )
 
 
-def test_posters_sit_at_the_ceiling():
-    assert maxed_account_bonuses(_basis()).posters == MEMORY_BONUS_MAX_POSTERS
+def test_posters_are_the_posters_the_game_has():
+    assert maxed_account_bonuses(_basis(), posters=42).posters == 42
+
+
+def test_posters_never_exceed_the_bonus_table():
+    assert maxed_account_bonuses(_basis(), posters=99).posters == MEMORY_BONUS_MAX_POSTERS
+
+
+def test_posters_are_absent_rather_than_assumed_without_the_poster_export():
+    """Unknown is not the table's 50: that would score a Memory Bonus no account can reach."""
+    assert maxed_account_bonuses(_basis()).posters is None
 
 
 def test_player_level_sits_at_the_ceiling():
@@ -94,7 +104,6 @@ def test_power_up_is_absent_rather_than_zero_with_no_curve_export():
     """Same first-class-absent contract as everywhere else: no ladder means the
     tool does not know, not that a maxed account earns nothing."""
     assert maxed_account_bonuses(None).power_up_permyriad is None
-    assert maxed_account_bonuses(None).posters == MEMORY_BONUS_MAX_POSTERS
 
 
 def test_it_is_never_auto():

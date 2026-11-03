@@ -95,6 +95,7 @@ from hbuilder.domain.scoring import (
     _score_up_pool,
     _support_targets,
     _stat_sum,
+    active_magnitude_by_card,
     deck_screen_unit_score,
     score_with_breakdown,
 )
@@ -1232,6 +1233,7 @@ def score_song_detailed(
     for card in members:
         normal_resolved.extend(card_set_gates.normal_by_card_id[card.id])
     team_rate_up = _fold_activation_rate_up(tuple(normal_resolved), cfg)
+    active_rank = active_magnitude_by_card(normal_resolved)
 
     # --- the member half, shared by every candidate leader ------------------
     member_index_by_id = {card.id: index for index, card in enumerate(members)}
@@ -1268,7 +1270,7 @@ def score_song_detailed(
             )
         elif pool == "support":
             support_state, support_targets = _support_state(
-                resolved, members, cfg, state
+                resolved, members, cfg, state, active_rank
             )
             member_terms.extend(_combo_split(resolved, cfg,
                 _term_for(
@@ -1399,7 +1401,7 @@ def score_song_detailed(
                 weight = cfg.family_weights[costume.family]
                 if pool == "support":
                     support_state, support_targets = _support_state(
-                        costume, members, cfg, state
+                        costume, members, cfg, state, active_rank
                     )
                     terms.append(
                         _term_for(
@@ -1812,6 +1814,7 @@ def _support_state(
     members: tuple[Card, ...],
     cfg: ScoringConfig,
     state: str,
+    active_rank: dict[str, float] | None,
 ) -> tuple[str, frozenset[str] | None]:
     """`scoring._bucket_term`'s support rule, restated for the timeline: a
     support whose resolved target set is EMPTY never enters the effect
@@ -1834,6 +1837,7 @@ def _support_state(
         STAT_NAMES,
         cfg.target_selection_model,
         cfg.target_under_supply,
+        rank_values=active_rank,
     )
     if not target_ids:
         return "gate_not_met", None

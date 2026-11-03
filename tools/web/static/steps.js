@@ -4,8 +4,7 @@
 // of twenty-nine controls.
 //
 //   1 What to build            the three goal cards (as before)
-//   2 What to optimise for     the song / "across all songs", and the cached
-//                              best team for that choice (twostage.js)
+//   2 What to optimise for     the song / "across all songs"
 //   3 Options                  which cards, the pool, locked cards
 //   4 Holomem boards           how each team's board is developed
 //   5 Details                  score model, platform, how many teams to keep
@@ -75,8 +74,6 @@ export function mountSteps() {
   const details = newCard("Details");
   const songBlock = block("song");
   if (songBlock) goal.grid.append(songBlock);
-  const panel = $("twostage");
-  if (panel) goal.card.querySelector(".st-body").append(panel);
   const boardBlock = block("boardprimary");
   if (boardBlock) boards.grid.append(boardBlock);
   ["uptime", "platform"].forEach((id) => { const b = block(id); if (b) details.grid.append(b); });

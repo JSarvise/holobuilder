@@ -1,4 +1,4 @@
-// Optimizer page, goal "Score": the cached answer (GET /api/two-stage), the live search
+// Optimizer page, goal "Score": the on-demand search (POST /api/search), the live search
 // (POST /solve + SSE, then POST /api/optimize-rerank — the classic page's default path), and the
 // results laid out as the Night Deck setlist (hb-rank.js, left) and the selected team (right).
 // Scores are the server's.
@@ -66,35 +66,15 @@ function restore(ctx) {
   sel = k.sel || 0; open = new Set([sel]);
 }
 
-/* ------------------------------------------------------------------ idle: the cached answer */
+/* ------------------------------------------------------------------ idle */
 export async function showScoreIdle(ctx, keepLive) {
   if (!restored) { restore(ctx); keepLive = true; }
   const S = ctx.S, key = optsKey(S);
   if (live && live.key === key) { render(ctx, live); return; }
   if (!keepLive) { sel = 0; open = new Set([0]); }
-  // the optimiser ON DEMAND (POST /api/search) -- searched for this request, no cache --
-  // for the account and maxed-account bases; otherwise the cached answer is read.
+  // the optimiser ON DEMAND (POST /api/search) -- searched for this request, no cache.
   // A search starts ONLY from Find best team -- never on load or on an option change
-  if (assumptionsOf(S) || basisOf(S) === "maxed") { idleOnDemand(ctx, key); return; }
-  const want = `/api/two-stage?song=${encodeURIComponent(S.song)}&basis=${tsBasis(S) || "account"}`;
-  if (cache && cache.url === want) { render(ctx, cache); return; }
-  ctx.out().innerHTML = `<div class="o-progress"><div class="row"><span>Reading the cached answer…</span></div></div>`;
-  try {
-    const doc = await getJSON(want);
-    if (optsKey(ctx.S) !== key) return;               // the options moved on
-    // the GLOBAL top N (rows may share a leader); older files: one row per leader
-    const src = Array.isArray(doc.ranking) && doc.ranking.length ? doc.ranking : (doc.rows || []);
-    const rows = src.map(r => ({
-      key: teamKey(r.leader, r.members), source: "cached", route: "the cached search", api: "/api/two-stage",
-      leader: r.leader, leaderName: r.leader_name, members: r.member_order || r.members, ordered: !!r.member_order,
-      expected: r.best, kind: doc.scope === "general" ? "across" : "song", sings: r.sings, status: r.status, refinedLeaf: r.refined,
-      p10: r.p10, p50: r.p50, p90: r.p90, max: r.song_max ?? null,
-    }));
-    cache = { url: want, doc, rows, cards: ctx.D.cards, cached: true };
-    render(ctx, cache);
-  } catch (e) {
-    ctx.out().innerHTML = `<section class="o-empty"><h2>No cached answer</h2><p>${esc(e.message)}. Press Find best team to search.</p></section>`;
-  }
+  idleOnDemand(ctx, key);
 }
 
 /* ------------------------------------------------------------------ on demand: POST /api/search */
@@ -198,6 +178,10 @@ async function searchNow(ctx, key) {
       cache = { url, doc, rows, cards: ctx.D.cards, cached: true };
       sel = 0; open = new Set([0]);
       remember(ctx);
+      // the search's best teams for the Versus page in this tab (vs-app.js optimizerBest)
+      stash("best", ctx, { song: ctx.S.song || "", difficulty: ctx.S.difficulty, cards: ctx.S.cards,
+        rows: (doc.ranking || []).slice(0, 20).map(r => ({ leader: r.leader, leader_name: r.leader_name,
+          members: r.member_order || r.members, best: r.best })) });
       render(ctx, cache);
     }
   };
@@ -568,7 +552,7 @@ function fromCompare(d, route, api = "/api/compare") {
 function fromRowDetail(d) {
   return { route: "the team's own board", api: "/api/row-detail", value: d.song_est, song_max: d.song_max, member_order: d.member_order, deck_power: d.deck_power,
     deck_power_basis: d.deck_power_basis, panel: d.panel, score_bonus: d.score_bonus, distribution: d.distribution || null,
-    board_state: d.board_state, bench_sockets: d.bench_sockets || null, bench_slots: d.bench_slots || null, row_matches: d.row_matches, row_best: d.row_best, unit_off: null };
+    board_state: d.board_state, bench_sockets: d.bench_sockets || null, bench_slots: d.bench_slots || null, unit_off: null };
 }
 function baseOf(S) {
   const b = { basis: basisOf(S), song: S.song, across: !S.song, platform: S.platform, uptime_model: "finite", auto: !!S.auto,
@@ -583,10 +567,13 @@ function boardDoc(ctxT, T, i, det, bs, cards) {
   // six boards are this row's own; it takes seconds, so it fills in after the rest
   const A = assumptionsOf(S);
   if (A && A.boards === "plan" && !det.acct && !det.acctLoading) {
+    // a general row's detail is ON one song (det.song): the plan is that song's, as its figures are
+    const song = det.song || S.song || null;
     det.acctLoading = true;
-    postJSON("/api/board-plan-account", { cards, song: S.song || null, assumptions: A, board_state: bs, bench_slots: (det.fig || {}).bench_slots || null })
-      .then(d => { det.acct = d; det.acctErr = null; }).catch(e => { det.acctErr = e.message; })
-      .finally(() => { det.acctLoading = false; repaint(ctxT, T, i); });
+    postJSON("/api/board-plan-account", { cards, song, assumptions: A, board_state: bs, bench_slots: (det.fig || {}).bench_slots || null })
+      .then(d => { if ((det.song || S.song || null) === song) { det.acct = d; det.acctErr = null; } })
+      .catch(e => { if ((det.song || S.song || null) === song) det.acctErr = e.message; })
+      .finally(() => { if ((det.song || S.song || null) === song) { det.acctLoading = false; repaint(ctxT, T, i); } });
   }
   // a maxed account: EVERY holomem's target is its complete board (the team's sockets its row's,
   // the bench's the exact assignment the score used), shown against the account's REAL boards --
@@ -615,7 +602,10 @@ export async function withDistribution(det, body, paint) {
 /* a general (across) cached row on ONE song: /api/row-detail for that song */
 async function perSongDetail(ctxT, T, i, det) {
   const S = ctxT.ctx.S, cards = [T.leader, ...T.members], song = det.song;
-  Object.assign(det, { fig: null, tl: null, tlErr: null, doc: null, docErr: null, err: null });
+  // the whole-account plan is per song too: the previous song's is dropped, and one still
+  // planning for it no longer applies (boardDoc ignores its answer)
+  Object.assign(det, { fig: null, tl: null, tlErr: null, doc: null, docErr: null, err: null,
+    acct: null, acctErr: null, acctLoading: false });
   repaint(ctxT, T, i);
   try {
     // an on-demand row carries the search's levers, as the song rows do, so an "In general"

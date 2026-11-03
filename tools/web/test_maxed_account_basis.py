@@ -3,7 +3,7 @@ the same basis the community tool holodori.best uses — the maxed catalogue
 (as `maxed`) plus a reference scenario:
 every one of the 54 holomem boards developed at the full 453 points with
 level-2 Connect cards socketed (`precompute.maxed_account_bench`), Memory
-posters = the master's 37, Member Power-Up = the 11.58 % roster ceiling
+posters = every poster the master has, Member Power-Up = the roster ceiling
 (`precompute.maxed_account_bonuses`), Connect pool = every card at level 2,
 team boards developed at the flat 453 by default.
 

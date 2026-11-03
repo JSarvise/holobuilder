@@ -44,6 +44,7 @@ from hbuilder.domain.card import Card
 from hbuilder.domain.gates import resolve_card_set_gates, resolve_leader_costume_skills
 from hbuilder.domain.scoring import (
     _board_bonus,
+    active_magnitude_by_card,
     _fold_activation_rate_up,
     _is_score_up_effect,
     _pool_for,
@@ -76,6 +77,7 @@ def _terms(members: tuple[Card, ...], leader: Card, chart: SongChart, cfg: Scori
     for card in members:
         normal.extend(gates.normal_by_card_id[card.id])
     team_rate_up = _fold_activation_rate_up(tuple(normal), cfg)
+    active_rank = active_magnitude_by_card(normal)
     index_of = {card.id: i for i, card in enumerate(members)}
     terms = []
     score_rates = []
@@ -87,7 +89,7 @@ def _terms(members: tuple[Card, ...], leader: Card, chart: SongChart, cfg: Scori
         weight = cfg.family_weights[resolved.family]
         index = index_of[resolved.card_id]
         if pool == "support":
-            s_state, s_targets = _support_state(resolved, members, cfg, state)
+            s_state, s_targets = _support_state(resolved, members, cfg, state, active_rank)
             terms.extend(_combo_split(resolved, cfg, _term_for(
                 resolved, cfg, team_rate_up, s_state, song_seconds, index, s_targets), times))
         elif _is_score_up_effect(resolved):
@@ -109,7 +111,7 @@ def _terms(members: tuple[Card, ...], leader: Card, chart: SongChart, cfg: Scori
         rate, state, _missing = _resolve_skill(costume, cfg, team_rate_up)
         weight = cfg.family_weights[costume.family]
         if pool == "support":
-            s_state, s_targets = _support_state(costume, members, cfg, state)
+            s_state, s_targets = _support_state(costume, members, cfg, state, active_rank)
             terms.append(_term_for(costume, cfg, team_rate_up, s_state, song_seconds,
                                    None, s_targets))
         elif pool == "score":

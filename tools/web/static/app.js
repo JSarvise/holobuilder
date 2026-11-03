@@ -102,8 +102,8 @@ if (el.mode) { el.mode.addEventListener("change", applyMode); applyMode(); }
 // assume selects so a hidden stale what-if can never leak into a run.
 // "maxed-account" (comparable with the community tool holodori.best) is a THIRD
 // server basis: maxed cards on
-// a fully maxed account (54 bench boards at 453, memories 37, power-up 11.58 %).
-const MAXED_ACCOUNT_LABEL = "maxed account · 54 bench boards @453 · memories 37 · power-up 11.58 %";
+// a fully maxed account (54 bench boards at 453, every poster, the roster's power-up ceiling).
+const MAXED_ACCOUNT_LABEL = "maxed account · 54 bench boards @453 · every poster · power-up ceiling";
 const MAXED_ACCOUNT_REASON = "Cards = maxed account: the board is develop / full tree (453) by definition — a maxed account has every point.";
 const cardsModeVal = () => (el.cardsmode && el.cardsmode.value) || "asis";
 const maxedAccountOn = () => cardsModeVal() === "maxed-account";

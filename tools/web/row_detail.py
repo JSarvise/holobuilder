@@ -21,9 +21,9 @@ the one place those figures are produced, from ONE board:
   the SAME `BoardModel` the develop assembled (`board_model_from_plan` with the
   basis' Connect cards, bench and cast names), not a `build_board` rebuild at
   Connect level 1 without the bench;
-* `two_stage_detail(...)` — a two-stage / event row re-developed on ITS leaf
-  (`parallel_refine.develop_team`), so the cached rows get a board, a slot
-  order and every figure above.
+* `two_stage_detail(...)` — a searched / event row re-developed on ITS leaf
+  (`parallel_refine.develop_team`), so the row gets a board, a slot order and
+  every figure above.
 
 READ-ONLY: nothing here writes a file.
 """
@@ -286,19 +286,6 @@ def _leaf_inputs(basis: str, song: str, difficulty: str, assumptions=None) -> di
     return built
 
 
-def cached_row(basis: str, song: str, difficulty: str, leader: str,
-               members: Sequence[str]) -> dict | None:
-    """The two-stage cache's row for this exact (leader, member set), if any."""
-    import two_stage_build as tsb  # noqa: PLC0415
-
-    cached = tsb._read(tsb.CACHE / tsb.song_file(song, basis, difficulty)) or {}
-    want = sorted(members)
-    for row in cached.get("rows") or []:
-        if row.get("leader") == leader and sorted(row.get("members") or []) == want:
-            return {**row, "key": cached.get("key")}
-    return None
-
-
 def leaf_detail(built: Mapping, team: Team, *, refine: bool = False,
                 want_distribution: bool = False, want_timeline: bool = False,
                 member_order: Sequence[str] | None = None, panel: bool = True,
@@ -544,13 +531,13 @@ def _whole_plan_cost(whole_plan: Mapping, ctx) -> dict:
 
 
 def two_stage_detail(basis: str, song: str, difficulty: str, leader_id: str,
-                     member_ids: Sequence[str], *, refine: bool | None = None,
+                     member_ids: Sequence[str], *, refine: bool = False,
                      want_distribution: bool = False, want_timeline: bool = False,
                      member_order: Sequence[str] | None = None, as_is: bool = True,
                      assumptions=None, want_reset_price: bool = False) -> dict:
-    """A two-stage (or event, `refine=False`) row re-developed on the leaf that
-    ranked it, with every figure from that one board. `refine=None` follows the
-    cached row (`refined`) when the row is in the cache, else the plain leaf.
+    """A searched (or event, `refine=False`) row re-developed on the leaf that
+    ranked it, with every figure from that one board. `refine`: the row was ranked
+    with the activation refinement.
     `assumptions` (`ondemand.Assumptions`): the on-demand search's account levers
     instead of a fixed `basis` -- the same leaf that ranked the row."""
     built = _leaf_inputs(basis, song, difficulty, assumptions)
@@ -572,9 +559,6 @@ def two_stage_detail(basis: str, song: str, difficulty: str, leader_id: str,
     if missing:
         raise KeyError(f"not in this basis' pool: {missing}")
     team = Team(leader=by_id[leader_id], members=tuple(by_id[m] for m in member_ids))
-    row = cached_row(basis, song, difficulty, leader_id, member_ids)
-    if refine is None:
-        refine = bool(row and row.get("refined"))
     out = leaf_detail(built, team, refine=bool(refine), want_distribution=want_distribution,
                       want_timeline=want_timeline, member_order=member_order, as_is=as_is)
     if as_is and whole_plan is not None:
@@ -584,9 +568,6 @@ def two_stage_detail(basis: str, song: str, difficulty: str, leader_id: str,
             out["reset_price"] = reset_price(
                 _leaf_inputs(basis, song, difficulty, assumptions), team, song, assumptions,
                 refine=bool(refine), current=(out["plan_cost"]["resets"], out["song_est"]))
-    if row is not None:
-        out["row_best"] = row.get("best")
-        out["row_matches"] = round(row.get("best") or 0) == round(out["song_est"])
     return out
 
 

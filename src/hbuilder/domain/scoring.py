@@ -287,6 +287,25 @@ def _effective_magnitude(resolved: ResolvedSkill) -> object:
     return skill.magnitude
 
 
+def active_magnitude_by_card(resolved_skills) -> dict[str, float] | None:
+    """Each card's ACTIVE magnitude as the game ranks the recipients of a count-limited
+    Score Support: the principal ACTIVE's magnitude at the card's own skill level, with
+    a fired override competing with it (`_effective_magnitude`). A support raises no
+    stat, and the game pays the qualifying members whose ACTIVE is the strongest (ties
+    to the earlier slot), whatever their parameter. A card with no ACTIVE ranks at 0.
+    `None` when a magnitude is not known: the caller then ranks by total parameter
+    instead of guessing an order."""
+    out: dict[str, float] = {}
+    for resolved in resolved_skills:
+        if resolved.slot_kind != "ACTIVE" or resolved.source != "normal" or resolved.card_id in out:
+            continue
+        magnitude = _effective_magnitude(resolved)
+        if isinstance(magnitude, bool) or not isinstance(magnitude, (int, float)):
+            return None
+        out[resolved.card_id] = float(magnitude)
+    return out
+
+
 @cache
 def _finite_window_uptime(duration: float, interval: float) -> float:
     """The fraction of a reference run this ACTIVE skill's effect is up, GIVEN it rolls
@@ -1761,6 +1780,7 @@ def _score_team(
         resolved_skills, cfg
     )
     cards = team.members  # gates and stats are the 5 members'
+    active_rank = active_magnitude_by_card(resolved_skills)
 
     stat_rates: list[float] = []
     # See `StatEntry`. The last two slots carry the skill's own target clause,
@@ -1876,6 +1896,7 @@ def _score_team(
                     STAT_NAMES,
                     cfg.target_selection_model,
                     cfg.target_under_supply,
+                    rank_values=active_rank,
                 )
                 target_kind = (
                     resolved.skill.target.kind
@@ -2639,6 +2660,7 @@ def score_card_set(
     team_rate_up = _fold_activation_rate_up(
         tuple(normal_resolved), cfg
     ) + _fold_rider_activation_rate_up(tuple(normal_resolved), cfg)
+    active_rank = active_magnitude_by_card(normal_resolved)
 
     # Target resolution depends only on the assembled 6-card
     # set (`cards`) and the skill's own target/effect_type — never on which
@@ -2673,11 +2695,10 @@ def score_card_set(
         weighted_rate = rate * weight
         target_ids: frozenset = frozenset()
         if state == "applied" and pool in ("stat", "support"):
-            # A support target resolves exactly like a stat target and is
-            # ranked by `STAT_NAMES` (i.e. by stat sum), because no single stat
-            # is "the" stat a Score Support effect raises — the same reasoning
-            # `targets.resolve_target_card_ids` already documents for
-            # `all_stats`. Disclosed through TARGET_SELECTION, never silent.
+            # A support target ranks its qualifiers by their ACTIVE magnitude
+            # (`active_magnitude_by_card`): it raises no stat, and the game pays
+            # the members whose ACTIVE is the strongest. A stat target ranks by
+            # the stat it raises.
             target_ids = targets.resolve_target_card_ids(
                 resolved.skill.target,
                 resolved.card_id,
@@ -2687,6 +2708,7 @@ def score_card_set(
                 else STAT_NAMES_BY_EFFECT_TYPE[resolved.skill.effect_type],
                 cfg.target_selection_model,
                 cfg.target_under_supply,
+                rank_values=active_rank if pool == "support" else None,
             )
         cache[(resolved.card_id, resolved.slot_kind, resolved.source)] = (
             weighted_rate,
@@ -2764,6 +2786,7 @@ def score_card_set(
                 else STAT_NAMES_BY_EFFECT_TYPE[costume.skill.effect_type],
                 cfg.target_selection_model,
                 cfg.target_under_supply,
+                rank_values=active_rank if pool == "support" else None,
             )
         cache[(costume.card_id, costume.slot_kind, costume.source)] = (
             weighted_rate,

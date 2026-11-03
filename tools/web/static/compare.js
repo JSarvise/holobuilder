@@ -336,8 +336,8 @@ function renderAssumptions() {
   option(ctl.cardsmode, "asis", "My cards, as they are", a.cardsmode === "asis");
   option(ctl.cardsmode, "whatif", "My cards, at a level/bloom I choose…", a.cardsmode === "whatif");
   option(ctl.cardsmode, "maxed", "Every card in the game, maxed", a.cardsmode === "maxed");
-  option(ctl.cardsmode, "maxed-account", "Every card maxed + maxed account (all boards 453, memories 37, power-up 11.58 %)", a.cardsmode === "maxed-account");
-  ctl.cardsmode.lastChild.title = "holodori-comparable: 54 boards fully developed at 453 with level-2 connect cards, memories 37, power-up 11.58 %";
+  option(ctl.cardsmode, "maxed-account", "Every card maxed + maxed account (all boards 453, every poster, power-up ceiling)", a.cardsmode === "maxed-account");
+  ctl.cardsmode.lastChild.title = "holodori-comparable: 54 boards fully developed at 453 with level-2 connect cards, every poster the game has, the roster's power-up ceiling";
   const assumeRow = el("div", "assume-row");
   ctl.assume_level = document.createElement("select");
   option(ctl.assume_level, "account", "real", a.assume_level === "account");

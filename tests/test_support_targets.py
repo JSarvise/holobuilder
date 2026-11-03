@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from hbuilder.domain.card import EffectTarget
+from hbuilder.domain.card import EffectTarget, Stats
 from hbuilder.domain.scoring import (
     score_card_set,
     score_fast,
@@ -180,3 +180,60 @@ def test_song_driver_agrees_with_deck_screen_ratio():
         )
         expected_note = 2300.0 * (1.0 + pool)
         assert result.total_score == 2 * expected_note, (target, result.total_score)
+
+
+# A count-limited Score Support goes to the qualifying members whose ACTIVE is the
+# strongest (its magnitude at the card's own skill level, a fired override competing
+# with it), not the ones with the most parameter; a tie goes to the earlier slot.
+# Read off the server's per-card `active_effect_up`, the recipients follow this rule on
+# every deck measured, including the ones where ranking by total parameter disagrees.
+BIG = Stats(performance=9000, technique=9000, sense=9000)
+
+
+def _strongest_active_members(order=("card-a", "card-b", "card-c", "card-d", "card-e")):
+    """card-a carries the most parameter but the weakest Cute ACTIVE (30 %); card-b
+    (40 %) and card-c (49 %) have the default parameter. A {Cute, 2} support on card-e."""
+    cards = {
+        "card-a": make_card("card-a", type_="Cute", stats=BIG, active=_active(30.0)),
+        "card-b": make_card("card-b", type_="Cute", active=_active(40.0)),
+        "card-c": make_card("card-c", type_="Cute", active=_active(49.0)),
+        "card-d": make_card("card-d", type_="Cool"),
+        "card-e": make_card("card-e", type_="Cool", passive=_support(10.0, CUTE_2)),
+    }
+    return tuple(cards[k] for k in order)
+
+
+def _support_recipients(members) -> tuple[str, ...]:
+    bd = score_with_breakdown(make_team([LEADER, *members]), cfg())
+    (row,) = [c for c in bd.contributions if c.family == "score_support"]
+    return row.target_card_ids
+
+
+def test_a_count_limited_support_goes_to_the_strongest_actives_not_the_most_parameter():
+    assert _support_recipients(_strongest_active_members()) == ("card-b", "card-c")
+
+
+def test_a_tie_in_active_magnitude_goes_to_the_earlier_slot():
+    def tied(order):
+        members = list(_strongest_active_members(order))
+        k = [m.id for m in members].index("card-b")
+        members[k] = dataclasses.replace(members[k], skills=(None, _active(49.0), None))
+        members[0] = dataclasses.replace(members[0], skills=(None, _active(50.0), None))
+        return tuple(members)
+    # card-a at 50 % is paid; card-b and card-c tie at 49 % for the second place
+    assert _support_recipients(tied(("card-a", "card-b", "card-c", "card-d", "card-e"))) == ("card-a", "card-b")
+    assert _support_recipients(tied(("card-a", "card-c", "card-b", "card-d", "card-e"))) == ("card-a", "card-c")
+
+
+def test_every_driver_pays_the_strongest_actives():
+    """The deck-screen, fast, card-set and song drivers agree on the recipients:
+    with p = 1 on both notes the song's pool is the larger boosted ACTIVE,
+    0.49 x 1.10 (card-c paid): 2300 x 1.539 = 3539.7 a note, 3540 as scored; paying
+    card-a and card-b instead leaves card-c's 0.49 on top, 2 x 3427 = 6854."""
+    members = _strongest_active_members()
+    team = make_team([LEADER, *members])
+    c = cfg()
+    full = score_with_breakdown(team, c).total_score
+    assert full == score_fast(team, c) == score_card_set(members, (LEADER,), c)[0].total_score
+    (result,) = score_song_detailed(members, (LEADER,), _chart(), c, deck_power=2000.0)
+    assert result.total_score == 2 * 3540.0

@@ -57,7 +57,6 @@ from hbuilder.domain.board import BoardError, BoardModel, load_board
 from hbuilder.domain.card import Card, Stats
 from hbuilder.domain.collection import (
     FULLY_SCORABLE_BLOOM,
-    MEMORY_BONUS_MAX_POSTERS,
     CollectionError,
     account_bonuses_from_mapping,
     caps_by_rarity_from_mapping,
@@ -195,6 +194,21 @@ COLLECTION_CAPS_PATH = "tools/recon/proxy/dumps/card_caps.json"
 # The per-level skill rows, for the bloom down-level. ⚠ NOT `skill_levels.json`
 # -- that path may hold a stale file no current tool generates.
 COLLECTION_LADDER_PATH = "tools/recon/proxy/dumps/skill_ladder.json"
+# The master's `Poster` table (one row per poster the game has): the maxed basis's
+# Memory Bonus input. Written by the refresh's master export.
+COLLECTION_POSTER_PATH = "tools/recon/proxy/dumps/holodori/main_Poster.json"
+
+
+def master_poster_count(path: Path | str = COLLECTION_POSTER_PATH) -> int | None:
+    """How many posters the game has (rows of the master `Poster` export), or
+    `None` when the export is absent or unreadable."""
+    try:
+        rows = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(rows, dict):
+        rows = rows.get("rows") or rows.get("data") or []
+    return len(rows) if isinstance(rows, list) else None
 
 # Above this PROJECTED EXACT duration a run switches to the beam
 # automatically, and `--exact` overrides it.
@@ -806,6 +820,7 @@ class CollectionBasis:
     def lines(self) -> list[str]:
         if self.maxed:
             power_up = getattr(self.bonuses, "power_up_permyriad", None)
+            posters = getattr(self.bonuses, "posters", None)
             return [
                 "BASIS: MAXED ACCOUNT -- every card owned, at max level and max "
                 "bloom. This is NOT your account; it answers what a team would be "
@@ -814,7 +829,11 @@ class CollectionBasis:
                 "BASIS: max bloom means every skill is at level 2, so no skill is "
                 "down-levelled and MODEL.md 4c's open ACTIVE/SPECIAL question "
                 "cannot affect this answer either way",
-                f"BASIS: Memory Bonus at {MEMORY_BONUS_MAX_POSTERS} posters; Member "
+                (f"BASIS: Memory Bonus at {posters} posters (every poster the game has)"
+                 if posters is not None else
+                 f"BASIS: ⚠ Memory Bonus NOT counted -- no {COLLECTION_POSTER_PATH} "
+                 "to say how many posters the game has")
+                + "; Member "
                 f"Power-Up at the roster ceiling "
                 f"({power_up if power_up is not None else 'unknown -- no card_level_curve.json'})",
                 "BASIS: ⚠ the Holomem Board is still YOUR REAL BOARD, not a maxed "
@@ -1039,7 +1058,7 @@ def apply_collection(
         curve_raw = _load_json_if_present(Path(COLLECTION_CURVE_PATH))
         basis = stat_basis_from_mapping(curve_raw) if curve_raw else None
         return cards, CollectionBasis(
-            bonuses=maxed_account_bonuses(basis),
+            bonuses=maxed_account_bonuses(basis, master_poster_count()),
             path=None,
             applied=0,
             unchanged=len(cards),

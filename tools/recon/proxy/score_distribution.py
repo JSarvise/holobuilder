@@ -65,6 +65,7 @@ from hbuilder.domain.loader import load_cards, load_owned               # noqa: 
 from hbuilder.domain.schema import STAT_NAMES                           # noqa: E402
 from hbuilder.domain.scoring import (                                   # noqa: E402
     STAT_NAMES_BY_EFFECT_TYPE,
+    active_magnitude_by_card,
     _board_score_rate,
     _effective_stat_sum,
     _FIXED_TARGET,
@@ -180,6 +181,7 @@ class Prepared:
         for card in members:
             normal_resolved.extend(card_set_gates.normal_by_card_id[card.id])
         team_rate_up = _fold_activation_rate_up(tuple(normal_resolved), cfg)
+        active_rank = active_magnitude_by_card(normal_resolved)
         index_by_id = {card.id: i for i, card in enumerate(members)}
 
         terms, score_rates, stat_entries = [], [], []
@@ -206,7 +208,7 @@ class Prepared:
             elif pool == "support":
                 terms.append(_term_for(
                     resolved, cfg, team_rate_up,
-                    _support_state(resolved, members, cfg, state),
+                    _support_state(resolved, members, cfg, state, active_rank),
                     song_seconds, index))
             elif _is_score_up_effect(resolved):
                 terms.append(_term_for(
@@ -223,7 +225,7 @@ class Prepared:
                 if pool == "support":
                     terms.append(_term_for(
                         costume, cfg, team_rate_up,
-                        _support_state(costume, members, cfg, state),
+                        _support_state(costume, members, cfg, state, active_rank),
                         song_seconds, None))
                 elif pool == "score":
                     if _is_score_up_effect(costume):

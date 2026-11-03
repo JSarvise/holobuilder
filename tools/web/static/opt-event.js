@@ -499,14 +499,15 @@ async function songDetail(c, r, i, det) {
     if (bs && Object.keys(bs).length) {
       await postJSON("/api/board-doc", isMaxed(S) ? { board_state: bs, cards, basis: "maxed", budget: 453, complete: true }
         : { board_state: bs, cards, basis: "account" })
-        .then(x => { det.doc = x; }).catch(e => { det.docErr = e.message; });
+        .then(x => { if (!stale()) det.doc = x; }).catch(e => { if (!stale()) det.docErr = e.message; });
       // the whole account's plan when the boards are planned (see opt-score.js boardDoc)
       const A = eventAssumptions(S);
       if (A && A.boards === "plan" && !det.acct) {
         det.acctLoading = true; repaint(c, r, i);
         await postJSON("/api/board-plan-account", { cards, song: onPool ? (d.plan_song || undefined) : song, song_pool: onPool ? (d.plan_pool || undefined) : undefined, assumptions: A, board_state: bs, bench_slots: det.fig.bench_slots })
-          .then(x => { det.acct = x; }).catch(e => { det.acctErr = e.message; });
-        det.acctLoading = false;
+          // a plan still running for the previous pool song no longer applies
+          .then(x => { if (!stale()) det.acct = x; }).catch(e => { if (!stale()) det.acctErr = e.message; });
+        if (!stale()) det.acctLoading = false;
       }
     }
     if (stale()) return;

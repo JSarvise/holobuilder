@@ -1232,7 +1232,7 @@ def derived_member_power_up_permyriad(
     )
 
 
-def maxed_account_bonuses(basis: StatBasis | None) -> AccountBonuses:
+def maxed_account_bonuses(basis: StatBasis | None, posters: int | None = None) -> AccountBonuses:
     """The account-level bonuses a FULLY MAXED account would carry.
 
     The other half of the maxed basis — the cards themselves — needs no work at
@@ -1254,9 +1254,15 @@ def maxed_account_bonuses(basis: StatBasis | None) -> AccountBonuses:
     `power_up_permyriad` is the ROSTER ceiling, not the account's: every card at
     its own max level, which is what `max_member_power_up_permyriad` already
     computes and why that function was written to grow with the card list.
-    `None` there rather than `0` when no curve is exported, as everywhere."""
+    `None` there rather than `0` when no curve is exported, as everywhere.
+
+    `posters` is how many posters the game HAS (the master's `Poster` rows): a
+    maxed account holds every one, and no more — `PosterCollectEffect` runs to
+    `MEMORY_BONUS_MAX_POSTERS` thresholds, but only the posters that exist can be
+    collected. `None` (the count is unknown) leaves the Memory Bonus unset rather
+    than assuming the table's last threshold."""
     return AccountBonuses(
-        posters=MEMORY_BONUS_MAX_POSTERS,
+        posters=None if posters is None else max(0, min(int(posters), MEMORY_BONUS_MAX_POSTERS)),
         power_up_permyriad=max_member_power_up_permyriad(basis),
         level=PLAYER_LEVEL_MAX,
         # Never auto: `"auto"` derives from the ACCOUNT's cards, and this basis

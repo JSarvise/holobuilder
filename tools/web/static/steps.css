@@ -46,7 +46,6 @@
   text-decoration: underline dotted;
 }
 .st-all:hover { opacity: 1; }
-.stepcard.st .st-body > .ts-panel { margin-bottom: 0; }
 /* Solve: pinned to the bottom of the viewport for as long as the steps are on
    screen, so it is reachable with any step folded or open. */
 .st-go {

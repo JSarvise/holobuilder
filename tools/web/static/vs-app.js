@@ -210,19 +210,29 @@ function teamAction(act, k) {
   else if (act === "del" && S.teams.length > 2) S.teams.splice(k, 1);
   save(); drawTeams(); markStale();
 }
+// The Optimizer's last search in this tab (opt-score.js stashes its best teams) when it is for
+// these options -- song or every song, difficulty, cards -- and the same account read; else null
+async function optimizerBest() {
+  let s = null;
+  try { s = JSON.parse(sessionStorage.getItem("hb.optimizer.best") || "null"); } catch (_) { /* private mode */ }
+  if (!s || !s.value) return null;
+  const meta = await getJSON("/api/meta").catch(() => null);
+  if (!meta || (meta.snapshot_mtime ?? null) !== s.read) return null;
+  const v = s.value;
+  const cards = S.cards === "maxed-account" ? "maxed" : S.cards;
+  return v.song === (S.scope === "song" ? S.song : "") && v.difficulty === S.difficulty && v.cards === cards ? v : null;
+}
 async function fillBest() {
-  const tsBasis = basisOf() !== "account" ? "maxed" : (S.maxpoints ? "account-max" : "account");
-  const songQ = S.scope === "song" ? S.song : "";
   const btn = byId("fillbest"); btn.disabled = true;
   try {
-    const doc = await getJSON(`/api/two-stage?song=${encodeURIComponent(songQ)}&basis=${tsBasis}`);
-    const rows = doc.rows || [];
-    if (!rows.length) { toast("The Optimizer has no best teams for this yet. Run it first."); return; }
+    const doc = await optimizerBest();
+    const rows = (doc && doc.rows) || [];
+    if (!rows.length) { toast("No Optimizer search for these options in this tab yet: press Find best team on the Optimizer page first."); return; }
     const n = Math.min(rows.length, Math.max(2, S.teams.length));
     S.teams = rows.slice(0, n).map(r => ({ cards: [r.leader, ...r.members], ov: [null, null, null, null, null, null],
       from: { key: fromKey(), score: r.best } }));
     save(); drawTeams(); markStale();
-    toast(`Filled ${n} teams from the Optimizer's best teams (${doc.scope === "general" ? "every song" : "this song"}).`);
+    toast(`Filled ${n} teams from the Optimizer's best teams (${doc.song ? "this song" : "every song"}).`);
   } catch (e) { toast("The Optimizer's best teams could not be read: " + e.message); }
   finally { btn.disabled = false; }
 }
@@ -490,13 +500,13 @@ async function details(R) {
 const START = { key: null, rows: null, pick: [], err: null };
 const ready = () => S.teams.every(filled) && (S.scope !== "song" || !!S.song);
 async function loadStart() {
-  const key = JSON.stringify([fromKey(), S.scope]);
+  const key = JSON.stringify([fromKey(), S.scope, S.cards]);
   if (START.key === key && START.rows) return;
   START.key = key; START.rows = null; START.err = null;
   try {
-    const doc = await getJSON(`/api/two-stage?song=${encodeURIComponent(S.scope === "song" ? S.song : "")}&basis=${tsBasis()}`);
+    const doc = await optimizerBest();
     if (START.key !== key) return;
-    START.rows = (doc.rows || []).filter(r => r.leader && Array.isArray(r.members) && r.members.length === 5 && r.best != null)
+    START.rows = ((doc && doc.rows) || []).filter(r => r.leader && Array.isArray(r.members) && r.members.length === 5 && r.best != null)
       .sort((x, y) => y.best - x.best).slice(0, 6);
   } catch (e) { START.rows = []; START.err = e.message; }
   START.pick = START.rows.length >= 2 ? [0, 1] : [];
@@ -507,7 +517,7 @@ function startBlock() {
   const rows = START.rows;
   let body;
   if (rows == null) body = `<p class="v-start-l">Reading the Optimizer's best teams…</p>`;
-  else if (!rows.length) body = `<p class="v-start-l">The Optimizer has no best teams for ${on} yet${START.err ? " (they could not be read)" : ""}. Run it on the Optimizer page, or choose each card in the slots above.</p>`;
+  else if (!rows.length) body = `<p class="v-start-l">No Optimizer search for ${on} with these options in this tab yet${START.err ? " (it could not be read)" : ""}. Press Find best team on the Optimizer page, or choose each card in the slots above.</p>`;
   else {
     body = `<ol class="v-cands">${rows.map((r, i) => {
       const k = START.pick.indexOf(i);
@@ -529,7 +539,7 @@ function startBlock() {
   byId("fillbest").hidden = top;   // the start block IS this action while every slot is empty
   byId(top ? "start" : "out").innerHTML = `<section class="v-start${top ? " top" : ""}" aria-labelledby="starth">
     <div class="v-start-h"><div><h2 id="starth">Start from the best teams</h2>
-      <p>The Optimizer's best team for each leader on ${on}, by expected score. Choose two to four.</p></div>
+      <p>The best teams of your last Optimizer search on ${on}, by expected score. Choose two to four.</p></div>
       ${rows && rows.length ? `<button class="btn btn-lg${ready() ? "" : " primary"}" type="button" id="startgo"${START.pick.length < 2 ? " disabled" : ""}>${label}</button>` : ""}</div>
     ${body}
   </section>`;

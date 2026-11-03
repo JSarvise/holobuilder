@@ -16,12 +16,11 @@ D = cs.D
 
 def test_kind_of_sorts_sync_lazy_and_never_the_account():
     assert cs.kind_of(D + "charts.json") == "sync"
-    assert cs.kind_of(D + "two_stage/song_m0020.json") == "sync"
     assert cs.kind_of(D + "live2d/models/00031-nene-0001-00/x.moc3") == "lazy"
     assert cs.kind_of(D + "chibi/models/sdcos-00031-nene-0001-00.glb") == "lazy"
     # the account never leaves the PC
     for rel in ("account_snapshot_main.json", "board_state.json", "card_params.json",
-                "inventory.json", "two_stage/account_song_m0020.json"):
+                "inventory.json"):
         assert cs.kind_of(D + rel) is None, rel
     assert cs.kind_of("state/account_credential.json") is None
     # skill_icons: the node glyphs, not the song jackets pulled next to them

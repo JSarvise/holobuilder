@@ -15,8 +15,7 @@ needs no rebuild. This module is that path:
   MEMORY as seeds for the next one (a hint, never the answer: every number
   served is computed in this request). Nothing here writes to disk.
 
-`payload` has the shape of `two_stage_view.payload` (`scope`, `ranking`, `rows`,
-...), so the page draws it with the same code; `state` is always "fresh".
+`payload` carries `scope`, `ranking`, `rows`, ...; `state` is always "fresh".
 """
 from __future__ import annotations
 
@@ -330,6 +329,41 @@ def parse_assumptions(raw: Mapping | None) -> Assumptions:
                        targets=tuple(sorted(set(targets))), reset_min_gain=gain)
 
 
+def _card_levers(ns, a: Assumptions):
+    """`ns` with `a`'s card levers as `two_stage_account` reads them."""
+    if a.level != "account":
+        ns.assume_level = a.level
+    if a.bloom != "account":
+        ns.assume_bloom = a.bloom
+    if a.sp_training != "account":
+        ns.assume_limit_break = a.sp_training
+    ns.keep_higher_level = ns.keep_higher_bloom = a.keep_higher
+    return ns
+
+
+def account_bonuses(a: Assumptions):
+    """The account's Memory / Member Power-Up bonuses under `a`'s card levers: the
+    `cfg.account` the leaf of `build_inputs` scores with, without building the leaf.
+    Raising every card's level raises the Member Power-Up, so the account's own
+    figure is not the one an "Upgraded cards" search uses."""
+    acct = tsb._account()
+    ex = tsb._load("_ex_account_bonuses", "tools/recon/probes/exhaustive_song_leader.py")
+    _cards, _owned, cfg = acct._cards_and_cfg(_card_levers(tsb._namespace(), a), ex)
+    return cfg.account
+
+
+def maxed_bonuses():
+    """The Memory / Member Power-Up bonuses of the Maxed account basis: every card in the
+    game owned at max level (the roster's power-up ceiling) and every poster the game has,
+    as its leaf scores (`apply_collection(maxed=True)`)."""
+    from hbuilder.cli import apply_collection, load_inputs  # noqa: PLC0415
+
+    ex = tsb._load("_ex_maxed_bonuses", "tools/recon/probes/exhaustive_song_leader.py")
+    cards, owned, _cfg, _prov = load_inputs(ex.CARDS_PATH, ex.OWNED_PATH, False)
+    _cards, basis = apply_collection(cards, None, owned_ids=[c.id for c in owned], maxed=True)
+    return basis.bonuses
+
+
 def build_inputs(a: Assumptions, difficulty: str, song: str = "m0334", *,
                  split_key=None) -> dict:
     """The leaf inputs of the user's account under `a` (the shape of
@@ -340,14 +374,7 @@ def build_inputs(a: Assumptions, difficulty: str, song: str = "m0334", *,
     import json as _json  # noqa: PLC0415
 
     acct = tsb._account()
-    ns = tsb._namespace(song, difficulty)
-    if a.level != "account":
-        ns.assume_level = a.level
-    if a.bloom != "account":
-        ns.assume_bloom = a.bloom
-    if a.sp_training != "account":
-        ns.assume_limit_break = a.sp_training
-    ns.keep_higher_level = ns.keep_higher_bloom = a.keep_higher
+    ns = _card_levers(tsb._namespace(song, difficulty), a)
     if a.boards == "as_is":
         state = _json.loads((_PROXY / "dumps" / "board_state.json").read_text(encoding="utf-8"))
         built = acct.build(ns, bench="captured", board_state=state, split_key=split_key)
@@ -800,6 +827,27 @@ MAX_ENGINES = 2
 # wallet the re-plan spends). Without them a refresh that only moved a socket or the
 # wallet would leave the engine on the old account.
 ACCOUNT_STATE_FILES = ("board_state.json", "inventory.json")
+
+
+_BASIS_KEYS: dict[str, tuple[float, str | None]] = {}
+# the key re-reads and digests the input files (~0.5 s): recomputed at most this often
+_BASIS_KEY_TTL = 20.0
+
+
+def basis_key(basis: str, difficulty: str) -> str | None:
+    """Today's key of `basis`'s inputs (`tsb.today_keys`, the in-general key), or None
+    when they cannot be read: an engine is rebuilt when it moves."""
+    now = time.monotonic()
+    slot = f"{basis}/{difficulty}"
+    held = _BASIS_KEYS.get(slot)
+    if held is not None and now - held[0] < _BASIS_KEY_TTL:
+        return held[1]
+    try:
+        key = tsb.today_keys(basis, difficulty)[1]
+    except Exception:  # noqa: BLE001 - "cannot vouch" keeps the engine in hand
+        return None
+    _BASIS_KEYS[slot] = (now, key)
+    return key
 
 
 def account_key(difficulty: str) -> str | None:

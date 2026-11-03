@@ -171,6 +171,27 @@ function summary() {
     LABEL.cards[S.cards], S.cards === "maxed" ? "" : LABEL.boards[S.boards]].filter(Boolean).join(" · ");
   return [LABEL.cards[S.cards], LABEL.boards[S.boards], LABEL.sort[S.sort]].join(" · ");
 }
+// "Upgraded cards" and "Maxed account" score with other account bonuses than the account's
+// own (every card's level raises the Member Power-Up; the maxed account owns every card and
+// poster): the sheet shows the figures the search scores with (/api/meta under the same
+// levers), as holodori.best does, one line each marked with what they assume
+let assumed = { q: null, v: null };
+function bonusRows(M) {
+  const pct = (v, div, places) => v != null ? `+${dec(v / div, places)}%` : null;
+  const own = [["Memory Bonus", pct(M.memory_bonus_permil, 10, 1)], ["Member Power-Up Bonus", pct(M.power_up_permyriad, 100, 2)]];
+  if (S.cards === "asis") return own.filter(r => r[1]);
+  const q = S.cards === "maxed" ? "basis=maxed"
+    : new URLSearchParams({ level: S.alevel, bloom: S.abloom, sp_training: S.aspt, keep_higher: S.keephigher ? "1" : "0" }).toString();
+  if (assumed.q !== q) {
+    assumed = { q, v: null };
+    getJSON("/api/meta?" + q).catch(() => ({})).then(m => { if (assumed.q === q) { assumed.v = m.assumed || {}; renderFresh(); } });
+  }
+  const A = assumed.v, wait = A ? "unavailable" : "…";
+  const note = S.cards === "maxed" ? "maxed account" : "custom levels applied";
+  // "Upgraded cards" changes levels only: the posters, and so the Memory Bonus, stay the account's
+  return [S.cards === "maxed" ? ["Memory Bonus", pct(A && A.memory_permil, 10, 1) || wait, note] : own[0],
+    ["Member Power-Up Bonus", pct(A && A.power_up_permyriad, 100, 2) || wait, note]].filter(r => r[1]);
+}
 function renderFresh() {
   const M = D.meta;
   const prov = byId("prov") ? byId("prov").innerHTML : "";
@@ -188,10 +209,9 @@ function renderFresh() {
   byId("acct").innerHTML = !M || M.error ? `<div><dt>Account</dt><dd>unavailable</dd></div>` : [
     M.owned != null ? ["Cards", `${M.owned} / ${M.catalogue}`] : null,
     M.boards_with_nodes != null ? ["Holomem Boards", M.boards_with_nodes] : null,
-    M.memory_bonus_permil != null ? ["Memory Bonus", `+${dec(M.memory_bonus_permil / 10, 1)}%`] : null,
-    M.power_up_permyriad != null ? ["Member Power-Up Bonus", `+${dec(M.power_up_permyriad / 100, 2)}%`] : null,
+    ...bonusRows(M),
     ["Read", when(M.snapshot_mtime)],
-  ].filter(Boolean).map(([k, v]) => `<div><dt>${k}</dt><dd class="num">${esc(String(v))}</dd></div>`).join("");
+  ].filter(Boolean).map(([k, v, note]) => `<div><dt>${k}</dt><dd class="num">${esc(String(v))}</dd>${note ? `<dd class="note">(${esc(note)})</dd>` : ""}</div>`).join("");
   const sc = byId("scenario");
   // Score and Event alike: both goals offer the maxed account, so the notice follows S.cards
   // whichever goal is shown

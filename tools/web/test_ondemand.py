@@ -378,3 +378,31 @@ def test_a_replanned_team_is_remembered_under_its_own_name(monkeypatch):
     out, failed = ondemand.Engine._within_materials(engine, ranking, leaders, pool, "m0020", (0,), None)
     assert failed == [] and len(out) == 3
     assert held and all(team == entry for team, entry in held)
+
+
+def test_account_bonuses_follow_the_card_levers():
+    """`account_bonuses` is the account bonuses the leaf of `build_inputs` scores with."""
+    a = ondemand.parse_assumptions({"level": "max", "sp_training": 4})
+    built = ondemand.build_inputs(a, "HARD")
+    assert ondemand.account_bonuses(a) == built["ctx"].cfg.account
+    plain = ondemand.account_bonuses(ondemand.parse_assumptions({}))
+    assert plain.power_up_permyriad <= built["ctx"].cfg.account.power_up_permyriad
+
+
+def test_maxed_bonuses_are_the_maxed_leaf_s():
+    """`maxed_bonuses` is the `cfg.account` the Maxed account leaf scores with (every card
+    in the game at max level: the roster's power-up ceiling)."""
+    import two_stage_build as tsb
+
+    assert ondemand.maxed_bonuses() == tsb.leaf_inputs("maxed", "EXPERT")["ctx"].cfg.account
+
+
+def test_maxed_memory_bonus_is_the_posters_the_game_has():
+    """A maxed account holds every poster that EXISTS (the master's `Poster` rows), not the
+    50 thresholds `PosterCollectEffect` runs to: its Memory Bonus is never above what an
+    account can reach in the game today."""
+    import precompute_optimisations as po
+
+    n = po.master_poster_count()
+    assert n is not None
+    assert ondemand.maxed_bonuses().posters == n
