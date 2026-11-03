@@ -2,6 +2,9 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.1.43 (2026-11-03)
+- Score Support passives now go to the members with the strongest Active Skill, as in the game; the Options sheet shows the bonuses each search uses.
+
 ## 0.1.42 (2026-10-30)
 - Requests name the app (the server is now behind Cloudflare); Live2D's engine downloads from Live2D itself; safer update checks.
 

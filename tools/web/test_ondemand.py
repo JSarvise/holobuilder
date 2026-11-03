@@ -8,8 +8,16 @@ from __future__ import annotations
 
 import queue
 
+import pytest
+
 import ondemand
 import server as web_server
+
+# the account's own files (gitignored): absent on a fresh checkout
+_ACCOUNT = all((web_server.REPO_ROOT / p).exists() for p in (
+    "data/owned.json", "state/collection.json", "tools/recon/proxy/dumps/board_state.json",
+    "tools/recon/proxy/dumps/holodori/main_Poster.json"))
+needs_account = pytest.mark.skipif(not _ACCOUNT, reason="needs the account's data (gitignored)")
 
 
 def _drain(job) -> list[dict]:
@@ -380,6 +388,7 @@ def test_a_replanned_team_is_remembered_under_its_own_name(monkeypatch):
     assert held and all(team == entry for team, entry in held)
 
 
+@needs_account
 def test_account_bonuses_follow_the_card_levers():
     """`account_bonuses` is the account bonuses the leaf of `build_inputs` scores with."""
     a = ondemand.parse_assumptions({"level": "max", "sp_training": 4})
@@ -389,6 +398,7 @@ def test_account_bonuses_follow_the_card_levers():
     assert plain.power_up_permyriad <= built["ctx"].cfg.account.power_up_permyriad
 
 
+@needs_account
 def test_maxed_bonuses_are_the_maxed_leaf_s():
     """`maxed_bonuses` is the `cfg.account` the Maxed account leaf scores with (every card
     in the game at max level: the roster's power-up ceiling)."""
@@ -397,6 +407,7 @@ def test_maxed_bonuses_are_the_maxed_leaf_s():
     assert ondemand.maxed_bonuses() == tsb.leaf_inputs("maxed", "EXPERT")["ctx"].cfg.account
 
 
+@needs_account
 def test_maxed_memory_bonus_is_the_posters_the_game_has():
     """A maxed account holds every poster that EXISTS (the master's `Poster` rows), not the
     50 thresholds `PosterCollectEffect` runs to: its Memory Bonus is never above what an

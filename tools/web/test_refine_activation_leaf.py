@@ -8,6 +8,7 @@ import dataclasses
 import importlib.util
 from pathlib import Path
 
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -19,6 +20,8 @@ def _account():
     return mod
 
 
+@pytest.mark.skipif(not (REPO / "data/owned.json").exists() or not (REPO / "state/collection.json").exists(),
+                    reason="needs the account's data (gitignored)")
 def test_refined_scores_are_never_below_the_plain_ones_and_plain_is_untouched():
     from hbuilder.domain.team import Team
     from hbuilder.solver import parallel_refine as pr
