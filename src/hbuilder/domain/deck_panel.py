@@ -166,10 +166,17 @@ are infeasible for any K.
 ## Per-song board bonus
 
 `song_bonus_permil` (`eff3`) adds the song's per-song (yellow) board nodes: the
-per-song board line is `board + eff3 + ceil((Active + Outfit + Passive +
+per-song board line is `board + ceil(eff3 + (Active + Outfit + Passive +
 special_raw) * eff3 / 1000)`, with `eff3` the song's singers' own per-song bonus
-(`BoardModel.song_score_bonus_for`, capped at 100 permil). It matches the game's
-deck screen exactly.
+(`BoardModel.song_score_bonus_for`, capped at 100 permil; the pooled `all`
+bucket on a whole-roster song). `eff3` can be fractional (55.5) and is kept
+exact under the one ceiling. It matches the game's deck screen exactly.
+
+A singer's conditional skill effect-up (the red R-002 family: "when X is
+included as a singer, grants Score Support to all") is NOT part of `eff3`: it
+is added to every reached card's `board_effect_up_permil` before the panel is
+computed, so it moves the Board line through the boosted window sum like any
+other board effect-up. The two compose in that order.
 
 ## What is NOT modelled
 
@@ -616,7 +623,8 @@ def unit_score_from_panel(overall_power: int, score_bonus_permil: int) -> int:
 
 
 def deck_panel(
-    cards: Iterable[PanelCard], *, overall_power: int = 0, song_bonus_permil: int = 0
+    cards: Iterable[PanelCard], *, overall_power: int = 0,
+    song_bonus_permil: int | float | Fraction = 0,
 ) -> DeckPanel:
     """Compute the panel for one deck. See the module docstring for every law.
 
@@ -711,8 +719,11 @@ def deck_panel(
     special_raw = active * pool / _SPECIAL_DENOMINATOR if pool else Fraction(0)
     special = ceil(special_raw) if pool else 0
     if song_bonus_permil:
-        e = int(song_bonus_permil)
-        board += e + ceil((active + outfit + passive + special_raw) * e / 1000)
+        # eff3 is fractional on the wire (a float32: 55.5 on a solo whose nodes
+        # sum to it), so it is kept exact and the whole per-song term pays ONE
+        # ceiling; rounding eff3 first reads one permil low on such a song
+        e = Fraction(song_bonus_permil).limit_denominator(1000)
+        board += ceil(e + (active + outfit + passive + special_raw) * e / 1000)
 
     score_bonus = active + outfit + passive + board + special
     return DeckPanel(

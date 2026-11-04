@@ -2,6 +2,12 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.1.45 (2026-11-04)
+- Unit Score Details on a chosen song now match the game: Overall Power and Score Bonus include the singing leader's red nodes and the song's yellow bonus; rankings shift slightly for teams whose leader sings.
+
+## 0.1.44 (2026-11-03)
+- Board plan: click a socket to read its card and see its whole range on the board.
+
 ## 0.1.43 (2026-11-03)
 - Score Support passives now go to the members with the strongest Active Skill, as in the game; the Options sheet shows the bonuses each search uses.
 

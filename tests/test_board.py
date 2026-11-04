@@ -1159,3 +1159,45 @@ def test_the_loader_refuses_a_connect_multiplier_below_one():
 def test_the_loader_refuses_a_board_without_a_characters_object():
     with pytest.raises(board.BoardError, match="characters"):
         board.board_from_mapping({"schema_version": "1"})
+
+
+def test_a_singer_conditional_rate_shares_one_ceiling_with_the_unconditional_rate():
+    """The deck screen sums a card's conditional and unconditional board rates on
+    a stat and ceils once, so the conditional power is the INCREMENT
+    `ceil((u + c) * stat) - ceil(u * stat)`. At Technique 1003 with +15 %
+    unconditional and +10 % conditional: ceil(250.75) - ceil(150.45) = 100,
+    where ceiling the conditional alone would give ceil(100.3) = 101."""
+    unconditional = (
+        "skill_tree_effect-technique_up_permil_up-150"
+        "-skill_tree_effect_target-all-set_live_leader"
+    )
+    node = BoardNode("R-044", (parse_effect_id(CONDITIONAL_STAT, branch="R"),
+                               parse_effect_id(unconditional, branch="R")))
+    model = BoardModel(characters={"Ina": CharacterBoard("Ina", (node,))})
+    members = tuple(
+        dataclasses.replace(make_card(f"m{i}"), stats=Stats(1000, 1003, 1000))
+        for i in range(5)
+    )
+    assert model.power_bonus_for(members, "Ina") == 5 * 151.0
+    assert model.conditional_stat_power_for(members, "Ina", ("Ina",)) == 5 * 100.0
+
+
+def test_a_singer_conditional_rate_raises_the_member_power_up():
+    """Member Power-Up is paid per member over a base that includes the Holomem
+    Board line, so a song's conditional board power raises it too: at 333
+    permyriad a base of 10,000 pays ceil(333) = 333, a base of 10,100 pays
+    ceil(336.33) = 337, +4 per member."""
+    from hbuilder.domain.song import OverallPower, cast_power_up
+
+    node = BoardNode("R-044", (parse_effect_id(CONDITIONAL_STAT, branch="R"),))
+    model = BoardModel(characters={"Ina": CharacterBoard("Ina", (node,))})
+    members = tuple(
+        dataclasses.replace(make_card(f"m{i}"), stats=Stats(1000, 1000, 1000))
+        for i in range(5)
+    )
+    cfg = dataclasses.replace(make_scoring_config(), board=model)
+    power = OverallPower(100000.0, power_up_bases=(10000.0,) * 5,
+                         member_ids=tuple(m.id for m in members), power_up_permyriad=333)
+    assert cast_power_up(power, members, "Ina", cfg, ("Ina",)) == 5 * 4
+    assert cast_power_up(power, members, "Ina", cfg, ()) == 0
+    assert cast_power_up(100000.0, members, "Ina", cfg, ("Ina",)) == 0  # no bases carried

@@ -93,7 +93,8 @@ from hbuilder.domain.collection import (
 )
 from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown
 from hbuilder.domain.scoring_config import ACTIVE_UPTIME_MODELS
-from hbuilder.domain.song import SongError, load_charts
+from hbuilder.domain.schema import COSTUME_SLOT_KIND
+from hbuilder.domain.song import SongError, load_charts, song_overall_power
 from hbuilder.domain.song_rank import score_team_on_chart
 from hbuilder.domain.team import MEMBER_COUNT, Team, TeamError
 
@@ -331,43 +332,65 @@ class OverrideContext:
 # ---------------------------------------------------------------------------
 # panel lines
 # ---------------------------------------------------------------------------
-def panel_lines(team: Team, cfg_board, cfg_off) -> dict:
+def panel_lines(team: Team, cfg_board, cfg_off, chart=None) -> dict:
     """The model's deck-screen lines for one team, in the deck screen's shape. `cfg_board`
     carries the board the team is scored on; `cfg_off` is board=None (same
-    otherwise). Member Parameter = `base_stat_sum`; Outfit = the costume stat
-    effect's own power (its rate x the stat it lifts — exact under additive
-    stacking); Passive = the rest of `effective - base`; Board = `board_power`;
-    Memory / Power-Up = the breakdown's own summands. The score bonus is ONE
-    pooled `combined_score_rate` (not separable into the game's lines), so this
+    otherwise). Member Parameter = `base_stat_sum`; Outfit and Passive = the
+    stat block's own source lines, each paid its per-(card, stat) ceilings as
+    the deck screen pays them; Board = `board_power`; Memory / Power-Up = the
+    breakdown's own summands. The score bonus is ONE pooled
+    `combined_score_rate` (not separable into the game's lines), so this
     reports the pooled rate, the SPECIAL/support `B` inside it, and the board
-    rate."""
+    rate.
+
+    With `chart`, the Overall Power lines are the deck screen's WITH that song
+    chosen: the singers' conditional stat power joins the Holomem Board line and
+    the Member Power-Up paid on it (`song.song_overall_power`). Without one they
+    are the song-less screen."""
     bd = score_with_breakdown(team, cfg_board)
     ds = deck_screen_unit_score(bd)
     bd_off = score_with_breakdown(team, cfg_off)
-    outfit_power = 0.0
-    by_id = {m.id: m for m in team.members}
-    for c in bd.contributions:
-        if c.slot_kind == "costume" and c.pool == "stat" and c.weighted_rate:
-            stat = c.effect_type
-            targets = c.target_card_ids or tuple(m.id for m in team.members)
-            base = 0.0
-            for cid in targets:
-                card = by_id.get(cid)
-                if card is None:
-                    continue
-                stats = card.stats
-                if stat in ("all", "all_stats"):
-                    base += sum(getattr(stats, s) for s in ("performance", "technique", "sense"))
-                else:
-                    base += getattr(stats, stat, 0.0)
-            outfit_power += c.weighted_rate * base
-    stat_lift = bd.effective_stat_sum - bd.base_stat_sum
+    lines = bd.overall_power_stat_lines
+    if lines is not None:
+        outfit_power = float(lines.get(COSTUME_SLOT_KIND, 0.0))
+        passive_power = float(sum(v for k, v in lines.items() if k != COSTUME_SLOT_KIND))
+    else:
+        outfit_power = 0.0
+        by_id = {m.id: m for m in team.members}
+        for c in bd.contributions:
+            if c.slot_kind == "costume" and c.pool == "stat" and c.weighted_rate:
+                stat = c.effect_type
+                targets = c.target_card_ids or tuple(m.id for m in team.members)
+                base = 0.0
+                for cid in targets:
+                    card = by_id.get(cid)
+                    if card is None:
+                        continue
+                    stats = card.stats
+                    if stat in ("all", "all_stats"):
+                        base += sum(getattr(stats, s) for s in ("performance", "technique", "sense"))
+                    else:
+                        base += getattr(stats, stat, 0.0)
+                outfit_power += c.weighted_rate * base
+        passive_power = bd.effective_stat_sum - bd.base_stat_sum - outfit_power
+    overall_power = ds.overall_power
+    board_power = bd.board_power
+    power_up = bd.member_power_up
+    singers = tuple(getattr(chart, "singers", None) or ()) if chart is not None else ()
+    if singers and cfg_board.board is not None:
+        song_power = song_overall_power(tuple(team.members), team.leader, cfg_board, chart)
+        cast = cfg_board.board.conditional_stat_power_for(
+            tuple(team.members), team.leader.member, singers)
+        board_power += cast
+        if power_up is not None:
+            power_up += song_power - overall_power - cast
+        overall_power = song_power
     return {
-        "unit_score": ds.unit_score, "overall_power": ds.overall_power,
+        "unit_score": ds.unit_score, "overall_power": overall_power,
         "score_bonus_permil": ds.score_bonus_permil,
         "member_parameter": bd.base_stat_sum,
-        "outfit": outfit_power, "passive": stat_lift - outfit_power,
-        "board": bd.board_power, "memory": bd.memory_bonus, "power_up": bd.member_power_up,
+        "outfit": outfit_power, "passive": passive_power,
+        "board": board_power, "memory": bd.memory_bonus, "power_up": power_up,
         "combined_score_rate_pct": bd.combined_score_rate * 100.0,
         "combined_score_rate_board_off_pct": bd_off.combined_score_rate * 100.0,
         "support_B_pct": bd.combined_support_rate * 100.0,
@@ -819,7 +842,8 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
         else:
             cfg_team = cfg_off
 
-        panel = panel_lines(team, cfg_team, cfg_off)
+        # on a chosen song both halves of the panel are that song's deck screen
+        panel = panel_lines(team, cfg_team, cfg_off, chart=chart if mode == "song" else None)
         bd = panel.pop("_bd")
         us_off = deck_screen_unit_score(score_with_breakdown(team, cfg_off)).unit_score
         score: dict[str, Any] = {"unit_score": panel["unit_score"], "unit_score_board_off": us_off}

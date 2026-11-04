@@ -1204,13 +1204,14 @@ class BoardModel:
         own holomem must be a credited singer. Unlike the skill term this is PER
         CARD (a stat effect reaches each recipient), not one team-wide addend.
 
-        ⚠ The rate ceiling here is taken over the CONDITIONAL rate alone, separate
-        from the unconditional rate `power_bonus_for` already ceiled — so a card
-        with both a conditional and an unconditional rate on the SAME stat is
-        ceiled twice, over-counting by at most 1 per (card, stat) versus one
-        combined ceiling. Negligible against a per-song power base, and the price
-        of keeping the conditional half a clean add-on rather than threading the
-        cast through the memoised `power_bonus_for`.
+        It is the INCREMENT over `power_bonus_for`: the game sums the conditional
+        rate with the card's unconditional board rate on the same stat and ceils
+        once, so a card's conditional power is
+        `ceil((unconditional + conditional) * stat) - ceil(unconditional * stat)`.
+        Ceiling the conditional rate on its own over-counts by up to 1 per
+        (card, stat) (12,026 against the deck screen's 12,013 on a five-card team).
+        `power_bonus_for(members) + conditional_stat_power_for(members, ...)` is
+        therefore the song's Holomem Board power line exactly.
 
         `0.0` for an empty cast, so every song-agnostic caller is unchanged."""
         if not self._conditional_stat_terms:
@@ -1238,7 +1239,10 @@ class BoardModel:
         total = flat_total
         card_by_id = {card.id: card for card in members}
         for (card_id, stat), rate in rate_by_card_stat.items():
-            total += math.ceil(rate * card_by_id[card_id].stat(stat))
+            card = card_by_id[card_id]
+            base_rate = self._terms(card, leader_holomem)[1].get(stat, 0.0)
+            value = card.stat(stat)
+            total += math.ceil((base_rate + rate) * value) - math.ceil(base_rate * value)
         return total
 
     def song_score_bonus_for(self, singers: Iterable[str], *, scope: str) -> float:

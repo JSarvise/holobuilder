@@ -51,6 +51,7 @@ from hbuilder.domain.board_plan import (  # noqa: E402
 from hbuilder.domain.deck_panel_team import team_deck_panel  # noqa: E402
 from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown  # noqa: E402
 from hbuilder.domain.song import timeline as song_timeline  # noqa: E402
+from hbuilder.domain.song import overall_power_for, song_overall_power  # noqa: E402
 from hbuilder.domain.song_distribution import run_score_distribution  # noqa: E402
 from hbuilder.domain.song_rank import score_team_ceiling, score_team_on_chart  # noqa: E402
 from hbuilder.domain.team import Team  # noqa: E402
@@ -125,29 +126,45 @@ def score_bonus_lines(team: Team, cfg_board, member_order: Sequence[str] | None 
 def song_board_bonus(team: Team, cfg_board, chart) -> dict | None:
     """What the boards add on THIS song only (how much extra yellow or red bonus the song
     gets): the YELLOW song score bonus -- each singer's board,
-    Connect multipliers included, then the 100-permil cap -- and the RED singer-conditional
-    terms (R-002 Score Support, R-044/062/063 Overall Power), which pay only when their
-    holomem sings and their scope reaches the team. None without a chart, a cast or a board."""
+    Connect multipliers included, then the 100-permil cap; on a whole-roster song with no
+    credited cast, the pooled `all` bucket -- and the RED singer-conditional terms (R-002
+    Score Support, R-044/062/063 Overall Power), which pay only when their holomem sings
+    and their scope reaches the team. `red_power` is the whole Overall Power they add:
+    the Holomem Board power plus the Member Power-Up paid on it. None without a chart or a
+    board."""
     board = getattr(cfg_board, "board", None)
-    singers = tuple(getattr(chart, "singers", None) or ()) if chart is not None else ()
-    if board is None or not singers:
+    if board is None or chart is None:
         return None
     from hbuilder.domain.board import SONG_ALL_CAP_PERMIL  # noqa: PLC0415
 
+    singers = tuple(getattr(chart, "singers", None) or ())
+    if not singers:
+        pooled = 1000 * board.score_bonus_rate()
+        return {
+            "scope": "all", "singers": [],
+            "yellow_permil": round(pooled, 1), "yellow_uncapped_permil": round(pooled, 1),
+            "yellow_cap_permil": SONG_ALL_CAP_PERMIL, "yellow_by_singer": [],
+            "red_support_permil": 0, "red_power": 0, "leader_sings": False,
+        }
     scope = getattr(chart, "singer_type", "") or "all"
     raw = board.song_score_bonus_by_singer(singers, scope=scope)
     uncapped = sum(raw.values())
     leader = team.leader.member
+    members = tuple(team.members)
+    red_power = 0.0
+    if board.conditional_stat_power_for(members, leader, singers):
+        red_power = (song_overall_power(members, team.leader, cfg_board, chart)
+                     - overall_power_for(members, team.leader, cfg_board))
     return {
         "scope": scope,
         "singers": sorted(raw),
-        "yellow_permil": round(1000 * min(uncapped, SONG_ALL_CAP_PERMIL / 1000.0)),
-        "yellow_uncapped_permil": round(1000 * uncapped),
+        "yellow_permil": round(1000 * min(uncapped, SONG_ALL_CAP_PERMIL / 1000.0), 1),
+        "yellow_uncapped_permil": round(1000 * uncapped, 1),
         "yellow_cap_permil": SONG_ALL_CAP_PERMIL,
-        "yellow_by_singer": [{"holomem": h, "permil": round(1000 * v)} for h, v in raw.items()],
+        "yellow_by_singer": [{"holomem": h, "permil": round(1000 * v, 1)} for h, v in raw.items()],
         "red_support_permil": round(1000 * board.conditional_skill_effect_up_for(
-            tuple(team.members), leader, singers)),
-        "red_power": round(board.conditional_stat_power_for(tuple(team.members), leader, singers)),
+            members, leader, singers)),
+        "red_power": round(red_power),
         "leader_sings": leader in raw,
     }
 
@@ -158,7 +175,7 @@ def unit_score_block(team: Team, cfg_board, cfg_off, member_order: Sequence[str]
     the five-line split}` on the row's board and slot order."""
     import compare_view  # noqa: PLC0415 — compare_view imports server lazily
 
-    panel = compare_view.panel_lines(team, cfg_board, cfg_off)
+    panel = compare_view.panel_lines(team, cfg_board, cfg_off, chart=chart)
     panel.pop("_bd", None)
     split = score_bonus_lines(team, cfg_board, member_order,
                               overall_power=panel.get("overall_power"), chart=chart)

@@ -51,6 +51,7 @@ from typing import Callable, Mapping, Sequence
 
 from hbuilder.domain import targets
 from hbuilder.domain.card import Card, SlotRider
+from hbuilder.domain.collection import member_power_up
 from hbuilder.domain.gates import (
     ResolvedSkill,
     resolve_card_set_gates,
@@ -113,7 +114,10 @@ __all__ = [
     "ChartLibrary",
     "charts_from_mapping",
     "load_charts",
+    "OverallPower",
+    "cast_power_up",
     "overall_power_for",
+    "song_overall_power",
     "score_song",
     "score_song_detailed",
 ]
@@ -857,12 +861,90 @@ def overall_power_for(
 
     NOT as a scalar computed once for the first leader: that is invisible, since
     every leader then scales by the same wrong factor and only the absolute
-    numbers are wrong."""
+    numbers are wrong.
+
+    This is the SONG-LESS figure (the deck screen with no song chosen). It is
+    returned as an `OverallPower`, a float that also carries the per-member
+    Member Power-Up bases, so `score_song_detailed` can raise it to the song's
+    own Overall Power (`song_overall_power`) without scoring the team again."""
     from hbuilder.domain.team import Team
 
-    return deck_screen_unit_score(
-        score_with_breakdown(Team(leader=leader, members=members), cfg)
-    ).overall_power
+    breakdown = score_with_breakdown(Team(leader=leader, members=members), cfg)
+    account = getattr(cfg, "account", None)
+    return OverallPower(
+        deck_screen_unit_score(breakdown).overall_power,
+        power_up_bases=breakdown.power_up_bases,
+        member_ids=tuple(card.id for card in members),
+        power_up_permyriad=None if account is None else account.power_up_permyriad,
+    )
+
+
+class OverallPower(float):
+    """A song-less Overall Power that remembers each member's Member Power-Up base.
+
+    A plain float everywhere a float is expected. The extra fields let a song
+    add its singer-conditional board power the way the deck screen does: that
+    power joins each member's power-up base and the power-up's per-member
+    ceilings are paid again (`cast_power_up`)."""
+
+    def __new__(cls, value: float, power_up_bases: tuple[float, ...] | None = None,
+                member_ids: tuple[str, ...] = (), power_up_permyriad: int | None = None):
+        obj = super().__new__(cls, value)
+        obj.power_up_bases = power_up_bases
+        obj.member_ids = member_ids
+        obj.power_up_permyriad = power_up_permyriad
+        return obj
+
+    def __reduce__(self):
+        return (OverallPower, (float(self), self.power_up_bases, self.member_ids,
+                               self.power_up_permyriad))
+
+
+def cast_power_up(
+    power: float, members: Sequence[Card], leader_holomem: str | None,
+    cfg: ScoringConfig, singers: Sequence[str],
+) -> int:
+    """The Member Power-Up a song's singer-conditional board power adds.
+
+    The deck screen pays Member Power-Up per member over
+    `MemberParameter + Outfit + Passive + Holomem Board`; on a song whose singer
+    holds a conditional stat node (R-044/062/063), that node's power is part of
+    the Holomem Board line, so it is part of the base too
+    (9,301 -> 9,701 on a five-card team gaining 12,013 board power).
+    `power` must be an `OverallPower` (from `overall_power_for`) for the same
+    members; anything else carries no bases and gets 0."""
+    bases = getattr(power, "power_up_bases", None)
+    permyriad = getattr(power, "power_up_permyriad", None)
+    if not bases or permyriad is None or cfg.board is None or not singers:
+        return 0
+    base_by_id = dict(zip(getattr(power, "member_ids", ()), bases))
+    if any(card.id not in base_by_id for card in members):
+        return 0
+    old: list[float] = []
+    new: list[float] = []
+    for card in members:
+        base = base_by_id[card.id]
+        old.append(base)
+        new.append(base + cfg.board.conditional_stat_power_for((card,), leader_holomem, singers))
+    if new == old:
+        return 0
+    return (member_power_up(new, permyriad) or 0) - (member_power_up(old, permyriad) or 0)
+
+
+def song_overall_power(
+    members: tuple[Card, ...], leader: Card, cfg: ScoringConfig, chart: "SongChart | None",
+) -> float:
+    """The deck screen's Overall Power with `chart` chosen: the song-less figure
+    plus the singers' conditional board power (one ceiling per (card, stat)
+    with the unconditional rate) plus the Member Power-Up that power earns.
+    The song-less figure for no chart or a chart with no credited cast."""
+    power = overall_power_for(members, leader, cfg)
+    singers = tuple(getattr(chart, "singers", None) or ()) if chart is not None else ()
+    if cfg.board is None or not singers:
+        return float(power)
+    holomem = leader.member
+    cast = cfg.board.conditional_stat_power_for(members, holomem, singers)
+    return float(power) + cast + cast_power_up(power, members, holomem, cfg, singers)
 
 
 # ---------------------------------------------------------------------------
@@ -1341,10 +1423,8 @@ def score_song_detailed(
 
     results: list[SongScore] = []
     for leader in leaders:
-        leader_power = (
-            float(resolve_power(leader)) if resolve_power is not None
-            else (None if deck_power is None else float(deck_power))
-        )
+        raw_power = resolve_power(leader) if resolve_power is not None else deck_power
+        leader_power = None if raw_power is None else float(raw_power)
         # ⚠ Read PER LEADER, and it cannot be hoisted. `skill_effect_up` is
         # leader-scoped — a red node applies to the whole team, but only while
         # its own holomem leads — so hoisting it out of this loop would hand
@@ -1391,6 +1471,13 @@ def score_song_detailed(
                 members, None if leader is None else leader.member, chart.singers
             )
             board_power += cast_power
+            # On a caller's Overall Power the cast power also joins each member's
+            # Member Power-Up base, as on the deck screen with this song chosen;
+            # `overall_power_for` carries the bases (`OverallPower`).
+            if cast_power and leader_power is not None:
+                cast_power += cast_power_up(
+                    raw_power, members, None if leader is None else leader.member,
+                    cfg, chart.singers)
         terms = list(member_terms)
         score_rates = list(member_score_rates)
         leader_stat_entry = None

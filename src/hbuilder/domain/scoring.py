@@ -13,7 +13,7 @@ from __future__ import annotations
 import itertools, math  # noqa: E401
 from dataclasses import dataclass, replace
 from functools import cache
-from typing import Callable
+from typing import Callable, Mapping
 
 from hbuilder.domain import board, targets
 from hbuilder.domain.collection import _f32, member_power_up, memory_bonus_per_stat
@@ -2083,8 +2083,9 @@ def _score_team(
         )
         for entry in stat_entries
     ]
+    op_stat_lines: dict[str, float] = {}
     op_stat_subtotals = _overall_power_stat_subtotals(
-        cards, stat_entries, cfg, op_recipients
+        cards, stat_entries, cfg, op_recipients, op_stat_lines
     )
     overall_power_stat_sum = float(sum(op_stat_subtotals))
     # Per-member Holomem Board power: `power_bonus_for` sums over the members
@@ -2125,6 +2126,8 @@ def _score_team(
         memory_bonus=memory_line,
         member_power_up=power_up_line,
         overall_power_stat_sum=overall_power_stat_sum,
+        overall_power_stat_lines=op_stat_lines,
+        power_up_bases=tuple(power_up_bases),
         base_stat_sum=float(team.base_stat_sum()),
         effective_stat_sum=effective_stat_sum,
         combined_stat_rate=combined_stat_rate,
@@ -2342,6 +2345,15 @@ class ScoreBreakdown:
     # falls back to `effective_stat_sum`.
     # This is a DISPLAY quantity and is NOT a summand of `total_score`.
     overall_power_stat_sum: float | None = None
+    # The same stat block split by source line, `{slot_kind: total}`: the deck
+    # screen's Outfit Skill (`COSTUME`) and Passive Skill (`PASSIVE`) lines, each paid its
+    # own per-(card, stat) ceilings. DISPLAY only; `None` where not built.
+    overall_power_stat_lines: Mapping[str, float] | None = None
+    # Each member's Member Power-Up base (MemberParameter + Outfit + Passive +
+    # Holomem Board), in `members` order: what a song's singer-conditional board
+    # power is added to before the power-up's per-member ceilings are paid
+    # again (`song.song_overall_power`). `None` where not built.
+    power_up_bases: tuple[float, ...] | None = None
 
     # The Holomem Board's POWER half — a summand of Overall Power, never a
     # rate (`_board_bonus`), which is the other side of `board_score_rate`
@@ -2982,8 +2994,14 @@ def _overall_power_stat_subtotals(
     stat_entries: list,
     cfg: ScoringConfig,
     recipients: list,
+    by_source: dict[str, float] | None = None,
 ) -> list[float]:
     """The DECK-SCREEN Overall Power stat block, per member, in `members` order.
+
+    `by_source`, when given, is filled with each source line's own total
+    (`{slot_kind: sum of its ceilings}`) -- the deck screen's Outfit Skill
+    (`COSTUME_SLOT_KIND`) and Passive Skill (`"PASSIVE"`) lines, each the sum of its per-(card, stat)
+    ceilings.
 
     This is the DISPLAY twin of `_stat_sum` and it rounds where the server
     rounds. `_stat_sum` accumulates `base * (1 + combined)` in float64 — correct
@@ -3052,7 +3070,10 @@ def _overall_power_stat_subtotals(
                     # `_f32` around the whole `rate * base`, the same `ss`-scalar
                     # discipline `collection.effective_stats` uses
                     # (`math.ceil(_f32(x * y))`) — then ceiled.
-                    member_total += math.ceil(_f32(combined * base))
+                    paid = math.ceil(_f32(combined * base))
+                    member_total += paid
+                    if by_source is not None:
+                        by_source[slot_kind] = by_source.get(slot_kind, 0.0) + paid
         subtotals.append(member_total)
     return subtotals
 

@@ -771,3 +771,56 @@ def test_the_song_bonus_joins_the_board_line_by_the_per_song_law():
     assert sung.active == plain.active and sung.special == plain.special
     assert sung.score_bonus_permil == plain.score_bonus_permil + (sung.board - plain.board)
     assert deck_panel([_plain()], song_bonus_permil=0) == plain
+
+
+def test_a_fractional_song_bonus_pays_one_ceiling():
+    """eff3 is a float32 on the wire and can be fractional (55.5 on a solo whose
+    yellow nodes sum to it). The per-song term is ONE ceiling over
+    `eff3 + (Active + Outfit + Passive + special_raw) * eff3 / 1000`; rounding
+    eff3 to 55 first reads one permil low."""
+    plain = deck_panel([_plain()])
+    rest = plain.active + plain.outfit + plain.passive  # no special on `_plain`
+    sung = deck_panel([_plain()], song_bonus_permil=55.5)
+    e = Fraction(111, 2)
+    assert sung.board == plain.board + ceil(e + rest * e / 1000)
+    # the integer case is the old law unchanged
+    assert deck_panel([_plain()], song_bonus_permil=100).board == \
+        plain.board + 100 + -(-rest * 100 // 1000)
+
+
+# One deck read from the server with and without a song (SaveDeck -> GetDeck,
+# leader Takane Lui, the holoX officer outfit): the five member cards as the
+# panel takes them, and the server's own lines. Lui's red R-002 (240 permil
+# Score Support while she leads and sings) and her yellow nodes (50 permil solo,
+# 60 on one unit song) are the song channels; 55.5 is another member's solo and
+# 28 the pooled whole-roster bucket.
+_LUI_DECK = (
+    PanelCard(1000, 550, 26, 9, 0, 0, 260, 420, 0, 1200, 10, 400, 500),
+    PanelCard(950, 550, 34, 12, 0, 0, 260, 210, 0, 1200, 10, 450, None),
+    PanelCard(1200, 550, 26, 9, 0, 80, 260, 396, 80, 1200, 11, 0, None),
+    PanelCard(900, 550, 25, 11, 0, 0, 260, 420, 120, 950, 14, 0, None),
+    PanelCard(1100, 550, 30, 11, 0, 80, 260, 300, 0, 1000, 12, 350, None),
+)
+
+
+@pytest.mark.parametrize(
+    "red, eff3, power, lines, unit_score",
+    [
+        (0, 0, 297167, (634, 0, 19, 414, 369), 1474829),     # no song
+        (240, 50, 309580, (634, 0, 19, 713, 369), 1725019),  # her solo
+        (240, 0, 309580, (634, 0, 19, 611, 369), 1660686),   # a unit song, no yellow
+        (240, 60, 309580, (634, 0, 19, 733, 369), 1737633),  # a unit song with yellow
+        (0, 55.5, 297167, (634, 0, 19, 527, 369), 1543242),  # another member's solo
+        (0, 28, 297167, (634, 0, 19, 471, 369), 1509338),    # a whole-roster song
+    ],
+)
+def test_the_song_deck_screen_matches_the_server(red, eff3, power, lines, unit_score):
+    """A singer's red effect-up joins every card's board effect-up BEFORE the
+    panel runs; the yellow eff3 is then folded into the Board line. Every line
+    and the Unit Score equal the server's GetDeck for that song."""
+    cards = [dataclasses.replace(c, board_effect_up_permil=c.board_effect_up_permil + red)
+             for c in _LUI_DECK]
+    panel = deck_panel(cards, overall_power=power, song_bonus_permil=eff3)
+    assert (panel.active, panel.outfit, panel.passive, panel.board, panel.special) == lines
+    assert panel.score_bonus_permil == sum(lines)
+    assert panel.unit_score == unit_score

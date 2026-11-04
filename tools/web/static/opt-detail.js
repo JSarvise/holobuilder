@@ -73,9 +73,10 @@ function songBonusHTML(sg) {
     : `none: no singer's board has yellow nodes of this song's type`;
   const red = sg.red_support_permil || sg.red_power
     ? `<b class="num">+${pct(sg.red_support_permil)}</b> Score Support${sg.red_power ? `, <b class="num">+${fmt(sg.red_power)}</b> Overall Power` : ""}`
+    : !(sg.singers || []).length ? `none: a whole-roster song credits no singer, so no singer red pays`
     : sg.leader_sings ? `the leader sings, but her board has no singer reds bought`
     : `none: the leader does not sing this song (singer reds pay only on the leader)`;
-  return `<div class="o-songbonus"><h5>On this song <span class="o-cap">(${esc(kind)}: ${esc((sg.singers || []).join(", "))})</span></h5>
+  return `<div class="o-songbonus"><h5>On this song <span class="o-cap">(${esc(kind)}${(sg.singers || []).length ? `: ${esc(sg.singers.join(", "))}` : ""})</span></h5>
     <p><i class="y"></i><span>Yellow</span><span>${yellow}</span></p>
     <p><i class="r"></i><span>Red</span><span>${red}</span></p></div>`;
 }

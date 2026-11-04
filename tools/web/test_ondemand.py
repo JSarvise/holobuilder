@@ -266,12 +266,18 @@ def test_five_star_pool_limits_the_members_not_the_leader():
     assert len(pool) == len(leaders) == 4
 
 
-def test_song_board_bonus_reports_yellow_per_singer_capped_and_the_singer_reds():
+def test_song_board_bonus_reports_yellow_per_singer_capped_and_the_singer_reds(monkeypatch):
     """The page shows what the boards add on THIS song -- yellow per singer
-    against the 100-permil cap, and the red singer-conditional terms."""
+    against the 100-permil cap, and the red singer-conditional terms. `red_power`
+    is the whole Overall Power the reds add: the song's Overall Power minus the
+    song-less one, so the Member Power-Up paid on the red's board power is in it."""
     from types import SimpleNamespace as NS
 
     import row_detail
+
+    monkeypatch.setattr(row_detail, "overall_power_for", lambda members, leader, cfg: 100000.0)
+    monkeypatch.setattr(row_detail, "song_overall_power",
+                        lambda members, leader, cfg, chart: 101274.4)
 
     class Board:
         def song_score_bonus_by_singer(self, singers, *, scope):
@@ -287,7 +293,7 @@ def test_song_board_bonus_reports_yellow_per_singer_capped_and_the_singer_reds()
                                                                    singer_type="group"))
     assert got["yellow_permil"] == 100 and got["yellow_uncapped_permil"] == 115
     assert got["yellow_by_singer"] == [{"holomem": "A", "permil": 75}, {"holomem": "B", "permil": 40}]
-    assert got["red_support_permil"] == 41 and got["red_power"] == 1234 and got["leader_sings"]
+    assert got["red_support_permil"] == 41 and got["red_power"] == 1274 and got["leader_sings"]
     assert row_detail.song_board_bonus(team, NS(board=Board()), None) is None
 
 

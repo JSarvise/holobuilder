@@ -313,6 +313,11 @@ def test_skill_contribution_and_score_breakdown_carry_the_full_declared_field_se
         # ceilings, distinct from the float64 `effective_stat_sum` the ranking
         # uses. A DISPLAY quantity, never a summand of `total_score`.
         "overall_power_stat_sum",
+        # the same block split by source line (Outfit / Passive), and each
+        # member's Member Power-Up base, which a song's singer-conditional
+        # board power is added to (`song.cast_power_up`). DISPLAY only.
+        "overall_power_stat_lines",
+        "power_up_bases",
     } == breakdown_fields
 
 

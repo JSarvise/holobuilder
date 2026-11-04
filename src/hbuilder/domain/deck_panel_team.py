@@ -18,9 +18,11 @@ Where this adapter follows a RULE rather than a measurement it says so:
 * run-state overrides (LIFE / COMBO) are taken outright, a COMBO one with its
   base magnitude before t = 20 s — `deck_panel`'s own law (it matches the
   server's panels) and the recon adapter's rule;
-* the board's effect-up is the song-less, unconditional leader-scope term
+* the board's effect-up is the unconditional leader-scope term
   (`skill_effect_up_for`), the quantity `deck_panel_params` derives from the
-  account's board; singer-conditional reds are not on a song-less panel;
+  account's board, plus — with a song's `singers` — the singer-conditional
+  reds (`conditional_skill_effect_up_for`), which the deck screen adds once a
+  song whose credited singer holds one is chosen;
 * activation-rate effects other than the board's and a SPECIAL rider's
   (`special_rate_rider_permil`) have no field in `PanelCard`; a team carrying
   one is NAMED in `unmodelled` rather than silently priced.
@@ -29,6 +31,7 @@ Where this adapter follows a RULE rather than a measurement it says so:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Sequence
 
 from hbuilder.domain.card import SlotRider
@@ -113,10 +116,13 @@ def _rider_permil(resolved) -> int:
 
 
 def panel_cards_for_team(
-    team: Team, cfg: ScoringConfig, member_order: Sequence[str] | None = None
+    team: Team, cfg: ScoringConfig, member_order: Sequence[str] | None = None,
+    *, singers: Sequence[str] = (),
 ) -> TeamPanel:
     """The five `PanelCard`s of `team` on `cfg` (board included), in
-    `member_order` (card ids; default: `team.members` order), and the panel."""
+    `member_order` (card ids; default: `team.members` order), and the panel.
+    `singers`: the chosen song's credited cast (chr ids or names); its singers'
+    conditional skill effect-up joins every card's board effect-up."""
     members = tuple(team.members)
     by_id = {card.id: card for card in members}
     order = tuple(member_order) if member_order else tuple(c.id for c in members)
@@ -166,7 +172,11 @@ def panel_cards_for_team(
     board = cfg.board
     board_up = 0
     if board is not None:
-        board_up = round(board.skill_effect_up_for(members, team.leader.member) * 1000.0)
+        effect_up = board.skill_effect_up_for(members, team.leader.member)
+        if singers:
+            effect_up += board.conditional_skill_effect_up_for(
+                members, team.leader.member, singers)
+        board_up = round(effect_up * 1000.0)
 
     cards: list[PanelCard] = []
     for cid in order:
@@ -194,13 +204,18 @@ def panel_cards_for_team(
                      unmodelled=tuple(unmodelled))
 
 
-def song_bonus_permil(cfg: ScoringConfig, chart) -> int:
+def song_bonus_permil(cfg: ScoringConfig, chart) -> Fraction:
     """`eff3`: the song's per-song board bonus in permil -- the same figure the song
-    scorer uses (`BoardModel.song_score_bonus_for` over the song's own cast and
-    scope, capped); 0 without a board or a cast."""
-    if chart is None or cfg.board is None or not getattr(chart, "singers", None):
-        return 0
-    return round(1000 * cfg.board.song_score_bonus_for(chart.singers, scope=chart.singer_type))
+    scorer uses: `BoardModel.song_score_bonus_for` over the song's own cast and
+    scope (capped), or, on a whole-roster song with no credited cast, the pooled
+    `all` bucket (`score_bonus_rate`). Exact, not rounded: the server's `eff3` is
+    fractional (55.5). 0 without a chart or a board."""
+    if chart is None or cfg.board is None:
+        return Fraction(0)
+    singers = getattr(chart, "singers", None)
+    rate = (cfg.board.song_score_bonus_for(singers, scope=chart.singer_type) if singers
+            else cfg.board.score_bonus_rate())
+    return Fraction(rate * 1000.0).limit_denominator(1000)
 
 
 def team_deck_panel(
@@ -209,12 +224,15 @@ def team_deck_panel(
 ) -> TeamPanel:
     """`panel_cards_for_team` with the Unit Score filled from `overall_power`
     (the deck screen's Overall Power, an integer on the panel). With `chart`, the
-    Board line carries that song's per-song bonus, as the deck screen of a chosen
-    song shows it (`deck_panel(song_bonus_permil=...)`)."""
-    got = panel_cards_for_team(team, cfg, member_order)
-    if overall_power is None:
+    panel is the deck screen of that song: its singers' conditional effect-up is
+    on every card and the Board line carries the song's per-song bonus
+    (`deck_panel(song_bonus_permil=...)`). `overall_power` must then be the
+    song's own Overall Power (`song.song_overall_power`)."""
+    singers = tuple(getattr(chart, "singers", None) or ()) if chart is not None else ()
+    got = panel_cards_for_team(team, cfg, member_order, singers=singers)
+    if overall_power is None and chart is None:
         return got
-    panel = deck_panel(got.cards, overall_power=round(overall_power),
+    panel = deck_panel(got.cards, overall_power=round(overall_power or 0),
                        song_bonus_permil=song_bonus_permil(cfg, chart))
     return TeamPanel(panel=panel, cards=got.cards, card_ids=got.card_ids,
                      unmodelled=got.unmodelled)
