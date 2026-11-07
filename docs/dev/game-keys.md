@@ -25,7 +25,7 @@ running anything and says how to get it.
 server's answers (a game update can change it):
 
 ```
-.venv\Scripts\python tools\recon\proxy\game_keys.py --find
+.venv\Scripts\python tools\refresh\game_keys.py --find
 ```
 
 1. It reads your installed client's `global-metadata.dat` and decrypts it
@@ -54,7 +54,7 @@ request) whether the seed still opens its answers.
 
 ## Where they are looked up
 
-`tools/recon/proxy/game_keys.py`, in order:
+`tools/refresh/game_keys.py`, in order:
 
 1. a private `_game_keys.py` module beside it (the official app's build ships one);
 2. the JSON file named by `HB_GAME_KEYS`;

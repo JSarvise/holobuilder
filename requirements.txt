@@ -8,6 +8,8 @@ hyperframe==6.1.0
 highspy==1.15.1
 pillow==12.3.0
 pywebview==5.4
+# HTTPS verified by Windows itself (tools/app/system_trust.py)
+truststore==0.10.5
 # the data refresh: reading the game's asset bundles, and the asset CDN
 UnityPy==1.25.3
 requests==2.34.2

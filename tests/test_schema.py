@@ -29,7 +29,7 @@ from hbuilder.domain.schema import (
     validate_skill_slot,
 )
 
-from conftest import FIXTURE_CARDS_PATH
+from support.builders import FIXTURE_CARDS_PATH
 
 
 def _valid_run_state_slot(**overrides: object) -> dict:

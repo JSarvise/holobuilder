@@ -23,21 +23,22 @@ Two things these tests pin:
 from __future__ import annotations
 
 import dataclasses
+import pickle
 
 import pytest
 
 from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown
 from hbuilder.domain.song import (
     ChartNote,
+    OverallPower,
     SongChart,
+    cast_power_up,
     overall_power_for,
     score_song_detailed,
 )
 from hbuilder.domain.team import Team
 
-from conftest import make_card, make_scoring_config, make_skill
-
-CERTAIN_TIERS = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
+from support.builders import CERTAIN_TIERS, make_card, make_scoring_config
 
 
 def _cfg(**overrides):
@@ -83,7 +84,7 @@ def test_overall_power_for_is_exactly_the_deck_screens_own_overall_power():
     reference = deck_screen_unit_score(
         score_with_breakdown(Team(leader=leader, members=members), cfg)
     ).overall_power
-    assert overall_power_for(members, leader, cfg) == reference
+    assert overall_power_for(members, leader, cfg).value == reference
 
 
 def test_overall_power_is_bigger_than_the_modelled_pool_default():
@@ -92,7 +93,7 @@ def test_overall_power_is_bigger_than_the_modelled_pool_default():
     power-up permyriad), none of which the modelled stat pool includes."""
     members, leader, cfg = _members(), make_card("leader"), _cfg()
     default = score_song_detailed(members, (leader,), _chart(), cfg)[0].deck_power
-    assert overall_power_for(members, leader, cfg) > default
+    assert overall_power_for(members, leader, cfg).value > default
 
 
 # ==========================================================================
@@ -105,14 +106,14 @@ def test_deck_power_accepts_a_per_leader_callable():
     express. The score is linear in the power, so the check is exact."""
     members, chart, cfg = _members(), _chart(), _cfg()
     a, b = make_card("leader-a"), make_card("leader-b")
-    powers = {"leader-a": 1000.0, "leader-b": 2000.0}
+    powers = {"leader-a": OverallPower.fixed(1000.0), "leader-b": OverallPower.fixed(2000.0)}
 
     scores = score_song_detailed(
         members, (a, b), chart, cfg, deck_power=lambda leader: powers[leader.id]
     )
     assert [s.deck_power for s in scores] == [1000.0, 2000.0]
-    flat_a = score_song_detailed(members, (a,), chart, cfg, deck_power=1000.0)[0]
-    flat_b = score_song_detailed(members, (b,), chart, cfg, deck_power=2000.0)[0]
+    flat_a = score_song_detailed(members, (a,), chart, cfg, deck_power=powers["leader-a"])[0]
+    flat_b = score_song_detailed(members, (b,), chart, cfg, deck_power=powers["leader-b"])[0]
     assert [s.total_score for s in scores] == [flat_a.total_score, flat_b.total_score]
 
 
@@ -127,7 +128,7 @@ def test_the_callable_is_asked_once_per_leader_and_is_given_that_leader():
 
     def power(leader):
         seen.append(leader.id)
-        return 1500.0
+        return OverallPower.fixed(1500.0)
 
     score_song_detailed(members, (a, b), chart, cfg, deck_power=power)
     assert seen == ["leader-a", "leader-b"]
@@ -140,7 +141,7 @@ def test_passing_the_helper_as_the_callable_scores_on_the_servers_power():
         members, (leader,), chart, cfg,
         deck_power=lambda ldr: overall_power_for(members, ldr, cfg),
     )[0]
-    assert score.deck_power == overall_power_for(members, leader, cfg)
+    assert score.deck_power == overall_power_for(members, leader, cfg).value
 
 
 # ==========================================================================
@@ -179,7 +180,7 @@ def test_the_absolute_power_flag_defaults_ON():
 
 
 def test_the_flag_makes_a_ranked_row_report_the_servers_power():
-    from hbuilder.domain.song_rank import rank_on_chart
+    from support.song_ranking import rank_on_chart
     from hbuilder.domain.team import Team
 
     members, chart = _members(), _chart()
@@ -191,7 +192,7 @@ def test_the_flag_makes_a_ranked_row_report_the_servers_power():
     off_power = off.teams[0].per_chart[0].deck_power
     on_power = on.teams[0].per_chart[0].deck_power
     assert off_power < on_power
-    assert on_power == overall_power_for(members, team.leader, _cfg())
+    assert on_power == overall_power_for(members, team.leader, _cfg()).value
     assert on.teams[0].expected_score > off.teams[0].expected_score
 
 
@@ -199,7 +200,7 @@ def test_the_flag_reaches_the_per_team_board_path_too():
     """`score_teams_on_chart` replaces the board per team (the develop-across case).
     Overall Power CARRIES the board's power half, so the power must be computed
     against that team's own board — not against the shared `cfg`'s."""
-    from hbuilder.domain.song_rank import score_teams_on_chart
+    from support.song_ranking import score_teams_on_chart
     from hbuilder.domain.team import Team
 
     members, chart = _members(), _chart()
@@ -209,14 +210,54 @@ def test_the_flag_reaches_the_per_team_board_path_too():
     rows = score_teams_on_chart([team], chart, cfg, boards=[None])
     assert rows[0].deck_power == overall_power_for(
         members, team.leader, dataclasses.replace(cfg, board=None)
-    )
+    ).value
 
 
-def test_a_float_still_means_the_same_float_for_every_leader():
+def test_a_fixed_power_means_the_same_power_for_every_leader():
     members, chart, cfg = _members(), _chart(), _cfg()
     a, b = make_card("leader-a"), make_card("leader-b")
-    scores = score_song_detailed(members, (a, b), chart, cfg, deck_power=1234.0)
+    scores = score_song_detailed(members, (a, b), chart, cfg,
+                                 deck_power=OverallPower.fixed(1234.0))
     assert [s.deck_power for s in scores] == [1234.0, 1234.0]
+
+
+# ==========================================================================
+# 3b. A bare number is not an Overall Power
+# ==========================================================================
+#
+# A bare float carries no Member Power-Up bases, so scoring it as a deck power
+# would pay 0 extra Power-Up on a song whose singing leader holds a conditional
+# stat node, with nothing to notice. The scorer refuses it instead.
+
+
+@pytest.mark.parametrize("bare", [2000, 2000.0])
+def test_a_bare_number_as_deck_power_raises(bare):
+    members, chart, cfg = _members(), _chart(), _cfg()
+    with pytest.raises(TypeError, match=r"overall_power_for\(.*OverallPower\.fixed"):
+        score_song_detailed(members, (make_card("leader"),), chart, cfg, deck_power=bare)
+
+
+def test_a_callable_returning_a_bare_number_raises():
+    members, chart, cfg = _members(), _chart(), _cfg()
+    with pytest.raises(TypeError, match="per-leader result"):
+        score_song_detailed(members, (make_card("leader"),), chart, cfg,
+                            deck_power=lambda ldr: 2000.0)
+
+
+def test_cast_power_up_refuses_a_bare_number():
+    members, cfg = _members(), _cfg()
+    with pytest.raises(TypeError, match="OverallPower"):
+        cast_power_up(100000.0, members, "Singer", cfg, ("Singer",))
+
+
+def test_overall_power_round_trips_through_pickle():
+    """Worker processes (spawn) receive it pickled; every field must survive."""
+    members, leader, cfg = _members(), make_card("leader"), _cfg()
+    power = overall_power_for(members, leader, cfg)
+    assert power.power_up_bases and power.member_ids and power.power_up_permyriad == 35
+    again = pickle.loads(pickle.dumps(power))
+    assert again == power and type(again) is OverallPower
+    assert float(again) == power.value
 
 
 # ==========================================================================
@@ -263,3 +304,29 @@ def test_a_singer_conditional_red_node_scores_on_both_power_paths(absolute):
                                        members, ldr, _cfg(board=without,
                                                           song_absolute_deck_power=absolute)))
                                    if absolute else None)[0].total_score)
+
+
+def test_a_fixed_power_gets_the_singer_node_but_no_member_power_up():
+    """On a song the leader sings, a team's own Overall Power adds the node's stat
+    power AND the Member Power-Up that power earns; `OverallPower.fixed` at the same
+    value declares no Power-Up bases, so it adds the stat power alone."""
+    from hbuilder.domain.board import BoardModel, BoardNode, CharacterBoard, parse_effect_id
+    from hbuilder.domain.collection import AccountBonuses
+
+    members, leader = _members(), make_card("leader", member="Singer")
+    chart = dataclasses.replace(_chart(), singers=("Singer",), singer_type="solo")
+    node = BoardNode("R-044", (parse_effect_id(_SINGER_TECH, branch="R"),))
+    board = BoardModel(characters={"Singer": CharacterBoard("Singer", (node,))})
+    # a permyriad large enough that the node's power moves the per-member ceilings
+    cfg = _cfg(board=board, account=AccountBonuses(posters=22, power_up_permyriad=333))
+    real = overall_power_for(members, leader, cfg)
+    stat = board.conditional_stat_power_for(members, "Singer", ("Singer",))
+    power_up = cast_power_up(real, members, "Singer", cfg, ("Singer",))
+    assert power_up > 0
+
+    on_real = score_song_detailed(members, (leader,), chart, cfg, deck_power=real)[0]
+    on_fixed = score_song_detailed(members, (leader,), chart, cfg,
+                                   deck_power=OverallPower.fixed(real.value))[0]
+    assert on_real.deck_power == real.value + (stat + power_up)
+    assert on_fixed.deck_power == real.value + stat
+    assert cast_power_up(OverallPower.fixed(real.value), members, "Singer", cfg, ("Singer",)) == 0

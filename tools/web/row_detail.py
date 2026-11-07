@@ -36,20 +36,16 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-REPO = Path(__file__).resolve().parents[2]
-for _p in (REPO / "src", REPO / "tools" / "recon" / "proxy", REPO / "tools" / "web" / "kernel"):
+_SRC = str(Path(__file__).resolve().parents[2] / "src")   # this checkout's hbuilder
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+from hbuilder import paths  # noqa: E402
+
+for _p in (paths.REFRESH_DIR, paths.WEB_DIR / "kernel"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from hbuilder.domain.board_optimizer import BoardPlan  # noqa: E402
-from hbuilder.domain.board_plan import (  # noqa: E402
-    UNIT_SCORE_K,
-    SocketPlacement,
-    TeamBoardPlan,
-    board_model_from_plan,
-)
 from hbuilder.domain.deck_panel_team import team_deck_panel  # noqa: E402
-from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown  # noqa: E402
 from hbuilder.domain.song import timeline as song_timeline  # noqa: E402
 from hbuilder.domain.song import overall_power_for, song_overall_power  # noqa: E402
 from hbuilder.domain.song_distribution import run_score_distribution  # noqa: E402
@@ -85,17 +81,6 @@ def figures(team: Team, chart, cfg_board, *, cfg_off=None) -> dict:
     if cfg_off is not None:
         out["song_off"] = score_team_on_chart(team, chart, cfg_off).total_score
     return out
-
-
-def modal_order(per_chart: Sequence) -> tuple[list[str] | None, float | None]:
-    """The slot order that is best on the most charts, and the share of charts
-    it is best on. A team has one best order PER SONG; an across row carries
-    this as its default and says how often it holds."""
-    orders = Counter(tuple(s.member_order) for s in per_chart if getattr(s, "member_order", None))
-    if not orders:
-        return None, None
-    order, count = orders.most_common(1)[0]
-    return list(order), round(count / len(per_chart), 3)
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +139,7 @@ def song_board_bonus(team: Team, cfg_board, chart) -> dict | None:
     red_power = 0.0
     if board.conditional_stat_power_for(members, leader, singers):
         red_power = (song_overall_power(members, team.leader, cfg_board, chart)
-                     - overall_power_for(members, team.leader, cfg_board))
+                     - overall_power_for(members, team.leader, cfg_board).value)
     return {
         "scope": scope,
         "singers": sorted(raw),
@@ -287,7 +272,7 @@ def _leaf_inputs(basis: str, song: str, difficulty: str, assumptions=None) -> di
     couple of minutes per (basis, song, difficulty): ~0.3 s to build)."""
     import time  # noqa: PLC0415
 
-    import two_stage_build as tsb  # noqa: PLC0415
+    import leaf_inputs  # noqa: PLC0415
 
     key = (basis, song, difficulty, assumptions.key() if assumptions is not None else None)
     held = _LEAF_CACHE.get(key)
@@ -297,7 +282,7 @@ def _leaf_inputs(basis: str, song: str, difficulty: str, assumptions=None) -> di
         import ondemand  # noqa: PLC0415
         built = ondemand.build_inputs(assumptions, difficulty, song)
     else:
-        built = tsb.leaf_inputs(basis, difficulty, song)
+        built = leaf_inputs.leaf_inputs(basis, difficulty, song)
     _LEAF_CACHE.clear()
     _LEAF_CACHE[key] = (time.monotonic(), built)
     return built
@@ -308,7 +293,7 @@ def leaf_detail(built: Mapping, team: Team, *, refine: bool = False,
                 member_order: Sequence[str] | None = None, panel: bool = True,
                 chart=None, as_is: bool = False) -> dict:
     """`team` re-developed on a two-stage leaf (`built`: a `leaf_inputs` /
-    `two_stage_account.build` result) on `chart` (default `built["chart"]`) and
+    `leaf_inputs.build_account` result) on `chart` (default `built["chart"]`) and
     every figure from that one board (`panel=False`: the song figures only, plus
     the run law when `want_distribution`). `as_is` adds `song_est_as_is` (the
     team on the account's boards as captured) and `plan_cost` (`_as_is`)."""
@@ -359,8 +344,8 @@ def leaf_detail(built: Mapping, team: Team, *, refine: bool = False,
 # ---------------------------------------------------------------------------
 # "as it is" against "after the plan"
 # ---------------------------------------------------------------------------
-CAPTURED_BOARD = REPO / "tools" / "recon" / "proxy" / "dumps" / "board_state.json"
-INVENTORY = REPO / "tools" / "recon" / "proxy" / "dumps" / "inventory.json"
+CAPTURED_BOARD = paths.DUMPS / "board_state.json"
+INVENTORY = paths.DUMPS / "inventory.json"
 # Hologold per board node taken off (`main_Setting.skillTreeResetConsumptionGoldQuantity`;
 # the reset refunds the node's materials). Per NODE is the reading the MILP's
 # `max_resets` uses (`board_plan_solver.py`); whether the game charges per node or per
@@ -473,7 +458,7 @@ def _account_holdings() -> tuple:
         reasons.append(f"hologold: {exc}")
     try:
         unspent = to._character_points()
-    except (Exception, SystemExit) as exc:  # noqa: BLE001 - its loader exits on a missing file
+    except Exception as exc:  # noqa: BLE001 - a missing snapshot is a reason, not a failure
         reasons.append(f"board points: {exc}")
     return _PRICES, wallet, gold, unspent, "; ".join(reasons) or None
 
@@ -562,15 +547,26 @@ def two_stage_detail(basis: str, song: str, difficulty: str, leader_id: str,
         # the row was ranked on its plan WITHIN THE WALLET (`materials_plan`): the
         # same plan, the same off-team boards, scored by the same leaf
         import materials_plan  # noqa: PLC0415
-        planned = materials_plan.plan_for(leader_id, list(member_ids), song,
-                                          assumptions.plan_opts())
+        from hbuilder.solver.parallel_refine import RefinePool  # noqa: PLC0415
+        # the plan's candidates rated by this leaf, as the search rated them
+        # (`materials_plan.leaf_judge`); a plan the search already holds is reused as it is
+        # held under its judge too: a plan the search picked on another leaf is not this one
+        opts = materials_plan.judged_opts(assumptions.plan_opts(), assumptions, difficulty,
+                                          built["ctx"])
+        with RefinePool(built["ctx"], workers=1) as helper:
+            planned = materials_plan.plan_for(
+                leader_id, list(member_ids), song, opts,
+                judge=materials_plan.leaf_judge(built["ctx"], built["by_id"], helper._tree_for,
+                                                helper._budget_for, leader_id, member_ids),
+                parallel=True)
         if planned is None:
             raise ValueError("the wallet cannot fund a plan for this team")
         built = dict(built, ctx=dataclasses.replace(built["ctx"], board_state=planned[0],
                                                      bench_characters=planned[1], socket_bench=True))
         whole_plan = planned[2]
+        optimal = materials_plan.plan_optimal(leader_id, list(member_ids), song, opts)
     else:
-        whole_plan = None
+        whole_plan = optimal = None
     by_id = built["by_id"]
     missing = [c for c in (leader_id, *member_ids) if c not in by_id]
     if missing:
@@ -578,6 +574,8 @@ def two_stage_detail(basis: str, song: str, difficulty: str, leader_id: str,
     team = Team(leader=by_id[leader_id], members=tuple(by_id[m] for m in member_ids))
     out = leaf_detail(built, team, refine=bool(refine), want_distribution=want_distribution,
                       want_timeline=want_timeline, member_order=member_order, as_is=as_is)
+    if whole_plan is not None:
+        out["plan_optimal"] = optimal       # False: a MILP stopped on the solver's time limit
     if as_is and whole_plan is not None:
         # the cost of the WHOLE plan: its off-team resets are refunds the team spends
         out["plan_cost"] = _whole_plan_cost(whole_plan, built["ctx"])
@@ -651,7 +649,8 @@ def pool_detail(basis: str, songs: Sequence[str], difficulty: str, leader_id: st
     Measured on one 23-song pool (account, developed boards, top 3 rows): the refined
     board at the one order is +0.3..+1.9 % over the search's per-song mean,
     the unrefined candidates -4.1..-6.1 %."""
-    import two_stage_build as tsb  # noqa: PLC0415
+    import leaf_inputs  # noqa: PLC0415
+    from hbuilder.domain.song import load_charts  # noqa: PLC0415
     from hbuilder.solver.parallel_refine import (  # noqa: PLC0415
         RefinePool, develop_refined_team, develop_team, song_cast)
 
@@ -659,7 +658,7 @@ def pool_detail(basis: str, songs: Sequence[str], difficulty: str, leader_id: st
     if not songs:
         raise ValueError("no pool songs")
     built = _leaf_inputs(basis, songs[0], difficulty, assumptions)
-    library = built["ex"].load_charts(str(tsb.charts_path(difficulty))).at(difficulty)
+    library = load_charts(str(leaf_inputs.charts_path(difficulty))).at(difficulty)
     by_music = {c.music_id: c for c in library}
     charts = [by_music[m] for m in songs if m in by_music]
     if not charts:
@@ -678,6 +677,7 @@ def pool_detail(basis: str, songs: Sequence[str], difficulty: str, leader_id: st
     reps = [rep_of[k] for k, _n in Counter(key_of(c) for c in charts).most_common()]
     ctx0 = built["ctx"]
     cands: list[tuple[str, Any, Any, Any]] = []      # (label, plan song, ctx, developed team)
+    plan_optimal: dict = {}                           # label -> plan solved to optimality
     pool_opts: dict = {}                              # label -> the plan's `song_pool`
     with RefinePool(ctx0, workers=1) as helper:
         tree_for, budget_for = helper._tree_for, helper._budget_for
@@ -701,10 +701,12 @@ def pool_detail(basis: str, songs: Sequence[str], difficulty: str, leader_id: st
                 chart = by_music.get(song) if song else None
                 if extra == "pool":
                     pool_opts["the plan for the pool, its yellows valued on every song"] = opts["song_pool"]
-                cands.append(("the plan for no song in particular" if song is None
-                              else "the plan for one song of the pool" if extra is None
-                              else "the plan for the pool, its yellows valued on every song",
-                              song, ctx, develop_team(ctx, team, tree_for, budget_for, chart)))
+                label = ("the plan for no song in particular" if song is None
+                         else "the plan for one song of the pool" if extra is None
+                         else "the plan for the pool, its yellows valued on every song")
+                plan_optimal[label] = materials_plan.plan_optimal(leader_id, list(member_ids),
+                                                                  song, opts)
+                cands.append((label, song, ctx, develop_team(ctx, team, tree_for, budget_for, chart)))
             if not cands:
                 raise ValueError("the wallet cannot fund a plan for this team")
         elif ctx0.board_state is not None:
@@ -751,6 +753,8 @@ def pool_detail(basis: str, songs: Sequence[str], difficulty: str, leader_id: st
         "candidates": len(cands), "charts": len(charts),
         "lost": [m for m in songs if m not in by_music],
     }
+    if label in plan_optimal:
+        out["plan_optimal"] = plan_optimal[label]
     out.update(unit_score_block(team, cfg_board, cfg_off, list(order), chart=None))
     by_card = {c.id: c for c in (team.leader, *team.members)}
     out.update({
@@ -801,7 +805,8 @@ def reset_price(built: Mapping, team: Team, song: str, assumptions, *, refine: b
         n = sum(len(set((current_state.get(c) or {}).get("nodes") or ()) - set(v.get("nodes") or ())
                     - {START_NODE}) for c, v in planned[2].items())
         points.append({"label": label, "resets": n, "score": float(est),
-                       "hologold": n * RESET_HOLOGOLD})
+                       "hologold": n * RESET_HOLOGOLD,
+                       "plan_optimal": materials_plan.plan_optimal(leader_id, member_ids, song, opts)})
     points.sort(key=lambda r: (r["resets"] is None, -(r["resets"] or 0)))
     return {"points": points, "basis": "each plan re-solved within your cubes and hexas and "
             "scored by the row's own leaf"}

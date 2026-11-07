@@ -16,7 +16,7 @@ What is random and what is not (the same model, nothing added):
 THE METHOD IS EXACT, NOT SAMPLED. A note is covered by at most one window per
 skill, so its value depends on the fired flags of the windows covering it.
 Windows that share a note are joined. Enumerating each connected component
-(2^k, as the prototype `tools/recon/proxy/score_distribution.py` does) is too
+(2^k) is too
 slow: a real team on a real chart has components of 22+ windows, so this
 module SWEEPS the notes in time order instead, carrying the law per set of
 open windows (at most one per ACTIVE skill) — exact, and linear in the notes.

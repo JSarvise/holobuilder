@@ -1,7 +1,6 @@
 """`GET /api/songs` — the list the page ranks a song against.
 
-The engine has `--song` and `--across-songs`; this route is what lets the page
-ask for either. `song.timeline()` builds the five lanes, the chart's SPECIAL
+The page ranks on one song or across every song; this route gives it the list. `song.timeline()` builds the five lanes, the chart's SPECIAL
 cues and every ACTIVE's cooldown windows; this route lets the page choose a song.
 
 What is pinned here is the CONTRACT, not the account's data: the route must answer
@@ -14,34 +13,11 @@ the same shape `test_routes.py` and `test_collection.py` use.
 from __future__ import annotations
 
 import json
-import socket
-import threading
 import urllib.request
 
 import pytest
 
-import server as web_server
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def web_base():
-    port = _free_port()
-    server = web_server.ThreadingServer(
-        (web_server.BIND_HOST, port), web_server.Handler
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
+from hbweb import config
 
 
 def _songs(base: str) -> dict:
@@ -69,7 +45,7 @@ def test_the_route_answers_200_with_or_without_the_chart_library(web_base):
 
 
 @pytest.mark.skipif(
-    not web_server.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
+    not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
 )
 def test_every_song_carries_what_makes_its_chart_score_differently(web_base):
     """A picker you cannot read is a picker you guess at.
@@ -98,7 +74,7 @@ def test_every_song_carries_what_makes_its_chart_score_differently(web_base):
 
 
 @pytest.mark.skipif(
-    not web_server.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
+    not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
 )
 def test_a_song_without_a_real_title_is_never_dressed_up_as_having_one(web_base):
     """`titled` is the whole point of the field.
@@ -118,7 +94,7 @@ def test_a_song_without_a_real_title_is_never_dressed_up_as_having_one(web_base)
 
 
 @pytest.mark.skipif(
-    not web_server.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
+    not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
 )
 def test_the_ids_are_unique_so_a_choice_names_exactly_one_chart(web_base):
     payload = _songs(web_base)
@@ -135,7 +111,7 @@ def test_the_ids_are_unique_so_a_choice_names_exactly_one_chart(web_base):
 
 
 @pytest.mark.skipif(
-    not web_server.CHARTS_PATH.is_file() or not web_server.MUSIC_PATH.is_file(),
+    not config.CHARTS_PATH.is_file() or not config.MUSIC_PATH.is_file(),
     reason="dumps/ is gitignored",
 )
 def test_every_song_carries_the_filter_metadata_in_contract_tokens(web_base):
@@ -190,7 +166,7 @@ def test_every_song_carries_the_filter_metadata_in_contract_tokens(web_base):
 
 
 @pytest.mark.skipif(
-    not web_server.CHARTS_PATH.is_file() or not web_server.MUSIC_PATH.is_file(),
+    not config.CHARTS_PATH.is_file() or not config.MUSIC_PATH.is_file(),
     reason="dumps/ is gitignored",
 )
 def test_the_cast_resolves_to_holomem_names_not_just_ids(web_base):
@@ -216,11 +192,11 @@ def test_absent_music_master_degrades_to_filters_available_false(
     """`main_Music.json` is gitignored, so a fresh checkout has none. The song
     LIST must survive that; only the filters degrade, and the payload says so
     (`filters_available: false`) instead of shipping empty menus."""
-    real_music = web_server.MUSIC_PATH
+    real_music = config.MUSIC_PATH
     before = _songs(web_base)
 
     monkeypatch.setattr(
-        web_server, "MUSIC_PATH", tmp_path / "no-such-main_Music.json"
+        config, "MUSIC_PATH", tmp_path / "no-such-main_Music.json"
     )
     after = _songs(web_base)
 

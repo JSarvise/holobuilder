@@ -5,7 +5,7 @@ cd /d "%~dp0"
 rem Reads the game and your account into this folder (tools\local\run_local.py refresh).
 rem   refresh.cmd                   the account's region is found by itself the first time
 rem   refresh.cmd --region as       us, as or jp: the server your account lives on
-rem   refresh.cmd --skip chibi      any other option goes to tools\recon\proxy\refresh_all.py
+rem   refresh.cmd --skip chibi      any other option goes to tools\refresh\refresh_all.py
 rem HB_NO_PAUSE=1 skips the closing pause.
 
 if not exist ".venv\Scripts\python.exe" (

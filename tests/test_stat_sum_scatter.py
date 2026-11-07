@@ -1,7 +1,7 @@
 """`_stat_sum` scatters where it used to gather — and the two must agree
 BIT-for-bit, not approximately.
 
-`SEARCH-STRATEGY.md` §2.1 measured the rewrite at **1.31x** on the real
+The rewrite measured **1.31x** on the real
 91-leader shape and justified shipping it on the claim that bit-identicality is
 *structural* rather than tolerance-based: a bucket is filled in
 `zip(stat_entries, recipients)` order, which is the order the predecessor's
@@ -35,7 +35,7 @@ from hbuilder.domain.scoring import _FIXED_TARGET, STAT_NAMES, _stat_sum
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.scoring_models import STACKING_MODELS
 
-from conftest import make_scoring_config
+from support.builders import make_scoring_config
 
 
 def config_with(stacking: str) -> ScoringConfig:
@@ -124,7 +124,7 @@ ADVERSARIAL_CASES: tuple[tuple[str, list], ...] = (
     ),
     (
         # 19.9 % of real entries resolve to an empty recipient set
-        # (`SEARCH-STRATEGY.md` §1). The scatter skips them; the gather filtered
+        # The scatter skips them; the gather filtered
         # them out. Same answer only if `combine(())` is still called for the
         # (card, stat) pairs they would never have reached.
         "an entry whose recipients are empty",
@@ -153,16 +153,14 @@ ADVERSARIAL_CASES: tuple[tuple[str, list], ...] = (
 )
 
 
-@pytest.mark.parametrize("stacking", ["additive", "multiplicative"])
 @pytest.mark.parametrize(
     "label,stat_entries", ADVERSARIAL_CASES, ids=[case[0] for case in ADVERSARIAL_CASES]
 )
-def test_the_scatter_equals_the_gather_bit_for_bit(label, stat_entries, stacking):
-    """Both stacking models, because only the multiplicative one can detect a
-    reordering inside a bucket — under additive stacking a permuted bucket is
-    *usually* still equal, so testing additive alone would prove nothing about
-    the ordering claim."""
-    cfg = config_with(stacking)
+def test_the_scatter_equals_the_gather_bit_for_bit(label, stat_entries):
+    """Under the shipped additive stacking. Float addition is not
+    associative, so a bucket combined in a different order can still differ in
+    the last bit, which `==` catches."""
+    cfg = config_with("additive")
     recipients = [item[2] for item in stat_entries]
 
     assert _stat_sum(MEMBERS, stat_entries, cfg, recipients) == gather_stat_sum(
@@ -170,15 +168,14 @@ def test_the_scatter_equals_the_gather_bit_for_bit(label, stat_entries, stacking
     ), label
 
 
-@pytest.mark.parametrize("stacking", ["additive", "multiplicative"])
-def test_the_scatter_equals_the_gather_over_randomised_entry_shapes(stacking):
+def test_the_scatter_equals_the_gather_over_randomised_entry_shapes():
     """A fixed-seed fuzz over the shapes the hand-written cases cannot enumerate.
 
     Seeded, so a failure is reproducible from the printed trial index alone; the
     assertion is still exact equality, so this is a *proof attempt*, not a
     statistical check.
     """
-    cfg = config_with(stacking)
+    cfg = config_with("additive")
     rng = random.Random(20260803)
 
     for trial in range(400):
@@ -198,12 +195,10 @@ def test_the_scatter_equals_the_gather_over_randomised_entry_shapes(stacking):
 
 
 def test_the_recipients_argument_overrides_the_entrys_own_target_ids():
-    """`_best_order_stat_sum` re-resolves recipients per candidate slot order and
-    passes them in `recipients`, NOT by rebuilding the entries. A scatter that
-    read `entry[2]` instead of the supplied set would score every ordering
-    identically — the slot-order search would silently become a no-op, and every
-    existing test would still pass because the free rule passes `entry[2]`
-    anyway."""
+    """`_stat_sum` takes the recipients as a separate argument rather than
+    reading them from the entries. A scatter that read `entry[2]` instead of the
+    supplied set would silently ignore the caller's recipients, and every test
+    that passes `entry[2]` as the recipients would still pass."""
     cfg = config_with("additive")
     stat_entries = [entry(0.5, ("performance",), frozenset({IDS[0]}))]
 

@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import pytest
 
-from hbuilder.domain.card import Card, GateCondition, SkillSlot, Stats
+from hbuilder.domain.card import Card, SkillSlot, Stats
 from hbuilder.domain.team import (
     MEMBER_COUNT,
     TeamError,
     Team,
     build_team,
 )
+
+from support.team_reference import effective_skill_instances
 
 _STATS = Stats(performance=100, technique=100, sense=100)
 
@@ -202,7 +204,7 @@ def test_leader_contributes_its_outfit_skill_and_nothing_else():
     team = Team(leader=leader, members=members)
 
     leader_instances = [
-        i for i in team.effective_skill_instances() if i.card_id == leader.id
+        i for i in effective_skill_instances(team) if i.card_id == leader.id
     ]
 
     assert len(leader_instances) == 1, "the leader's own SP/A/P must not count"
@@ -224,7 +226,7 @@ def test_a_leader_who_is_also_a_member_contributes_both_roles_once_each():
     members = (shared, *(_card(f"member_{i:02d}") for i in range(2, MEMBER_COUNT + 1)))
     team = Team(leader=shared, members=members)
 
-    mine = [i for i in team.effective_skill_instances() if i.card_id == shared.id]
+    mine = [i for i in effective_skill_instances(team) if i.card_id == shared.id]
 
     assert len([i for i in mine if i.source == "normal"]) == 3
     assert len([i for i in mine if i.source == "costume"]) == 1
@@ -241,7 +243,7 @@ def test_member_costume_skill_contributes_no_costume_instance():
     members = (doped_member, *members[1:])
     team = Team(leader=leader, members=members)
 
-    instances = team.effective_skill_instances()
+    instances = effective_skill_instances(team)
     costume_instances = [i for i in instances if i.source == "costume"]
     assert len(costume_instances) == 1
     assert costume_instances[0].card_id == leader.id

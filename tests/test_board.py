@@ -30,6 +30,7 @@ import json
 import pytest
 
 from hbuilder.domain import board
+from support import board_reference
 from hbuilder.domain.board import (
     BoardError,
     BoardModel,
@@ -40,7 +41,7 @@ from hbuilder.domain.board import (
 from hbuilder.domain.card import Stats
 from hbuilder.domain.scoring import score_card_set, score_fast
 
-from conftest import make_card, make_scoring_config, make_team
+from support.builders import make_card, make_scoring_config, make_team
 
 # --------------------------------------------------------------------------
 # Ina's 27 unlocked red nodes, verbatim.
@@ -276,7 +277,7 @@ without an argument of that shape.
     members = _members_summing_to(MEMBER_PARAMETER)
     leader = make_card("leader_ina", member="Ina")
 
-    contribution = board.resolve(model, leader, members)
+    contribution = board_reference.resolve(model, leader, members)
     predicted = contribution.power_bonus(members)
 
     # The two halves, pinned separately so a regression says which one moved.
@@ -322,7 +323,7 @@ def test_the_screen_target_cannot_arbitrate_the_ceiling():
 
     def predict(p_share: float) -> float:
         members = _members_with_performance_share(MEMBER_PARAMETER, p_share)
-        return board.resolve(model, leader, members).power_bonus(members)
+        return board_reference.resolve(model, leader, members).power_bonus(members)
 
     # The account's own observed Performance shares, over
     # `state/collection.json`: 33.72 % across all 97 owned cards, 37.75 % on
@@ -379,7 +380,7 @@ def test_ina_red_nodes_land_on_the_measured_score_bonus_delta():
     members = _members_summing_to(MEMBER_PARAMETER)
     leader = make_card("leader_ina", member="Ina")
 
-    contribution = board.resolve(model, leader, members)
+    contribution = board_reference.resolve(model, leader, members)
 
     assert contribution.skill_effect_up == pytest.approx(0.173, abs=1e-9)
     assert contribution.conditional_skill_effect_up == pytest.approx(0.240, abs=1e-9)
@@ -465,7 +466,7 @@ def test_the_prediction_is_stable_across_every_plausible_stat_split():
     predictions = []
     for performance_share in (0.30, 1 / 3, 0.35, 0.40):
         members = _members_with_performance_share(MEMBER_PARAMETER, performance_share)
-        predictions.append(board.resolve(model, leader, members).power_bonus(members))
+        predictions.append(board_reference.resolve(model, leader, members).power_bonus(members))
 
     assert min(predictions) == pytest.approx(23201.0, abs=1.0)
     assert max(predictions) == pytest.approx(23445.0, abs=1.0)
@@ -545,7 +546,7 @@ def test_the_red_branch_reaches_five_cards_and_not_six():
     leader = make_card("leader_ina", member="Ina")
     members = _members_summing_to(MEMBER_PARAMETER)
 
-    five = board.resolve(model, leader, members).power_bonus(members)
+    five = board_reference.resolve(model, leader, members).power_bonus(members)
     six_flat = 16837.5 * 6 / 5
     six = six_flat + (five - 16837.5)
 
@@ -561,7 +562,7 @@ def test_a_leader_who_is_not_ina_gets_none_of_her_red_nodes():
     configuration C."""
     model = _ina_board()
     members = _members_summing_to(MEMBER_PARAMETER)
-    contribution = board.resolve(model, make_card("leader_calli", member="Calli"), members)
+    contribution = board_reference.resolve(model, make_card("leader_calli", member="Calli"), members)
 
     assert contribution.power_bonus(members) == 0.0
     assert contribution.skill_effect_up == 0.0
@@ -598,8 +599,8 @@ def test_c09_green_all_always_nodes_are_a_constant_that_cancels_in_a_ranking():
         dataclasses.replace(card, stats=Stats(1000, 1000, 1000)) for card in team_a
     )
 
-    a = board.resolve(model, leader, team_a).power_bonus(team_a)
-    b = board.resolve(model, leader, team_b).power_bonus(team_b)
+    a = board_reference.resolve(model, leader, team_a).power_bonus(team_a)
+    b = board_reference.resolve(model, leader, team_b).power_bonus(team_b)
     assert a == 75.0
     assert b == 75.0
     assert a == b  # the constant: identical for two completely different teams
@@ -635,14 +636,14 @@ def test_c09_green_character_grouping_nodes_are_a_per_team_discriminator():
     zero_myth = _team(0)
     five_myth = _team(5)
 
-    assert board.resolve(model, leader, three_myth).power_bonus(three_myth) == 1350.0
-    assert board.resolve(model, leader, zero_myth).power_bonus(zero_myth) == 0.0
-    assert board.resolve(model, leader, five_myth).power_bonus(five_myth) == 2250.0
+    assert board_reference.resolve(model, leader, three_myth).power_bonus(three_myth) == 1350.0
+    assert board_reference.resolve(model, leader, zero_myth).power_bonus(zero_myth) == 0.0
+    assert board_reference.resolve(model, leader, five_myth).power_bonus(five_myth) == 2250.0
 
     # The claim in one assertion: it is not a constant.
     assert (
-        board.resolve(model, leader, three_myth).power_bonus(three_myth)
-        != board.resolve(model, leader, zero_myth).power_bonus(zero_myth)
+        board_reference.resolve(model, leader, three_myth).power_bonus(three_myth)
+        != board_reference.resolve(model, leader, zero_myth).power_bonus(zero_myth)
     )
 
 
@@ -671,7 +672,7 @@ def test_c09_grouping_matches_the_catalogue_display_name_not_only_the_token():
         )
         for i in range(2)
     )
-    assert board.resolve(model, leader, display).power_bonus(display) == 1350.0
+    assert board_reference.resolve(model, leader, display).power_bonus(display) == 1350.0
 
 
 def test_c09_the_grouping_scope_is_read_from_the_effect_id_not_assumed():
@@ -718,8 +719,8 @@ def test_blue_nodes_reach_only_their_own_holomems_card():
         for i in range(5)
     )
 
-    assert board.resolve(model, leader, with_nene).power_bonus(with_nene) == 150.0
-    assert board.resolve(model, leader, without_nene).power_bonus(without_nene) == 0.0
+    assert board_reference.resolve(model, leader, with_nene).power_bonus(with_nene) == 150.0
+    assert board_reference.resolve(model, leader, without_nene).power_bonus(without_nene) == 0.0
 
 
 def test_a_leaders_blue_nodes_do_not_count_while_she_is_not_a_member():
@@ -739,7 +740,7 @@ def test_a_leaders_blue_nodes_do_not_count_while_she_is_not_a_member():
         for i in range(5)
     )
     leader = make_card("leader_nene", member="Nene")
-    assert board.resolve(model, leader, members).power_bonus(members) == 0.0
+    assert board_reference.resolve(model, leader, members).power_bonus(members) == 0.0
 
 
 def test_connect_multiplies_the_number_whatever_its_unit():
@@ -763,7 +764,7 @@ def test_connect_multiplies_the_number_whatever_its_unit():
         dataclasses.replace(make_card("m0", member="M0"), stats=Stats(1000, 1000, 1000)),
     )
 
-    contribution = board.resolve(model, leader, members)
+    contribution = board_reference.resolve(model, leader, members)
     flat = contribution.flat_by_card["m0"]
     assert flat["performance"] == 120.0  # 50 -> 120
     assert flat["technique"] == 120.0
@@ -794,7 +795,7 @@ def test_bloom_5_connect_overshoots_the_acceptance_number():
     the captured account: its two socket cards are below Bloom 5. A
     collection that defaults every card to `max` therefore cannot be trusted
     to supply the Connect level, which is the trap
-    `tools/recon/proxy/build_board.py` has to avoid when it derives the level
+    `tools/refresh/build_board.py` has to avoid when it derives the level
     from a collection instead of taking `--connect-level`."""
     members = _members_summing_to(MEMBER_PARAMETER)
     leader = make_card("leader_ina", member="Ina")
@@ -811,7 +812,7 @@ def test_bloom_5_connect_overshoots_the_acceptance_number():
         model = BoardModel(
             characters={"Ina": CharacterBoard(holomem="Ina", nodes=nodes)}
         )
-        return board.resolve(model, leader, members).power_bonus(members)
+        return board_reference.resolve(model, leader, members).power_bonus(members)
 
     base = power_at(lambda m: m)
     bloom5 = power_at(lambda m: BLOOM5_CONNECT_MULTIPLIER[m])
@@ -855,7 +856,7 @@ def test_yellow_song_scoped_bonuses_are_separated_by_song_scope():
     model = BoardModel(characters={"Ina": CharacterBoard("Ina", nodes)})
     members = _members_summing_to(3000)
 
-    contribution = board.resolve(model, make_card("l", member="L"), members)
+    contribution = board_reference.resolve(model, make_card("l", member="L"), members)
     assert contribution.song_score_bonus == {"all": 0.001, "solo": 0.005}
     assert contribution.score_bonus_rate() == 0.001  # the song-independent half only
 
@@ -984,7 +985,7 @@ def test_activation_and_cooldown_riders_are_kept_per_member():
         )
         for i in range(5)
     )
-    contribution = board.resolve(model, make_card("l", member="L"), members)
+    contribution = board_reference.resolve(model, make_card("l", member="L"), members)
 
     assert contribution.activation_rate_up == {"m2": 0.06}
     assert contribution.cooldown_shorten == {"m2": 0.04}
@@ -1131,7 +1132,7 @@ def test_a_board_file_round_trips_through_the_loader_to_the_same_numbers(tmp_pat
     assert model is not None
     members = _members_summing_to(MEMBER_PARAMETER)
     leader = make_card("leader_ina", member="Ina")
-    contribution = board.resolve(model, leader, members)
+    contribution = board_reference.resolve(model, leader, members)
     assert contribution.power_bonus(members) == pytest.approx(23358.0, abs=0.01)
     assert contribution.skill_effect_up == pytest.approx(0.173, abs=1e-9)
 
@@ -1200,4 +1201,7 @@ def test_a_singer_conditional_rate_raises_the_member_power_up():
                          member_ids=tuple(m.id for m in members), power_up_permyriad=333)
     assert cast_power_up(power, members, "Ina", cfg, ("Ina",)) == 5 * 4
     assert cast_power_up(power, members, "Ina", cfg, ()) == 0
-    assert cast_power_up(100000.0, members, "Ina", cfg, ("Ina",)) == 0  # no bases carried
+    # a fixed raw power declares no bases, so it earns no Power-Up
+    assert cast_power_up(OverallPower.fixed(100000.0), members, "Ina", cfg, ("Ina",)) == 0
+    with pytest.raises(TypeError):
+        cast_power_up(100000.0, members, "Ina", cfg, ("Ina",))

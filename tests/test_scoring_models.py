@@ -1,11 +1,9 @@
-"""Coverage of both `StackingModel` implementations,
-both `ActivationRateModel` implementations, the two name-to-instance
-registries, and the four-combination matrix that proves switching either
-unverified interpretation actually changes a team's total.
+"""The shipped `StackingModel` and `ActivationRateModel`, their name-to-instance
+registries, and a team total through the shipped pair.
 
 Test names state the exact behavior or defect each one pins, following
 `tests/test_gates.py`'s convention. Card/skill/team fixtures come from
-`tests/conftest.py`.
+`tests/support/builders.py`.
 """
 
 from __future__ import annotations
@@ -21,13 +19,11 @@ from hbuilder.domain.scoring import score_fast
 from hbuilder.domain.scoring_models import (
     ACTIVATION_RATE_MODELS,
     STACKING_MODELS,
-    AdditivePercentagePoints,
     AdditiveStacking,
     MultiplicativeRateUp,
-    MultiplicativeStacking,
 )
 
-from conftest import make_card, make_scoring_config, make_skill, make_team
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 # --- Stacking model: combine ------------------------------------------------
 
@@ -36,68 +32,39 @@ def test_additive_stacking_combine_of_empty_list_is_exactly_zero():
     assert AdditiveStacking().combine([]) == 0.0
 
 
-def test_multiplicative_stacking_combine_of_empty_list_is_exactly_zero():
-    assert MultiplicativeStacking().combine([]) == 0.0
-
-
 def test_additive_stacking_combine_of_single_rate_returns_it_unchanged():
     assert AdditiveStacking().combine([0.10]) == 0.10
-
-
-def test_multiplicative_stacking_combine_of_single_rate_returns_it_approx():
-    assert MultiplicativeStacking().combine([0.10]) == pytest.approx(0.10)
 
 
 def test_additive_stacking_combine_of_pair_is_zero_point_two_four():
     assert AdditiveStacking().combine([0.10, 0.14]) == pytest.approx(0.24)
 
 
-def test_multiplicative_stacking_combine_of_pair_is_zero_point_two_five_four():
-    assert MultiplicativeStacking().combine([0.10, 0.14]) == pytest.approx(0.254)
-
-
-def test_neither_combine_returns_a_multiplier_adding_one_reproduces_d15():
-    # The worked numbers: 1.24 additive, 1.254 multiplicative. Both
-    # `combine` implementations return the *combined rate*, not the
-    # multiplier — the caller adds 1.0.
-    assert 1.0 + AdditiveStacking().combine([0.10, 0.14]) == pytest.approx(1.24)
-    assert 1.0 + MultiplicativeStacking().combine([0.10, 0.14]) == pytest.approx(1.254)
-
-
 # --- Activation-rate model: apply -------------------------------------------
-
-
-def test_additive_percentage_points_apply_of_zero_rate_up_returns_base_unchanged():
-    assert AdditivePercentagePoints().apply(0.55, 0.0) == 0.55
 
 
 def test_multiplicative_rate_up_apply_of_zero_rate_up_returns_base_unchanged():
     assert MultiplicativeRateUp().apply(0.55, 0.0) == 0.55
 
 
-def test_additive_percentage_points_apply_of_fifteen_pp_is_seventy_percent():
-    assert AdditivePercentagePoints().apply(0.55, 0.15) == pytest.approx(0.70)
-
-
 def test_multiplicative_rate_up_apply_of_fifteen_percent_is_sixty_three_point_two_five():
     assert MultiplicativeRateUp().apply(0.55, 0.15) == pytest.approx(0.6325)
 
 
-def test_both_apply_implementations_clamp_at_exactly_one():
-    assert AdditivePercentagePoints().apply(0.75, 0.55) == 1.0
+def test_the_activation_rate_up_clamps_at_exactly_one():
     assert MultiplicativeRateUp().apply(0.75, 0.55) == 1.0
 
 
 # --- Registries --------------------------------------------------------------
 
 
-def test_stacking_models_registry_maps_additive_and_multiplicative_by_name():
-    assert set(STACKING_MODELS) == {"additive", "multiplicative"}
+def test_stacking_models_registry_maps_additive_by_name():
+    assert set(STACKING_MODELS) == {"additive"}
     assert all(key == model.name for key, model in STACKING_MODELS.items())
 
 
-def test_activation_rate_models_registry_maps_pp_and_multiplicative_by_name():
-    assert set(ACTIVATION_RATE_MODELS) == {"pp", "multiplicative"}
+def test_activation_rate_models_registry_maps_multiplicative_by_name():
+    assert set(ACTIVATION_RATE_MODELS) == {"multiplicative"}
     assert all(key == model.name for key, model in ACTIVATION_RATE_MODELS.items())
 
 
@@ -223,7 +190,7 @@ def _cfg_for(stacking_key: str, activation_rate_key: str):
     )
 
 
-# Base stat sum: the FIVE MEMBERS at the conftest STATS baseline (300 each) =
+# Base stat sum: the FIVE MEMBERS at the builders' STATS baseline (300 each) =
 # 1500.0. The leader slot contributes no stats.
 _BASE_STAT_SUM = 1500.0
 # Both ACTIVEs on this team are 10 s effects on a 10 s cooldown, so both carry
@@ -284,14 +251,6 @@ _STEADY_STATE_PP_TOTAL = 1751.37
 _STEADY_STATE_MULTIPLICATIVE_TOTAL = 1700.583
 
 
-def test_four_combo_additive_stacking_with_pp_activation_rate():
-    cfg = _cfg_for("additive", "pp")
-    total = score_fast(_four_combo_team(), cfg)
-    assert total == pytest.approx(_expected_total("additive", "pp"))
-    assert total == pytest.approx(_PP_TOTAL)
-    assert total != pytest.approx(_STEADY_STATE_PP_TOTAL)
-
-
 def test_four_combo_additive_stacking_with_multiplicative_activation_rate():
     cfg = _cfg_for("additive", "multiplicative")
     total = score_fast(_four_combo_team(), cfg)
@@ -300,56 +259,3 @@ def test_four_combo_additive_stacking_with_multiplicative_activation_rate():
     assert total != pytest.approx(_STEADY_STATE_MULTIPLICATIVE_TOTAL)
 
 
-def test_four_combo_multiplicative_stacking_with_pp_activation_rate():
-    cfg = _cfg_for("multiplicative", "pp")
-    total = score_fast(_four_combo_team(), cfg)
-    assert total == pytest.approx(_expected_total("multiplicative", "pp"))
-    assert total == pytest.approx(_PP_TOTAL)
-    assert total != pytest.approx(_STEADY_STATE_PP_TOTAL)
-
-
-def test_four_combo_multiplicative_stacking_with_multiplicative_activation_rate():
-    cfg = _cfg_for("multiplicative", "multiplicative")
-    total = score_fast(_four_combo_team(), cfg)
-    assert total == pytest.approx(_expected_total("multiplicative", "multiplicative"))
-    assert total == pytest.approx(_MULTIPLICATIVE_TOTAL)
-    assert total != pytest.approx(_STEADY_STATE_MULTIPLICATIVE_TOTAL)
-
-
-def _totals_over_four_combinations(team) -> dict:
-    return {
-        (stacking_key, activation_rate_key): score_fast(
-            team, _cfg_for(stacking_key, activation_rate_key)
-        )
-        for stacking_key in ("additive", "multiplicative")
-        for activation_rate_key in ("pp", "multiplicative")
-    }
-
-
-def test_stacking_is_inert_on_a_team_whose_score_pool_has_one_entry():
-    """A consequence of the score pool becoming ONE aggregate rate: every
-    Score UP collapses into `SkillScoreUpRatio` and Score Support combines by
-    its own max rule, so `combine()` is called over a single-element list and
-    both stacking models return that element unchanged. On this team the
-    stacking axis therefore does nothing and only the activation-rate axis
-    varies the total — two distinct values, not four.
-
-    This is a narrowing of `model.stacking`'s scope, not a loss of the knob:
-    it still governs the STAT pool, where several rates really do meet. Pinned
-    so the narrowing is a recorded fact rather than something a reader has to
-    rediscover from four equal numbers."""
-    totals = _totals_over_four_combinations(_four_combo_team())
-
-    assert len(set(totals.values())) == 2, totals
-    assert totals[("additive", "pp")] == totals[("multiplicative", "pp")]
-
-
-def test_four_combinations_produce_four_distinct_totals_once_the_stat_pool_is_exercised():
-    """The original guarantee — all four combinations live and distinct —
-    restated on a team that actually exercises both axes. Two `stat_up`
-    PASSIVEs give the stat pool two rates to combine, which is where the
-    stacking model still bites."""
-    team = _four_combo_team_with_stat_pool()
-    totals = _totals_over_four_combinations(team)
-
-    assert len(set(totals.values())) == 4, totals

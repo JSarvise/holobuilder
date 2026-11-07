@@ -7,18 +7,17 @@
 //   * fixed chests are one-time pickups: the ones still closed are drawn with the game's own
 //     chest icon and counted per area (a new area can bring dozens); the
 //     opened ones are an optional, dimmed layer.
-// GET /api/park triggers a live login (server TTL 60 s), so it runs on page open and on
-// "Read again" only; the layer toggles redraw from the data in hand.
+// GET /api/park returns the pick the last account refresh saved (the page never logs in: a
+// login from the app ends the game's session); it runs on page open and on "Read again",
+// the layer toggles redraw from the data in hand.
 const byId = id => document.getElementById(id);   // not `$`: test_id_contract
 const QUOTE = String.fromCharCode(34);
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", [QUOTE]: "&quot;" };
 const ESC_RE = new RegExp("[&<>" + QUOTE + "]", "g");
 const esc = s => String(s ?? "").replace(ESC_RE, c => ESC[c]);
 const HOUR = 3600e3, DAY = 24 * HOUR;
-// the game's own area names come with the export (LangArea); these only cover an old export
-const AREA = { "area-a01": "Harmony Garden", "area-a02-game": "Play Area · Game Corner",
-  "area-a02-casino": "Play Area · Casino", "area-a02-lobby": "Lobby", "area-a03": "Soda Pop Lagoon" };
-const areaName = a => a.name && a.name !== a.id ? a.name : AREA[a.id] || a.id;
+// the game's own area names come with the export (LangArea)
+const areaName = a => a.name && a.name !== a.id ? a.name : a.id;
 const CHEST = "/park/chest.png";
 const closed = a => (a.treasures || []).filter(t => !t.opened && t.x != null);
 const spotNo = s => { const m = String(s || "").match(/(\d+)$/); return m ? String(+m[1]) : ""; };
@@ -130,18 +129,15 @@ async function load() {
     data = { available: false, reason: "Could not reach the builder's server: " + e.message };
   }
   readAt = Date.now();
-  byId("readat").textContent = data.available ? `Read from your account ${F.date(readAt)}` : "Not read";
+  const at = data.captured_at ? Date.parse(data.captured_at) : NaN;
+  byId("readat").textContent = !data.available ? "Not read"
+    : `From your last Refresh ${F.date(Number.isNaN(at) ? readAt : at)}`;
   btn.disabled = false; byId("rereadlabel").textContent = "Read again";
   render();
 }
 
-/* "Read again" logs into the account: a second press within 4 s confirms it */
-let armed = 0;
-byId("reread").addEventListener("click", () => {
-  if (Date.now() - armed < 4000) { armed = 0; byId("reread").classList.remove("armed"); load(); return; }
-  armed = Date.now(); byId("reread").classList.add("armed"); byId("rereadlabel").textContent = "Press again: logs into your account";
-  setTimeout(() => { if (armed && Date.now() - armed >= 4000) { armed = 0; byId("reread").classList.remove("armed"); byId("rereadlabel").textContent = "Read again"; } }, 4100);
-});
+/* "Read again" re-reads what the last Refresh saved; it never logs in */
+byId("reread").addEventListener("click", load);
 for (const k of ["opened", "cands"]) byId(k).addEventListener("click", () => {
   L[k] = !L[k]; try { localStorage.setItem("hb.parkview", JSON.stringify(L)); } catch (_) { /* private */ }
   setLegend(); render();

@@ -3,7 +3,7 @@
 Find the message you see, then the fix.
 
 - [The app](#the-app) (installed with `holobuilder-setup.exe`)
-- [Running from source](#running-from-source) (`setup.cmd`, `refresh.cmd`, `start.cmd`)
+- [Running from source](#running-from-source) (`setup`, `refresh`, `start`: `.cmd` on Windows, `.sh` on Linux)
 
 ## The app
 
@@ -29,18 +29,22 @@ problem. `setup.cmd` can be run again at any time to see what is missing.
 
 | Message | What it means | What to do |
 |---|---|---|
-| **Python 3.11 or newer was not found** (`setup.cmd`) | No usable Python on this PC. The `python` that opens the Microsoft Store does not count. | Install Python 3.13 from python.org with *Add python.exe to PATH* ticked, open a new window, run `setup.cmd` again. |
+| **Python 3.12 or newer was not found** (`setup.cmd`) | No usable Python on this PC. The `python` that opens the Microsoft Store does not count. | Install Python 3.13 from python.org with *Add python.exe to PATH* ticked, open a new window, run `setup.cmd` again. |
+| **Python 3.x is too old: holobuilder needs Python 3.12 or newer** (`setup.cmd`, `setup.sh`) | Only an older Python is on this PC. | Install Python 3.13 (python.org on Windows, your distribution's package on Linux), open a new window, run `setup` again. |
+| **This folder's .venv runs Python 3.x: holobuilder needs 3.12 or newer** (`start`, `refresh`) | The folder was set up with an older Python. | Install Python 3.13 and run `setup` again: it makes `.venv` again with it. |
 | **The packages did not install** | `pip` failed: no internet, or a package has no ready-made build for this Python version. | Check the connection; use Python 3.13; run `setup.cmd` again. |
-| **gcc is not on the PATH** / **no gcc on PATH; the ... kernel cannot be built** | The C compiler the team search needs is missing. | `winget install BrechtSanders.WinLibs.POSIX.UCRT` (or WinLibs from winlibs.com, its `mingw64\bin` on the PATH), open a new window, run `setup.cmd` again. |
+| **gcc is not on the PATH** / **no gcc on PATH; the ... kernel cannot be built** | The C compiler the team search needs is missing. | Windows: `winget install BrechtSanders.WinLibs.POSIX.UCRT` (or WinLibs from winlibs.com, its `mingw64\bin` on the PATH), open a new window, run `setup.cmd` again. Linux: `sudo apt install gcc` (or your distribution's), run `./setup.sh` again. |
+| **.venv could not be created** (Linux) | Python's `venv` module is a separate package on Debian and Ubuntu. | `sudo apt install python3-venv`, delete the `.venv` folder, run `./setup.sh` again. |
+| **libsqlcipher not found** (Linux) | The SQLCipher library that opens the game's master tables is missing. | `sudo apt install libsqlcipher1` (Fedora, Arch: `sqlcipher`), or set `HOLODREAMS_SQLCIPHER` to the library file. |
 | **hololive Dreams is not installed where Steam keeps games** / **hololiveDreams install not found** | The game is in none of this PC's Steam libraries. | Install it from Steam, or set `HOLODREAMS_DIR` to the folder that holds `hololive-Dreams_Data`. |
 | **no account file in ...** | The game has not written its account file on this PC yet. | Start the game once and get past its title screen, then run `refresh.cmd` again. |
 | **N files ... look like an account file** | More than one account has played on this PC. | Set `HB_CREDENTIAL_FILE` to the file of the account you play (the most recently changed one, usually) and run `refresh.cmd` again. |
 | **no literal opens the server's answer** | The game's build constants could not be found: the installed client is older than the one the server expects. | Update the game in Steam, start it once, run `refresh.cmd` again. |
-| **THE GAME CLIENT'S BUILD CONSTANTS ARE NOT ON THIS PC** | `refresh_all.py` was run directly, before the constants were found. | Run `refresh.cmd` once, or `.venv\Scripts\python tools\recon\proxy\game_keys.py --find`. See [game-keys.md](dev/game-keys.md). |
+| **THE GAME CLIENT'S BUILD CONSTANTS ARE NOT ON THIS PC** | `refresh_all.py` was run directly, before the constants were found. | Run `refresh.cmd` once, or `.venv\Scripts\python tools\refresh\game_keys.py --find`. See [game-keys.md](dev/game-keys.md). |
 | **no region accepted this account** / **login rejected** | The account's server refused the login. | Start the game once (that refreshes the account file) and try again; set the region yourself with `refresh.cmd --region us` (or `as`, `jp`). |
 | **GAME IN MAINTENANCE** | The game's servers refuse every call during maintenance. Nothing was written. | Refresh again when it ends. |
 | **... refused: DATE_CHANGED** / **The game's day has changed** | The in-game day rolled over (04:00 JST) and the game has not been opened since; the server wants the client's daily reset first. Your cards, boards and collection were still read. | Open the game once, then refresh again. |
-| **port 8731 is in use by PID ...** | Another program holds the port. | Nothing: `start.cmd` uses the next free port and says which. To choose one: `start.cmd --port 8740`. |
+| **port 8731 is in use by another program** | Another program holds the port. | Nothing: `start` uses the next free port and says which. To choose one: `start.cmd --port 8740` (`./start.sh --port 8740`). |
 | The pages are empty, or say there is no data | No refresh has run in this folder yet. | Run `refresh.cmd`, then reload the page. |
 | Card art, jackets or figures missing after the first refresh | The pictures are still being fetched in the background. | Wait; progress is in `tools\recon\proxy\dumps\pictures_refresh.log`. |
 | Scores look out of date | Results use your account as of the last refresh. | Run `refresh.cmd` or press **Refresh**. |

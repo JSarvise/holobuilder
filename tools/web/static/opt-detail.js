@@ -268,14 +268,20 @@ export function boardPanel(T, det, wallet, isOpen, cardOf) {
   const unit0 = det.fig && det.fig.unit_off != null ? Math.ceil(det.fig.unit_off) : null;
   const unitCur = deckUnit(det.cur), unit1 = deckUnit(det.fig);
   const changedN = plan.per_character.filter(pc => (pc.buy || []).length || (pc.sell || []).length).length;
-  // a maxed account: every holomem off the team is scored with a COMPLETE board (the full
-  // 453 Pt tree, level-2 Connect cards), so there is nothing to plan for them and only the
-  // leader and the 5 members appear
+  // a maxed account: every holomem off the team is scored at max level with every node that
+  // reaches the team from her board (level-2 Connect cards), so there is nothing to plan for
+  // them and only the leader and the 5 members appear
   const scope = det.unlimited ? (det.acct
       ? `A maxed account, against your boards now: the nodes that add score and the paths to them (no mini-game, reward, EXP or LIFE nodes), level-2 Connect cards. <b class="num">${fmt(changedN)}</b> boards to change, the team first, then the bench.`
       : det.acctLoading ? "Every holomem's scoring nodes against your boards…" : "The team's boards. Every other holomem is counted with all of its scoring nodes and level-2 Connect cards.")
     : det.acct ? `Every holomem the plan changes: <b class="num">${fmt(changedN)}</b> boards, the team first, then the bench (green nodes lift every team).`
     : det.acctLoading ? "Planning every holomem's board…" : det.acctErr ? `The team's six boards (the whole-account plan is unavailable: ${esc(det.acctErr)}).` : "The team's six boards.";
+  // a maxed account keeps every node the account holds (it resets nothing): a board with
+  // nodes bought off the scoring paths can cost more than a max-level holomem's points
+  const over = (doc && doc.over_points) || [];
+  const overNote = over.length
+    ? `<p class="o-warn"><svg class="i s"><use href="#i-alert"/></svg>${fmt(over.length)} board${over.length === 1 ? "" : "s"} above ${fmt(doc.budget)} Pt, more than a max-level holomem holds: your boards keep nodes that add no score, and a maxed account resets nothing.<small>${over.map(o => `${esc(o.name)} ${fmt(o.points)} Pt`).join(" · ")}</small></p>`
+    : "";
   // materials: the server's sums (board_plan_summary.materials) against the wallet (/api/resources)
   // the plan spends what the resets refund too (the planner's wallet counts them), so a material is
   // short only when the buys exceed the held amount PLUS the refunds -- not on the buys alone
@@ -305,6 +311,7 @@ export function boardPanel(T, det, wallet, isOpen, cardOf) {
     <summary><h3>Holomem Board plan</h3>${info("plan")}${uplift}
       <svg class="i s go" aria-hidden="true"><use href="#i-chev"/></svg></summary>
     <p class="o-cap o-bp-scope">${scope}</p>
+    ${overNote}
     ${boardPlanHTML(T.key, doc, !!det.acctLoading)}
     ${mats.length ? `<div class="o-mats">
       <h4>Required Materials <small>${Object.keys(back).length ? "needed / held + back from resets" : "needed / held"}</small>${info("materials")}</h4>

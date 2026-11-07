@@ -31,11 +31,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
 
-HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
-CONF = REPO / "state" / "server_api.json"
-STORE = REPO / "tools" / "recon" / "proxy" / "dumps" / ".content"
-PUBLISHER_MARK = "tools/recon/proxy/dumps/.publish_hashes.json"   # publish.py's hash cache
+from hbuilder import paths
+
+REPO = paths.REPO
+CONF = paths.STATE / "server_api.json"
+STORE = paths.DUMPS / ".content"
+PUBLISHER_MARK = f"{paths.DUMPS_REL}/.publish_hashes.json"   # publish.py's hash cache
 DEFAULT_CAP = 0                     # unlimited
 TIMEOUT_S = 30
 SYNC_THREADS = 8
@@ -178,10 +179,6 @@ class ContentStore:
 
     def entry(self, rel: str) -> dict | None:
         return (self.manifest().get("files") or {}).get(rel)
-
-    def known(self, rel: str) -> bool:
-        """True when the file is local or the server has it: 'can a page ask for it'."""
-        return (self.repo / rel).is_file() or self.entry(rel) is not None
 
     # ------------------------------------------------------------------ sync
     def sync(self, progress: Callable[[dict], None] | None = None) -> dict:

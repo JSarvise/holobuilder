@@ -1,7 +1,7 @@
 // hb-grade.js — the game's RankIcon, reproduced from its prefab (Night Deck component).
 //
 // PORTED, not designed. Every number below is read out of the shipped client
-// (docs/redesign/IDENTITY.md §Grade badge, tools/recon/UI-OFFICIAL-ASSETS.md §3a/§4a):
+// (docs/redesign/IDENTITY.md §Grade badge):
 //  * RectTransforms of `RankIcon_180` (LiveDeckStatusDetailConfirmDialog c7b8e1b98029,
 //    LiveDeckEditScreen 051497f6ed47, PrePlay ba7144946fd1, song select HighScoreRank
 //    16ba0fd3c171: all identical) and `RankIcon_120` (ParkLiveQuestScreen 04c5217a269a).

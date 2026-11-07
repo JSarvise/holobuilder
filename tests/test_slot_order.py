@@ -11,11 +11,7 @@ The machine code `Vision.LiveCore!LiveSkillUtility::IsSatisfyEffectTarget*Condit
 (@ rva `0x5f03d70` / `0x5f03f50` / `0x5f04140`) counts matchers "at or before the
 candidate in the member list" and returns `count <= targetCount` — first-`count`-
 in-LIST-order — but the list it walks is PRE-SORTED, which is why the observed
-recipients are the top `count` by the ranking value. The refuted slot-search
-alternative is kept runnable as `slot_order_rule="best_order"`.
-
-The tests below that exercise the slot-search machinery pin it explicitly via
-`best_order(cfg)`; the rest assert the shipped rule.
+recipients are the top `count` by the ranking value.
 
 **What this is worth, said plainly, because a test that pins a number should
 also say how much to trust it.** The ordering swing over many charts is a
@@ -28,23 +24,20 @@ run of a given team, and therefore it moves rankings — which is exactly the ki
 of term a ranking must not drop, and exactly the kind of term that must never be
 described to the user as something they could go and verify.
 
-Every pinned number below is derived by hand in its own docstring and asserted
-against both rules, so a regression that silently swaps the rule fails rather
-than passing at a plausible-looking value.
+Every pinned number below is derived by hand in its own docstring, so a
+regression that silently changes the rule fails rather than passing at a
+plausible-looking value.
 """
 
 from __future__ import annotations
 
-import collections
 import dataclasses
 import itertools
 import json
-import random
-import statistics
 
 import pytest
 
-from conftest import (
+from support.builders import (
     FIXTURE_CARDS_PATH,
     make_card,
     make_scoring_config,
@@ -100,18 +93,8 @@ def free(cfg):
     effect). Each effect ranks on its own stat, so two effects can reach
     different members, and `member_order` is `None` — slot order only breaks an
     exact tie. This is also the DEFAULT (`make_scoring_config`), so `free(cfg)`
-    equals a bare `cfg`; kept as a named helper to contrast with the refuted
-    alternative."""
+    equals a bare `cfg`; the named helper pins the rule explicitly."""
     return dataclasses.replace(cfg, slot_order_rule="free")
-
-
-def best_order(cfg):
-    """The REFUTED alternative, kept runnable: assumes the player picks recipients
-    via slot order (first `count` in slot order), so a set scores at the max over
-    its 120 orderings. Server measurements refute it — recipients are the top
-    `count` by the ranking value regardless of slot. Pinned explicitly where a
-    test exercises the slot-search machinery."""
-    return dataclasses.replace(cfg, slot_order_rule="best_order")
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +216,8 @@ def test_a_cards_contribution_is_not_a_function_of_the_card_and_its_own_slot():
     ) == frozenset({"B"})
 
 
-def test_two_count_limited_effects_cannot_each_have_their_own_best_order():
-    """The behaviour change, with every number derived by hand.
+def test_two_count_limited_effects_each_rank_on_the_stat_they_raise():
+    """Every number derived by hand.
 
     Members (all stats out of `Stats(performance, technique, sense)`):
 
@@ -258,17 +241,8 @@ def test_two_count_limited_effects_cannot_each_have_their_own_best_order():
         C, D, E:                     300 each
         total                      = 2200.0
 
-    This is what the server does.
-
-    **The slot-order alternative (`"best_order"`)** has both effects read ONE
-    slot order; both have `count = 1`, so both land on whichever Cute member sits
-    earliest:
-
-        first Cute = A:  A = 300*1.5 + 100*1.5 + 100 = 700, B = 500  -> 2100
-        first Cute = B:  B = 100*1.5 + 300*1.5 + 100 = 700, A = 500  -> 2100
-        first Cute = C:  C = 100*1.5 + 100*1.5 + 100 = 400           -> 2000
-
-    so it tops out at **2100.0**, 100.0 below what the server pays.
+    This is what the server does. A rule that had both effects read ONE slot
+    order would land both on the same Cute member and top out at 2100.0.
     """
     a = make_card("A", type_="Cute", stats=Stats(300, 100, 100))
     b = make_card("B", type_="Cute", stats=Stats(100, 300, 100))
@@ -286,18 +260,11 @@ def test_two_count_limited_effects_cannot_each_have_their_own_best_order():
     #   A: 300*1.5 + 100 + 100 = 650, B: 100 + 300*1.5 + 100 = 650, C/D/E: 300  -> 2200
     assert score_fast(team, cfg) == 2200.0
     assert score_fast(team, free(cfg)) == 2200.0
-    # best_order collapses both onto one slot-earliest Cute and reaches 2100.
-    assert score_fast(team, best_order(cfg)) == 2100.0
 
 
-def test_the_chosen_slot_order_is_reported_and_the_attribution_names_it():
-    """A tool that recommends a team without its slot order would hand the
-    player the median case instead of the best one.
-
-    Same team as above. Under `best_order`'s chosen order both effects reach
-    exactly one Cute member — the SAME one, since both have `count = 1` — and
-    the breakdown must say so: `target_card_ids` names the cards the scored
-    number actually reached."""
+def test_the_attribution_names_the_rule_and_each_effects_recipients():
+    """Same team as above. The breakdown names the rule, chooses no slot order,
+    and `target_card_ids` names the cards each scored number actually reached."""
     a = make_card("A", type_="Cute", stats=Stats(300, 100, 100))
     b = make_card("B", type_="Cute", stats=Stats(100, 300, 100))
     c = make_card("C", type_="Cute", stats=Stats(100, 100, 100))
@@ -305,17 +272,6 @@ def test_the_chosen_slot_order_is_reported_and_the_attribution_names_it():
     e = make_card("E", type_="Cool", passive=stat_passive("technique", cute(1)))
     team = make_team([make_card("L", type_="Cool"), a, b, c, d, e])
     cfg = make_scoring_config()
-
-    # The refuted alternative `best_order` still reports the chosen slot order, and
-    # both count-1 effects reach the SAME first Cute in that order.
-    bo = score_with_breakdown(team, best_order(cfg))
-    assert bo.slot_order_rule == "best_order"
-    assert bo.member_order is not None
-    assert sorted(bo.member_order) == ["A", "B", "C", "D", "E"]
-    first_cute = next(cid for cid in bo.member_order if cid in {"A", "B", "C"})
-    bo_stat_rows = [row for row in bo.contributions if row.pool == "stat"]
-    assert len(bo_stat_rows) == 2
-    assert {row.target_card_ids for row in bo_stat_rows} == {(first_cute,)}
 
     # Shipped rule (default `free`): no order is chosen (`member_order is None`),
     # and each effect ranks by the stat it raises, so performance names A and
@@ -477,8 +433,8 @@ def test_score_card_set_reproduces_score_fast_bit_identically_when_order_binds()
 def test_every_declared_slot_order_rule_has_an_implementation():
     assert set(SLOT_ORDER_RESOLVERS) == set(SLOT_ORDER_RULES)
     assert SLOT_ORDER_RULES[0] == "free", (
-        "the shipped default must be the MEASURED rule (top-count by the stat "
-        "the effect raises), not the refuted slot-order predecessor"
+        "the shipped default must be the measured rule (top-count by the stat "
+        "the effect raises), not a first-count-in-slot-order rule"
     )
 
 
@@ -628,97 +584,3 @@ def test_the_recipient_is_the_highest_buffed_stat_not_the_highest_total():
     stat_targets = {row.target_card_ids for row in bd.contributions if row.pool == "stat"}
     assert stat_targets == {("card-aaa",)}
     assert bd.total_score == score_fast(team, cfg)
-
-
-# ---------------------------------------------------------------------------
-# 5. The invariant, over a broad generated collection
-# ---------------------------------------------------------------------------
-
-
-def _generated_collection(rng: random.Random) -> tuple:
-    """A synthetic 60-card collection shaped like the real one: three types,
-    three generations, and a count-limited PASSIVE `stat_up` on most cards, at
-    the same `type`/2, `type`/3 and `generation`/2 mix the shipped collection
-    carries.
-
-    Generated rather than read from disk on purpose. `tests/test_fixture_
-    isolation.py` forbids a test reaching the user's authoritative, hand-edited
-    collection, and it is right to: a test that samples it would change its
-    verdict every time a card is transcribed. What is asserted below is an
-    INVARIANT of the two rules, not a property of any particular collection,
-    so it does not need the real one.
-    """
-    types = ("Cute", "Cool", "Sexy")
-    generations = ("1期生", "2期生", "3期生")
-    effect_types = ("performance", "technique", "sense", "all_stats")
-    shapes = (("type", 2), ("type", 3), ("generation", 2), None, None)
-    cards = []
-    for index in range(60):
-        card_type = types[index % 3]
-        generation = generations[(index // 3) % 3]
-        shape = shapes[index % len(shapes)]
-        if shape is None:
-            passive = None
-        else:
-            kind, count = shape
-            passive = stat_passive(
-                rng.choice(effect_types),
-                EffectTarget(
-                    kind=kind,
-                    value=card_type if kind == "type" else generation,
-                    count=count,
-                ),
-                magnitude=rng.choice((20.0, 35.0, 50.0)),
-            )
-        cards.append(
-            make_card(
-                f"{index:03d}",
-                type_=card_type,
-                generations=frozenset({generation}),
-                stats=Stats(
-                    rng.randrange(1000, 4000),
-                    rng.randrange(1000, 4000),
-                    rng.randrange(1000, 4000),
-                ),
-                passive=passive,
-            )
-        )
-    return tuple(cards)
-
-
-def test_the_shipped_rule_differs_from_the_refuted_predecessor_on_a_real_share():
-    """The shipped rule (`free`) and the refuted alternative (`best_order`,
-    slot-search) disagree on a non-trivial share of teams, so a regression that
-    silently made the alternative the default cannot pass this file.
-
-    Only the disagreement is asserted, not a fixed direction (e.g.
-    "`best_order <= free`, always"): neither rule bounds the other on every
-    team — they differ where the count binds.
-    """
-    rng = random.Random(11)
-    cards = _generated_collection(rng)
-    cfg = make_scoring_config()
-    by_holomem: dict[str, list] = collections.defaultdict(list)
-    for card in cards:
-        by_holomem[card.member].append(card)
-    holomems = sorted(by_holomem)
-
-    differ = 0
-    gaps: list[float] = []
-    for _ in range(400):
-        members = tuple(
-            rng.choice(by_holomem[name]) for name in rng.sample(holomems, 5)
-        )
-        team = Team(leader=rng.choice(cards), members=members)
-        shipped = score_fast(team, cfg)               # default: free
-        predecessor = score_fast(team, best_order(cfg))
-        if shipped != predecessor:
-            differ += 1
-            gaps.append(abs(shipped - predecessor) / shipped * 100.0)
-
-    assert differ >= 20, (
-        f"only {differ}/400 sampled teams distinguished the shipped rule from the "
-        "refuted predecessor — either the generator stopped producing binding "
-        "targets or the default has been reverted to the predecessor"
-    )
-    assert 0.0 < statistics.median(gaps) < 10.0

@@ -1,7 +1,7 @@
 """Event ranking TOP 100: the latest board and how each player moves, from the 24/7 tracker.
 
 READ-ONLY. The store is `tools/recon/proxy/dumps/cutoffs/<region>/<chapter_id>.top.jsonl`,
-written on the VPS by `tools/recon/proxy/event_tracker.py` and merged here by `tracker_pull.py`:
+written on the VPS by `tools/refresh/event_tracker.py` and merged here by `tracker_pull.py`:
 one line per read, `{captured_at, final, region, event_id, chapter_id, kind, rows: [[rank, score,
 public_user_id, name], ...]}`. Modelled on the community tool holodori.best's leaderboard (rank
 and Event Pt change over the last hour, a player's own series), but from reads every couple of
@@ -115,7 +115,7 @@ def build_top(store: Path, region: str, *, now: int, chapter_id: str | None = No
     files = {p.name[:-len(".top.jsonl")]: p for p in top_files(store, region)}
     if not files:
         raise LookupError(f"no top-100 reads stored for region {region!r} -- the 24/7 tracker "
-                          "writes them (tools/recon/proxy/event_tracker.py)")
+                          "writes them (tools/refresh/event_tracker.py)")
     metas = [m for m in cutoffs_view.list_chapters(store, region) if m.get("chapter_id") in files]
     if chapter_id is None:
         open_now = [m for m in metas if (m.get("start_time") or 0) <= now

@@ -22,14 +22,12 @@ fixture-isolation rule — membership is checked against `build_cards`' own
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
-_PROXY = _REPO / "tools" / "recon" / "proxy"
-_CURVE = _PROXY / "dumps" / "card_level_curve.json"
+_CURVE = _REPO / "tools" / "recon" / "proxy" / "dumps" / "card_level_curve.json"
 
 
 def _two_level_candidates():
@@ -62,8 +60,7 @@ def _two_level_candidates():
 def test_build_cards_scores_the_levels_it_was_handed_not_a_stale_doc():
     """The stale-doc shape: the temp doc says level 1, the caller says
     the high level. Every card must come out at the CALLER's level."""
-    sys.path.insert(0, str(_PROXY))
-    import board_reconcile as BR
+    from support import board_reconcile as BR
 
     picks, basis = _two_level_candidates()
     stale = {cid: {"level": 1, "bloom": 0, "limit_break": "max"} for cid, _ in picks}
@@ -95,8 +92,7 @@ def test_build_cards_refuses_a_doc_from_another_process():
     """`build_cards({})` is the frozen-basis form and is only honest when the
     doc was written in THIS process. Simulate a fresh process finding a stale
     doc on disk: the call must refuse rather than silently score it."""
-    sys.path.insert(0, str(_PROXY))
-    import board_reconcile as BR
+    from support import board_reconcile as BR
 
     picks, _basis = _two_level_candidates()
     cid, _hi = picks[0]

@@ -1,19 +1,12 @@
-﻿"""Every ES module the page imports must actually be served.
+﻿"""Every page of the rail, and every ES module and stylesheet it reaches, is served.
 
-If the static route were an allowlist, a module that falls off it would not
-be a loud error -- it would be a **blank page** with one line in a console
-nobody has open, because an ES module import that 404s aborts the whole
-module graph.
-So the test walks `app.js`'s own import statements and demands a 200 for
-each, rather than restating the allowlist a second time (which would pass
-for exactly as long as someone remembered to edit both).
+If the static route were an allowlist, a module that falls off it would not be a loud error:
+an ES module import that 404s aborts the whole module graph and leaves a blank page. So the
+test reads each page's own `<script src>` / `<link href>` and walks the `import ... from`
+statements of every module it reaches, demanding a 200 for each, rather than restating the
+file list a second time.
 
-Fast by construction: it starts the server and fetches static files. No
-solve runs here -- the solve is ~10 s and is covered elsewhere.
-
-`pyproject.toml`'s `testpaths` is `["tests", "tools/web", "tools/explorer"]`,
-so this runs in the root suite; `test_no_writes.py`'s AST checks are
-parametrised over the `.py` files in this directory and scan this file too.
+Fast by construction: it starts the server and fetches static files; no search runs.
 
     python -m pytest tools/web/test_routes.py
 """
@@ -21,39 +14,19 @@ parametrised over the `.py` files in this directory and scan this file too.
 from __future__ import annotations
 
 import re
-import socket
-import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 import pytest
 
-import server as web_server
+from hbweb import config
+from hbuilder.inputs import load_inputs
 
 STATIC = Path(__file__).resolve().parent / "static"
 IMPORT_RE = re.compile(r"""^\s*import\s.*?from\s+["'](/[^"']+)["']""", re.M)
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def web_base():
-    port = _free_port()
-    server = web_server.ThreadingServer(
-        (web_server.BIND_HOST, port), web_server.Handler
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
+ASSET_RE = re.compile(r'(?:src|href)="(/[a-z0-9-]+\.(?:js|css))"')
+PAGES = sorted(p.stem for p in STATIC.glob("*.html"))
 
 
 def _get(url: str) -> tuple[int, str, bytes]:
@@ -64,32 +37,29 @@ def _get(url: str) -> tuple[int, str, bytes]:
         return exc.code, exc.headers.get("Content-Type", ""), exc.read()
 
 
-def test_root_opens_the_redesign_and_the_previous_ui_stays_at_classic(web_base):
-    """`/` redirects to the Optimizer page; `/classic` is the previous page."""
+def test_root_opens_the_optimizer(web_base):
     status, ctype, body = _get(web_base + "/")          # urllib follows the 302
     assert status == 200 and "text/html" in ctype
     assert b'data-page="optimizer"' in body
 
 
-def test_page_and_its_modules_are_served(web_base):
-    """`/classic` (the previous UI), plus every module `app.js` imports, by reading app.js."""
-    status, ctype, body = _get(web_base + "/classic")
-    assert status == 200 and "text/html" in ctype
-    assert b'src="/app.js"' in body
-
-    imports = IMPORT_RE.findall((STATIC / "app.js").read_text(encoding="utf-8"))
-    assert imports, "app.js imports nothing -- this test would be vacuous"
-    assert "/ranking.js" in imports
-    for module in imports:
-        status, ctype, body = _get(web_base + module)
-        assert status == 200, f"{module} is imported by app.js but 404s"
-        assert "javascript" in ctype
-        assert body, f"{module} served empty"
-
-
-def test_stylesheet_is_served(web_base):
-    status, ctype, _ = _get(web_base + "/style.css")
-    assert status == 200 and "text/css" in ctype
+@pytest.mark.parametrize("page", PAGES)
+def test_every_page_and_every_module_it_reaches_is_served(web_base, page):
+    status, ctype, body = _get(f"{web_base}/{page}")
+    assert status == 200 and "text/html" in ctype, page
+    todo = ASSET_RE.findall(body.decode("utf-8"))
+    assert todo, f"{page} loads no script -- this test would be vacuous"
+    seen: set[str] = set()
+    while todo:
+        asset = todo.pop()
+        if asset in seen:
+            continue
+        seen.add(asset)
+        status, ctype, served = _get(web_base + asset)
+        assert status == 200 and served, f"{asset} (reached from /{page}) is not served"
+        assert ("javascript" if asset.endswith(".js") else "text/css") in ctype, asset
+        if asset.endswith(".js"):
+            todo.extend(IMPORT_RE.findall(served.decode("utf-8")))
 
 
 @pytest.mark.parametrize(
@@ -97,16 +67,15 @@ def test_stylesheet_is_served(web_base):
     [
         ("/nope.js", 404),
         ("/nope.css", 404),
-        ("/deeper/app.js", 404),  # one level only
+        ("/deeper/opt-app.js", 404),  # one level only
         ("/server.py", 404),  # the extension gate, not an allowlist accident
-        ("/art/notacard.webp", 400),  # _ART_NAME_RE
-        ("/art/../../../data/cards.json", 400),
+        ("/classic", 404),
+        ("/index.html", 404),
     ],
 )
 def test_routes_that_must_not_serve(web_base, path, expected):
     status, _, _ = _get(web_base + path)
     assert status == expected
-
 
 
 # ---------------------------------------------------------------------------
@@ -117,9 +86,8 @@ def test_routes_that_must_not_serve(web_base, path, expected):
 # ---------------------------------------------------------------------------
 
 import json  # noqa: E402
-import dataclasses  # noqa: E402
 
-from hbuilder.cli import apply_collection  # noqa: E402
+from hbuilder.inputs import apply_collection  # noqa: E402
 
 
 def _post(url: str, payload: dict) -> tuple[int, dict]:
@@ -163,7 +131,7 @@ def test_what_the_page_saves_scores_the_same_as_the_cli(web_base, tmp_path, monk
     through JSON, the HTTP body and the file and then produces a different
     restatement is exactly the failure this endpoint could otherwise ship."""
     written = tmp_path / "collection.json"
-    monkeypatch.setattr(web_server, "COLLECTION_PATH", written)
+    monkeypatch.setattr(config, "COLLECTION_PATH", written)
 
     document = {"schema_version": "collection-1", "card_default": "max", "cards": {}}
     status, saved = _post(web_base + "/api/collection", document)
@@ -172,8 +140,8 @@ def test_what_the_page_saves_scores_the_same_as_the_cli(web_base, tmp_path, monk
     assert written.is_file(), "POST reported success and wrote nothing"
     assert json.loads(written.read_text(encoding="utf-8")) == document
 
-    cards, _owned, _cfg, _prov = web_server.load_inputs(
-        web_server.CARDS_PATH, web_server.OWNED_PATH, None
+    cards, _owned, _cfg, _prov = load_inputs(
+        config.CARDS_PATH, config.OWNED_PATH
     )
     _restated, basis = apply_collection(tuple(cards), str(written))
     assert basis.applied == saved["cards_restated"]
@@ -185,7 +153,7 @@ def test_a_malformed_document_is_rejected_and_not_written(web_base, tmp_path, mo
     control for the test above, which would otherwise pass on an endpoint that
     wrote anything it was handed."""
     written = tmp_path / "collection.json"
-    monkeypatch.setattr(web_server, "COLLECTION_PATH", written)
+    monkeypatch.setattr(config, "COLLECTION_PATH", written)
 
     status, data = _post(web_base + "/api/collection", {"cards": "not an object"})
 

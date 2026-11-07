@@ -1,7 +1,7 @@
 """Event ranking cutoffs: read the stored border series and predict where each tier ends.
 
 READ-ONLY. The store (`tools/recon/proxy/dumps/cutoffs/<region>/<chapter_id>.jsonl` plus
-`<chapter_id>.meta.json`) is written ONLY by `tools/recon/proxy/event_cutoffs.py`; this module
+`<chapter_id>.meta.json`) is written ONLY by `tools/refresh/event_cutoffs.py`; this module
 reads it and computes the prediction on the fly. API contract: `tools/web/EVENT-API.md`
 "Cutoffs".
 
@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Iterable
 
 REGIONS = ("us", "as", "jp")
 RECENT_WINDOW_MS = 12 * 3600 * 1000   # trailing window for the recent pace
@@ -334,7 +334,8 @@ def build_view(store: Path, region: str, *, now: int, chapter_id: str | None = N
     if not chapters:
         raise LookupError(f"no cutoffs stored for region {region!r}"
                           + (f" chapter {chapter_id!r}" if chapter_id else "")
-                          + " -- run the sync (POST /api/event/cutoffs/sync)")
+                          + " -- not synced yet (the server's cutoffs poller or"
+                          + " event_cutoffs.py writes the store)")
     meta = chapters[0]
     cid = meta["chapter_id"]
     _m, recs = read_chapter(store, region, cid)
@@ -506,7 +507,7 @@ def standing_from_points(points: int | None, borders: list[dict]) -> dict | None
 
 
 def history_view(doc: dict, grades: dict | None = None, titles: dict | None = None) -> list[dict]:
-    """`dumps/event_history.json` (written by `tools/recon/proxy/event_history.py`) as the page's
+    """`dumps/event_history.json` (written by `tools/refresh/event_history.py`) as the page's
     list, newest event first: per chapter the player's result (rank, tier reached, Event Pt, or
     only the tier from an emblem for an event older than the stored reads) and the final borders."""
     grades = grades or {}

@@ -1,9 +1,7 @@
 """Marathon event-farming valuation: the parts read from the game.
 
 Covers the two primitives taken from the game's data: the wildcard bonus-row matcher
-(rows are patterns, unset fields wildcards, all matching rows SUM) and the observed
-stamina/multiplier tables. The absolute-points composition (×2.0 ordering, base score) is
-inferred and intentionally not asserted here beyond the deck-independent `points_scalar`.
+(rows are patterns, unset fields wildcards, all matching rows SUM) and the live stamina table.
 """
 from __future__ import annotations
 
@@ -14,17 +12,11 @@ import pytest
 
 from hbuilder.domain.card import Card, Stats
 from hbuilder.domain.marathon import (
-    DEFAULT_MARATHON_PATH,
-    MARATHON_RECOMMEND_DECK_MULTIPLIER,
     MarathonBonusRow,
     MarathonEvent,
-    event_bonus_permil,
     live_stamina_score,
-    load_marathon_event,
-    minigame_stamina_score,
-    points_scalar,
 )
-from hbuilder.domain.schema import SchemaError
+from support.event_bonus import event_bonus_permil
 
 STATS = Stats(performance=5000, technique=5000, sense=5000)
 
@@ -134,78 +126,17 @@ def test_live_stamina_curve_is_linear_through_three_then_sublinear():
     assert live_stamina_score(3) / 3 > live_stamina_score(10) / 10
 
 
-def test_minigame_curves_differ_by_type():
-    assert minigame_stamina_score(1, 3) == 17
-    assert minigame_stamina_score(3, 3) == 15
-    with pytest.raises(ValueError):
-        minigame_stamina_score(2, 1)  # type 2 has no shipped curve
-
-
 def test_stamina_out_of_range_raises():
     with pytest.raises(ValueError):
         live_stamina_score(11)
 
 
-def test_points_scalar_applies_recommended_multiplier():
-    base = points_scalar(stamina=3, recommended=False)
-    boosted = points_scalar(stamina=3, recommended=True)
-    assert base == 24.0
-    assert boosted == 24.0 * MARATHON_RECOMMEND_DECK_MULTIPLIER == 48.0
-
-
-# --- Loader / schema --------------------------------------------------------
-
-
-def test_loads_the_shipped_data_file():
-    ev = load_marathon_event()
-    assert isinstance(ev, MarathonEvent)
-    assert ev.rows_for("live")  # the current event has live bonus rows
-    # every live row identifies a card somehow
-    for row in ev.rows_for("live"):
-        assert row.character_id or row.card_id or (row.rarity is not None)
 
 
 def _write(tmp_path: Path, obj) -> Path:
     p = tmp_path / "marathon.json"
     p.write_text(json.dumps(obj), encoding="utf-8")
     return p
-
-
-def test_loader_rejects_unknown_row_field(tmp_path):
-    p = _write(tmp_path, {"name": "e", "channels": {"live": [{"permil": 300, "chr": "x"}]}})
-    with pytest.raises(SchemaError) as exc:
-        load_marathon_event(p)
-    assert "unknown" in str(exc.value).lower()
-
-
-def test_loader_rejects_row_with_no_identifier(tmp_path):
-    p = _write(tmp_path, {"name": "e", "channels": {"live": [{"permil": 300}]}})
-    with pytest.raises(SchemaError):
-        load_marathon_event(p)
-
-
-def test_loader_rejects_rarity_without_bloom(tmp_path):
-    p = _write(tmp_path, {"name": "e", "channels": {"live": [{"permil": 10, "rarity": 3}]}})
-    with pytest.raises(SchemaError) as exc:
-        load_marathon_event(p)
-    assert "bloom" in str(exc.value).lower()
-
-
-def test_loader_rejects_bad_permil(tmp_path):
-    p = _write(tmp_path, {"name": "e", "channels": {"live": [{"permil": "x", "card_id": "c"}]}})
-    with pytest.raises(SchemaError):
-        load_marathon_event(p)
-
-
-def test_loader_rejects_unknown_channel(tmp_path):
-    p = _write(tmp_path, {"name": "e", "channels": {"bonusround": []}})
-    with pytest.raises(SchemaError):
-        load_marathon_event(p)
-
-
-def test_default_path_points_at_repo_data_file():
-    assert DEFAULT_MARATHON_PATH.name == "marathon.json"
-    assert DEFAULT_MARATHON_PATH.parent.name == "data"
 
 
 def test_the_multi_room_divisor_follows_the_event_kind():

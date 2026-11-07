@@ -29,8 +29,6 @@ that dict feeds `score_bonus_rate` — a different channel, and the one
 
 from __future__ import annotations
 
-import dataclasses
-
 import pytest
 
 from hbuilder.domain.board import (
@@ -41,23 +39,15 @@ from hbuilder.domain.board import (
 )
 from hbuilder.domain.song import (
     ChartNote,
+    OverallPower,
     SongChart,
     score_song,
     score_song_detailed,
 )
 
-from conftest import make_card, make_scoring_config, make_skill
-
-# Same pinning as `test_score_song.py`: every tier certain, so a live ACTIVE has
-# occupancy exactly 1.0 and `E[max]` reduces to `max`.
-CERTAIN_TIERS = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
+from support.builders import certain_config as cfg, make_card, make_skill
 
 LEADER_SCOPE_PERMIL = 173.0  # Ina'nis' own
-
-
-def cfg(**overrides):
-    base = make_scoring_config(probability_tiers=CERTAIN_TIERS)
-    return dataclasses.replace(base, **overrides) if overrides else base
 
 
 def _skill_effect_up(permil: float, scope: str, *, conditional: bool = False):
@@ -153,9 +143,9 @@ def test_a_leader_scope_board_node_multiplies_the_active_pool():
     chart = _chart()
     board = _board("Ina", _skill_effect_up(LEADER_SCOPE_PERMIL, "leader"))
 
-    without = score_song(members, (leader,), chart, cfg(), deck_power=2000)
+    without = score_song(members, (leader,), chart, cfg(), deck_power=OverallPower.fixed(2000))
     with_board = score_song(
-        members, (leader,), chart, cfg(board=board), deck_power=2000
+        members, (leader,), chart, cfg(board=board), deck_power=OverallPower.fixed(2000)
     )
 
     assert without[0].total_score == 6900
@@ -173,7 +163,7 @@ def test_it_pays_only_under_its_own_leader():
 
     result = score_song(
         members, (make_card("leader", member="Nene"),), chart, cfg(board=board),
-        deck_power=2000,
+        deck_power=OverallPower.fixed(2000),
     )
     assert result[0].total_score == 6900
 
@@ -188,7 +178,7 @@ def test_it_reorders_two_leaders_which_is_the_whole_point():
     board = _board("Ina", _skill_effect_up(LEADER_SCOPE_PERMIL, "leader"))
     leaders = (make_card("lead-ina", member="Ina"), make_card("lead-nene", member="Nene"))
 
-    scores = score_song(members, leaders, chart, cfg(board=board), deck_power=2000)
+    scores = score_song(members, leaders, chart, cfg(board=board), deck_power=OverallPower.fixed(2000))
     by_id = {s.leader_id: s.total_score for s in scores}
 
     assert by_id["lead-ina"] > by_id["lead-nene"]
@@ -209,9 +199,9 @@ def test_a_team_with_no_active_score_up_gains_nothing_from_it():
     board = _board("Ina", _skill_effect_up(LEADER_SCOPE_PERMIL, "leader"))
     leader = make_card("leader", member="Ina")
 
-    without = score_song(plain, (leader,), chart, cfg(), deck_power=2000)
+    without = score_song(plain, (leader,), chart, cfg(), deck_power=OverallPower.fixed(2000))
     with_board = score_song(
-        plain, (leader,), chart, cfg(board=board), deck_power=2000
+        plain, (leader,), chart, cfg(board=board), deck_power=OverallPower.fixed(2000)
     )
     assert with_board[0].total_score == without[0].total_score == 4600
 
@@ -229,7 +219,7 @@ def test_a_conditional_node_is_still_excluded_here():
     board = _board("Ina", _skill_effect_up(240.0, "leader", conditional=True))
     leader = make_card("leader", member="Ina")
 
-    result = score_song(members, (leader,), chart, cfg(board=board), deck_power=2000)
+    result = score_song(members, (leader,), chart, cfg(board=board), deck_power=OverallPower.fixed(2000))
     assert result[0].total_score == 6900
 
 

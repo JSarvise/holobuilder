@@ -45,7 +45,6 @@ from __future__ import annotations
 import json
 import math
 import struct
-import sys
 from pathlib import Path
 
 import pytest
@@ -59,9 +58,8 @@ from hbuilder.domain.scoring import (
     score_fast,
     score_with_breakdown,
 )
-from hbuilder.domain.schema import STAT_NAMES
 
-from conftest import make_card, make_scoring_config, make_team
+from support.builders import make_card, make_scoring_config, make_team
 
 try:
     from hbuilder.domain.schema import Stats
@@ -193,8 +191,8 @@ def test_score_team_pays_member_power_up_per_member_over_the_overall_power_base(
 # ==========================================================================
 
 _REPO = Path(__file__).resolve().parents[1]
-_PROXY = _REPO / "tools" / "recon" / "proxy"
-_DUMPS = _PROXY / "dumps"
+_REFRESH = _REPO / "tools" / "refresh"
+_DUMPS = _REPO / "tools" / "recon" / "proxy" / "dumps"
 _DB = _DUMPS / "bonus_extract_db.jsonl"
 _CURVE = _DUMPS / "card_level_curve.json"
 
@@ -243,8 +241,7 @@ def test_model_overall_power_is_bit_exact_against_captured_server_rows():
     is computed on the SAME rows to prove the fixes are what moved the number —
     it matched 0 of them.
     """
-    sys.path.insert(0, str(_PROXY))
-    import board_reconcile as BR  # noqa: E402  (os.chdir(REPO) + sys.path at import)
+    from support import board_reconcile as BR  # (os.chdir(REPO) + sys.path at import)
 
     import dataclasses as dc
 
@@ -356,8 +353,7 @@ def test_the_residual_is_fully_closed():
     tie-break) every captured deck whose account state matches the capture is
     bit-exact. This pins that there is no remaining bounded-but-nonzero band —
     the worst relative error over all checked decks is exactly 0."""
-    sys.path.insert(0, str(_PROXY))
-    import board_reconcile as BR
+    from support import board_reconcile as BR
 
     import dataclasses as dc
     from collections import defaultdict
@@ -427,7 +423,7 @@ def test_the_ranking_objective_is_bit_identical():
          `effective_stat_sum` (float64) — the display path really changed, so
          (1) is a real invariance, not a no-op."""
     target = EffectTarget(kind="type", value="Cute", count=5)
-    from conftest import make_skill
+    from support.builders import make_skill
 
     # magnitude 14.0 -> combined stat rate 0.14; on a base of 101 the ranking
     # keeps the un-rounded float64 product (101 * 1.14 = 115.14 per member) while
@@ -492,7 +488,7 @@ def test_slot_order_tie_break_moves_the_display_and_ranking_recipient_together()
     What the test pins: the display sum and the ranking sum AGREE on the
     recipient, and total_score equals `score_fast`.
     """
-    from conftest import make_skill
+    from support.builders import make_skill
 
     buff = make_skill(
         "PASSIVE",

@@ -65,7 +65,7 @@ UNGATED_CONDITION_KIND: str = "ungated"
 # Score Support of 6% to 3 Cute Members" carries a gate AND a target, and
 # many gateless PASSIVEs carry a target with no gate at all.
 # Element-for-element the kinds
-# `tools/recon/proxy/skills.py::parse_target` emits.
+# `tools/refresh/skills.py::parse_target` emits.
 TARGET_KINDS: tuple[str, ...] = ("self", "all", "type", "generation")
 
 # The affirmative on-disk marker for "this effect reaches the whole
@@ -74,10 +74,10 @@ TARGET_KINDS: tuple[str, ...] = ("self", "all", "type", "generation")
 # whose `target` is JSON null is UNKNOWN (untranscribed), never team-wide.
 TEAM_WIDE_TARGET_KIND: str = "all"
 
-# team.TEAM_SIZE, hardcoded here rather than imported: schema.py must not
-# import team.py (schema.py is the base contract team.py itself builds
-# on), so the bound this constant enforces (an effect cannot target more
-# cards than exist in a team) is named explicitly instead.
+# The team size (leader + 5 members), hardcoded here rather than imported:
+# schema.py must not import team.py (schema.py is the base contract team.py
+# itself builds on), so the bound this constant enforces (an effect cannot
+# target more cards than exist in a team) is named explicitly instead.
 MAX_TARGET_COUNT: int = 6
 
 # The shared affirmative "this slot carries no second effect of this shape"

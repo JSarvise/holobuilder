@@ -26,7 +26,7 @@ from hbuilder.domain.scoring import _resolve_skill, score_card_set, score_with_b
 from hbuilder.domain.team import Team
 from hbuilder.domain.unknown import UNKNOWN
 
-from conftest import make_card, make_resolved, make_scoring_config, make_skill, make_team
+from support.builders import make_card, make_resolved, make_scoring_config, make_skill, make_team
 
 # A fully-known ACTIVE slot, so `condition` is the only field under test.
 _DURATION = 8.0

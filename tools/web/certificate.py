@@ -2,8 +2,8 @@
 `inputs_hash` (the certificate hashing recipe), `git_state`, `cfg_json`,
 and the `MODEL_VERSION` re-export.
 
-Read-only: it hashes files, it never writes any. Lives on the recon/web side
-so `src/hbuilder` keeps no knowledge of dump paths.
+Read-only: it hashes files, it never writes any. Lives on the recon/web side,
+beside the dumps it hashes.
 """
 from __future__ import annotations
 
@@ -14,17 +14,18 @@ import json
 import subprocess
 from pathlib import Path
 
+from hbuilder import paths
 from hbuilder.domain.model_version import MODEL_VERSION  # noqa: F401  (re-export)
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = paths.REPO
 
 # label -> repo-relative path, in the order the recipe hashes them
 INPUT_FILES = (
     ("cards", "data/cards.json"),
-    ("board", "tools/recon/proxy/dumps/board.json"),
-    ("charts", "tools/recon/proxy/dumps/charts.json"),
-    ("skilltree", "tools/recon/proxy/dumps/skilltree.json"),
-    ("master_stn", "tools/recon/proxy/dumps/master_SkillTreeNode.json"),
+    ("board", f"{paths.DUMPS_REL}/board.json"),
+    ("charts", f"{paths.DUMPS_REL}/charts.json"),
+    ("skilltree", f"{paths.DUMPS_REL}/skilltree.json"),
+    ("master_stn", f"{paths.DUMPS_REL}/master_SkillTreeNode.json"),
 )
 MAXED_BASIS_LITERAL = b"maxed:level=max,bloom=max"
 
@@ -117,9 +118,9 @@ def scenario_hash(cfg, bench: dict, scenario_literal: str,
                   model_version: str = MODEL_VERSION, *,
                   repo: Path = REPO) -> tuple[str, dict]:
     """The `inputs_hash` of a GENERATED scenario — the maxed-account basis,
-    whose bench (every holomem's board at the full 453 tree with level-2
-    Connect cards socketed) is computed, not a file on disk. Same recipe as
-    `inputs_hash`; the collection line is
+    whose bench (every holomem at max level, her points on what of her board
+    reaches a team, level-2 Connect cards socketed) is computed, not a file on
+    disk. Same recipe as `inputs_hash`; the collection line is
     `sha256(f"{scenario_literal};bench={sha256(json(bench, sort_keys))}")`,
     the same hash the offline certificate runs use, so a certificate and a web
     response on the same scenario carry the same hash. `per["bench"]` reports
@@ -176,16 +177,12 @@ def certificate_basis(*, universe: str, basis: str, budget_kind: str,
     number was scored on — "plan_cache" (the FIXED per-(character, role,
     budget, singer-context) plan, the v2 objective the certificates certify)
     or "develop" (the per-team greedy re-develop, a labelled what-if). Absent
-    (None) on rows that develop nothing. Not part of the guard's equality
-    (the tables carry no such field); `certindex.attach` reads it to refuse
-    the ERROR verdict for a develop-leaf row above a certified maximum — a
-    different objective, not a bug."""
+    (None) on rows that develop nothing."""
     out = {"universe": universe, "basis": basis, "budget_kind": budget_kind,
            "budget": budget, "uptime_model": uptime_model, "platform": platform}
     # `difficulty`: the chart difficulty the rows were scored on.
     # Present ONLY when it is not EXPERT, so every EXPERT basis keeps its
-    # original shape (and every certificate on file, all EXPERT, still matches);
-    # `certindex` compares it with an absent field read as EXPERT.
+    # original shape (an absent field reads as EXPERT).
     if difficulty is not None and str(difficulty).upper() != CHART_DIFFICULTY:
         out["difficulty"] = str(difficulty).upper()
     if leaf is not None:
@@ -214,7 +211,7 @@ __all__ += ["try_inputs_hash", "certificate_basis", "universe_name"]
 # retire every cached enumeration — but an enumeration's bare scores depend on
 # ONE chart (its own song's), never on the others. Two keys, shared by the
 # enumeration run (which stamps them into the meta) and the web index
-# (`members_first_index.py`, which guards by them):
+# (the members-first store guards by them):
 #
 #   reference_key   = sha256 over the NON-chart lines — cards / collection /
 #                     board / skilltree / master_stn / cfg / model_version —

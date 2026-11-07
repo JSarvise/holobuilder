@@ -26,10 +26,10 @@ import dataclasses
 from hbuilder.domain.card import GateCondition, SlotOverride
 from hbuilder.domain.scoring_config import RunState
 from hbuilder.domain.song import ChartNote, SongChart, score_song_detailed
-from hbuilder.domain.song_rank import rank_on_chart
+from support.song_ranking import rank_on_chart
 from hbuilder.domain.team import Team
 
-from conftest import make_card, make_scoring_config, make_skill
+from support.builders import make_card, make_scoring_config, make_skill
 
 CERTAIN = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
 

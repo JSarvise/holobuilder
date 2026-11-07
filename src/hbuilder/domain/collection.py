@@ -79,7 +79,7 @@ the `stats_max.at.bloom_mult` the dataset builder records independently.
 The **per-LEVEL** multiplier arrives through `StatBasis`, from
 `dumps/card_level_curve.json`. `build_cards_dataset.py` reads the same master
 `CardLevel` table but keeps only each group's value at its MAXIMUM level,
-because maxed stats are all it needs; `tools/recon/proxy/card_level_curve.py`
+because maxed stats are all it needs; `tools/refresh/card_level_curve.py`
 exports the whole curve (27 groups, 1,890 (group, level) rows, levels
 1..60/70/80, multipliers 3432..15444 on the first group).
 
@@ -165,13 +165,11 @@ __all__ = [
     "overstated_skills",
     "connect_bonus_level",
     "resolve_card_state",
-    "resolve_collection",
     "StatBasis",
     "stat_basis_from_mapping",
     "CollectionReport",
     "collection_stats",
     "caps_by_rarity_from_mapping",
-    "MEMORY_BONUS_CAP_PERMIL",
     "MEMORY_BONUS_MAX_POSTERS",
     "MEMBER_POWER_UP_CAP_PERMYRIAD",
     "PLAYER_LEVEL_MAX",
@@ -203,9 +201,6 @@ class CollectionError(ValueError):
 MAX = "max"
 UNKNOWN = "unknown"
 
-# The number of bloom steps the game defines. From master `CardPotential`:
-# every rarity carries upgrade_count 1..5.
-BLOOM_STEPS: int = 6
 
 # What each bloom step buys, from master `CardPotential` (every row of all
 # three rarity groups):
@@ -625,7 +620,7 @@ def resolve_card_state(
         if level is None:
             warnings.append(
                 f"{card_id}: 'max' level with no card_caps.json — run "
-                f"tools/recon/proxy/card_caps.py. Left unknown rather than guessed"
+                f"tools/refresh/card_caps.py. Left unknown rather than guessed"
             )
     elif level is not None:
         level = _coerce_int(level, "level", card_id, warnings)
@@ -650,7 +645,7 @@ def resolve_card_state(
         if bloom is None:
             warnings.append(
                 f"{card_id}: 'max' bloom with no card_caps.json — run "
-                f"tools/recon/proxy/card_caps.py. Left unknown rather than guessed"
+                f"tools/refresh/card_caps.py. Left unknown rather than guessed"
             )
     elif bloom is not None:
         bloom = _coerce_int(bloom, "bloom", card_id, warnings)
@@ -697,62 +692,11 @@ def resolve_card_state(
     )
 
 
-def resolve_collection(
-    cards: Sequence[tuple[str, int, int]],
-    document: Mapping | None,
-    caps_by_group: Mapping[str, CardLevelCaps] | None,
-) -> tuple[dict[str, CardState], list[str]]:
-    """Every card's state, plus the document-level warnings.
-
-    `cards` is a sequence of `(card_id, rarity_rank, attribute)` triples rather
-    than card records, so this module stays independent of whatever shape the
-    caller happens to hold.
-
-    An id in the document that names no card in `cards` is **warned about, not
-    ignored**: it is how a renamed or removed card shows up, and dropping it
-    silently is how a collection rots against `cards.json` without anyone
-    noticing.
-    """
-    if document is None:
-        document = {}
-    if not isinstance(document, Mapping):
-        raise CollectionError(
-            f"a collection document must be an object, got {type(document).__name__}"
-        )
-
-    entries = document.get("cards") or {}
-    if not isinstance(entries, Mapping):
-        raise CollectionError("collection document's 'cards' must be an object")
-    default = document.get("card_default", UNKNOWN)
-
-    warnings: list[str] = []
-    known_ids = {card_id for card_id, _, _ in cards}
-    for card_id in entries:
-        if card_id not in known_ids:
-            warnings.append(
-                f"the collection names a card that is not in the dataset: {card_id}"
-            )
-
-    states: dict[str, CardState] = {}
-    for card_id, rarity_rank, attribute in cards:
-        caps = None
-        if caps_by_group is not None:
-            caps = caps_by_group.get(f"rarity_{rarity_rank}-attribute_{attribute}")
-            if caps is None:
-                warnings.append(
-                    f"{card_id}: no level caps for "
-                    f"rarity_{rarity_rank}-attribute_{attribute}"
-                )
-        states[card_id] = resolve_card_state(card_id, entries.get(card_id), default, caps)
-
-    return states, warnings
-
-
 @dataclass(frozen=True, slots=True)
 class StatBasis:
     """Everything needed to turn `(card_id, level, bloom)` into three stats.
 
-    Built from `dumps/card_level_curve.json` (`tools/recon/proxy/card_level_curve.py`), which
+    Built from `dumps/card_level_curve.json` (`tools/refresh/card_level_curve.py`), which
     exports master `CardLevel`'s **per-level** multiplier — 27 groups x 60-80 levels, 1,890
     rows — plus each card's level group, potential group and stat ratios.
 
@@ -873,18 +817,6 @@ class CollectionReport:
     # in that case.
     states: Mapping[str, CardState] = field(default_factory=dict)
 
-    def summary(self) -> str:
-        parts = [f"{len(self.applied)} card(s) restated from the collection"]
-        if self.unchanged:
-            parts.append(f"{len(self.unchanged)} left at data/cards.json's value")
-        if self.not_scorable:
-            parts.append(
-                f"{len(self.not_scorable)} not fully scorable — stats applied, "
-                f"but data/cards.json's level-2 skill magnitudes overstate them "
-                f"below bloom 4"
-            )
-        return "; ".join(parts)
-
 
 def _rarity_of(level_group: str | None) -> str | None:
     """`grp-card-level-rarity_5-03` -> `"5"`.
@@ -930,7 +862,7 @@ def collection_stats(
     """
     if basis is None:
         return {}, CollectionReport((), tuple(card_ids), (), (
-            "no card_level_curve.json — run tools/recon/proxy/card_level_curve.py; "
+            "no card_level_curve.json — run tools/refresh/card_level_curve.py; "
             "every card keeps data/cards.json's stats",
         ))
 
@@ -987,7 +919,6 @@ def collection_stats(
 # Memory Bonus. From master `PosterCollectEffect`: 50 rows, thresholds dense
 # 1..50, `permil(t) = min(2t, t+30)` with ZERO violations across all 50.
 MEMORY_BONUS_MAX_POSTERS: int = 50
-MEMORY_BONUS_CAP_PERMIL: int = 80  # = 8.0 %, at 50 posters
 
 
 def memory_bonus_permil(posters: int | None) -> int | None:
@@ -1384,28 +1315,5 @@ def caps_by_rarity_from_mapping(raw: Mapping) -> dict[str, CardLevelCaps]:
             level_by_limit_break=tuple(int(v) for v in caps),
             max_bloom=potential.get("max"),
             bloom_mult_permil=tuple(int(v) for v in (potential.get("mult_permil") or ())),
-        )
-    return out
-
-
-def caps_from_mapping(raw: Mapping) -> dict[str, CardLevelCaps]:
-    """`card_caps.json`'s two tables into one lookup keyed the way the file
-    keys its level caps (`rarity_<R>-attribute_<A>`).
-
-    The bloom arrays are keyed by rarity ALONE in that file while the level caps
-    are keyed by rarity AND attribute, so this join is where the two shapes are
-    reconciled — in one place, rather than at every call site."""
-    levels = raw.get("level_cap_by_limit_break") or {}
-    potentials = raw.get("potential_by_rarity") or {}
-
-    out: dict[str, CardLevelCaps] = {}
-    for group, caps in levels.items():
-        rarity = group.split("-", 1)[0].removeprefix("rarity_")
-        potential = potentials.get(rarity) or {}
-        permil = potential.get("mult_permil") or ()
-        out[group] = CardLevelCaps(
-            level_by_limit_break=tuple(int(v) for v in caps),
-            max_bloom=potential.get("max"),
-            bloom_mult_permil=tuple(int(v) for v in permil),
         )
     return out

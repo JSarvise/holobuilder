@@ -1,6 +1,6 @@
 # Event Points mode — HTTP API (backend contract)
 
-Logic in `tools/web/event_mode.py`; routes in `tools/web/server.py`. Everything uses the
+Logic in `tools/web/event_mode.py`; routes in `tools/web/hbweb/event.py`. Everything uses the
 **newest open event** in `tools/recon/proxy/dumps/marathon_bonus.json` (written by every
 refresh, `Event/ListEventInfo`) unless `event=<key>` is given.
 
@@ -64,7 +64,7 @@ Rules the numbers follow (`src/hbuilder/domain/marathon.py`):
 ```
 
 - `title`, `kind_label`, `starts_at`, `ends_at`, `art`, `logo` come from `dumps/event_meta.json`
-  (`tools/recon/proxy/event_art.py`, the refresh's `event_art` step; sources in
+  (`tools/refresh/event_art.py`, the refresh's `event_art` step; sources in
   `event_art.py`'s docstring). `title` = the event poster's English name in the master (the text the
   logo draws); `kind_label` = `EventInfo.name` off the wire ("Point Rally Event" / "Score Challenge
   Event"); times are ISO 8601 UTC from the wire (`ends_at` = the chapter's end; the exchange stays open
@@ -207,30 +207,22 @@ bonus on the wrong cards' scores. Use `/api/event/run`.
 
 Logic in `tools/web/cutoffs_view.py`; the store
 (`tools/recon/proxy/dumps/cutoffs/<region>/<chapter>.jsonl`) is written only by
-`tools/recon/proxy/event_cutoffs.py`.
+`tools/refresh/event_cutoffs.py`.
 
 | method | path | what |
 |---|---|---|
 | GET | `/api/event/cutoffs?region=us\|as\|jp[&chapter=<id>][&kind=<kind>]` | stored borders + prediction. Default region `us`, newest chapter, first kind (`points`, else `total`). 400 on a bad region; 503 `{available:false, region, error}` when that region was never synced |
-| POST | `/api/event/cutoffs/sync` | body `{region?: "all"\|"us"\|"as"\|"jp" (default all), self?: bool (default true)}`. Logs in and APPENDS one read per tier. 200 `{returncode, appended, failed_regions[], stdout}`; 400 bad region; 409 while one is running (or while a poller cycle runs). ~4 s per region (1 req/s) |
-| GET | `/api/event/cutoffs/poller` | the optional local poller's status (below) |
-| POST | `/api/event/cutoffs/poller` | body `{enabled?: bool, interval_min?: int ≥ 1}` → its status. 400 on a non-bool `enabled` or an interval < 1. Not persisted: a restarted server starts with it OFF (`HBUILDER_CUTOFFS_POLL_MIN=<min>` turns it on at start-up) |
 
-Every region is read with its own **guest** account. `self: true` additionally reads the
-user's own region (US) with the user's account, for the user's rank; if that account is
-refused `DATE_CHANGED` (the game has not been opened this game day) the borders are read with
-the US guest instead and the rank is skipped. A guest refused `DATE_CHANGED` gets one
-`Home/Login` (the client's daily login, guest-only) and a retry.
+### The poller
 
-### The poller — status
-
-`{enabled, running, interval_min, min_interval_min: 1, next_delay_min, backing_off,
-consecutive_failures, cycles, skipped, last_started, last_finished, last_ok, last_appended,
-last_failed_regions[], last_error, next_run, requests_per_hour, accounts: "guests"}` (times in
-epoch ms). Each cycle runs `event_cutoffs.py --region all` — **never `--self`** — so the user's
-account is never used by it. 12 requests per cycle at 1 req/s (144/h at the default 5 min, 720/h
-at 1 min). All regions failing doubles the wait (cap 60 min); no open chapter → 60 min; a cycle
-is skipped while a manual sync runs. Policy and cost: `tools/web/cutoffs_poller.py`.
+The server starts a local poller (`tools/web/cutoffs_poller.py`) that re-reads the borders
+every 5 min; `HBUILDER_CUTOFFS_POLL_MIN=<min>` sets the interval and `=0` turns it off. Each
+cycle runs `event_cutoffs.py --region all` — **never `--self`** — so every region is read with
+its own **guest** account and the user's account is never used by it (with the VPS tracker
+configured it runs `tracker_pull.py` instead). A guest refused `DATE_CHANGED` gets one
+`Home/Login` (the client's daily login, guest-only) and a retry. 12 requests per cycle at
+1 req/s (144/h at the default 5 min). All regions failing doubles the wait (cap 60 min); no
+open chapter → 60 min.
 
 ### GET /api/event/cutoffs — response
 
@@ -265,8 +257,8 @@ is skipped while a manual sync runs. Policy and cost: `tools/web/cutoffs_poller.
   everybody-who-played floor (inferred), not a meaningful pace.
 - `previous` / `rate_per_hour`: the read before the latest one and the per-hour change between
   them (`null` with a single read). This is NOT a fixed "last hour" delta: reads are only as
-  frequent as manual syncs or the poller's interval.
-- `self`: the user's latest rank on this ranking, `null` unless a `self` sync covered this region.
+  frequent as the poller's interval or a hand-run `event_cutoffs.py`.
+- `self`: the user's latest rank on this ranking, `null` unless an `event_cutoffs.py --self` run covered this region.
 - `prediction` (`null` when the tier has no border): `method` `pace` | `template` | `final`;
   `final` / `low` / `high` / `plus_minus` = (high − low)/2; `points` = 25 `[t, v]` from the latest
   read to `end_time` (dashed line); `band` = `[t, lo, hi]` (shaded area; **empty when there is
@@ -278,7 +270,7 @@ is skipped while a manual sync runs. Policy and cost: `tools/web/cutoffs_poller.
 
 `GET /api/event/top?region=us[&chapter=<id>][&uid=<public id>]`. Read from
 `dumps/cutoffs/<region>/<chapter>.top.jsonl`, which only the **24/7 tracker** writes
-(`tools/recon/proxy/event_tracker.py` on the VPS, pulled in by `tracker_pull.py`; with
+(`tools/refresh/event_tracker.py` on the VPS, pulled in by `tracker_pull.py`; with
 `state/tracker_remote.json` present the server's poller runs the pull instead of
 `event_cutoffs.py`). 400 on a bad region; 503 `{available:false,error}` when no board is stored.
 

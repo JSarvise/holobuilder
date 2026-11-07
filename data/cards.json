@@ -12533,6 +12533,117 @@
       "type": "Happy"
     },
     {
+      "costume_name": "Slumber Acorn",
+      "costume_skill": {
+        "condition": {
+          "count": 2,
+          "kind": "generation",
+          "target": "ID1"
+        },
+        "duration": null,
+        "effect_type": "sense",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 135.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "ID1"
+      ],
+      "id": "card-03001-5-uniq-0114-00",
+      "member": "Ayunda Risu",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 10.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 26.0,
+          "magnitude": 110.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": "Medium",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": null,
+          "effect_type": "sense",
+          "family": "stat_up",
+          "interval": null,
+          "magnitude": 43.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "generation",
+            "value": "ID1"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 10.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 145.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "condition": {
+              "count": 2,
+              "kind": "generation",
+              "target": "ID1"
+            },
+            "effect_type": "activation_rate",
+            "family": "activation_rate_up",
+            "kind": "rider",
+            "magnitude": 55.0,
+            "target": null
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 7828,
+        "sense": 11146,
+        "technique": 6947
+      },
+      "title": "Drowsy Morning Routine",
+      "type": "Pure"
+    },
+    {
       "costume_name": "Default",
       "costume_skill": {
         "condition": {
@@ -12848,6 +12959,132 @@
       },
       "title": "Lunar Songstress",
       "type": "Cute"
+    },
+    {
+      "costume_name": "Cosmic Chill",
+      "costume_skill": {
+        "condition": {
+          "count": 2,
+          "kind": "type",
+          "target": "Happy"
+        },
+        "duration": null,
+        "effect_type": "performance",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 80.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "condition": {
+            "count": 2,
+            "kind": "type",
+            "target": "Happy"
+          },
+          "effect_type": "score",
+          "family": "score_support",
+          "kind": "rider",
+          "magnitude": 25.0,
+          "target": {
+            "kind": "all"
+          }
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "ID1"
+      ],
+      "id": "card-03002-5-uniq-0113-00",
+      "member": "Moona Hoshinova",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 12.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 33.0,
+          "magnitude": 60.0,
+          "override": {
+            "condition": {
+              "count": 2,
+              "kind": "type",
+              "target": "Happy"
+            },
+            "kind": "override",
+            "magnitude": 120.0
+          },
+          "probability_tier": "Medium",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": null,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 11.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "type",
+            "value": "Happy"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 15.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 95.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "condition": {
+              "kind": "ungated"
+            },
+            "effect_type": "activation_rate",
+            "family": "activation_rate_up",
+            "kind": "rider",
+            "magnitude": 35.0,
+            "target": null
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 11146,
+        "sense": 6947,
+        "technique": 7828
+      },
+      "title": "Starlight Soak",
+      "type": "Happy"
     },
     {
       "costume_name": "Default",
@@ -13172,6 +13409,110 @@
       },
       "title": "Sunlit Cosmos Palette",
       "type": "Pure"
+    },
+    {
+      "costume_name": "Sunlit Daydream",
+      "costume_skill": {
+        "condition": {
+          "count": 2,
+          "kind": "type",
+          "target": "Cute"
+        },
+        "duration": null,
+        "effect_type": "performance",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 130.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "ID1"
+      ],
+      "id": "card-03003-5-uniq-0115-00",
+      "member": "Airani Iofifteen",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 7.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 20.0,
+          "magnitude": 115.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": "High",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "count": 2,
+            "kind": "type",
+            "target": "Cute"
+          },
+          "duration": null,
+          "effect_type": "performance",
+          "family": "stat_up",
+          "interval": null,
+          "magnitude": 43.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "type",
+            "value": "Cute"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 14.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 115.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 11381,
+        "sense": 7683,
+        "technique": 6803
+      },
+      "title": "Radiant Solstice Smile",
+      "type": "Cute"
     },
     {
       "costume_name": "Default",

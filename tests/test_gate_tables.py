@@ -20,7 +20,7 @@ from hbuilder.domain.gates import (
 from hbuilder.domain.loader import load_cards
 from hbuilder.domain.schema import SKILL_SLOT_KINDS
 
-from conftest import FIXTURE_CARDS_PATH, make_card, make_skill
+from support.builders import FIXTURE_CARDS_PATH, make_card, make_skill
 
 
 def _reference(cards, run_state):

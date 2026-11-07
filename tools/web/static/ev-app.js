@@ -146,7 +146,7 @@ function renderChart() {
 }
 
 /* ------------------------------------------------------------------ top 100 */
-// The chapter's board as the 24/7 tracker reads it (tools/recon/proxy/event_tracker.py, every
+// The chapter's board as the 24/7 tracker reads it (tools/refresh/event_tracker.py, every
 // couple of minutes on the VPS), with each player's last hour, modelled on the community tool
 // holodori.best's leaderboard. A row opens that player's own line.
 const TOP_COLS = [
@@ -525,7 +525,21 @@ function renderKinds() {
   row.innerHTML = row.hidden ? "" : songs.map(k => `<button type="button" class="ev-songpick" data-v="${esc(k)}" aria-pressed="${k === cur}">
       <img src="/jacket/${esc(k.slice(6))}" alt="" loading="lazy"><span>${esc(songTitle(k))}</span></button>`).join("");
 }
+// the 24/7 tracker's health: a region with no border read for 30 min while an event is open
+// (/api/event/tracker), so a stopped tracker never passes for a quiet ranking
+const REGION_NAME = { us: "US", as: "Asia", jp: "Japan" };
+async function loadTrackerHealth() {
+  const el = $("#trackerwarn");
+  let h = null;
+  try { h = await getJSON("/api/event/tracker"); } catch (_) { /* no route: say nothing */ }
+  const stale = (h && h.stale) || [];
+  el.hidden = !stale.length;
+  el.textContent = !stale.length ? "" : "Live borders are not updating: " + stale.map(r =>
+    `${REGION_NAME[r.region] || r.region} ${r.minutes == null ? "never read" : `last read ${r.minutes} min ago`}`
+    + (r.error ? ` (${r.error})` : "")).join("; ") + `. The tracker reads every 5 min while an event is open.`;
+}
 async function loadCutoffs() {
+  loadTrackerHealth();
   const q = `region=${S.region}${S.chapter ? `&chapter=${encodeURIComponent(S.chapter)}` : ""}`;
   try {
     let c = await getJSON(`/api/event/cutoffs?${q}${S.kind ? `&kind=${encodeURIComponent(S.kind)}` : ""}`);

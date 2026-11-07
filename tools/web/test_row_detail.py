@@ -1,4 +1,4 @@
-"""ONE number set per row (row_detail.py, BACKEND-GAPS.md §1-3).
+"""ONE number set per row (row_detail.py).
 
 The property under test: a ranked row's detail views — /api/compare with the
 row's `board_state`, /api/timeline with it, /api/row-detail for a two-stage row
@@ -9,9 +9,6 @@ helpers run on synthetic inputs. Writes nothing (test_no_writes.py)."""
 from __future__ import annotations
 
 import json
-import socket
-import threading
-import types
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -20,7 +17,6 @@ import pytest
 
 import event_mode
 import row_detail
-import server as web_server
 
 SONG = "m0334"
 _MEMBERS = [
@@ -29,25 +25,6 @@ _MEMBERS = [
     "card-00006-5-uniq-0007-00",
 ]
 _TEAM = ["card-04001-5-uniq-0042-00", *_MEMBERS]
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def web_base():
-    port = _free_port()
-    server = web_server.ThreadingServer((web_server.BIND_HOST, port), web_server.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 def _req(url: str, obj: dict | None = None) -> tuple[int, dict]:
@@ -68,21 +45,8 @@ def _skip_without_dumps(status: int, doc: dict) -> None:
         pytest.skip(f"dumps absent: {doc.get('error')}")
 
 
-# -- the pure helpers -----------------------------------------------------------
-def test_modal_order_is_the_order_best_on_most_charts():
-    a, b = ("x", "y", "z", "u", "v"), ("y", "x", "z", "u", "v")
-    rows = [types.SimpleNamespace(member_order=o) for o in (a, b, a, a)]
-    order, share = row_detail.modal_order(rows)
-    assert order == list(a) and share == 0.75
-    assert row_detail.modal_order([]) == (None, None)
-
-
 def _put(path: Path, obj) -> None:
-    # through the builder's own writer (tools/recon/proxy): nothing in tools/web
-    # writes to disk
-    import two_stage_build  # noqa: PLC0415
-
-    two_stage_build._write(path, obj)
+    path.write_bytes(json.dumps(obj, indent=1, ensure_ascii=False, default=str).encode("utf-8"))
 
 
 def test_ranks_are_read_from_the_master_tables(tmp_path):
@@ -125,16 +89,6 @@ def test_event_row_detail_fills_the_row_and_survives_a_failure():
     broken = {"score": 1}
     event_mode.add_row_detail(broken, {}, "L", [], detail_fn=lambda l, m: 1 / 0)
     assert "ZeroDivisionError" in broken["detail_error"]
-
-
-def test_run_body_carries_materials_and_leader_options():
-    opts = web_server._parse_run_body({"materials": "infinite", "leader_member": "Mori Calliope",
-                                       "leader_card": "card-x", "no_leader_overlap": True})
-    assert opts["materials"] == "infinite"
-    assert opts["leader_member"] == "Mori Calliope" and opts["leader_card"] == "card-x"
-    assert opts["no_leader_overlap"] is True
-    plain = web_server._parse_run_body({})
-    assert plain["materials"] is None and plain["no_leader_overlap"] is False
 
 
 # -- the routes -------------------------------------------------------------------

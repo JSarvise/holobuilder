@@ -104,11 +104,10 @@ def test_the_children_get_the_account_settings(tmp_path):
 
 def test_only_this_folders_server_counts_as_ours(tmp_path):
     repo = tmp_path / "My Clone"
-    mine = f'"C:\\Python\\python.exe" -u "{repo}\\tools\\web\\server.py" --port 8731'
-    assert run_local.ours(mine, repo)
-    assert run_local.ours(mine.replace("\\", "/").upper(), repo)
-    assert not run_local.ours(mine.replace("My Clone", "Other"), repo)
-    assert not run_local.ours("", repo)
+    repo.mkdir()
+    assert run_local.ours({"repo": str(repo), "pid": 7}, repo)
+    assert not run_local.ours({"repo": str(tmp_path / "Other"), "pid": 7}, repo)
+    assert not run_local.ours(None, repo)
 
 
 def test_a_port_held_by_another_program_is_left_alone(monkeypatch):
@@ -117,14 +116,67 @@ def test_a_port_held_by_another_program_is_left_alone(monkeypatch):
     held.listen()
     port = held.getsockname()[1]
     try:
-        monkeypatch.setattr(run_local, "listeners", lambda p: [{"pid": 1, "name": "other.exe", "cmd": "x"}])
         monkeypatch.setattr(run_local.time, "sleep", lambda s: None)
         killed = []
-        monkeypatch.setattr(run_local.subprocess, "run", lambda *a, **k: killed.append(a))
+        monkeypatch.setattr(run_local.os, "kill", lambda *a: killed.append(a))
+        monkeypatch.setattr(run_local, "server_on", lambda p: None)      # not a holobuilder server
+        got = run_local.claim_port(port)
+        assert got is not None and got != port and not killed
+        monkeypatch.setattr(run_local, "server_on", lambda p: {"repo": "/elsewhere", "pid": 9})
         got = run_local.claim_port(port)
         assert got is not None and got != port and not killed
     finally:
         held.close()
+
+
+def test_an_earlier_server_of_this_folder_is_stopped(monkeypatch):
+    held = socket.socket()
+    held.bind(("127.0.0.1", 0))
+    held.listen()
+    port = held.getsockname()[1]
+    killed = []
+
+    def kill(pid, sig):
+        killed.append((pid, sig))
+        held.close()                                     # the old server lets the port go
+
+    monkeypatch.setattr(run_local, "server_on", lambda p: {"repo": str(run_local.REPO), "pid": 4242})
+    monkeypatch.setattr(run_local.os, "kill", kill)
+    monkeypatch.setattr(run_local.time, "sleep", lambda s: None)
+    assert run_local.claim_port(port) == port
+    assert killed == [(4242, run_local.signal.SIGTERM)]
+
+
+def test_the_server_answer_is_read_from_the_port():
+    import http.server
+    import json
+    import threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            body = json.dumps({"repo": "/r", "pid": 5}).encode() if self.path == "/api/server" else b"{}"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        assert run_local.server_on(srv.server_address[1]) == {"repo": "/r", "pid": 5}
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_the_launchers_and_helpers_call_no_powershell():
+    for name in ("tools/local/run_local.py", "tools/web/hbweb/router.py", "tools/refresh/refresh_all.py"):
+        text = (ROOT / name).read_text("utf8")
+        assert "Get-NetTCPConnection" not in text and "taskkill" not in text
+        assert '"powershell"' not in text or name.endswith("refresh_all.py")
 
 
 def test_a_free_port_is_used_as_it_is():
@@ -150,9 +202,116 @@ def test_start_and_check_refuse_unknown_options():
 
 
 def test_the_launchers_call_the_helper_from_their_own_folder():
-    for name, sub in (("setup.cmd", "check"), ("refresh.cmd", "refresh"), ("start.cmd", "start")):
+    for name, sub in (("setup.cmd", "setup"), ("refresh.cmd", "refresh"), ("start.cmd", "start")):
         raw = (ROOT / name).read_bytes()
         text = raw.decode("ascii")                         # cmd reads them in the OEM code page
         assert 'cd /d "%~dp0"' in text                    # any clone folder, any working directory
         assert f"tools\\local\\run_local.py {sub}" in text
         assert "goto" not in text.lower() and "\n:" not in text   # no labels: LF-only copies still run
+
+
+def test_the_shell_launchers_mirror_the_cmd_ones():
+    for name, sub in (("setup.sh", "setup"), ("refresh.sh", "refresh"), ("start.sh", "start")):
+        raw = (ROOT / name).read_bytes()
+        assert b"\r" not in raw                            # bash reads a CR as part of the line
+        text = raw.decode("ascii")
+        assert text.startswith("#!/usr/bin/env bash\n")
+        assert 'cd "$(dirname "$0")"' in text             # any clone folder, any working directory
+        assert f"tools/local/run_local.py {sub}" in text
+    assert "*.sh text eol=lf" in (ROOT / ".gitattributes").read_text("utf8")
+
+
+def test_launcher_names_follow_the_platform(monkeypatch):
+    monkeypatch.setattr(run_local, "WINDOWS", True)
+    assert run_local.launcher("refresh") == "refresh.cmd"
+    monkeypatch.setattr(run_local, "WINDOWS", False)
+    assert run_local.launcher("refresh") == "./refresh.sh"
+
+
+def test_shown_hides_the_user_folder_on_both_platforms():
+    assert run_local.shown(r"C:\Users\Ana\x", r"C:\Users\ana", windows=True) == r"%USERPROFILE%\x"
+    assert run_local.shown("/home/ana/x", "/home/ana", windows=False) == "~/x"
+    assert run_local.shown("/home/Ana/x", "/home/ana", windows=False) == "/home/Ana/x"
+
+
+def test_setup_creates_the_venv_installs_and_checks(monkeypatch, tmp_path):
+    venv = tmp_path / ".venv"
+    py = run_local.paths.venv_python(venv)
+    calls = []
+
+    def fake_run(cmd, **_kw):
+        calls.append([str(c) for c in cmd])
+        if cmd[1:3] == ["-m", "venv"]:
+            py.parent.mkdir(parents=True)
+            py.write_text("")
+        return type("R", (), {"returncode": 0})()
+
+    monkeypatch.setattr(run_local.paths, "VENV", venv)
+    monkeypatch.setattr(run_local.subprocess, "run", fake_run)
+    assert run_local.setup() == 0
+    assert calls[0][1:] == ["-m", "venv", str(venv)]
+    assert calls[1] == [str(py), "-m", "pip", "--version"]
+    assert calls[2][:4] == [str(py), "-m", "pip", "install"] and calls[2][-3:] == [".", "-r", "requirements.txt"]
+    assert calls[3][0] == str(py) and calls[3][-1] == "check"
+
+
+def test_setup_stops_when_the_venv_cannot_be_made(monkeypatch, tmp_path):
+    monkeypatch.setattr(run_local.paths, "VENV", tmp_path / ".venv")
+    monkeypatch.setattr(run_local.subprocess, "run",
+                        lambda cmd, **_kw: type("R", (), {"returncode": 1})())
+    assert run_local.setup() == 1
+
+
+def test_setup_refuses_a_python_older_than_the_minimum(monkeypatch, capsys):
+    monkeypatch.setattr(run_local, "MIN_PYTHON", (99, 0))
+    monkeypatch.setattr(run_local.subprocess, "run", lambda *a, **k: pytest.fail("ran something"))
+    assert run_local.setup() == 1
+    assert "is too old: 3.12 or newer is needed" in capsys.readouterr().out
+
+
+def test_setup_makes_a_venv_from_an_older_python_again(monkeypatch, tmp_path, capsys):
+    venv = tmp_path / ".venv"
+    py = run_local.paths.venv_python(venv)
+    py.parent.mkdir(parents=True)
+    py.write_text("")
+    calls = []
+    monkeypatch.setattr(run_local.paths, "VENV", venv)
+    monkeypatch.setattr(run_local, "venv_version", lambda _py: (3, 11))
+    monkeypatch.setattr(run_local.subprocess, "run",
+                        lambda cmd, **_kw: calls.append([str(c) for c in cmd])
+                        or type("R", (), {"returncode": 0})())
+    assert run_local.setup() == 0
+    assert calls[0] == [sys.executable, "-m", "venv", "--clear", str(venv)]
+    assert "runs Python 3.11, too old" in capsys.readouterr().out
+
+
+def test_the_venv_version_is_read_from_its_python():
+    assert run_local.venv_version(Path(sys.executable)) == tuple(sys.version_info[:2])
+    assert run_local.venv_version(Path(sys.executable).with_name("no-such-python.exe")) is None
+
+
+@pytest.mark.parametrize("command", [["start"], ["refresh"]])
+def test_start_and_refresh_refuse_a_venv_older_than_the_minimum(monkeypatch, capsys, command):
+    monkeypatch.setattr(run_local, "MIN_PYTHON", (99, 0))
+    monkeypatch.setattr(run_local, "start", lambda args: pytest.fail("started"))
+    monkeypatch.setattr(run_local, "refresh", lambda args, extra: pytest.fail("refreshed"))
+    assert run_local.main(command) == 1
+    assert "holobuilder needs 3.12 or newer" in capsys.readouterr().out
+
+
+def test_the_minimum_python_is_the_same_everywhere():
+    import re
+
+    assert run_local.MIN_PYTHON == (3, 12)
+    assert 'requires-python = ">=3.12"' in (ROOT / "pyproject.toml").read_text("utf8")
+    for name in ("setup.cmd", "setup.sh"):
+        text = (ROOT / name).read_text("utf8")
+        assert "sys.version_info < (3, 12)" in text and "3.11" not in text, name
+    assert "sys.version_info < (3, 12)" in (ROOT / "tools" / "web" / "server.py").read_text("utf8")
+    assert not re.search(r"3\.11", (ROOT / "tools" / "local" / "run_local.py").read_text("utf8"))
+
+
+def test_venv_python_per_platform(tmp_path):
+    from hbuilder import paths
+    assert paths.venv_python(tmp_path, "win32") == tmp_path / "Scripts" / "python.exe"
+    assert paths.venv_python(tmp_path, "linux") == tmp_path / "bin" / "python"

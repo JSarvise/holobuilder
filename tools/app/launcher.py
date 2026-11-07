@@ -1,7 +1,7 @@
 """holobuilder, the desktop app: one native window over the web app.
 
     runtime\\pythonw.exe app\\tools\\app\\launcher.py        (what the installer's shortcut runs)
-    proxyenv\\Scripts\\python tools\\app\\launcher.py        (development)
+    python tools\\app\\launcher.py        (development)
 
 What it does, each step shown on the start screen (ui/index.html) as it happens:
 
@@ -25,6 +25,7 @@ import base64
 import ctypes
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -34,16 +35,19 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
+from hbuilder import paths  # noqa: E402
+
+HERE = paths.APP_DIR
+REPO = paths.REPO
 sys.path.insert(0, str(HERE))
 import app_settings  # noqa: E402
 import content_store  # noqa: E402
 
 UI = HERE / "ui" / "index.html"
 VERSION_FILE = HERE / "VERSION"          # written by the build; absent in a development checkout
-LOG = REPO / "state" / "server.log"
-DUMPS = REPO / "tools" / "recon" / "proxy" / "dumps"
+LOG = paths.STATE / "server.log"
+DUMPS = paths.DUMPS
 APP_ID = "holobuilder.app"
 UPDATE_POLL_S = 600                       # one small GET every 10 min while the app is open
 LOCALLOW = app_settings.LOCALLOW
@@ -166,16 +170,13 @@ def hardware() -> dict:
 
 
 LOG_TAIL_LINES = 60
-_SECRETISH = None
+LOG_MAX_BYTES = 5_000_000
+_SECRETISH = re.compile(r"[A-Za-z0-9+/_=-]{32,}")
 
 
 def redact(text: str) -> str:
     """Hide what identifies the person in text meant for a public issue: the Windows user
     folder (it carries the account name) and any long token-like run (credentials, keys)."""
-    import re  # noqa: PLC0415
-    global _SECRETISH
-    if _SECRETISH is None:
-        _SECRETISH = re.compile(r"[A-Za-z0-9+/_=-]{32,}")
     home = os.path.expandvars("%USERPROFILE%")
     if home and "%" not in home:
         text = re.sub(re.escape(home), "%USERPROFILE%", text, flags=re.IGNORECASE)
@@ -216,27 +217,6 @@ def diagnostics(s: dict, *, engine: str, log: Path = LOG) -> str:
     return redact("\n".join(lines))
 
 
-def _collection_current(path: Path | None = None, board: Path | None = None) -> bool:
-    """Whether the account was read by this app's refresh: one read before 0.1.7 has no
-    player.power_up_permyriad (no Member Power-Up Bonus), one before 0.1.9 built the
-    boards with every socket at Connect level 1 (a bloom-5 card's level 2 missed), one before
-    0.1.13 shows the publisher's event history (its results) instead of its own."""
-    path = path or REPO / "state" / "collection.json"
-    board = board or DUMPS / "board.json"
-    try:
-        doc = json.loads(path.read_text("utf-8"))
-        built = json.loads(board.read_text("utf-8"))
-    except (OSError, ValueError):
-        return False
-    history = DUMPS / "event_history.json" if board == DUMPS / "board.json" else board.with_name("event_history.json")
-    try:     # before 0.1.13 the app received the publisher's own history (its results)
-        own_history = json.loads(history.read_text("utf-8")).get("built_for") is not None
-    except (OSError, ValueError):
-        own_history = True                       # none yet: nothing of anyone's to replace
-    return ("power_up_permyriad" in (doc.get("player") or {}) and built.get("connect_level") == "auto"
-            and own_history)
-
-
 def free_port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -256,7 +236,7 @@ def holomems() -> list[dict]:
     """[{chr, name, card}] for every holomem in the catalogue: the card is her first 5-star
     (the start screen's art), else her first card."""
     try:
-        doc = json.loads((REPO / "data" / "cards.json").read_text("utf8"))
+        doc = json.loads((paths.DATA / "cards.json").read_text("utf8"))
     except (OSError, ValueError):
         return []
     out: dict[str, dict] = {}
@@ -287,7 +267,7 @@ def face_file(chr_id: str) -> Path | None:
 
 def icon_file(chr_id: str) -> Path | None:
     """state/app_icon_<chr>.ico from the game's own character icon."""
-    out = REPO / "state" / f"app_icon_{chr_id}.ico"
+    out = paths.STATE / f"app_icon_{chr_id}.ico"
     if out.is_file():
         return out
     src = face_file(chr_id)
@@ -330,7 +310,8 @@ class Api:
         self.url: str | None = None
         self.home: str | None = None          # the start screen's own URL (pywebview serves it)
         self._started = False
-        self._pending: dict | None = None     # a newer version found while open
+        self._pending: dict | None = None     # the newer version found at start or while open
+        self._dismissed: str | None = None    # the version whose notice the user closed
         self._named = threading.Event()
 
     # -- reads
@@ -342,7 +323,7 @@ class Api:
             "version": app_version(), "settings": self._public(s),
             "problems": app_settings.validate(s), "hardware": hardware(),
             "holomem": pick, "url": self.url,
-            "font": data_uri(REPO / "tools" / "explorer" / "fonts" / "line-seed-sans-xbd-latin.woff2",
+            "font": data_uri(paths.WEB_DIR / "fonts" / "line-seed-sans-xbd-latin.woff2",
                              "font/woff2"),
         }
 
@@ -406,8 +387,13 @@ class Api:
             signing.verify(signing.canonical(remote), remote.get("sig", ""))
         except Exception as exc:  # noqa: BLE001 -- offline is not a failed start
             return {"state": "unknown", "local": local, "error": str(exc)}
-        return {"state": update_state(local, remote), "local": local,
-                "latest": remote.get("latest"), "notes": remote.get("notes", "")}
+        got = {"state": update_state(local, remote), "local": local,
+               "latest": remote.get("latest"), "notes": remote.get("notes", "")}
+        # held for the pages: the start screen opens the Optimizer a moment after it shows
+        # the notice, so the pages carry it on (hb-shell.js asks `pending_update` on each load)
+        if got["state"] in ("available", "required"):
+            self._pending = got
+        return got
 
     def start(self) -> dict:
         """Run steps 3-5 in the background; the page follows `hb.progress(...)` calls."""
@@ -470,17 +456,9 @@ class Api:
             self._emit(step="profile", state="done", **({} if prof["steam_id"] else {
                 "note": "no Steam ID found: sign in to Steam or type it in Settings"}))
 
-            if not all(p.is_file() for p in (REPO / "state" / "collection.json",
-                                             REPO / "data" / "owned.json", DUMPS / "board.json")):
+            if not all(p.is_file() for p in (paths.STATE / "collection.json",
+                                             paths.DATA / "owned.json", DUMPS / "board.json")):
                 self._account_refresh(s)          # a first start: the app has no account yet
-            elif not _collection_current():
-                # read by an older app (before 0.1.7 the Member Power-Up was left out): read it
-                # again now, not on the user's first Refresh. An account that
-                # cannot be read keeps the app usable on what it already has.
-                try:
-                    self._account_refresh(s)
-                except RuntimeError:
-                    pass
 
             self._emit(step="server", state="run")
             self.url = self._start_server(s)
@@ -488,7 +466,7 @@ class Api:
             # first visit to Collection must not wait for 300 cards one by one (~80 MB, once)
             threading.Thread(target=store.prefetch, name="prefetch", daemon=True,
                              args=(("tools/explorer/cards_explorer_art/",
-                                    "tools/recon/proxy/dumps/card_images/"),)).start()
+                                    f"{paths.DUMPS_REL}/card_images/"),)).start()
             self._started = True
             self._emit(step="server", state="done", url=self.url)
             threading.Thread(target=self._watch_updates, name="updates", daemon=True).start()
@@ -499,7 +477,7 @@ class Api:
         """refresh_all --account-only, its step lines streamed to the start screen."""
         self._emit(step="account", state="run", detail="logging in…")
         proc = subprocess.Popen(
-            [sys.executable, "-u", str(REPO / "tools" / "recon" / "proxy" / "refresh_all.py"),
+            [sys.executable, "-u", str(paths.REFRESH_DIR / "refresh_all.py"),
              "--account-only"], cwd=str(REPO), env=app_settings.env(s), stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
             errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -512,7 +490,7 @@ class Api:
                 if line.startswith(f"[run ] {step} "):
                     self._emit(step="account", state="run", detail=text)
         proc.wait()
-        if not (REPO / "state" / "collection.json").is_file():
+        if not (paths.STATE / "collection.json").is_file():
             raise RuntimeError("the account could not be read:\n" + "\n".join(account_failure(tail)))
         warn = "DATE_CHANGED" in "\n".join(tail)
         self._emit(step="account", state="done",
@@ -527,9 +505,9 @@ class Api:
         if LOG.is_file() and LOG.stat().st_size > LOG_MAX_BYTES:
             LOG.replace(LOG.with_name(LOG.name + ".1"))
         log = open(LOG, "ab")
-        art = REPO / "tools" / "explorer" / "cards_explorer_art"
+        art = paths.TOOLS / "explorer" / "cards_explorer_art"
         self._server = subprocess.Popen(
-            [sys.executable, "-u", str(REPO / "tools" / "web" / "server.py"), "--port", str(port),
+            [sys.executable, "-u", str(paths.WEB_DIR / "server.py"), "--port", str(port),
              "--art-dir", str(art)],
             cwd=str(REPO), env=app_settings.env(s), stdin=subprocess.DEVNULL, stdout=log,
             stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -551,18 +529,27 @@ class Api:
         (`pending_update`, read by hb-shell.js on every page) and shown on the open one."""
         while True:
             time.sleep(UPDATE_POLL_S)
-            got = self.check_update()
-            if got.get("state") in ("available", "required") and got != self._pending:
-                self._pending = got
-                if self._window is not None:
-                    try:
-                        self._window.evaluate_js(f"window.hbUpdate && hbUpdate({json.dumps(got)})")
-                    except Exception:  # noqa: BLE001 -- a page mid-load picks it up itself
-                        pass
+            before = self._pending
+            self.check_update()
+            shown = self.pending_update()
+            if shown is not None and shown != before and self._window is not None:
+                try:
+                    self._window.evaluate_js(f"window.hbUpdate && hbUpdate({json.dumps(shown)})")
+                except Exception:  # noqa: BLE001 -- a page mid-load picks it up itself
+                    pass
 
     def pending_update(self) -> dict | None:
-        """The newer version found while the app is open, for the update banner."""
-        return self._pending if self._pending and self.can_update() else None
+        """The newer version for the pages' update notice: None in a copy that cannot update
+        itself, and None for the version whose notice was dismissed (a later one shows again)."""
+        if not self._pending or not self.can_update():
+            return None
+        return None if self._pending.get("latest") == self._dismissed else self._pending
+
+    def dismiss_update(self) -> dict:
+        """The notice's close button: hidden on every page until a newer version or the next start."""
+        if self._pending:
+            self._dismissed = self._pending.get("latest")
+        return {"ok": True}
 
     def can_update(self) -> bool:
         """Installed by holobuilder-setup.exe (it leaves a copy of itself next to app/)."""
@@ -609,8 +596,6 @@ class Api:
                 self._server.kill()
 
 
-LOG_MAX_BYTES = 5_000_000
-
 
 def main() -> int:
     content_store.install_user_agent()
@@ -632,7 +617,7 @@ def main() -> int:
         if api.home is None:
             api.home = window.get_current_url()
     window.events.loaded += loaded
-    webview.start(private_mode=False, storage_path=str(REPO / "state" / "webview"))
+    webview.start(private_mode=False, storage_path=str(paths.STATE / "webview"))
     api.stop()
     return 0
 

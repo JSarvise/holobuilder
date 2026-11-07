@@ -7,8 +7,8 @@ silent about them, in a chain where each link's failure looks like success:
 * `chart_download.py` can only fetch assets the catalogue names, so it fetches
   nothing and reports every known chart verified;
 * `songs.json` has no chart to point at, so it reports the old song count and means it;
-* and `active_lattice.build_chart_cache` rebuilds only when its cache file is
-  ABSENT, so even once the charts land the solver would go on scoring the old
+* and the parsed chart cache is not rebuilt by a plain `build_charts.py` run,
+  so even once the charts land the solver would go on scoring the old
   set — producing a number computed over content that no longer matches the disk.
 
 That last one is the dangerous one, because it is the only link that stays
@@ -27,9 +27,9 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PROXY_DIR = REPO_ROOT / "tools" / "recon" / "proxy"
-if str(PROXY_DIR) not in sys.path:
-    sys.path.insert(0, str(PROXY_DIR))
+REFRESH_DIR = REPO_ROOT / "tools" / "refresh"
+if str(REFRESH_DIR) not in sys.path:
+    sys.path.insert(0, str(REFRESH_DIR))
 
 import refresh_all  # noqa: E402
 
@@ -68,7 +68,7 @@ def test_a_cache_left_behind_by_new_charts_is_reported_STALE(tmp_path, monkeypat
     assert "704 parsed against 724 expected" in stale[0]
     assert "scoring the OLD chart set" in stale[0]
     # Naming the fix matters: this is the one link with no automatic rebuild.
-    assert "active_lattice.py" in stale[0]
+    assert "build_charts.py --rebuild-caches" in stale[0]
 
 
 def test_a_missing_cache_is_reported_rather_than_read_as_empty(tmp_path, monkeypatch):

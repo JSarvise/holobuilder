@@ -1,7 +1,7 @@
 """Publish the app's shared content from this PC to api.holobuilder.dev.
 
-    proxyenv/Scripts/python tools/app/publish.py            # hash, upload what is new, swap
-    proxyenv/Scripts/python tools/app/publish.py --dry-run  # say what it would do, send nothing
+    python tools/app/publish.py            # hash, upload what is new, swap
+    python tools/app/publish.py --dry-run  # say what it would do, send nothing
 
 The store on the VPS is content-addressed, so a publish only ever ADDS files and the switch to
 the new version is one rename:
@@ -34,14 +34,17 @@ import tarfile
 import time
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
+from hbuilder import paths  # noqa: E402
+
+HERE = paths.APP_DIR
+REPO = paths.REPO
 sys.path.insert(0, str(HERE))
 import content_spec  # noqa: E402
 
 REMOTE = "/srv/holobuilder/content"
-HASH_CACHE = REPO / "tools" / "recon" / "proxy" / "dumps" / ".publish_hashes.json"
-REMOTE_CONF = REPO / "state" / "tracker_remote.json"   # {"ssh": "root@<vps>", ...}
+HASH_CACHE = paths.DUMPS / ".publish_hashes.json"
+REMOTE_CONF = paths.STATE / "tracker_remote.json"   # {"ssh": "root@<vps>", ...}
 MANIFEST_VERSION = 1
 
 
@@ -174,7 +177,7 @@ def swap_manifest(target: str, manifest: dict) -> None:
 def write_client_version() -> None:
     """dumps/client_version.json from this PC's game install, for the app's login (it has no
     install to read). Left as it is when the install cannot be read: never a guess."""
-    sys.path.insert(0, str(REPO / "tools" / "recon" / "proxy"))
+    sys.path.insert(0, str(paths.REFRESH_DIR))
     import account_snapshot  # noqa: PLC0415 -- recon-side, only on the publisher
     import atomic_io  # noqa: PLC0415
     v = account_snapshot.app_version()

@@ -24,7 +24,6 @@ from hbuilder.domain.loader import load_cards
 from hbuilder.domain.schema import (
     NOT_APPLICABLE_TARGET_FIELDS_BY_TARGET_KIND,
     SCHEMA_VERSION,
-    SchemaError,
     TARGET_KINDS,
     validate_skill_slot,
 )
@@ -32,7 +31,7 @@ from hbuilder.domain.scoring import _resolve_skill, team_taint
 from hbuilder.domain.team import MEMBER_COUNT, Team
 from hbuilder.domain.unknown import UNKNOWN
 
-from conftest import make_resolved, make_scoring_config, make_skill
+from support.builders import make_resolved, make_scoring_config, make_skill
 
 
 def _passive_slot(**overrides: object) -> dict:

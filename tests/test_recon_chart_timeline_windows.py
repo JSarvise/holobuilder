@@ -1,4 +1,4 @@
-"""`tools/recon/proxy/chart_timeline.active_windows` must not clamp a window
+"""`tools/refresh/chart_timeline.active_windows` must not clamp a window
 to the end of the song.
 
 **The bug this pins.** `song_seconds` is `max(note.time)` — the timestamp of the
@@ -7,7 +7,7 @@ window as half-open `[check, end)`. Clamping `end` to `song_seconds` therefore
 made `end == song_seconds` for any skill still live when the chart ends, and
 `t < end` then judged that last note **outside** the window that covers it. One
 silently dropped note per such window, and it is the note carrying the highest
-combo multiplier (`SCORE-SONG.md` §6 measures the loss at 0.4 % of the level-1
+combo multiplier (the measured loss is 0.4 % of the level-1
 prediction on `m0001` easy).
 
 `src/hbuilder/domain/song.py::_active_windows` never clamped and documents why;
@@ -16,7 +16,7 @@ asserts against the **previous, buggy** answer so a re-introduced `min(...)`
 fails rather than passes quietly.
 
 The numbers are the real `m0001` easy timeline for `chart_timeline.DEFAULT_TEAM`
-(`python tools/recon/proxy/chart_timeline.py m0001 easy`), transcribed as
+(`python tools/refresh/chart_timeline.py m0001 easy`), transcribed as
 literals so the test does not depend on the gitignored `dumps/`.
 """
 
@@ -26,9 +26,9 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PROXY_DIR = REPO_ROOT / "tools" / "recon" / "proxy"
-if str(PROXY_DIR) not in sys.path:
-    sys.path.insert(0, str(PROXY_DIR))
+REFRESH_DIR = REPO_ROOT / "tools" / "refresh"
+if str(REFRESH_DIR) not in sys.path:
+    sys.path.insert(0, str(REFRESH_DIR))
 
 import chart_timeline  # noqa: E402
 

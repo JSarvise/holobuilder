@@ -26,6 +26,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from hbuilder import paths
 from hbuilder.domain.gates import RunState
 from hbuilder.domain.schema import (
     PROBABILITY_TIERS,
@@ -50,31 +51,29 @@ from hbuilder.domain.scoring_models import (
 # STACKING_MODELS gives the other unverified semantics.
 UNDER_SUPPLY_RULES: tuple[str, ...] = ("apply_to_available", "do_not_apply")
 
-# How a member SET's stat pool is scored once deck slot order is known to
-# matter (`scoring.SLOT_ORDER_RESOLVERS` holds the two implementations and
-# asserts it covers exactly these names).
+# How a member SET's stat pool is scored (`scoring.SLOT_ORDER_RESOLVERS` holds the
+# implementation and asserts it covers exactly these names).
 #
-#   "free"       — the default rule, which matches 690/690 captured server
-#                  rows. A count-limited effect reaches the `count` matching
-#                  members with the greatest base value of the STAT IT RAISES
-#                  (total parameter for an all-stats effect), resolved by
-#                  `targets.resolve_target_card_ids`. Slot order only breaks an
-#                  exact tie, where the payout is the same either way, so a set
-#                  has a single stat sum and `member_order` is `None`.
-#   "best_order" — a refuted alternative. Assumes the player picks the recipients
-#                  via slot order (first `count` IN SLOT ORDER), so a set would
-#                  score at the MAXIMUM over its 120 orderings. Kept runnable so the
-#                  refuted rule stays testable and `ScoreBreakdown` can name it.
+#   "free" — matches 690/690 captured server rows. A count-limited effect reaches the
+#            `count` matching members with the greatest base value of the STAT IT RAISES
+#            (total parameter for an all-stats effect), resolved by
+#            `targets.resolve_target_card_ids`. Slot order only breaks an exact tie,
+#            where the payout is the same either way, so a set has a single stat sum
+#            and `member_order` is `None`.
 #
-# Captured decks are bit-exact on ranking recipients by the buffed stat and match
-# only 510/690 rows on ranking by total parameter; first-by-slot ("best_order")
-# matches neither. An older capture (tests/test_passive_power_line.py, row 9)
-# shows the total rule paying, so the server's basis has changed over time.
-#
-# Deliberately NOT a `config.json` key: the rule is measured from the game, not
-# a user guess. It lives on `ScoringConfig` so the refuted alternative stays
-# runnable under test with one `dataclasses.replace`.
-SLOT_ORDER_RULES: tuple[str, ...] = ("free", "best_order")
+# Not a `config.json` key: the rule is measured from the game, not a user guess.
+SLOT_ORDER_RULES: tuple[str, ...] = ("free",)
+
+# Model names a `config.json` could once select: alternatives to the game's rule, removed.
+REMOVED_MODELS: dict[tuple[str, str], str] = {
+    ("stacking", "multiplicative"): "the game's rule is 'additive'",
+    ("activation_rate", "pp"): "the game's rule is 'multiplicative'",
+}
+
+
+def _removed_note(key: str, value: object) -> str:
+    reason = REMOVED_MODELS.get((key, value)) if isinstance(value, str) else None
+    return f" ({value!r} was removed: {reason})" if reason else ""
 
 # A fixed normalization denominator, not a config key. It makes
 # SPECIAL's `fires * duration / reference_run_seconds` commensurable with
@@ -98,7 +97,7 @@ SLOT_ORDER_RULES: tuple[str, ...] = ("free", "best_order")
 # `Transaction.UserCard` carries and the deck captures do not.
 REFERENCE_RUN_SECONDS = 128.8
 
-DEFAULT_CONFIG_PATH = Path("config.json")
+DEFAULT_CONFIG_PATH = paths.CONFIG
 
 # The two ACTIVE-skill uptime references `active_uptime_model` selects between:
 # "finite" (in-run, with the start-of-song dead zone) and "steady" (the
@@ -376,7 +375,7 @@ def validate_scoring_config(doc: object) -> list[str]:
             elif model["stacking"] not in STACKING_MODELS:
                 errors.append(
                     f"model.stacking: {model['stacking']!r} is not one of "
-                    f"{sorted(STACKING_MODELS)}"
+                    f"{sorted(STACKING_MODELS)}{_removed_note('stacking', model['stacking'])}"
                 )
             if "activation_rate" not in model:
                 errors.append("model.activation_rate: missing required key")
@@ -384,6 +383,7 @@ def validate_scoring_config(doc: object) -> list[str]:
                 errors.append(
                     f"model.activation_rate: {model['activation_rate']!r} "
                     f"is not one of {sorted(ACTIVATION_RATE_MODELS)}"
+                    f"{_removed_note('activation_rate', model['activation_rate'])}"
                 )
             # Optional (a pre-existing "model" block omits it and reads "finite"),
             # but a PRESENT value must be one of the two references.
@@ -510,16 +510,6 @@ class ScoringConfig:
     # comparing a refuted alternative needs one `dataclasses.replace` rather
     # than a monkeypatch.
     active_stacking_model: ActiveStackingModel = DEFAULT_ACTIVE_STACKING
-    # How co-live ACTIVEs combine AT ONE INSTANT of a real run — read ONLY by
-    # `song._ratio_at`, never by the run-average ranking scorer. `None` means
-    # "use `active_stacking_model`", i.e. the same object through the same call,
-    # so the default is identical to the run-average combine by construction.
-    # Set it to `ACTIVE_INSTANT_MODELS["exclusive"]` to score the exclusive
-    # co-firing hypothesis (`scoring_models.ExclusiveNormalizedActiveSkill`);
-    # traces of real runs support the independent-roll default, so this is
-    # opt-in and NOT a `config.json` key — the same reasoning
-    # `active_stacking_model` gives.
-    active_instant_model: ActiveStackingModel | None = None
     # Which deck power the PER-SONG modes score on. `True` (the default) is the
     # deck screen's own Overall Power (`song.overall_power_for`) — the quantity
     # the game actually multiplies, bit-exact against the server. `False` is the

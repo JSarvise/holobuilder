@@ -15,7 +15,7 @@ from hbuilder.domain.loader import load_cards
 from hbuilder.domain.schema import SCHEMA_VERSION, SchemaError
 from hbuilder.domain.team import MEMBER_COUNT, build_team
 
-from conftest import FIXTURE_CARDS_PATH
+from support.builders import FIXTURE_CARDS_PATH
 
 CARDS_PATH = FIXTURE_CARDS_PATH
 
@@ -70,7 +70,7 @@ def test_costume_skill_present_as_team_wide_effect_alongside_normal_slots():
     ]
     assert normal_leader_entries == [], (
         "the leader's own SPECIAL/ACTIVE/PASSIVE must not be emitted; only "
-        "its Outfit Skill is a team-wide effect (MODEL-REVISION §23)"
+        "its Outfit Skill is a team-wide effect"
     )
 
 

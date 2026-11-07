@@ -21,7 +21,7 @@ from hbuilder.domain.card import Stats
 from hbuilder.domain.skilltree import SkillTree, TreeNode, ROOT_NODE
 from hbuilder.domain.team import Team
 
-from conftest import make_card, make_scoring_config
+from support.builders import make_card, make_scoring_config
 
 K = 2.03734
 _STATS = Stats(performance=1000, technique=1000, sense=1000)

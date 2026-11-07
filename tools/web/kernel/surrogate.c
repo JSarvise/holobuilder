@@ -181,12 +181,16 @@ static int item_cmp(const void *x, const void *y) {
 }
 
 /* Writes up to `want` sets (5 card indices each, best prediction first) and their
- * predictions; `seen` are keys (`set_key` of ascending indices) to leave out.
- * Returns how many were written, `*n_legal` = how many legal sets exist; -1 on error. */
-int hd_sur_scan(const Pool *p, const Model *m, int n_seen, const uint64_t *seen,
-                int want, uint8_t *out_sets, double *out_pred, int64_t *n_legal) {
+ * predictions, over the sets whose first (smallest) card is a0, a0 + step, a0 + 2 step, ...;
+ * `seen` are keys (`set_key` of ascending indices) to leave out. Returns how many were
+ * written, `*n_legal` = how many legal sets that part holds; -1 on error. The order is
+ * total (`worse`), so the best `want` of the union of the parts' answers, for a0 = 0..step-1,
+ * are exactly the best `want` of the whole scan, in the same order. */
+int hd_sur_scan_part(const Pool *p, const Model *m, int n_seen, const uint64_t *seen,
+                     int want, int a0, int step, uint8_t *out_sets, double *out_pred,
+                     int64_t *n_legal) {
     int N = p->n_cards, K = p->n_kinds;
-    if (N > MAX_CARDS || K > MAX_KINDS || want <= 0) return -1;
+    if (N > MAX_CARDS || K > MAX_KINDS || want <= 0 || a0 < 0 || step < 1) return -1;
     uint64_t cap = 16;
     while (cap < (uint64_t)n_seen * 2 + 1) cap <<= 1;
     uint64_t *table = malloc(sizeof(uint64_t) * cap);
@@ -231,7 +235,7 @@ int hd_sur_scan(const Pool *p, const Model *m, int n_seen, const uint64_t *seen,
         } \
     } while (0)
 
-    for (int a = 0; a < N; a++) {
+    for (int a = a0; a < N; a += step) {
         PUSH(0, a);
         for (int b = a + 1; b < N; b++) {
             if (hol[b] == hol[a]) continue;
@@ -287,4 +291,10 @@ int hd_sur_scan(const Pool *p, const Model *m, int n_seen, const uint64_t *seen,
     *n_legal = legal;
     free(table); free(heap);
     return filled;
+}
+
+/* The whole scan: `hd_sur_scan_part` over every first card. */
+int hd_sur_scan(const Pool *p, const Model *m, int n_seen, const uint64_t *seen,
+                int want, uint8_t *out_sets, double *out_pred, int64_t *n_legal) {
+    return hd_sur_scan_part(p, m, n_seen, seen, want, 0, 1, out_sets, out_pred, n_legal);
 }

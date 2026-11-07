@@ -163,11 +163,14 @@ def test_negative_expected_fires_per_run_is_rejected_naming_special_expected_fir
 
 
 def test_unknown_model_stacking_name_is_rejected_naming_model_stacking_and_accepted_names():
-    errors = validate_scoring_config({"model": {"stacking": "geometric", "activation_rate": "pp"}})
+    errors = validate_scoring_config(
+        {"model": {"stacking": "geometric", "activation_rate": "multiplicative"}}
+    )
     assert any(
-        e.startswith("model.stacking") and "additive" in e and "multiplicative" in e
+        e.startswith("model.stacking") and "'geometric'" in e and "['additive']" in e
         for e in errors
     )
+    assert not any("was removed" in e for e in errors)
 
 
 def test_unknown_model_activation_rate_name_is_rejected_naming_model_activation_rate_and_accepted_names():
@@ -175,7 +178,34 @@ def test_unknown_model_activation_rate_name_is_rejected_naming_model_activation_
         {"model": {"stacking": "additive", "activation_rate": "logarithmic"}}
     )
     assert any(
-        e.startswith("model.activation_rate") and "pp" in e and "multiplicative" in e
+        e.startswith("model.activation_rate")
+        and "'logarithmic'" in e
+        and "['multiplicative']" in e
+        for e in errors
+    )
+    assert not any("was removed" in e for e in errors)
+
+
+def test_a_removed_stacking_model_is_rejected_naming_it_and_the_shipped_rule():
+    errors = validate_scoring_config(
+        {"model": {"stacking": "multiplicative", "activation_rate": "multiplicative"}}
+    )
+    assert any(
+        e.startswith("model.stacking")
+        and "'multiplicative' was removed" in e
+        and "the game's rule is 'additive'" in e
+        for e in errors
+    )
+
+
+def test_a_removed_activation_rate_model_is_rejected_naming_it_and_the_shipped_rule():
+    errors = validate_scoring_config(
+        {"model": {"stacking": "additive", "activation_rate": "pp"}}
+    )
+    assert any(
+        e.startswith("model.activation_rate")
+        and "'pp' was removed" in e
+        and "the game's rule is 'multiplicative'" in e
         for e in errors
     )
 
@@ -338,12 +368,11 @@ def test_load_scoring_config_resolves_stacking_and_activation_rate_models_throug
     assert cfg.activation_rate_model in ACTIVATION_RATE_MODELS.values()
 
 
-def test_load_scoring_config_on_file_choosing_multiplicative_resolves_the_multiplicative_instances(
+def test_load_scoring_config_on_file_naming_a_removed_model_fails_naming_the_shipped_rule(
     tmp_path,
 ):
     doc = dict(DEFAULT_CONFIG)
     doc["model"] = {"stacking": "multiplicative", "activation_rate": "multiplicative"}
     path = _write_config(tmp_path, doc)
-    cfg = load_scoring_config(path)
-    assert cfg.stacking_model is STACKING_MODELS["multiplicative"]
-    assert cfg.activation_rate_model is ACTIVATION_RATE_MODELS["multiplicative"]
+    with pytest.raises(SchemaError, match="the game's rule is 'additive'"):
+        load_scoring_config(path)

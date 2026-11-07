@@ -45,8 +45,6 @@ unchanged.
 
 from __future__ import annotations
 
-import dataclasses
-
 import pytest
 
 from hbuilder.domain.board import (
@@ -55,18 +53,11 @@ from hbuilder.domain.board import (
     BoardNode,
     CharacterBoard,
 )
-from hbuilder.domain.song import ChartNote, SongChart, SongError, score_song
+from hbuilder.domain.song import ChartNote, OverallPower, SongChart, SongError, score_song
 
-from conftest import make_card, make_scoring_config, make_skill
-
-CERTAIN_TIERS = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
+from support.builders import certain_config as cfg, make_card, make_skill
 
 AKI_CONDITIONAL_PERMIL = 100.0  # R-002's stated rate; 41 permil is what it BUYS
-
-
-def cfg(**overrides):
-    base = make_scoring_config(probability_tiers=CERTAIN_TIERS)
-    return dataclasses.replace(base, **overrides) if overrides else base
 
 
 def _effect(
@@ -202,10 +193,10 @@ def test_a_conditional_fires_when_its_own_holomem_sings():
     )
 
     songless = score_song(members, (leader,), _chart(), cfg(board=board),
-                          deck_power=2000)
+                          deck_power=OverallPower.fixed(2000))
     sung = score_song(
         members, (leader,), _chart(singers=("Aki",), singer_type="solo"),
-        cfg(board=board), deck_power=2000,
+        cfg(board=board), deck_power=OverallPower.fixed(2000),
     )
 
     assert songless[0].total_score == 6900
@@ -224,7 +215,7 @@ def test_a_conditional_stays_silent_when_someone_else_sings():
     chart = _chart(singers=("Ina",), singer_type="solo")
 
     result = score_song(members, (leader,), chart, cfg(board=board),
-                        deck_power=2000)
+                        deck_power=OverallPower.fixed(2000))
     assert result[0].total_score == 6900
 
 
@@ -241,7 +232,7 @@ def test_a_conditional_still_needs_its_ordinary_scope_to_reach_the_team():
 
     result = score_song(
         members, (make_card("leader", member="Nene"),), chart,
-        cfg(board=board), deck_power=2000,
+        cfg(board=board), deck_power=OverallPower.fixed(2000),
     )
     assert result[0].total_score == 6900
 
@@ -254,10 +245,10 @@ def test_the_unconditional_term_is_unaffected_by_the_cast():
     board = _board(("Ina", _effect(173.0, "skill_effect_up", "leader")))
 
     without_cast = score_song(members, (leader,), _chart(), cfg(board=board),
-                              deck_power=2000)
+                              deck_power=OverallPower.fixed(2000))
     with_cast = score_song(
         members, (leader,), _chart(singers=("Nene",), singer_type="solo"),
-        cfg(board=board), deck_power=2000,
+        cfg(board=board), deck_power=OverallPower.fixed(2000),
     )
     assert without_cast[0].total_score == with_cast[0].total_score == 7298
 
@@ -284,7 +275,7 @@ def test_a_solo_song_takes_only_its_own_singers_board():
     chart = _chart(singers=("Aki",), singer_type="solo")
 
     result = score_song(plain, (make_card("leader"),), chart, cfg(board=board),
-                        deck_power=2000)
+                        deck_power=OverallPower.fixed(2000))
     assert result[0].total_score == 4784
 
 
@@ -299,7 +290,7 @@ def test_a_group_song_sums_its_units_boards():
     chart = _chart(singers=("Aki", "Ina"), singer_type="group")
 
     result = score_song(plain, (make_card("leader"),), chart, cfg(board=board),
-                        deck_power=2000)
+                        deck_power=OverallPower.fixed(2000))
     assert result[0].total_score == 4968
 
 
@@ -312,6 +303,6 @@ def test_a_chart_with_no_cast_falls_back_to_the_pooled_all_scope():
     )
 
     result = score_song(plain, (make_card("leader"),), _chart(), cfg(board=board),
-                        deck_power=2000)
+                        deck_power=OverallPower.fixed(2000))
     # constant 2300.0 x 1.040 -> 2392 per note
     assert result[0].total_score == 4784

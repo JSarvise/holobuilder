@@ -1,8 +1,7 @@
 """Per-card collection state and the stat formula.
 
-Seeded from `tools/explorer/card_state.py`'s 10-check `_selftest()`, plus the
-two things that self-test could not do: a bloom-0 decision and an acceptance
-check of the stat formula against real cards.
+Ten unit checks of the collection state, plus a bloom-0 decision and an
+acceptance check of the stat formula against real cards.
 
 The acceptance check reads `dumps/cards_enriched.json`, which is gitignored
 account-adjacent data, and skips when it is absent — the same contract
@@ -17,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_card, make_scoring_config, make_team
-from hbuilder.cli import build_parser
+from support.builders import make_card, make_scoring_config, make_team
+from hbuilder.inputs import default_paths
 from hbuilder.domain.collection import (
     MAX,
     FULLY_SCORABLE_BLOOM,
@@ -29,16 +28,12 @@ from hbuilder.domain.collection import (
     CardLevelCaps,
     CollectionError,
     bloom_multiplier,
-    caps_from_mapping,
     effective_stats,
     _f32,
-    level_cap_for,
     resolve_card_state,
-    resolve_collection,
     stat_basis_from_mapping,
     collection_stats,
     caps_by_rarity_from_mapping,
-    MEMORY_BONUS_CAP_PERMIL,
     MEMORY_BONUS_MAX_POSTERS,
     MEMBER_POWER_UP_CAP_PERMYRIAD,
     PLAYER_LEVEL_MAX,
@@ -227,39 +222,7 @@ def test_a_card_with_a_level_but_no_bloom_is_not_known():
 
 
 # ---------------------------------------------------------------------------
-# 4. The document level
-# ---------------------------------------------------------------------------
-
-
-def test_an_id_not_in_the_dataset_is_warned_about_not_ignored():
-    """How a renamed or removed card shows up. Dropping it silently is how a
-    collection rots against cards.json without anyone noticing."""
-    _states, warnings = resolve_collection(
-        [("real", 5, 1)],
-        {"card_default": UNKNOWN, "cards": {"ghost": {"level": 1, "bloom": 1}}},
-        {"rarity_5-attribute_1": FIVE_STAR},
-    )
-
-    assert any("ghost" in w for w in warnings)
-
-
-def test_an_absent_document_resolves_every_card_as_unknown():
-    """No collection file is a first-class state, the same contract
-    `load_board` has — not an error, and not an invented default."""
-    states, warnings = resolve_collection([("a", 5, 1)], None, None)
-
-    assert states["a"].source == UNKNOWN
-    assert not states["a"].known
-    assert warnings == [] or all("no level caps" in w for w in warnings)
-
-
-def test_a_document_that_is_not_an_object_raises():
-    with pytest.raises(CollectionError):
-        resolve_collection([("a", 5, 1)], ["not", "an", "object"], None)
-
-
-# ---------------------------------------------------------------------------
-# 5. The stat formula
+# 4. The stat formula
 # ---------------------------------------------------------------------------
 
 
@@ -357,7 +320,7 @@ def test_effective_stats_returns_none_on_any_missing_input():
 
 
 # ---------------------------------------------------------------------------
-# 6. Acceptance: the formula reproduces 167 real cards' maxed stats
+# 5. Acceptance: the formula reproduces 167 real cards' maxed stats
 # ---------------------------------------------------------------------------
 
 
@@ -475,12 +438,12 @@ def test_the_formula_is_consistent_with_every_cards_stats_max():
 @pytest.mark.skipif(
     not _CAPS_FILE.exists(), reason="dumps/card_caps.json is gitignored account data"
 )
-def test_caps_from_mapping_joins_the_two_real_tables():
+def test_caps_by_rarity_joins_the_two_real_tables():
     """`card_caps.json` keys level caps by rarity AND attribute but bloom by
     rarity ALONE. This pins the join against the real file, because a join that
     silently produced empty bloom arrays would make every `max` bloom resolve
     to `None` and look like a missing caps file."""
-    caps = caps_from_mapping(json.loads(_CAPS_FILE.read_text(encoding="utf-8")))
+    caps = caps_by_rarity_from_mapping(json.loads(_CAPS_FILE.read_text(encoding="utf-8")))
 
     assert caps, "no groups parsed out of the real card_caps.json"
     for group, entry in caps.items():
@@ -499,8 +462,8 @@ def test_caps_from_mapping_joins_the_two_real_tables():
 def test_the_real_five_star_caps_match_the_fixture_used_above():
     """The fixture at the top of this file is written out rather than loaded,
     so it can drift from the real data it claims to model. This is the tie."""
-    caps = caps_from_mapping(json.loads(_CAPS_FILE.read_text(encoding="utf-8")))
-    real = caps.get("rarity_5-attribute_1")
+    caps = caps_by_rarity_from_mapping(json.loads(_CAPS_FILE.read_text(encoding="utf-8")))
+    real = caps.get("5")
 
     assert real is not None
     assert real.level_by_limit_break == FIVE_STAR.level_by_limit_break
@@ -509,7 +472,7 @@ def test_the_real_five_star_caps_match_the_fixture_used_above():
 
 
 # ---------------------------------------------------------------------------
-# 7. StatBasis — the per-level curve, and the acceptance it makes possible
+# 6. StatBasis — the per-level curve, and the acceptance it makes possible
 # ---------------------------------------------------------------------------
 
 _CURVE = _REPO / "tools" / "recon" / "proxy" / "dumps" / "card_level_curve.json"
@@ -521,7 +484,7 @@ def _basis():
 
 @pytest.mark.skipif(
     not _CURVE.exists(),
-    reason="dumps/card_level_curve.json is gitignored; run tools/recon/proxy/card_level_curve.py",
+    reason="dumps/card_level_curve.json is gitignored; run tools/refresh/card_level_curve.py",
 )
 @pytest.mark.skipif(
     not _ENRICHED.exists(), reason="dumps/cards_enriched.json is gitignored account data"
@@ -651,7 +614,7 @@ def test_member_parameter_reproduces_the_servers_own_figure():
     is frozen at the instant of the capture, while `state/collection.json` is
     re-merged from a live `User/Get` on every refresh, so reading it would make
     every level-up in between read as a model error (the same few cards, with
-    residuals of exactly one level's worth, over and over). `deck_oracle.py`
+    residuals of exactly one level's worth, over and over). The deck oracle
     records each row's capture-time levels, so every row is checked exactly and
     the check cannot rot with the account.
     """
@@ -685,7 +648,7 @@ def test_member_parameter_reproduces_the_servers_own_figure():
 
     assert not undated, (
         "every oracle row must carry the card levels of its own capture — "
-        "regenerate with `proxyenv/Scripts/python deck_oracle.py`; "
+        "regenerate it with the deck oracle (archive/research); "
         f"rows without levels: {undated[:5]}"
     )
     assert checked >= 25, f"expected the captured decks, only checked {checked}"
@@ -697,7 +660,7 @@ def test_member_parameter_reproduces_the_servers_own_figure():
 
 
 # ---------------------------------------------------------------------------
-# 8. collection_stats — and the migration property the wiring depends on
+# 7. collection_stats — and the migration property the wiring depends on
 # ---------------------------------------------------------------------------
 
 # The canonical cards file, read from the CLI's OWN default rather than
@@ -705,7 +668,7 @@ def test_member_parameter_reproduces_the_servers_own_figure():
 # literal, and reading the tool's default is stricter than a second constant
 # because it cannot disagree with the tool. Same pattern as
 # `tests/test_cli_heuristic.py`.
-_CARDS_JSON = _REPO / build_parser().parse_args(["solve"]).cards
+_CARDS_JSON = _REPO / default_paths().cards
 
 
 @pytest.mark.skipif(not _CURVE.exists(), reason="dumps/card_level_curve.json is gitignored")
@@ -790,7 +753,6 @@ def test_bloom_zero_applies_stats_and_is_reported_as_not_scorable():
 
     assert card_id in stats
     assert card_id in report.not_scorable
-    assert "not fully scorable" in report.summary()
 
 
 def test_collection_stats_without_a_curve_changes_nothing_and_says_so():
@@ -804,21 +766,8 @@ def test_collection_stats_without_a_curve_changes_nothing_and_says_so():
 
 
 # ---------------------------------------------------------------------------
-# 9. The CLI seam — `--collection`
+# 8. The CLI seam — `--collection`
 # ---------------------------------------------------------------------------
-
-
-def _solve(capsys, argv):
-    """One `solve` through `cli.main`, returning (exit_code, stdout).
-
-    Driven through pytest's `capsys` rather than `redirect_stdout`, because
-    `main` calls `sys.stdout.reconfigure(encoding="utf-8")` and a bare
-    `StringIO` has no such method — the same way `test_estimate_backstops.py`
-    exercises `cli.main`."""
-    from hbuilder import cli
-
-    code = cli.main(["solve", *argv])
-    return code, capsys.readouterr().out
 
 
 def _top_score(stdout):
@@ -828,142 +777,8 @@ def _top_score(stdout):
     return None
 
 
-@pytest.fixture
-def real_small_pool(tmp_path):
-    """A tmp `owned.json` naming eight REAL card ids from `data/cards.json`.
-
-    The shared fixture pool cannot exercise this seam at all: its cards are
-    `fubuki_01`-style test ids, which appear in no master table, so nothing is
-    restatable and every assertion below would pass vacuously. Real ids keep the pool small
-    enough for an EXACT search, so the comparison is about the wiring rather
-    than about the beam.
-    """
-    cards = json.loads(_CARDS_JSON.read_text(encoding="utf-8"))["cards"]
-    # One card per HOLOMEM: Team rejects any member set repeating a holomem, and
-    # the first eight cards by id share only a handful of characters — a pool
-    # built from them enumerates no team at all and every assertion below would
-    # compare two empty tables.
-    seen, ids = set(), []
-    for card in cards:
-        if card["member"] in seen:
-            continue
-        seen.add(card["member"])
-        ids.append(card["id"])
-        if len(ids) == 8:
-            break
-    owned = tmp_path / "owned.json"
-    owned.write_text(
-        json.dumps({"schema_version": "2", "owned": ids}), encoding="utf-8"
-    )
-    return ["--cards", str(_CARDS_JSON), "--owned", str(owned), "--top", "1"]
-
-
-@pytest.mark.skipif(not _CURVE.exists(), reason="dumps/card_level_curve.json is gitignored")
-@pytest.mark.skipif(not _CAPS_FILE.exists(), reason="dumps/card_caps.json is gitignored")
-def test_a_max_collection_leaves_the_cli_answer_identical(tmp_path, capsys, real_small_pool):
-    """The migration property at the CLI seam, which is where it matters: a
-    `card_default: "max"` document must give the SAME top score as
-    `--no-collection`, because `data/cards.json` already holds maxed stats.
-
-    Run on the small fixture pool so this is an exact search, not a beam — a
-    heuristic run would make the comparison about the beam, not the wiring.
-    """
-    doc = tmp_path / "collection.json"
-    doc.write_text(json.dumps({"card_default": MAX, "cards": {}}), encoding="utf-8")
-    args = real_small_pool
-
-    code_off, off = _solve(capsys, [*args, "--no-collection"])
-    code_max, maxed = _solve(capsys, [*args, "--collection", str(doc)])
-
-    assert code_off == 0 and code_max == 0
-    assert _top_score(off) is not None
-    assert _top_score(maxed) == _top_score(off)
-
-
-@pytest.mark.skipif(not _CURVE.exists(), reason="dumps/card_level_curve.json is gitignored")
-@pytest.mark.skipif(not _CAPS_FILE.exists(), reason="dumps/card_caps.json is gitignored")
-def test_a_low_level_collection_moves_the_cli_answer(tmp_path, capsys, real_small_pool):
-    """The negative control. Without it the test above would pass if
-    `--collection` were ignored entirely."""
-    doc = tmp_path / "collection.json"
-    doc.write_text(
-        json.dumps({"card_default": {"level": 20, "bloom": 4}, "cards": {}}),
-        encoding="utf-8",
-    )
-    args = real_small_pool
-
-    _code_off, off = _solve(capsys, [*args, "--no-collection"])
-    _code_low, low = _solve(capsys, [*args, "--collection", str(doc)])
-
-    assert _top_score(low) != _top_score(off)
-
-
-@pytest.mark.skipif(not _CURVE.exists(), reason="dumps/card_level_curve.json is gitignored")
-def test_an_absent_collection_file_is_not_an_error_and_changes_nothing(tmp_path, capsys, real_small_pool):
-    """First-class state, the same contract `--board` has: an absent document
-    keeps every card at `data/cards.json`'s value and exits 0."""
-    args = real_small_pool
-
-    code_off, off = _solve(capsys, [*args, "--no-collection"])
-    code_absent, absent = _solve(capsys, [*args, "--collection", str(tmp_path / "nope.json")])
-
-    assert code_off == 0 and code_absent == 0
-    assert _top_score(absent) == _top_score(off)
-    assert "COLLECTION: none" in absent
-
-
-@pytest.mark.skipif(not _CURVE.exists(), reason="dumps/card_level_curve.json is gitignored")
-@pytest.mark.skipif(not _CAPS_FILE.exists(), reason="dumps/card_caps.json is gitignored")
-def test_the_json_payload_says_which_collection_the_run_used(tmp_path, capsys, real_small_pool):
-    """A ranking scored against the account's real levels is a different answer
-    from the maxed one, so the payload must carry which — the same reason the
-    `board` key exists."""
-    doc = tmp_path / "collection.json"
-    doc.write_text(json.dumps({"card_default": MAX, "cards": {}}), encoding="utf-8")
-    out = tmp_path / "payload.json"
-
-    code, _ = _solve(
-        capsys,
-        [*real_small_pool, "--collection", str(doc), "--json", str(out)],
-    )
-
-    assert code == 0
-    payload = json.loads(out.read_text(encoding="utf-8"))
-    assert payload["collection"]["loaded"] is True
-    assert payload["collection"]["cards_restated"] > 0
-    assert payload["collection"]["path"] == str(doc)
-
-
-@pytest.mark.skipif(not _CURVE.exists(), reason="dumps/card_level_curve.json is gitignored")
-@pytest.mark.skipif(not _CAPS_FILE.exists(), reason="dumps/card_caps.json is gitignored")
-def test_real_stats_supersedes_the_collection_and_says_so(tmp_path, capsys, real_small_pool):
-    """`--real-stats` wins over `--collection`.
-
-    `--real-stats` carries the account's REAL measured per-card stats; a
-    collection COMPUTES them from level and bloom. Both answer the same
-    question, and a measurement outranks a derivation. Applying the collection
-    on top of `--real-stats` would silently overwrite the measurement and make
-    a mode-B run and a maxed run return byte-identical rankings.
-
-    Pinned here as well as in `test_mode_b.py` because that test asserts the
-    two runs DIFFER, which is a symptom; this one names the rule.
-    """
-    from hbuilder import cli
-
-    doc = tmp_path / "collection.json"
-    doc.write_text(json.dumps({"card_default": MAX, "cards": {}}), encoding="utf-8")
-
-    cards, basis = cli.apply_collection((), str(doc), superseded_by_real_stats=True)
-
-    assert cards == ()
-    assert basis.applied == 0
-    assert basis.superseded_by_real_stats is True
-    assert "supersedes" in basis.lines()[0]
-    assert basis.payload()["superseded_by_real_stats"] is True
-
-
 # ---------------------------------------------------------------------------
-# 10. The two account-level terms: Memory Bonus and Member Power-Up
+# 9. The two account-level terms: Memory Bonus and Member Power-Up
 # ---------------------------------------------------------------------------
 
 
@@ -972,14 +787,13 @@ def test_memory_bonus_follows_the_master_ladder_and_caps_at_eighty():
     with zero violations. The closed form is asserted across the whole domain
     rather than at three sample points."""
     assert MEMORY_BONUS_MAX_POSTERS == 50
-    assert MEMORY_BONUS_CAP_PERMIL == 80
 
     for posters in range(1, MEMORY_BONUS_MAX_POSTERS + 1):
         assert memory_bonus_permil(posters) == min(2 * posters, posters + 30)
 
     # A real account value: 22 posters.
     assert memory_bonus_permil(22) == 44
-    assert memory_bonus_permil(MEMORY_BONUS_MAX_POSTERS) == MEMORY_BONUS_CAP_PERMIL
+    assert memory_bonus_permil(MEMORY_BONUS_MAX_POSTERS) == 80
     # Monotone, which is what makes a slider legible.
     values = [memory_bonus_permil(t) for t in range(0, 51)]
     assert values == sorted(values)
@@ -991,7 +805,7 @@ def test_memory_bonus_clamps_out_of_range_and_keeps_none_distinct_from_zero():
     assert memory_bonus_permil(None) is None
     assert memory_bonus_permil(0) == 0
     assert memory_bonus_permil(-5) == 0
-    assert memory_bonus_permil(9999) == MEMORY_BONUS_CAP_PERMIL
+    assert memory_bonus_permil(9999) == 80
 
 
 @pytest.mark.skipif(not _CURVE.exists(), reason="dumps/card_level_curve.json is gitignored")
@@ -1008,8 +822,8 @@ def test_the_member_power_up_ceiling_is_derived_from_the_roster_not_typed():
     basis = _basis()
     reachable = max_member_power_up_permyriad(basis)
 
-    # 1230 on a 201-card roster (1158 on 192: nine new 5★ cards, +8 each).
-    assert reachable == 1230
+    # 1254 on a 204-card roster (1230 on 201, 1158 on 192: +8 for each new 5★ card).
+    assert reachable == 1254
     assert reachable < MEMBER_POWER_UP_CAP_PERMYRIAD == 5000
 
     # Derived, not typed: recomputing it by hand from the ladders must agree.
@@ -1201,7 +1015,7 @@ def test_member_power_up_base_includes_the_outfit_skill_line():
 
 
 # ---------------------------------------------------------------------------
-# 11. The breakdown carries both terms, and the RANKING does not move
+# 10. The breakdown carries both terms, and the RANKING does not move
 # ---------------------------------------------------------------------------
 
 

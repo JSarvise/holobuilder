@@ -248,15 +248,26 @@ def objective_scorer(score: Callable[[object, list[tuple[int, ...]]], Sequence[f
     members, P takes the largest, the leader slot adds nothing."""
     from hbuilder.domain.marathon import event_objective  # noqa: PLC0415
 
-    if objective == "score":
-        return lambda leader, sets: [float(v) for v in score(leader, sets)]
+    many = getattr(score, "many", None)
 
-    def wrapped(leader, sets):
-        sets = list(sets)
+    def apply(values, sets):
+        if objective == "score":
+            return [float(v) for v in values]
         return [event_objective(value, objective=objective,
                                 live_permil=sum(bonus[i][0] for i in members),
                                 song_permil=max(bonus[i][1] for i in members))
-                for value, members in zip(score(leader, sets), sets)]
+                for value, members in zip(values, sets)]
+
+    def wrapped(leader, sets):
+        sets = list(sets)
+        return apply(score(leader, sets), sets)
+
+    if many is not None:
+        # `score.many` (several leaders' sets in one call) passes through, objective applied
+        def wrapped_many(groups):
+            groups = [(leader, list(sets)) for leader, sets in groups]
+            return [apply(values, sets) for (_l, sets), values in zip(groups, many(groups))]
+        wrapped.many = wrapped_many
     return wrapped
 
 

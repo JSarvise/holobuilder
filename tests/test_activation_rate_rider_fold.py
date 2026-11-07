@@ -19,7 +19,7 @@ from hbuilder.domain.scoring import (
 )
 from hbuilder.domain.unknown import UNKNOWN
 
-from conftest import make_card, make_resolved, make_scoring_config, make_skill, make_team
+from support.builders import make_card, make_resolved, make_scoring_config, make_skill, make_team
 
 _RIDER_MAGNITUDE = 55.0  # +55% activation rate, as on card-00002-5-uniq-0001-00
 _HOST_DURATION = 10.0

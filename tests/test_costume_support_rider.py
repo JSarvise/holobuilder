@@ -26,11 +26,11 @@ from hbuilder.domain.gates import (
     aggregate,
 )
 from hbuilder.domain.scoring import score_card_set, score_fast, score_with_breakdown
-from hbuilder.domain.song import ChartNote, SongChart, score_song_detailed
+from hbuilder.domain.song import ChartNote, OverallPower, SongChart, score_song_detailed
 from hbuilder.domain.team import Team
-from hbuilder.solver.dominance import dominant_leaders, outfit_signature
 
-from conftest import DEFAULT_RUN_STATE, make_card, make_scoring_config, make_skill
+from support.builders import DEFAULT_RUN_STATE, make_card, make_scoring_config, make_skill
+from support.team_reference import effective_skill_instances
 
 CUTE2 = GateCondition(kind="type", target="Cute", count=2)
 CERTAIN = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
@@ -104,10 +104,10 @@ def test_leader_costume_skills_emits_principal_then_rider_and_the_single_costume
     assert not skills1[1].gate.fired
     # a rider-less outfit yields exactly one entry
     assert len(resolve_leader_costume_skills(_leader(None), agg, DEFAULT_RUN_STATE)) == 1
-    # resolve_team_gates and Team.effective_skill_instances() stay in lockstep
+    # resolve_team_gates and the reference `effective_skill_instances` stay in lockstep
     team = _team(RIDER, 2)
     resolved = resolve_team_gates(team, DEFAULT_RUN_STATE)
-    instances = team.effective_skill_instances()
+    instances = effective_skill_instances(team)
     assert len(resolved) == len(instances)
     assert [(r.card_id, r.slot_kind, r.source) for r in resolved] == [
         (i.card_id, i.slot_kind, i.source) for i in instances
@@ -158,7 +158,7 @@ def test_a_leader_without_a_rider_is_bit_identical_to_the_v2_1_pin():
     `make_scoring_config()` defaults): the change must be a no-op for every
     leader whose outfit has no `score_support` rider."""
     from hbuilder.domain.loader import load_cards
-    from conftest import FIXTURE_CARDS_PATH
+    from support.builders import FIXTURE_CARDS_PATH
 
     cards = load_cards(FIXTURE_CARDS_PATH)
     assert not any(
@@ -188,26 +188,13 @@ def test_per_song_total_rises_with_the_rider():
     )
     cfg = _cfg()
     members = _members(cute=2)
-    (with_rider,) = score_song_detailed(members, (_leader(RIDER),), chart, cfg, deck_power=10000.0)
-    (without,) = score_song_detailed(members, (_leader(None),), chart, cfg, deck_power=10000.0)
+    (with_rider,) = score_song_detailed(members, (_leader(RIDER),), chart, cfg, deck_power=OverallPower.fixed(10000.0))
+    (without,) = score_song_detailed(members, (_leader(None),), chart, cfg, deck_power=OverallPower.fixed(10000.0))
     assert with_rider.total_score > without.total_score
     # gate not met: identical
     members1 = _members(cute=1)
-    (a,) = score_song_detailed(members1, (_leader(RIDER),), chart, cfg, deck_power=10000.0)
-    (b,) = score_song_detailed(members1, (_leader(None),), chart, cfg, deck_power=10000.0)
+    (a,) = score_song_detailed(members1, (_leader(RIDER),), chart, cfg, deck_power=OverallPower.fixed(10000.0))
+    (b,) = score_song_detailed(members1, (_leader(None),), chart, cfg, deck_power=OverallPower.fixed(10000.0))
     assert a.total_score == b.total_score
 
 
-# ---------------------------------------------------------------------------
-# dominance
-# ---------------------------------------------------------------------------
-def test_dominance_keeps_two_outfits_that_differ_only_by_the_rider():
-    with_rider = _leader(RIDER)
-    bigger_no_rider = dataclasses.replace(
-        make_card("card-lead2", type_="Cute", member="Lead2",
-                  costume_skill=make_skill("COSTUME", family="stat_up", effect_type="sense",
-                                           magnitude=100.0, condition=CUTE2)),
-    )
-    assert outfit_signature(with_rider) != outfit_signature(bigger_no_rider)
-    kept = dominant_leaders((with_rider, bigger_no_rider))
-    assert {c.id for c in kept} == {"card-lead", "card-lead2"}

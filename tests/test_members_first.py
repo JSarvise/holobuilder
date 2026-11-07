@@ -1,8 +1,7 @@
 """`hbuilder.solver.members_first` — the file-free core of the members-first
-probe, on the SYNTHETIC pool of `test_exact_row` (nine cards, eight holomems,
-a leader with a gated outfit + rider). The leaf is
-`parallel_refine.evaluate(plan_cache=...)`, the same function the probe, the
-exhaustive route and the branch-and-bound call."""
+enumeration, on a SYNTHETIC pool (nine cards, eight holomems, a leader with a
+gated outfit + rider). The leaf is `parallel_refine.evaluate(plan_cache=...)`,
+the same function the web's search scores with."""
 
 from __future__ import annotations
 
@@ -12,14 +11,156 @@ import itertools
 
 import pytest
 
-from hbuilder.domain.card import GateCondition
+from hbuilder.domain.board_plan import node_effect_ids_from_master
+from hbuilder.domain.card import EffectTarget, GateCondition, SlotOverride, SlotRider, Stats
+from hbuilder.domain.song import ChartNote, SongChart
 from hbuilder.domain.team import Team
-from hbuilder.solver import exact_row as er
 from hbuilder.solver import members_first as mf
 from hbuilder.solver import parallel_refine as pr
 
-from conftest import make_skill
-from test_exact_row import CHART, HOL, LEADER, POOL, POOL_IDS, _context
+from support.builders import make_card, make_scoring_config, make_skill
+
+# ---------------------------------------------------------------------------
+# synthetic skill tree (orthogonal adjacency from positions), Connect, bench
+# ---------------------------------------------------------------------------
+_E = {
+    "R-001": "skill_tree_effect-all_parameter_up-100-skill_tree_effect_target-all-set_live_leader",
+    "R-002": ("skill_tree_effect-all_parameter_up_permil_up-100-skill_tree_effect_target"
+              "-all-set_live_leader"),
+    "R-003": ("skill_tree_effect-live_active_skill_effect_up_permil_up-50-skill_tree_effect_target"
+              "-all-set_live_leader"),
+    "B-001": "skill_tree_effect-sense_up-50-skill_tree_effect_target-skill_tree_character-always",
+    "B-002": ("skill_tree_effect-live_active_skill_activation_probability_up_permil_up-30-"
+              "skill_tree_effect_target-skill_tree_character-always"),
+    "B-003": ("skill_tree_effect-live_active_skill_cool_time_shorten_permil_up-40-"
+              "skill_tree_effect_target-skill_tree_character-always"),
+    "G-001": "skill_tree_effect-technique_up-10-skill_tree_effect_target-all-always",
+    "G-002": "skill_tree_effect-all_parameter_up_permil_up-100-skill_tree_effect_target-all-always",
+    "Y-001": ("skill_tree_effect-live_music_score_bonus_permil_up-20-"
+              "skill_tree_effect_target-skill_tree_character-always-solo"),
+}
+_POS = {"S-001": [0, 0], "R-001": [1, 0], "R-002": [2, 0], "R-003": [3, 0],
+        "B-001": [0, 1], "B-002": [0, 2], "B-003": [0, 3],
+        "G-001": [-1, 0], "G-002": [-2, 0], "Y-001": [0, -1], "S-002": [1, 1]}
+_COST = {n: 1 for n in _E}
+_COST.update({"S-001": 0, "S-002": 1})
+SKILLTREE = {
+    "nodes": {n: {"br": n[0], "chr": {}} for n in _POS},
+    "members": [{"chr": f"chr-{i:05d}", "model": "m"} for i in range(1, 12)],
+    "models": {"m": _POS},
+    "extents": {"area-2": [[1, 0], [2, 0]]},
+    "connect": {"eff-2": {"area": "area-2", "levels": [{"v": 1000}]}},
+    "card_connect": {"card-shape": "eff-2"},
+}
+MASTER = [{"group_id": n, "data": {"6": [_E[n]] if n in _E else [], "9": [_COST[n]]}}
+          for n in _POS]
+CONNECT = {
+    "cc-a1": (((1, 0), (2, 0)), 1500), "cc-a2": (((1, 0), (2, 0)), 1500),
+    "cc-b": (((0, 1), (0, 2)), 1200),
+    "cc-c": (((-1, 0), (-2, 0), (1, 0)), 900),
+}
+BENCH = {
+    "Chr9": [{"node": "G-001", "effects": [_E["G-001"]], "connect_multiplier": 1.5},
+             {"node": "G-002", "effects": [_E["G-002"]]}],
+    "Chr2": [{"node": "G-001", "effects": [_E["G-001"]], "connect_multiplier": 2.0}],
+}
+
+
+# ---------------------------------------------------------------------------
+# synthetic cards: every kind of term the bound relaxes
+# ---------------------------------------------------------------------------
+def _sp(mag, dur):
+    return make_skill("SPECIAL", family="score_support", magnitude=mag, duration=dur)
+
+
+def _ac(mag, dur, itv, tier, cond=None, override=None):
+    return make_skill("ACTIVE", magnitude=mag, duration=dur, interval=itv,
+                      probability_tier=tier, condition=cond, override=override)
+
+
+def _pa(mag, effect="performance", target=None, cond=None):
+    return make_skill("PASSIVE", family="stat_up", effect_type=effect, magnitude=mag,
+                      target=target, condition=cond)
+
+
+def _sup(mag, target=None, cond=None):
+    return make_skill("PASSIVE", family="score_support", magnitude=mag, target=target,
+                      condition=cond)
+
+
+CUTE2 = GateCondition(kind="type", target="Cute", count=2)
+GEN1_2 = GateCondition(kind="generation", target="G1", count=2)
+T_CUTE2 = EffectTarget(kind="type", value="Cute", count=2)
+T_GEN2 = EffectTarget(kind="generation", value="G2", count=2)
+T_SELF = EffectTarget(kind="self", value=None, count=None)
+
+
+def _card(no, type_, gens, stats, special, active, passive, costume=None):
+    return make_card(f"card-{no:05d}-5-uniq-{no:04d}-00", member=f"Chr{no}", type_=type_,
+                     generations=frozenset(gens), stats=Stats(*stats), special=special,
+                     active=active, passive=passive, costume_skill=costume)
+
+
+POOL = [
+    _card(1, "Cute", {"G1"}, (3000, 2500, 2600), _sp(30, 10), _ac(50, 10, 25, "High"),
+          _sup(15, target=T_CUTE2),
+          # objective-v2.2: the outfit also carries a `score_support` RIDER on a
+          # DIFFERENT gate (2+ Cute) — the shape of the 11 real rider outfits
+          costume=make_skill("COSTUME", family="stat_up", effect_type="all_stats",
+                             magnitude=20, condition=GEN1_2,
+                             rider=SlotRider(family="score_support", effect_type="score",
+                                             magnitude=25.0, condition=CUTE2, target=None))),
+    _card(2, "Happy", {"G1"}, (2800, 2900, 2400), _sp(40, 8), _ac(45, 9, 30, "Medium", CUTE2),
+          _pa(30, "performance", target=T_GEN2)),
+    _card(3, "Pure", {"G2"}, (2600, 2700, 3000), _sp(25, 12),
+          _ac(30, 11, 20, "Low", override=SlotOverride(magnitude=60, condition=CUTE2)),
+          _pa(25, "all_stats", target=T_SELF, cond=CUTE2)),
+    _card(3, "Pure", {"G2"}, (2900, 2400, 2500), _sp(20, 9), _ac(55, 8, 28, "High"),
+          _sup(20)),                                            # a second Chr3 card
+    _card(4, "Cute", {"G2"}, (2700, 2600, 2800), _sp(35, 11), _ac(40, 10, 22, "Medium"),
+          _pa(35, "sense", target=T_CUTE2)),
+    _card(5, "Cute", {"G1", "G2"}, (2500, 3000, 2600), _sp(28, 10), _ac(60, 7, 35, "Low"),
+          make_skill("ACTIVE", family="activation_rate_up", effect_type="activation_rate",
+                     magnitude=10, duration=8, interval=30, probability_tier="High")),
+    _card(6, "Happy", {"G3"}, (3100, 2400, 2500), _sp(32, 12), _ac(48, 9, 26, "High", GEN1_2),
+          _pa(20, "technique")),
+    _card(7, "Pure", {"G3"}, (2600, 2600, 2600), _sp(22, 8), _ac(52, 12, 24, "Medium"),
+          _sup(12, target=T_GEN2)),
+    _card(8, "Cute", {"G1"}, (2400, 2500, 3200), _sp(38, 10),
+          _ac(35, 10, 21, "High", CUTE2, SlotOverride(magnitude=70, condition=CUTE2)),
+          _pa(40, "performance", target=T_CUTE2, cond=GEN1_2)),
+]
+LEADER = POOL[0]
+
+
+def _chart() -> SongChart:
+    notes = []
+    t = 0.0
+    for i in range(240):
+        notes.append(ChartNote(time=round(t, 3), perfect_permil=100 if i % 7 == 3 else 1000))
+        t += 0.45 if i % 3 else 0.55
+    return SongChart(music_id="m9001", difficulty="EXPERT", difficulty_level=26,
+                     live_score_coefficient_permil=4, notes=tuple(notes),
+                     special_cues=(15.0, 35.0, 55.0, 75.0, 95.0),
+                     singers=("chr-00001",), singer_type="solo")
+
+
+CHART = _chart()
+POOL_IDS = [c.id for c in POOL]
+HOL = tuple(c.member for c in POOL)
+
+
+def _context(*, connect=CONNECT, bench=BENCH) -> pr.RefineContext:
+    cfg = make_scoring_config()
+    cfg = dataclasses.replace(cfg, board=None, active_uptime_model="finite")
+    return pr.RefineContext(
+        cards=tuple(POOL), cfg=cfg, charts=(CHART,), skilltree=SKILLTREE,
+        node_master=MASTER, node_effect_ids=node_effect_ids_from_master(MASTER),
+        connect_cards=connect, bench_characters=bench,
+        name_by_chr={f"chr-{i:05d}": f"Chr{i}" for i in range(1, 12)},
+        flat_budget=12, granted={}, use_plan_cache=True,
+        plan_cache_seed=(LEADER.id, tuple(POOL_IDS[i] for i in (0, 1, 2, 4, 5))))
+
 
 K_MEASURED = 15  # smallest K at which every synthetic leader's optimum is a candidate (found below:
                  # 8 for the gated+rider leader, 15 for the ungated one — 91 sets, so the tiers are coarse)
@@ -100,7 +241,7 @@ def test_gate_of_reads_kind_target_count_or_none():
 def test_tabulate_matches_legal_rosters_and_brute_force_aggregates(world):
     t = world["tables"]
     assert t.n == 91 and t.n == len(world["rosters"])
-    assert world["rosters"] == list(er.legal_rosters(HOL, 5))
+    assert world["rosters"] == list(mf.legal_rosters(HOL, 5))
     assert t.pool_ids == tuple(POOL_IDS)
     assert t.types == ("Cute", "Happy", "Pure")
     for i, idx in enumerate(world["rosters"]):
@@ -114,26 +255,33 @@ def test_tabulate_matches_legal_rosters_and_brute_force_aggregates(world):
         assert t.roster_ids(i) == tuple(POOL_IDS[k] for k in idx)
 
 
+def _gate_satisfied(tables, gate, i: int) -> bool:
+    """Does set `i` fire `gate`, by the predicate `candidate_tiers` filters with?
+    (No gate -> True.)"""
+    f = mf._satisfier(tables, gate)
+    return True if f is None else f(i)
+
+
 def test_gate_count_semantics_type_generation_unknown(world):
     t = world["tables"]
     for i, idx in enumerate(world["rosters"]):
         cards = [POOL[k] for k in idx]
         # a type gate counts members of that type
-        assert mf.gate_satisfied(t, ("type", "Cute", 3), i) == (
+        assert _gate_satisfied(t, ("type", "Cute", 3), i) == (
             sum(1 for c in cards if c.type == "Cute") >= 3)
         # a generation gate counts MEMBERS carrying the generation (card 5
         # carries G1 and G2: it counts once for each), not presence
-        assert mf.gate_satisfied(t, ("generation", "G2", 3), i) == (
+        assert _gate_satisfied(t, ("generation", "G2", 3), i) == (
             sum(1 for c in cards if "G2" in c.generations) >= 3)
-        assert mf.gate_satisfied(t, ("generation", "G1", 1), i) == any(
+        assert _gate_satisfied(t, ("generation", "G1", 1), i) == any(
             "G1" in c.generations for c in cards)
         # no gate, a target no pool card carries, an unknown kind: always on
-        assert mf.gate_satisfied(t, None, i)
-        assert mf.gate_satisfied(t, ("type", "Cool", 1), i)
-        assert mf.gate_satisfied(t, ("generation", "G9", 1), i)
-        assert mf.gate_satisfied(t, ("run_state", "fever", 1), i)
+        assert _gate_satisfied(t, None, i)
+        assert _gate_satisfied(t, ("type", "Cool", 1), i)
+        assert _gate_satisfied(t, ("generation", "G9", 1), i)
+        assert _gate_satisfied(t, ("run_state", "fever", 1), i)
     # the count-3 generation gate is satisfiable but not everywhere
-    sat = [i for i in range(t.n) if mf.gate_satisfied(t, ("generation", "G2", 3), i)]
+    sat = [i for i in range(t.n) if _gate_satisfied(t, ("generation", "G2", 3), i)]
     assert 0 < len(sat) < t.n
 
 
@@ -144,7 +292,7 @@ def _expected_tiers(order, tables, leader, k):
     gate = mf.gate_of(leader)
     top = set(order[:k])
     gate_tier = set() if gate is None else set(
-        [i for i in order if mf.gate_satisfied(tables, gate, i)][:k])
+        [i for i in order if _gate_satisfied(tables, gate, i)][:k])
     own = set([i for i in order if leader.member in
                {POOL[j].member for j in tables.roster(i)}][:k])
     return top, gate_tier, own
@@ -211,7 +359,7 @@ def test_gated_leader_optimum_fires_its_gate(world):
         leader = LEADERS[name]
         best = max(exact[name])
         i = exact[name].index(best)
-        assert mf.gate_satisfied(t, mf.gate_of(leader), i), name
+        assert _gate_satisfied(t, mf.gate_of(leader), i), name
 
 
 # ---------------------------------------------------------------------------
@@ -256,8 +404,7 @@ def test_bare_enumeration_is_leader_agnostic_but_not_the_answer(world):
 # ---------------------------------------------------------------------------
 # incremental update: extend an enumeration to a pool with a new card
 # ---------------------------------------------------------------------------
-# the synthetic POOL carries two cards with ONE id (the second Chr3 card, a
-# test_exact_row quirk); the update keys on ids, so it runs on a copy whose
+# the synthetic POOL carries two cards with ONE id (the second Chr3 card); the update keys on ids, so it runs on a copy whose
 # ids are distinct (POOL_U) with its own plan cache
 POOL_U = [dataclasses.replace(c, id=f"card-{i + 1:05d}-5-uniq-{8000 + i:04d}-00") for i, c in enumerate(POOL)]
 POOL_U_IDS = [c.id for c in POOL_U]

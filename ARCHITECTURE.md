@@ -5,7 +5,7 @@ this account really has?* Everything else feeds that answer or shows it.
 
 ```
  the game's servers + the local install
-        │  tools/recon/proxy/refresh_all.py   (one command, ~30 steps)  
+        │  tools/refresh/refresh_all.py   (one command, ~30 steps)  
         ▼
  tools/recon/proxy/dumps/  +  state/collection.json  +  data/owned.json
         │  read by
@@ -20,10 +20,10 @@ this account really has?* Everything else feeds that answer or shows it.
  tools/local  (setup.cmd, refresh.cmd, start.cmd: a clone on a PC with the game)
 ```
 
-## The data: `tools/recon/proxy`
+## The data: `tools/refresh`
 
-`refresh_all.py` runs every step in order and prints what changed. Each step is one script and can
-be run alone. The main groups:
+`refresh_all.py` runs every step in order, writes into `tools/recon/proxy/dumps/` and prints what
+changed. Each step is one script and can be run alone. The main groups:
 
 | Steps | What they make |
 |---|---|
@@ -53,7 +53,7 @@ they replace, and tests compare the two.
   chosen inside the search.
 - `two_stage.py`: a learned screen (`kernel/surrogate.c`) proposes member sets, the exact scorer
   decides. Every reported number comes from the exact scorer.
-- `tools/recon/proxy/board_plan_solver.py`: the board plan as an integer program (HiGHS).
+- `tools/refresh/board_plan_solver.py`: the board plan as an integer program (HiGHS).
 
 `server.py` serves the pages and a JSON API under `/api/`. It writes only the collection file;
 downloads and caches go through `tools/app/content_store.py` (a test enforces this).
@@ -72,7 +72,7 @@ downloads and caches go through `tools/app/content_store.py` (a test enforces th
 `run_local.py` is what `setup.cmd`, `refresh.cmd` and `start.cmd` call. It does what the desktop
 app does before reading an account, with the PC's own game install in place of the server: it
 finds the account file and the region, writes the client profile, finds the game's build
-constants in the install (`tools/recon/proxy/game_keys.py --find`), and runs `refresh_all.py` and
+constants in the install (`tools/refresh/game_keys.py --find`), and runs `refresh_all.py` and
 `server.py` with those settings. Guide: [docs/run-locally.md](docs/run-locally.md).
 
 Serving your own installer: [docs/self-hosting.md](docs/self-hosting.md).

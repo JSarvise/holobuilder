@@ -7,8 +7,7 @@ Two independent sources, and they agree:
   @ rva `0x5efdb90` folds each effect into one of two accumulators with
   `Math::Max` and returns their sum (`addss xmm7, xmm8`).
 - This rule reproduces the deck screen's Active Skill line across captured
-  decks to rms about 0.4 pp with no free constant. A summed model misses by up
-  to about 14 pp and fails an order test that no free constant can survive.
+  decks to rms about 0.4 pp with no free constant.
 
 The two buckets are **ACTIVE and SPECIAL**, discriminated by the plain byte
 `LiveSkillEffectData.isSpecialSkill` (`cmp byte [rsp+0x38], 0` at `0x5efddf1`).
@@ -19,9 +18,9 @@ stub returning `0.0f`, so `max_SPECIAL v(e)` is structurally zero and a SPECIAL
 *multiplies* the ACTIVE maximum instead of adding to it — see
 `tests/test_special_collapse.py`.
 
-Every number here is derived by hand in its test's own docstring, and each
-asserts against the summed answer too. Direction-only assertions would pass
-under both rules for a single-ACTIVE team, where the two agree exactly.
+Every number here is derived by hand in its test's own docstring. Where two
+effects can be live at once, the test also asserts the total is NOT the plain
+sum of the pieces, so a regression to summing fails.
 """
 
 from __future__ import annotations
@@ -39,9 +38,9 @@ from hbuilder.domain.scoring import (
 )
 from hbuilder.domain.scoring_models import ACTIVE_STACKING_MODELS
 
-from conftest import make_card, make_scoring_config, make_skill, make_team
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
-# conftest's STATS baseline is 300 total per card, so five members are 1500.0.
+# the builders' STATS baseline is 300 total per card, so five members are 1500.0.
 BASE_STAT_SUM = 1500.0
 
 
@@ -96,21 +95,18 @@ def _team(*scorers):
     return make_team([make_card("outfit"), *scorers, *filler])
 
 
-def test_a_single_active_is_identical_under_both_rules():
-    """The two rules can only disagree when two effects can be live at once.
-    One ACTIVE at magnitude 40, at the finite-window occupancy
+def test_a_single_active_reduces_to_its_own_term():
+    """One ACTIVE at magnitude 40, at the finite-window occupancy
     `uptime 118.8/128.8 = 0.922360248447205` (checks at 10, 20, ... 120, the
     last window running past the end of the run) times the Medium tier 0.46,
     i.e. 297/700 = 0.4242857142857143:
 
         0.40 * 0.4242857142857143 = 0.1697142857142857
 
-    so 1500 * 1.1697142857142857 = 1754.571428571429 either way — `==`, because
-    `E[max]` over one term must reduce to that term exactly, not merely
-    closely."""
+    so 1500 * 1.1697142857142857 = 1754.571428571429 — `E[max]` over one term
+    reduces to that term."""
     team = _team(_scorer("a", 40.0))
 
-    assert score_fast(team, _cfg("max")) == score_fast(team, _cfg("sum"))
     assert score_fast(team, _cfg("max")) == pytest.approx(1754.571428571429)
     # 1776.0 is the answer on the steady-state duty cycle:
     # uptime `min(1, 10/10) = 1.0` and so `0.40 * 0.46 = 0.184`.
@@ -136,11 +132,10 @@ def test_two_actives_take_the_expected_maximum_not_the_sum():
     team = _team(_scorer("a", 40.0), _scorer("b", 30.0))
 
     assert score_fast(team, _cfg("max")) == pytest.approx(1864.4917346938776)
-    assert score_fast(team, _cfg("sum")) == pytest.approx(1945.5)
-    # 1887.78 and 1983.0 are the pair on the steady-state duty
-    # cycle's occupancy of 0.46 (pool 0.25852, sum 0.322).
+    assert score_fast(team, _cfg("max")) != pytest.approx(1945.5)
+    # 1887.78 is the answer on the steady-state duty cycle's occupancy of
+    # 0.46 (pool 0.25852).
     assert score_fast(team, _cfg("max")) != pytest.approx(1887.78)
-    assert score_fast(team, _cfg("sum")) != pytest.approx(1983.0)
 
 
 def test_the_pool_is_independent_of_the_order_the_actives_appear_in():
@@ -392,15 +387,15 @@ def test_two_buckets_take_two_maxima_and_add_them_at_the_model_level():
     does not ask for it."""
     model = ACTIVE_STACKING_MODELS["max"]
     terms = [
-        ("x", 0.40, 0.46, False),
-        ("y", 0.40, 0.46, False),
-        ("x", 0.30, 0.46, False),
-        ("y", 0.30, 0.46, False),
+        ("x", 0.40, 0.46, 0, False),
+        ("y", 0.40, 0.46, 0, False),
+        ("x", 0.30, 0.46, 0, False),
+        ("y", 0.30, 0.46, 0, False),
     ]
 
     assert model.combine(terms) == pytest.approx(0.51704)
     one_bucket = model.combine(
-        [(SCORE_BUCKET_ACTIVE, m, o, x) for _b, m, o, x in terms]
+        [(SCORE_BUCKET_ACTIVE, m, o, 0, x) for _b, m, o, _i, x in terms]
     )
     assert one_bucket == pytest.approx(0.34533083)
     assert one_bucket < model.combine(terms)
@@ -422,13 +417,12 @@ def test_the_independence_walk_is_the_exclusive_free_special_case_bit_for_bit():
         classic += magnitude * occupancy * free
         free *= 1.0 - occupancy
 
-    assert model.combine([("A", m, o, False) for m, o in pairs]) == classic
+    assert model.combine([("A", m, o, 0, False) for m, o in pairs]) == classic
 
 
-def test_an_all_exclusive_bucket_is_the_plain_sum_and_the_summed_model_agrees():
+def test_an_all_exclusive_bucket_is_the_plain_sum():
     """The other limit. Over windows that never overlap, the time-average of a
-    maximum IS the sum of the pieces — nothing ever competes — so the `max`
-    model and the `sum` model return the same float:
+    maximum IS the sum of the pieces — nothing ever competes:
 
         0.50*0.10 + 0.40*0.10 + 0.30*0.10 = 0.12
 
@@ -436,12 +430,10 @@ def test_an_all_exclusive_bucket_is_the_plain_sum_and_the_summed_model_agrees():
     `0.05 + 0.04*0.9 + 0.03*0.81 = 0.1103`, a **-8.08 %** discount for
     collisions the chart forbids."""
     max_model = ACTIVE_STACKING_MODELS["max"]
-    sum_model = ACTIVE_STACKING_MODELS["sum"]
-    terms = [("S", 0.50, 0.10, True), ("S", 0.40, 0.10, True), ("S", 0.30, 0.10, True)]
+    terms = [("S", 0.50, 0.10, 0, True), ("S", 0.40, 0.10, 0, True), ("S", 0.30, 0.10, 0, True)]
 
     assert max_model.combine(terms) == pytest.approx(0.12)
-    assert max_model.combine(terms) == pytest.approx(sum_model.combine(terms))
-    independent = [(b, m, o, False) for b, m, o, _x in terms]
+    independent = [(b, m, o, 0, False) for b, m, o, _i, _x in terms]
     assert max_model.combine(independent) == pytest.approx(0.1103)
     assert max_model.combine(terms) != pytest.approx(0.1103)
 
@@ -469,12 +461,12 @@ def test_a_bucket_mixing_exclusive_and_independent_terms_is_exact():
     be 1, and `P(nothing live) = (1 - 0.10 - 0.10) * (1 - 0.30) = 0.56`, which
     with `0.10 + 0.27 + 0.07 = 0.44` it is."""
     model = ACTIVE_STACKING_MODELS["max"]
-    terms = [("S", 0.50, 0.10, True), ("S", 0.45, 0.30, False), ("S", 0.40, 0.10, True)]
+    terms = [("S", 0.50, 0.10, 0, True), ("S", 0.45, 0.30, 0, False), ("S", 0.40, 0.10, 0, True)]
 
     assert model.combine(terms) == pytest.approx(0.1995)
     assert 0.10 + 0.27 + 0.07 + (1.0 - 0.10 - 0.10) * (1.0 - 0.30) == pytest.approx(1.0)
     # Treating all three as independent gives 0.50*0.10 + 0.45*0.30*0.90 + 0.40*0.10*0.90*0.70 = 0.1967.
-    all_independent = [(b, m, o, False) for b, m, o, _x in terms]
+    all_independent = [(b, m, o, 0, False) for b, m, o, _i, _x in terms]
     assert model.combine(all_independent) == pytest.approx(0.1967)
     assert model.combine(terms) != pytest.approx(0.1967)
 

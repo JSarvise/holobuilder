@@ -1,13 +1,13 @@
 """Coverage of the three attribution states (applied,
 gate_not_met, data_missing) on `SkillContribution`, contribution ordering
-against `Team.effective_skill_instances()`, `SkillContribution`/
+against the reference `effective_skill_instances`, `SkillContribution`/
 `ScoreBreakdown`'s declared field shape, `team_taint`'s union-over-cards
 completeness indicator, and the fast-path/full-attribution parity guarantee
-across all four model combinations plus a run-state flip.
+under the shipped scoring models plus a run-state flip.
 
 Test names state the exact behavior each one pins, following
 `tests/test_gates.py`'s convention. Card/skill/team fixtures come from
-`tests/conftest.py`; the shipped six-card fixture team (`nene_01` as
+`tests/support/builders.py`; the shipped six-card fixture team (`nene_01` as
 leader) comes from `tests/fixtures/cards.json` via `load_cards`/`build_team`,
 mirroring `tests/test_scoring_ev.py`'s own end-to-end check.
 """
@@ -29,7 +29,6 @@ from hbuilder.domain.gates import RunState
 from hbuilder.domain.loader import load_cards
 from hbuilder.domain.schema import TEAM_WIDE_TARGET_KIND
 from hbuilder.domain.scoring import (
-    CONTRIBUTION_STATES,
     ScoreBreakdown,
     SkillContribution,
     score_fast,
@@ -41,7 +40,8 @@ from hbuilder.domain.scoring_models import ACTIVATION_RATE_MODELS, STACKING_MODE
 from hbuilder.domain.team import build_team
 from hbuilder.domain.unknown import UNKNOWN
 
-from conftest import FIXTURE_CARDS_PATH, make_card, make_scoring_config, make_skill, make_team
+from support.builders import FIXTURE_CARDS_PATH, make_card, make_scoring_config, make_skill, make_team
+from support.team_reference import effective_skill_instances
 
 _FIXTURE_MEMBER_IDS = ["fubuki_01", "mio_01", "matsuri_01", "polka_01", "lamy_01"]
 
@@ -158,7 +158,7 @@ def test_contributions_appear_in_effective_skill_instances_order():
 
     breakdown = score_with_breakdown(team, cfg)
 
-    instances = team.effective_skill_instances()
+    instances = effective_skill_instances(team)
     assert [c.card_id for c in breakdown.contributions] == [i.card_id for i in instances]
     assert [c.slot_kind for c in breakdown.contributions] == [i.slot_kind for i in instances]
     # The activation_rate_up skill (fubuki_01's ACTIVE) is folded into
@@ -244,8 +244,8 @@ def test_every_contribution_state_is_one_of_the_declared_contribution_states():
 
     breakdown = score_with_breakdown(team, cfg)
 
-    assert set(CONTRIBUTION_STATES) == {"applied", "gate_not_met", "data_missing"}
-    assert all(c.state in CONTRIBUTION_STATES for c in breakdown.contributions)
+    assert all(c.state in {"applied", "gate_not_met", "data_missing"}
+               for c in breakdown.contributions)
 
 
 def test_skill_contribution_and_score_breakdown_carry_the_full_declared_field_set():
@@ -610,7 +610,7 @@ def test_a_riders_attribution_fields_never_change_rate_weight_or_weighted_rate()
     assert c_with.weighted_rate == c_without.weighted_rate
 
 
-# --- fast/attribution parity across all four model combinations -------------
+# --- fast/attribution parity under the shipped models ------------------------
 
 
 def _cfg_for(stacking_key: str, activation_rate_key: str, *, run_state: RunState | None = None):
@@ -624,27 +624,9 @@ def _cfg_for(stacking_key: str, activation_rate_key: str, *, run_state: RunState
     return dataclasses.replace(cfg, **overrides)
 
 
-def test_fast_and_breakdown_totals_agree_under_additive_stacking_with_pp_activation_rate():
-    team = _shipped_fixture_team()
-    cfg = _cfg_for("additive", "pp")
-    assert score_fast(team, cfg) == pytest.approx(score_with_breakdown(team, cfg).total_score)
-
-
 def test_fast_and_breakdown_totals_agree_under_additive_stacking_with_multiplicative_activation_rate():
     team = _shipped_fixture_team()
     cfg = _cfg_for("additive", "multiplicative")
-    assert score_fast(team, cfg) == pytest.approx(score_with_breakdown(team, cfg).total_score)
-
-
-def test_fast_and_breakdown_totals_agree_under_multiplicative_stacking_with_pp_activation_rate():
-    team = _shipped_fixture_team()
-    cfg = _cfg_for("multiplicative", "pp")
-    assert score_fast(team, cfg) == pytest.approx(score_with_breakdown(team, cfg).total_score)
-
-
-def test_fast_and_breakdown_totals_agree_under_multiplicative_stacking_with_multiplicative_activation_rate():
-    team = _shipped_fixture_team()
-    cfg = _cfg_for("multiplicative", "multiplicative")
     assert score_fast(team, cfg) == pytest.approx(score_with_breakdown(team, cfg).total_score)
 
 

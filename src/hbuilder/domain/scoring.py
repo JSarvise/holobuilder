@@ -1,21 +1,22 @@
 """Stage three of the three-stage team evaluation (see `domain/gates.py`'s
 module docstring): reduce resolved skills into a scored float.
 
-Every EV function here returns an **average per-run rate**, never a point
-total and never a point-in-time indicator — no song-length
-parameter exists anywhere in this module, and none should ever be added:
-song length cancels out of every team-vs-team comparison (see also
-`scoring_config.REFERENCE_RUN_SECONDS`).
+The song-agnostic scorers (`score_fast`, `score_card_set`, `score_with_breakdown`,
+`deck_screen_unit_score`) return an **average per-run rate**, never a point
+total: song length cancels out of every team-vs-team comparison. The one
+duration they use is the finite ACTIVE reference window
+(`_finite_window_uptime`, `scoring_config.REFERENCE_RUN_SECONDS`). The
+per-song scorer that does take a chart is `song.py`.
 """
 
 from __future__ import annotations
 
-import itertools, math  # noqa: E401
+import math  # noqa: E401
 from dataclasses import dataclass, replace
 from functools import cache
 from typing import Callable, Mapping
 
-from hbuilder.domain import board, targets
+from hbuilder.domain import targets
 from hbuilder.domain.collection import _f32, member_power_up, memory_bonus_per_stat
 from hbuilder.domain.card import Card, EffectTarget, SlotRider
 from hbuilder.domain.gates import (
@@ -37,7 +38,6 @@ from hbuilder.domain.schema import (
 from hbuilder.domain.scoring_config import (
     REFERENCE_RUN_SECONDS,
     SLOT_ORDER_RULES,
-    ActiveStackingModel,
     ScoringConfig,
 )
 from hbuilder.domain.team import Team
@@ -94,10 +94,6 @@ POOL_BY_EFFECT_TYPE: dict[str, str] = {
     "judgment": "score",
     "activation_rate": "none",
 }
-
-
-def _route(effect_type: str) -> str:
-    return POOL_BY_EFFECT_TYPE[effect_type]
 
 
 # `score_support` does NOT add to the score pool.
@@ -222,13 +218,6 @@ _REQUIRED_KNOWN_FIELDS: tuple[str, ...] = (
     "magnitude",
 )
 
-# The three states a per-skill contribution can land in. `applied` is
-# a real (possibly zero) contribution; `gate_not_met` and `data_missing`
-# are both zero but for structurally different, distinguishable reasons —
-# neither is ever reported as if it were the other.
-CONTRIBUTION_STATES: tuple[str, ...] = ("applied", "gate_not_met", "data_missing")
-
-
 def _first_missing_field(resolved: ResolvedSkill) -> str | None:
     """The name of the first field this skill needs known before it may
     contribute at all but which is `UNKNOWN`, or `None` if every
@@ -337,7 +326,7 @@ def _finite_window_uptime(duration: float, interval: float) -> float:
     pair `data/cards.json` carries, and never above it. The loss grows with `interval`,
     which is what a one-cooldown dead zone predicts and what no ratio can express: two
     skills with equal duty and different cooldowns are NOT equally up.
-    `tools/recon/proxy/active_lattice.py` is the harness.
+    The per-song scorer (`song.py`) is the reference it is measured against.
 
     ⚠ **This expression lands at about 76 % .. 93 % of the ratio, so on a single skill
     it slightly UNDER-shoots that truth (about 96 % of it on average).** Over a real
@@ -734,8 +723,7 @@ def _resolve_skill(
     — never coerced through `float(UNKNOWN)`, and never confused
     with each other by a caller that only wants the rate. Dispatches
     through `EV_FUNCTIONS[resolved.skill.kind]`, never `resolved.slot_kind`
-    (the lowercase `costume` string `Team.effective_skill_instances()`
-    emits, which is not an `EV_FUNCTIONS` key)."""
+    (the lowercase `costume` string, which is not an `EV_FUNCTIONS` key)."""
     slot = resolved.skill
     pool = _pool_for(resolved)
     # An activation-rate skill structurally never receives the team
@@ -1028,7 +1016,6 @@ def _score_up_pool(
     skill_effect_up: float = 0.0,
     ratio_owners: list[str | None] | None = None,
     boost_targets: list[frozenset[str] | None] | None = None,
-    ratio_model: ActiveStackingModel | None = None,
 ) -> float:
     """`SkillScoreUpRatio` -- the team's whole skill-effect Score UP as ONE rate.
 
@@ -1118,7 +1105,7 @@ def _score_up_pool(
     **3. The `E[A]` marginal.** A steady-state duty cycle `min(1,
     duration/interval) x P` over-states the exact note-weighted `E[A]` by 7 % to
     16 % per team. The over-statement is entirely in the MARGINAL, not in the
-    dependence (`tools/recon/proxy/active_lattice.py`, a real card pool x every
+    dependence (a real card pool x every
     chart):
 
         replace only the marginal (finite window, walk untouched)
@@ -1156,22 +1143,14 @@ def _score_up_pool(
 
     `ratio_entries` and `boost_entries` are both
     `(bucket, weighted_magnitude_rate, occupancy, interval, exclusive)` in
-    `Team.effective_skill_instances()` order. Non-score-up score-pool
+    `resolve_team_gates` order. Non-score-up score-pool
     contributions never come here; they stay individual rates combined by
     `stacking_model` in the caller.
 
     Both scoring drivers call THIS function rather than each re-implementing
     the arithmetic, so bit-identical parity holds by construction rather than
     by two copies staying in step."""
-    # `ratio_model` is the RATIO population's combiner and defaults to the
-    # config's, so the ordinary call is unchanged down to the object identity.
-    # It exists for `song._ratio_at`, which alone holds terms whose `occupancy`
-    # is an instantaneous probability and can therefore ask a different question
-    # of them (an exclusive co-firing hypothesis). `B` is NOT affected:
-    # the boost population keeps the max-of-two-maxima either way,
-    # because the hypothesis is about ACTIVEs sharing one activation roll, not
-    # about how a Score Support applies.
-    combine_ratio = (ratio_model or cfg.active_stacking_model).combine
+    combine_ratio = cfg.active_stacking_model.combine
     # Only the magnitude (index 1) is scaled; `occupancy`, `interval`, `exclusive`
     # and the trailing `(duration, probability)` pair pass via `*rest`.
     if boost_targets is None or all(t is None for t in boost_targets):
@@ -1521,90 +1500,11 @@ def _free_stat_sum(
     return _stat_sum(members, stat_entries, cfg, [entry[2] for entry in stat_entries]), None
 
 
-def _best_order_stat_sum(
-    members: tuple[Card, ...],
-    stat_entries: list,
-    cfg: ScoringConfig,
-    orderings_cache: dict | None = None,
-) -> tuple[float, tuple[str, ...] | None]:
-    """The alternative rule, kept runnable: `max` over the 120 slot orderings,
-    under a first-`count`-in-slot-order recipient rule. Captured decks show the
-    game does NOT pick recipients this way (they are chosen by stat, independent
-    of slot order). Selected only under `slot_order_rule="best_order"`; the
-    default is `free`.
-
-    Returns `(stat_sum, member_order)`, where `member_order` is the member ids
-    in the slot order that achieved the maximum — a tool that recommends a team
-    without its slot order is handing the player the median case instead of
-    the best one. It is `None` when no entry binds, which is the honest report:
-    every ordering scores the same, so naming one would imply a recommendation
-    the model did not make.
-
-    Ties go to the first ordering `itertools.permutations(members)` reaches
-    (strict `>`), and `members` is itself in a caller-fixed order, so the
-    reported order is deterministic across runs.
-
-    `orderings_cache`, when supplied, memoises the ordering enumeration by the
-    varying entries' `(target, self_card_id)` signature. `score_card_set` passes
-    one because its per-leader tail re-enters this function once per candidate
-    leader over the *same* member set — and the leader contributes at most its
-    own outfit skill, so the signature is nearly always identical across all of
-    them. That turns a per-leader 120-permutation walk into a per-set one. The
-    cache is created per `score_card_set` call and never outlives it: the
-    enumeration depends on `members`, which is fixed inside one call and
-    different in the next."""
-    varying = _order_varying_indices(stat_entries, members)
-    if not varying:
-        # Provably identical to `_free_stat_sum`, not merely close — see
-        # `_order_varying_indices`. Sharing the call is what makes it
-        # bit-identical.
-        return _free_stat_sum(members, stat_entries, cfg)
-
-    signature = tuple((stat_entries[index][3], stat_entries[index][4]) for index in varying)
-    orderings = None if orderings_cache is None else orderings_cache.get(signature)
-    if orderings is None:
-        # Distinct recipient-set tuples, each mapped to the FIRST slot ordering
-        # that produces it. Many of the 120 orderings induce the same tuple —
-        # only the relative order of each predicate's own matchers is read — and
-        # the objective is a function of the tuple alone, so `_stat_sum` runs
-        # once per distinct tuple rather than 120 times.
-        distinct: dict[tuple, tuple[str, ...]] = {}
-        for ordering in itertools.permutations(members):
-            key = tuple(
-                _ordered_target_card_ids(
-                    stat_entries[index][3],
-                    stat_entries[index][4],
-                    ordering,
-                    cfg.target_under_supply,
-                )
-                for index in varying
-            )
-            if key not in distinct:
-                distinct[key] = tuple(card.id for card in ordering)
-        orderings = tuple(distinct.items())
-        if orderings_cache is not None:
-            orderings_cache[signature] = orderings
-
-    base = [entry[2] for entry in stat_entries]
-    best_value: float | None = None
-    best_order: tuple[str, ...] | None = None
-    for recipient_key, member_order in orderings:
-        recipients = list(base)
-        for slot, index in enumerate(varying):
-            recipients[index] = recipient_key[slot]
-        value = _stat_sum(members, stat_entries, cfg, recipients)
-        if best_value is None or value > best_value:
-            best_value = value
-            best_order = member_order
-    return best_value, best_order
-
-
 # The one place a slot-order rule name becomes an implementation. `scoring.py`
 # never compares `cfg.slot_order_rule` for equality anywhere else;
-# `scoring_config.SLOT_ORDER_RULES` names the same two keys and this module
+# `scoring_config.SLOT_ORDER_RULES` names the same keys and this module
 # asserts the two agree at import.
 SLOT_ORDER_RESOLVERS: dict[str, SlotOrderResolver] = {
-    "best_order": _best_order_stat_sum,
     "free": _free_stat_sum,
 }
 
@@ -1768,7 +1668,7 @@ def _score_team(
     no `SkillContribution` is allocated anywhere — the fast
     path allocates nothing extra. When `True`, every resolved skill
     instance is retained as a `SkillContribution` in
-    `Team.effective_skill_instances()` order — including an
+    `resolve_team_gates` order — including an
     `activation_rate_up` skill, whose own contribution was already folded
     into `team_rate_up` and therefore still never joins `stat_rates`/
     `score_rates` even in the breakdown path — and a `ScoreBreakdown` is
@@ -2160,7 +2060,10 @@ class SkillContribution:
     `GatePredicate` (`card_id`, `slot_kind`, `source`, `family`) rather
     than inventing parallel names.
 
-    `state` is one of `CONTRIBUTION_STATES`. The `gate_*` fields are set
+    `state` is one of three: `"applied"` is a real (possibly zero)
+    contribution; `"gate_not_met"` and `"data_missing"` are both zero but for
+    structurally different reasons, and neither is reported as the other.
+    The `gate_*` fields are set
     from the skill's `GateResolution` and its `GatePredicate` whenever the
     skill is gated, and are all `None` when it is not (an ungated skill).
     A gate whose actual team count exactly equals its threshold is
@@ -2246,7 +2149,7 @@ class ScoreBreakdown:
     `total_score = effective_stat_sum * (1 + combined_score_rate)
                                       * (1 + board_score_rate)`.
 
-    `contributions` is in `Team.effective_skill_instances()` order, never
+    `contributions` is in `resolve_team_gates` order, never
     reordered by contribution value — two skills contributing equal
     amounts keep a specified, stable position. `incomplete_skills` is
     `team_taint(team)`, carried on the result rather than reconstructed
@@ -2391,7 +2294,7 @@ class ScoreBreakdown:
 #
 # The shipped point is `2.03734`. It is chosen for STABILITY, not because it is
 # special: a midpoint moves every time the interval narrows, a point that stays
-# inside does not, and `deck_oracle.py` uses the same value so the two agree by
+# inside does not, and the deck-screen oracle uses the same value so the two agree by
 # construction.
 # ⚠ `2.03734` is ALSO the 5-decimal round number, and the interval contains it.
 # Do not read that as identification: a random band of this width contains a
@@ -2626,7 +2529,7 @@ def score_card_set(
     leader-invariant for exactly the same reason `weighted_rate` is.
 
     **Per-leader tail.** For each candidate leader, the cached entries are
-    walked in exactly `Team.effective_skill_instances()` order — that
+    walked in exactly `resolve_team_gates` order — that
     leader's normal slots in `SKILL_SLOT_KINDS` order, then that leader's
     costume entry if present, then the other five cards' normal slots in
     `cards` order — routed by the cached pool into a stat-rate list, a
@@ -2640,7 +2543,7 @@ def score_card_set(
     deliberately not done here, because float addition and multiplication
     are not associative, so an incrementally folded total would not be
     bit-identical to recomputing `combine()` over all rates in
-    `effective_skill_instances()` order. Cross-run determinism
+    `resolve_team_gates` order. Cross-run determinism
     would survive incremental folding — same code, same order every time —
     but parity with `score_fast`/`score_with_breakdown` would not, since both
     recompute via `_score_team`. The cost of
@@ -2872,7 +2775,7 @@ def score_card_set(
         ratio_owners: list[str | None] = []
         boost_targets: list[frozenset[str] | None] = []
 
-        # Exactly `Team.effective_skill_instances()` order: the leader's
+        # Exactly `resolve_team_gates` order: the leader's
         # outfit skill first, then every member's normal slots in member
         # order. The leader's OWN normal slots are never emitted — if
         # its card is also a member, they arrive through the member loop
@@ -2903,7 +2806,7 @@ def score_card_set(
                     score_rates.append(weighted_rate)
                 elif _score_up_implements_boost(resolved):
                     # The SPECIAL collapse, routed exactly as `_score_team`
-                    # routes it and in the same `effective_skill_instances()`
+                    # routes it and in the same `resolve_team_gates`
                     # order, which is what keeps the two bit-identical.
                     boost_entries.append(bucket_term)
                     boost_targets.append(None)
@@ -2962,29 +2865,6 @@ def score_card_set(
         LeaderScore(leader_id=leader.id, total_score=scores[index])
         for index, leader in enumerate(leaders)
     )
-
-
-def team_taint(team: Team) -> tuple[str, ...]:
-    """The team-level completeness indicator, derived *without
-    scoring*: for every card in `Team.members`, each of that card's
-    `Card.unknown_fields()` dotted paths joined to the card id, in card
-    order then field order — mirroring `loader.py`'s `completeness_report`
-    at team scope rather than reimplementing the taint primitive.
-
-    A non-empty result is data for the output layer, never a score: a team
-    this function flags must not be silently scored as if every field were
-    known — "this card's data is incomplete" and "do not pull this card" are
-    opposite messages, and rendering the former as the latter is the failure
-    this exists to prevent. Discarding which field was missing here would make
-    that report impossible to build later.
-
-    Called once when building a `ScoreBreakdown`, never inside pass 2, and
-    never from `score_fast`."""
-    fields: list[str] = []
-    for card in team.members:
-        for field in card.unknown_fields():
-            fields.append(f"{card.id}:{field}")
-    return tuple(fields)
 
 
 # Defined at module end (after `_score_team`, which calls it). Python binds the
@@ -3139,7 +3019,7 @@ def _lattice_entry(
     """`_bucket_entry` plus the trailing `(duration, probability)` lattice
     elements — the 7-tuple `ActiveTerm` the two pool builders (`_score_team`,
     `score_card_set` via `_bucket_term`) emit. `_bucket_entry` itself keeps its
-    5-tuple shape for its other readers (`song.py`, `exact_row.py`, the shape
+    5-tuple shape for its other readers (`song.py`, the shape
     tests)."""
     return _bucket_entry(resolved, cfg, team_rate_up, weight, state) + _active_lattice(
         resolved, cfg, team_rate_up, state
@@ -3172,13 +3052,15 @@ def _first_missing_field(resolved: ResolvedSkill) -> str | None:  # noqa: F811
     return hit[1]
 
 
-_team_taint_reference = team_taint
 _card_taint_cache: dict[int, tuple] = {}
 
 
-def team_taint(team: Team) -> tuple[str, ...]:  # noqa: F811
-    """`_team_taint_reference`, with each card's entries built once per card
-    OBJECT — they are a function of the (frozen) card alone."""
+def team_taint(team: Team) -> tuple[str, ...]:
+    """The team-level completeness indicator, derived *without scoring*: every
+    member's `Card.unknown_fields()` dotted paths joined to the card id, in card
+    order then field order. Non-empty means data the output layer reports, never
+    a score. Each card's entries are built once per card OBJECT (a function of the
+    frozen card alone)."""
     fields: list[str] = []
     for card in team.members:
         hit = _card_taint_cache.get(id(card))

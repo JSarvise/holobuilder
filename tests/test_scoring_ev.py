@@ -5,7 +5,7 @@ fast-path invariants (member-order independence, activation-rate-up
 folding). Test names state the exact defect or contract each one pins,
 following `tests/test_gates.py`'s convention.
 
-Card/skill/team fixtures come from `tests/conftest.py`, extended with
+Card/skill/team fixtures come from `tests/support/builders.py`, extended with
 non-`None` `duration`/`interval`/`probability_tier`/`magnitude` values that
 `tests/test_gates.py`'s own builders deliberately omit.
 """
@@ -23,7 +23,6 @@ from hbuilder.domain.gates import GatePredicate, GateResolution, resolve_team_ga
 from hbuilder.domain.loader import load_cards
 from hbuilder.domain.schema import COSTUME_SLOT_KIND
 from hbuilder.domain.scoring import (
-    CONTRIBUTION_STATES,
     EV_FUNCTIONS,
     ScoringError,
     _effective_magnitude,
@@ -41,7 +40,7 @@ from hbuilder.domain.unknown import UNKNOWN
 
 import hbuilder.domain.scoring as scoring_module
 
-from conftest import (
+from support.builders import (
     DEFAULT_RUN_STATE,
     FIXTURE_CARDS_PATH,
     make_card,
@@ -439,7 +438,6 @@ def test_known_zero_magnitude_is_applied_state_not_confused_with_missing_data():
     assert rate == 0.0
     assert state == "applied"
     assert missing_field is None
-    assert set(CONTRIBUTION_STATES) == {"applied", "gate_not_met", "data_missing"}
 
 
 # --- Team-level invariants (fast path) --------------------------------------
@@ -581,7 +579,7 @@ def test_shipped_fixture_team_with_mio_01_null_active_magnitude_scores_finite_po
 def _targeted_stat_up_cards():
     """Six cards built so the targeted subset (top 2 by performance among
     the three Cute cards) and the untargeted remainder hold DIFFERENT
-    values of the targeted stat (performance) — a uniform conftest.STATS
+    values of the targeted stat (performance) — a uniform builders.STATS
     team passes under both a team-wide and a targeted formula and pins
     nothing. `target_member_low` is Cute (so it
     would qualify by type) but is NOT among the top 2 by performance, and

@@ -6,36 +6,14 @@ the doc the Optimizer's board viewer draws. Skips when the gitignored dumps are 
 from __future__ import annotations
 
 import json
-import socket
-import threading
 import urllib.error
 import urllib.request
 
 import pytest
 
-import server as web_server
 
 _TEAM = ["card-03001-5-uniq-0033-00", "card-00034-5-uniq-0027-00", "card-00031-5-uniq-0025-00",
          "card-00023-5-uniq-0019-00", "card-00030-4-cmmn-0000-00", "card-03009-4-cmmn-0000-00"]
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def web_base():
-    port = _free_port()
-    server = web_server.ThreadingServer((web_server.BIND_HOST, port), web_server.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 def _post(url, obj):

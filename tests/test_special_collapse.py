@@ -76,9 +76,9 @@ from hbuilder.domain.scoring import (
 )
 from hbuilder.domain.scoring_models import ACTIVE_STACKING_MODELS
 
-from conftest import make_card, make_scoring_config, make_skill, make_team
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
-# conftest's STATS baseline is 300 total per card, so five members are 1500.0.
+# the builders' STATS baseline is 300 total per card, so five members are 1500.0.
 BASE_STAT_SUM = 1500.0
 
 # The ACTIVE uptime is the finite activation lattice over the
@@ -510,23 +510,17 @@ def test_batch_and_single_paths_stay_bit_identical_under_the_collapse():
     assert batch[0].total_score == single
 
 
-def test_the_refuted_summed_model_now_agrees_inside_b_and_still_disagrees_on_the_actives():
-    """`SummedActiveSkills` stays runnable so the rival sum model is
-    assertable with one `dataclasses.replace` — and the disjoint SPECIAL
-    windows decide WHERE the two models differ, which is a result rather than a
-    coincidence.
+def test_disjoint_special_windows_add_while_overlapping_actives_take_the_maximum():
+    """The disjoint SPECIAL windows decide where `E[max]` reduces to a plain
+    sum and where it does not.
 
-    **They agree on any all-SPECIAL bucket**, because the disjoint
+    **On an all-SPECIAL bucket it is the sum**, because the disjoint
     time-average of a maximum IS the sum. Two SPECIALs, 50 and 40:
 
         max  : 0.50*0.10 + 0.40*0.10 (no discount, disjoint) = 0.09
-        sum  : 0.50*0.10 + 0.40*0.10                         = 0.09
 
-    That is not the sum model being vindicated; it is `E[max]` and `sum`
-    being the same function on mutually exclusive events.
-
-    **They still disagree wherever windows really can overlap** — the ACTIVE
-    bucket, where two skills roll on their own cooldown lattices. With
+    **Wherever windows really can overlap it is not** — the ACTIVE bucket,
+    where two skills roll on their own cooldown lattices. With
     `A = 0.46 * 118.8/128.8 = 0.4242857142857143 = 297/700`:
 
         max  : 0.40*A + 0.30*A*(1 - A) = 0.2429944897959184
@@ -536,17 +530,13 @@ def test_the_refuted_summed_model_now_agrees_inside_b_and_still_disagrees_on_the
         1500 * 1.2551442142857143 = 1882.7163214285715
                                   vs  1500 * 1.31185 = 1967.775
 
-    The finite-window uptime scales both models by the same factor and does
-    not touch which of them the `exclusive` flag makes agree: the agreement is
-    on the SPECIAL bucket, which has no lattice. Under a steady-state uptime
-    these two totals would read 1907.169 and 2007.15."""
+    The plain sum of the two ACTIVEs is the `1967.775` the total must not
+    reach. Under a steady-state uptime the `E[max]` total would read 1907.169."""
     one_each = _team(_active("a", 40.0), _special("s", 50.0))
-    assert score_fast(one_each, _cfg("sum")) == pytest.approx(1767.3)
     assert score_fast(one_each, _cfg("max")) == pytest.approx(1767.3)
     assert score_fast(one_each, _cfg("max")) != pytest.approx(1789.8)  # steady-state uptime
 
     two_specials = _team(_active("a", 40.0), _special("s1", 50.0), _special("s2", 40.0))
-    assert score_fast(two_specials, _cfg("sum")) == pytest.approx(1777.4828571428573)
     assert score_fast(two_specials, _cfg("max")) == pytest.approx(1777.4828571428573)
     # The independence walk inside the SPECIAL bucket would give 1776.4645714...
     # here; at a steady-state uptime it gives 1799.736 against a disjoint
@@ -557,9 +547,8 @@ def test_the_refuted_summed_model_now_agrees_inside_b_and_still_disagrees_on_the
 
     two_actives = _team(_active("a", 40.0), _active("b", 30.0), _special("s", 50.0))
     assert score_fast(two_actives, _cfg("max")) == pytest.approx(1882.7163214285715)
-    assert score_fast(two_actives, _cfg("sum")) == pytest.approx(1967.775)
+    assert score_fast(two_actives, _cfg("max")) != pytest.approx(1967.775)  # plain sum
     assert score_fast(two_actives, _cfg("max")) != pytest.approx(1907.169)  # steady-state uptime
-    assert score_fast(two_actives, _cfg("sum")) != pytest.approx(2007.15)  # steady-state uptime
 
 
 def test_the_exclusivity_predicate_marks_special_windows_and_only_those():

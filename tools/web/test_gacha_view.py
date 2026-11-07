@@ -8,7 +8,6 @@ tiny in-memory path-like double instead of touching disk, the same pattern
 `test_park_route.py` documents for this package.
 """
 from __future__ import annotations
-from pathlib import Path
 import gacha_view as gv
 
 CARDS = {"card-00001-5-x": {"rarity": "5★"}, "card-00002-3-x": {"rarity": "3★"}}

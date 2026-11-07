@@ -19,10 +19,9 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
 
-_PROXY = Path(__file__).resolve().parents[1] / "tools" / "recon" / "proxy"
-sys.path.insert(0, str(_PROXY))
+_REFRESH = Path(__file__).resolve().parents[1] / "tools" / "refresh"
+sys.path.insert(0, str(_REFRESH))
 
 import refresh_all  # noqa: E402
 

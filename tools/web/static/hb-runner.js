@@ -1,5 +1,5 @@
 // The search's progress bar with a holomem's 3D chibi running along it.
-// One random SD outfit per search, from the game's own models (tools/recon/proxy/chibi_build.py,
+// One random SD outfit per search, from the game's own models (tools/refresh/chibi_build.py,
 // GET /api/chibi/index, /chibi/models/<id>.glb) and its own run motion baked into the .glb.
 // three.js loads only when a search starts; anything missing leaves a plain bar.
 //

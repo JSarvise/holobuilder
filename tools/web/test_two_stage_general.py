@@ -93,20 +93,18 @@ def test_one_pool_scores_a_chosen_song_exactly_as_that_songs_own_context_does():
     many-chart mean against the mean of the single-song scores."""
     import argparse
     import dataclasses
-    import importlib.util
 
     repo = HERE.parents[1]
-    proxy_dir = repo / "tools" / "recon" / "proxy"
-    if str(proxy_dir) not in sys.path:
-        sys.path.insert(0, str(proxy_dir))
+    refresh_dir = repo / "tools" / "refresh"
+    if str(refresh_dir) not in sys.path:
+        sys.path.insert(0, str(refresh_dir))
     try:
-        spec = importlib.util.spec_from_file_location(
-            "_mfp_two_stage_general_test", repo / "tools/recon/probes/members_first_2026_08_19.py")
-        mfp = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mfp)
-        built = mfp.build(argparse.Namespace(song="m0334", budget=453, uptime="finite",
-                                             platform="mobile"), mfp.PROXIES["nonsinger"])
-        library = built["ex"].load_charts(str(built["ex"].CHARTS_PATH))
+        import leaf_inputs
+
+        built = leaf_inputs.build_maxed(argparse.Namespace(song="m0334", budget=453, uptime="finite",
+                                                           platform="mobile"),
+                                        leaf_inputs.PROXIES["nonsinger"])
+        library = leaf_inputs.load_charts(str(leaf_inputs.CHARTS_PATH))
         charts = tuple(c for c in (library.get(m) for m in ("m0334", "m0144", "m0001")) if c)
     except Exception as exc:  # noqa: BLE001 - no dumps on this machine
         pytest.skip(f"the real inputs are not available here: {exc!r}")
@@ -143,20 +141,18 @@ def test_per_chart_scores_are_the_charts_own_and_average_to_the_batch_score():
     a one-chart selection gives, and their mean is exactly `batch_score`'s."""
     import argparse
     import dataclasses
-    import importlib.util
 
     repo = HERE.parents[1]
-    proxy_dir = repo / "tools" / "recon" / "proxy"
-    if str(proxy_dir) not in sys.path:
-        sys.path.insert(0, str(proxy_dir))
+    refresh_dir = repo / "tools" / "refresh"
+    if str(refresh_dir) not in sys.path:
+        sys.path.insert(0, str(refresh_dir))
     try:
-        spec = importlib.util.spec_from_file_location(
-            "_mfp_two_stage_general_test2", repo / "tools/recon/probes/members_first_2026_08_19.py")
-        mfp = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mfp)
-        built = mfp.build(argparse.Namespace(song="m0334", budget=453, uptime="finite",
-                                             platform="mobile"), mfp.PROXIES["nonsinger"])
-        library = built["ex"].load_charts(str(built["ex"].CHARTS_PATH))
+        import leaf_inputs
+
+        built = leaf_inputs.build_maxed(argparse.Namespace(song="m0334", budget=453, uptime="finite",
+                                                           platform="mobile"),
+                                        leaf_inputs.PROXIES["nonsinger"])
+        library = leaf_inputs.load_charts(str(leaf_inputs.CHARTS_PATH))
         charts = tuple(c for c in (library.get(m) for m in ("m0334", "m0144", "m0001")) if c)
     except Exception as exc:  # noqa: BLE001 - no dumps on this machine
         pytest.skip(f"the real inputs are not available here: {exc!r}")

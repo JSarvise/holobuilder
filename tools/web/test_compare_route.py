@@ -8,14 +8,11 @@ Writes nothing (tools/web/test_no_writes.py walks this file too).
 from __future__ import annotations
 
 import json
-import socket
-import threading
 import urllib.error
 import urllib.request
 
 import pytest
 
-import server as web_server
 
 _MEMBERS = [
     "card-04001-5-uniq-0042-00", "card-00032-5-uniq-0026-00",
@@ -24,27 +21,6 @@ _MEMBERS = [
 ]
 _TEAM_A = ["card-04001-5-uniq-0042-00", *_MEMBERS]   # Calliope PDW leads (also member 1)
 _TEAM_B = ["card-04001-5-uniq-0071-00", *_MEMBERS]   # the other Calliope leads
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def web_base():
-    port = _free_port()
-    server = web_server.ThreadingServer(
-        (web_server.BIND_HOST, port), web_server.Handler
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 def _post(url: str, obj: dict) -> tuple[int, dict]:

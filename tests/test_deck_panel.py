@@ -11,9 +11,7 @@ the dump is absent.
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import json
-import sys
 from fractions import Fraction
 from math import ceil
 from pathlib import Path
@@ -23,7 +21,6 @@ import pytest
 from hbuilder.domain.deck_panel import (
     PANEL_WINDOW_S,
     PanelCard,
-    _adams,
     _attribution_weights,
     _split_quotas,
     deck_panel,
@@ -32,8 +29,13 @@ from hbuilder.domain.deck_panel import (
 )
 
 _REPO = Path(__file__).resolve().parents[1]
-_PROXY = _REPO / "tools" / "recon" / "proxy"
-_DUMPS = _PROXY / "dumps"
+_REFRESH = _REPO / "tools" / "refresh"
+_DUMPS = _REPO / "tools" / "recon" / "proxy" / "dumps"
+
+
+def _nonspecial_total(panel) -> int:
+    """`Active + Outfit + Passive + Board`: the sum of the displayed lines."""
+    return panel.active + panel.outfit + panel.passive + panel.board
 
 
 # --- the lattice --------------------------------------------------------
@@ -154,7 +156,7 @@ def test_each_line_is_its_own_ceiling_and_the_pedestal_is_an_identity():
     assert two.tot_raw == Fraction(91 * 782, 200)
     assert two.active == 210
     assert (two.outfit, two.passive, two.board) == (105, 42, 0)
-    assert two.nonspecial_total == 357
+    assert _nonspecial_total(two) == 357
 
     three = deck_panel(
         [
@@ -168,7 +170,7 @@ def test_each_line_is_its_own_ceiling_and_the_pedestal_is_an_identity():
     assert three.tot_raw == Fraction(91 * 920, 200)
     assert three.active == 210
     assert (three.outfit, three.passive, three.board) == (105, 42, 63)
-    assert three.nonspecial_total == 420          # the pedestal rule says 421
+    assert _nonspecial_total(three) == 420          # the pedestal rule says 421
 
     # the identity itself, spelled out on the three-line deck
     base = 419 - 210
@@ -189,10 +191,7 @@ def test_the_split_always_sums_to_the_measured_total():
             )
         ]
     )
-    assert panel.active + panel.outfit + panel.passive + panel.board == (
-        panel.nonspecial_total
-    )
-    assert panel.score_bonus_permil == panel.nonspecial_total + panel.special
+    assert panel.score_bonus_permil == _nonspecial_total(panel) + panel.special
 
 
 # --- P' is a whole permil, rounded up ------------------------------------
@@ -281,31 +280,7 @@ def test_the_active_line_is_untouched_by_the_probability_rounding():
     assert deck_panel([card]).active == ceil(Fraction(550 * 91, 200))
 
 
-# --- the per-line split: Adams' method on unsaturated contributions ------
-
-
-def test_adams_gives_every_positive_quota_a_seat_before_any_second_seat():
-    """Adams is the method of SMALLEST DIVISORS: `line_s = ceil(kappa*q_s)`, and
-    a ceiling of anything positive is at least 1. That is exactly why the server
-    never shows a displayed source as zero."""
-    assert _adams([1, 1000], 2) == [1, 1]
-    assert _adams([1, 10 ** 9], 3) == [1, 2]
-    # fewer seats than units, or no positive quota: the method does not apply
-    assert _adams([5, 5], 1) is None
-    assert _adams([0, 0], 4) is None
-
-
-def test_adams_matches_the_ceiling_under_a_common_divisor():
-    """Hand-checked against the definition rather than the implementation.
-    q = (91, 41), target 153. Need ceil(91k) = 105 -> k in (104/91, 105/91]
-    and ceil(41k) = 48 -> k in (47/41, 48/41]; the two intervals overlap on
-    (47/41, 105/91], so (105, 48) IS reachable by a common divisor and sums to
-    153."""
-    assert _adams([91, 41], 153) == [105, 48]
-    lo, hi = Fraction(47, 41), Fraction(105, 91)
-    assert lo < hi
-    k = (lo + hi) / 2
-    assert (-(-91 * k // 1), -(-41 * k // 1)) == (105, 48)
+# --- the per-line split on unsaturated contributions -------------------
 
 
 def test_the_split_weights_a_permil_by_the_card_that_carries_it():
@@ -350,7 +325,7 @@ def test_the_split_weights_a_permil_by_the_card_that_carries_it():
     assert panel.tot_raw == Fraction(690 * 132, 200)
     assert _attribution_weights([a, b]) == [Fraction(230000), Fraction(115000)]
     assert (panel.outfit, panel.passive) == (102, 51)
-    assert panel.nonspecial_total == 457
+    assert _nonspecial_total(panel) == 457
 
 
 def test_the_attribution_weight_is_an_unshortened_rate_with_no_saturation_clamp():
@@ -536,9 +511,6 @@ def test_a_displayed_source_with_no_live_carrier_falls_back_and_still_shows():
     )
     panel = deck_panel([carrier, worker])
     assert _split_quotas([carrier, worker])[1] == 0
-    assert panel.outfit + panel.passive + panel.board == (
-        panel.nonspecial_total - panel.active
-    )
 
 
 def test_a_boost_that_does_not_beat_the_base_zeroes_all_three_lines():
@@ -568,13 +540,13 @@ def test_a_boost_that_does_not_beat_the_base_zeroes_all_three_lines():
     assert panel.tot_raw < panel.a_raw
     assert panel.active == 518
     assert (panel.outfit, panel.passive, panel.board) == (0, 0, 0)
-    assert panel.nonspecial_total == 518
+    assert _nonspecial_total(panel) == 518
 
 
 def test_a_deck_with_no_source_at_all_shows_only_the_active_line():
     panel = deck_panel([_plain()])
     assert (panel.outfit, panel.passive, panel.board) == (0, 0, 0)
-    assert panel.nonspecial_total == panel.active
+    assert _nonspecial_total(panel) == panel.active
 
 
 # --- the Special line ---------------------------------------------------
@@ -640,14 +612,8 @@ def test_a_zero_cooldown_is_rejected_rather_than_looping_forever():
 
 
 def _params_module():
-    path = _PROXY / "deck_panel_params.py"
-    if not path.exists():  # pragma: no cover
-        pytest.skip("tools/recon/proxy/deck_panel_params.py missing")
-    spec = importlib.util.spec_from_file_location("deck_panel_params", path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["deck_panel_params"] = module
     try:
-        spec.loader.exec_module(module)
+        from support import deck_panel_params as module
     except Exception as exc:  # pragma: no cover - offline machines
         pytest.skip(f"master data unavailable: {exc!r}")
     return module
@@ -728,7 +694,7 @@ def test_oracle_non_special_total_is_within_one_permil():
     resid = []
     for row, cards in rows:
         server = sum(row["bonus"][k] for k in ("active", "outfit", "passive", "board"))
-        resid.append(deck_panel(cards).nonspecial_total - server)
+        resid.append(_nonspecial_total(deck_panel(cards)) - server)
     exact = sum(1 for r in resid if r == 0)
     assert exact >= 0.96 * len(resid), f"{exact}/{len(resid)} exact"
     # About 97 % exact; the rest at -1 or +1, and a single row at -2.

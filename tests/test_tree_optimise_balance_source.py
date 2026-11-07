@@ -1,15 +1,9 @@
 """Which cube/hexa balance the board optimiser costs a plan against.
 
 `tree_optimise.py` prices every purchase against the account's eight skill-tree
-currencies. Where that balance is READ FROM decides whether a plan answers a
-question about today or about whenever the last packet capture happened to be
-taken.
-
-⛔ `inventory_snapshot.py` writes the live figure to `dumps/inventory.json`.
-Reading only the `*.mitm` captures misses it, and the optimiser then reports,
-say, Red Cube 5,013 / Blue Cube 227 from the newest capture while the account
-actually holds 5,288 / 292. Nothing looks wrong: the tool names its source and
-the source is real. It simply is not the freshest one on disk.
+currencies, read from `dumps/inventory.json` (`inventory_snapshot.py`, a live
+`User/Get`). The source is named with its capture time, and an incomplete or
+unreadable file is UNKNOWN, never a partial or zero balance.
 
 These fixtures are synthetic. The one test that reads the account's real dumps
 skips when they are absent, which is the normal state of a fresh checkout.
@@ -19,16 +13,17 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import sys
 from pathlib import Path
 
 import pytest
 
+from hbuilder.errors import MissingInput
+
 _REPO = Path(__file__).resolve().parents[1]
-_PROXY = _REPO / "tools" / "recon" / "proxy"
-_TREE_OPTIMISE = _PROXY / "tree_optimise.py"
-_DUMPS = _PROXY / "dumps"
+_REFRESH = _REPO / "tools" / "refresh"
+_TREE_OPTIMISE = _REFRESH / "tree_optimise.py"
+_DUMPS = _REPO / "tools" / "recon" / "proxy" / "dumps"
 
 
 def _load_tree_optimise():
@@ -43,7 +38,7 @@ def _load_tree_optimise():
 
 try:
     _TREE = _load_tree_optimise()
-except SystemExit as exc:  # gitignored account data missing
+except MissingInput as exc:  # gitignored account data missing
     _TREE = None
     _WHY = str(exc)
 else:
@@ -63,17 +58,12 @@ def _write_inventory(directory: Path, held: dict, captured_at: str) -> Path:
     return path
 
 
-def test_inventory_json_wins_when_it_is_newer_than_every_capture(tmp_path):
-    """The live snapshot is preferred, and the run SAYS so.
-
-    A source the reader cannot name is a source nobody can check — figures go
+def test_inventory_json_is_read_and_named_with_its_capture_time(tmp_path):
+    """A source the reader cannot name is a source nobody can check — figures go
     stale silently precisely when the label stays truthful while the file
     behind it ages."""
     held = {item: 100 + index for index, item in enumerate(_TREE.CURRENCIES)}
     _write_inventory(tmp_path, held, "2026-08-09T02:50:04+0200")
-    stale = tmp_path / "old_capture.mitm"
-    stale.write_bytes(b"not a real capture")
-    os.utime(stale, (1, 1))  # the capture is older than the inventory
 
     balance, source = _TREE.balance_from_disk(tmp_path)
 
@@ -86,27 +76,23 @@ def test_inventory_json_wins_when_it_is_newer_than_every_capture(tmp_path):
 
 
 def test_a_partial_inventory_is_refused_rather_than_read_as_zero(tmp_path):
-    """Seven of eight currencies is not a balance.
-
-    Falling back is right; silently treating the missing currency as zero would
-    make an unaffordable plan look affordable, which is the one direction this
-    cost model must never round."""
+    """Seven of eight currencies is not a balance: treating the missing currency as
+    zero would make an unaffordable plan look affordable, which is the one
+    direction this cost model must never round."""
     partial = {item: 10 for item in _TREE.CURRENCIES[:-1]}
     _write_inventory(tmp_path, partial, "2026-08-09T02:50:04+0200")
 
     balance, source = _TREE.balance_from_disk(tmp_path)
 
     assert balance is None and source is None, (
-        "no capture and an incomplete inventory means UNKNOWN, never a partial "
+        "an incomplete inventory means UNKNOWN, never a partial "
         f"balance; got {balance!r} from {source!r}"
     )
 
 
 def test_an_unreadable_inventory_does_not_kill_the_run(tmp_path):
-    """A corrupt `inventory.json` degrades to the captures, it does not raise.
-
-    `--plan` is a long run; aborting it on a malformed cache would trade a
-    recoverable staleness for a total failure."""
+    """A corrupt `inventory.json` reads as UNKNOWN, it does not raise: a search
+    must not die on a malformed cache."""
     (tmp_path / "inventory.json").write_text("{ this is not json", encoding="utf-8")
 
     balance, source = _TREE.balance_from_disk(tmp_path)

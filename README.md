@@ -32,27 +32,29 @@ Find the best teams for every song, plan your Holomem Boards and follow the even
 | Needs the game on the same PC | no | yes: the data is built from your install |
 | Access | Google sign-in, approved by hand | none |
 | Game data and pictures | downloaded from the holobuilder server | built from your game and the game's servers |
-| Updates | automatic | `git pull`, then `refresh.cmd` |
+| Runs on | Windows | Windows and Linux |
+| Updates | automatic | `git pull`, then `refresh.cmd` (`refresh.sh` on Linux) |
 
 In both cases the optimizer runs on your PC and your account is read straight from the game.
 
 **The app:** download `holobuilder-setup.exe` from [Releases](../../releases/latest), sign in with
 Google and wait for approval; the installer does the rest. See [Getting started](docs/getting-started.md).
 
-**From source:** you need Windows, the game installed and started once,
-[Python 3.13](https://www.python.org/downloads/windows/) and `gcc`
-(`winget install BrechtSanders.WinLibs.POSIX.UCRT`).
+**From source:** you need the game installed and started once, Python 3.12 or newer (3.13 is
+the tested one) and `gcc`. On Windows: [Python 3.13](https://www.python.org/downloads/windows/)
+and `winget install BrechtSanders.WinLibs.POSIX.UCRT`. On Linux, with the game under Proton:
+`sudo apt install python3 python3-venv gcc libsqlcipher1` (or your distribution's equivalent).
 
 ```
 git clone https://github.com/JSarvise/holobuilder
 cd holobuilder
-.\setup.cmd
-.\refresh.cmd
-.\start.cmd
+.\setup.cmd      # Linux: ./setup.sh
+.\refresh.cmd    # Linux: ./refresh.sh
+.\start.cmd      # Linux: ./start.sh
 ```
 
-`setup.cmd` installs the Python packages and lists anything missing, `refresh.cmd` reads the game
-and your account (about 20 minutes the first time), and `start.cmd` opens
+`setup` installs the Python packages and lists anything missing, `refresh` reads the game and
+your account (about 20 minutes the first time), and `start` opens
 <http://127.0.0.1:8731/optimizer>. Details: [Run it from source](docs/run-locally.md).
 
 ## Privacy

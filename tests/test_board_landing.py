@@ -5,13 +5,13 @@ CLI flag that hands it to the solver.
 number. This file pins the two things that connect that model to a real
 answer:
 
-1. `tools/recon/proxy/build_board.py` — the join from captured account state
+1. `tools/refresh/build_board.py` — the join from captured account state
    (`chr-NNNNN` -> group ids -> socket occupants) to what `load_board` reads
    (holomem name -> effect ids -> Connect multiplier). Without this join
    `ScoringConfig.board` is `None` and the Holomem Board — 29.4-48.7 % of
    Overall Power in the game's own `Live/GetDeck` numbers — scores as
    exactly zero.
-2. `hbuilder.cli` `--board` / `--no-board`, and the requirement that a run
+2. `hbuilder.inputs` `--board` / `--no-board`, and the requirement that a run
    SAYS which of the two states it was in. A solve that silently moved by
    30 % between two invocations would be worse than never landing the board.
 
@@ -29,17 +29,18 @@ import sys
 from pathlib import Path
 
 import pytest
+from support import board_reference
 
-from hbuilder import cli
+from hbuilder import inputs as cli
 from hbuilder.domain import board as board_module
 from hbuilder.domain.board import BoardError, board_from_mapping, load_board
 from hbuilder.domain.collection import CardLevelCaps
 from hbuilder.domain.scoring import score_card_set, score_fast
 
-from conftest import make_card, make_scoring_config, make_team
+from support.builders import make_card, make_scoring_config, make_team
 
 _REPO = Path(__file__).resolve().parents[1]
-_BUILD_BOARD = _REPO / "tools" / "recon" / "proxy" / "build_board.py"
+_BUILD_BOARD = _REPO / "tools" / "refresh" / "build_board.py"
 _DUMPS = _REPO / "tools" / "recon" / "proxy" / "dumps"
 
 
@@ -463,8 +464,8 @@ def test_a_leader_scope_effect_pays_only_when_that_holomem_leads(converted):
     others = [make_card(f"card-{i}") for i in range(4)]
     members = (beta, *others)
 
-    with_alpha_leading = board_module.resolve(model, alpha, members)
-    with_other_leading = board_module.resolve(model, others[0], members)
+    with_alpha_leading = board_reference.resolve(model, alpha, members)
+    with_other_leading = board_reference.resolve(model, others[0], members)
 
     # R-001 is `all_parameter_up 50` at x2.4 = 120 flat to each of the three
     # stats, on every one of the five members — but only under Alpha.
@@ -482,7 +483,7 @@ def test_a_leader_scope_effect_pays_nothing_when_its_holomem_is_only_a_member(co
     alpha = make_card("card-alpha", member="Alpha")
     others = [make_card(f"card-{i}") for i in range(4)]
     members = (alpha, *others)
-    contribution = board_module.resolve(model, others[0], members)
+    contribution = board_reference.resolve(model, others[0], members)
     # Only R-002 (member scope, Alpha's own card) and G-001 (account scope)
     # can pay here; R-001's 360 must not appear on anyone.
     assert contribution.flat_by_card[others[1].id] == {
@@ -545,10 +546,10 @@ def test_a_leader_without_a_red_node_resolves_bit_identically_to_no_leader(conve
     others = [make_card(f"card-{i}") for i in range(4)]
     members = (beta, *others)
 
-    baseline = board_module.resolve(model, None, members)
+    baseline = board_reference.resolve(model, None, members)
     for leader in (beta, *others):
         assert leader.member not in model.leader_scoped_holomem
-        assert board_module.resolve(model, leader, members) == baseline
+        assert board_reference.resolve(model, leader, members) == baseline
 
 
 def test_a_leader_WITH_a_red_node_does_not_resolve_like_no_leader(converted):
@@ -562,7 +563,7 @@ def test_a_leader_WITH_a_red_node_does_not_resolve_like_no_leader(converted):
     members = (alpha, *others)
 
     assert alpha.member in model.leader_scoped_holomem
-    assert board_module.resolve(model, alpha, members) != board_module.resolve(
+    assert board_reference.resolve(model, alpha, members) != board_reference.resolve(
         model, None, members
     )
 
@@ -590,7 +591,7 @@ def test_the_memoised_invariant_terms_reproduce_the_full_walk_exactly(converted)
         # branch (Alpha) is cross-checked as well as the invariant one.
         for leader in (None, alpha, beta, *others):
             holomem = None if leader is None else leader.member
-            expected = board_module.resolve(model, leader, members)
+            expected = board_reference.resolve(model, leader, members)
             assert model.power_bonus_for(members, holomem) == expected.power_bonus(
                 members
             )
@@ -598,7 +599,7 @@ def test_the_memoised_invariant_terms_reproduce_the_full_walk_exactly(converted)
 
     # The memo must be a cache, not a mutation: asking twice gives the same
     # answer, and a card seen in one set must not leak into another.
-    assert model.power_bonus_for((alpha, *others), None) == board_module.resolve(
+    assert model.power_bonus_for((alpha, *others), None) == board_reference.resolve(
         model, None, (alpha, *others)
     ).power_bonus((alpha, *others))
 
@@ -616,10 +617,10 @@ def test_the_invariant_memo_does_not_confuse_two_cards_sharing_an_id(converted):
 
     first = model.power_bonus_for((as_alpha, *others), None)
     second = model.power_bonus_for((as_beta, *others), None)
-    assert first == board_module.resolve(model, None, (as_alpha, *others)).power_bonus(
+    assert first == board_reference.resolve(model, None, (as_alpha, *others)).power_bonus(
         (as_alpha, *others)
     )
-    assert second == board_module.resolve(model, None, (as_beta, *others)).power_bonus(
+    assert second == board_reference.resolve(model, None, (as_beta, *others)).power_bonus(
         (as_beta, *others)
     )
     # Negative control: Alpha's own `member`-scope node makes these differ, so
@@ -668,45 +669,6 @@ def test_score_card_set_matches_score_fast_for_every_leader_with_a_board(convert
 # run from a boardless one: `project_duration` would report the stale rate with
 # full confidence instead of warning.
 # --------------------------------------------------------------------------
-
-
-def test_config_hash_separates_a_board_run_from_a_boardless_one(converted):
-    """Two runs whose ONLY difference is `--board` must
-    hash differently, or the staleness warning cannot fire between them."""
-    document, _report, _problems = converted
-    model = board_from_mapping(document, source="<test>")
-    cfg = make_scoring_config()
-
-    boardless = cli.config_hash(cli._scoring_config_document(cfg))
-    boarded = cli.config_hash(
-        cli._scoring_config_document(dataclasses.replace(cfg, board=model))
-    )
-    assert boardless != boarded
-
-
-def test_two_different_boards_hash_differently(converted, build_board):
-    """Not just present-vs-absent: a board that has GROWN — the player buying a
-    node — is a different scoring model, and the rates measured against the
-    old one no longer describe it."""
-    document, _report, _problems = converted
-    cfg = make_scoring_config()
-
-    smaller_state = {
-        "chr-00001": {"nodes": ["G-001"], "slots": {}},
-        "chr-00002": {"nodes": ["G-008"], "slots": {}},
-    }
-    smaller_doc, _r, problems = build_board.build(
-        smaller_state, _SKILLTREE, _NODE_MASTER, level=1
-    )
-    assert problems == []
-
-    def hashed(doc):
-        model = board_from_mapping(doc, source="<test>")
-        return cli.config_hash(
-            cli._scoring_config_document(dataclasses.replace(cfg, board=model))
-        )
-
-    assert hashed(document) != hashed(smaller_doc)
 
 
 def test_the_fingerprint_is_stable_across_two_loads_of_the_same_board(converted):
@@ -775,7 +737,7 @@ def test_board_basis_says_which_of_the_two_states_the_run_was_in(tmp_path, conve
         "characters": 0,
         "nodes": 0,
     }
-    assert "--no-board" in disabled.lines()[0]
+    assert "disabled" in disabled.lines()[0]
 
 
 def test_a_board_file_that_exists_but_does_not_parse_is_an_error(tmp_path):
@@ -798,7 +760,7 @@ def test_song_all_bucket_is_clamped_to_the_attested_100_permil():
     constant `0x75cec38` = `0000c842`, displayed 10.0 %). It is the ONLY capped
     quantity `score_bonus_rate()` can return, so it is the only one clamped
     here. It binds only once a board's bonus sum passes the cap."""
-    contribution = board_module.BoardContribution(
+    contribution = board_reference.BoardContribution(
         flat_by_card={},
         rate_by_card={},
         skill_effect_up=0.0,
@@ -814,7 +776,7 @@ def test_song_all_bucket_is_clamped_to_the_attested_100_permil():
 def test_the_clamp_is_inert_below_the_cap():
     """A typical captured board sums to well under 100 permil, so the
     clamp must not move any number below the cap."""
-    contribution = board_module.BoardContribution(
+    contribution = board_reference.BoardContribution(
         flat_by_card={},
         rate_by_card={},
         skill_effect_up=0.0,
@@ -832,7 +794,7 @@ def test_solo_and_group_are_neither_clamped_nor_read():
     limitation rather than left to be
     rediscovered, because doing it right needs a per-character
     `song_score_bonus`, which is a restructure and not a clamp."""
-    contribution = board_module.BoardContribution(
+    contribution = board_reference.BoardContribution(
         flat_by_card={},
         rate_by_card={},
         skill_effect_up=0.0,
@@ -845,10 +807,9 @@ def test_solo_and_group_are_neither_clamped_nor_read():
     assert contribution.song_score_bonus["solo"] == 0.9
 
 
-def test_solve_parser_defaults_to_the_conventional_board_path():
-    args = cli.build_parser().parse_args(["solve"])
+def test_the_default_board_path_is_the_conventional_one():
+    args = cli.default_paths()
     assert args.board == cli.DEFAULT_BOARD_PATH
-    assert args.no_board is False
     assert cli.DEFAULT_BOARD_PATH.startswith("tools/recon/proxy/dumps/")
 
 

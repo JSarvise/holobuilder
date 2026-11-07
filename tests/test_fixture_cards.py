@@ -32,7 +32,7 @@ from hbuilder.domain.schema import (
 )
 from hbuilder.domain.team import build_team
 
-from conftest import FIXTURE_CARDS_PATH, FIXTURE_OWNED_PATH
+from support.builders import FIXTURE_CARDS_PATH, FIXTURE_OWNED_PATH
 
 CARDS_PATH = FIXTURE_CARDS_PATH
 

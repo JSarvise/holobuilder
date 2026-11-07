@@ -30,7 +30,7 @@ import sys
 from dataclasses import dataclass, field, replace
 from typing import Callable, Mapping, Sequence
 
-from hbuilder.domain.team import Team, TeamError
+from hbuilder.domain.team import Team
 from hbuilder.domain.skilltree import SkillTree, tree_from_mapping
 from hbuilder.domain.board import (
     parse_effect_id, SONG_ALL_CAP_PERMIL, STAT_NAMES, _GENERATION_BY_GROUPING, _GROUPING_RE,
@@ -530,11 +530,7 @@ def optimize_team_boards(
     when the leader is a credited singer of the song this plan is for, 0.0 for
     the song-agnostic plan. A member is valued as a singer when `singers` (the
     song's cast, chr ids) holds her holomem -- her own solo/group yellows pay on
-    her board whoever leads; without it, members are valued at 0.0.
-
-    The phase-B bound (`board_ceiling`) still bounds this: an optimised board is
-    a subset of the full board, so `optimised <= full <= ceiling`, and the
-    rerank-safe cut holds unchanged — only the top-N candidates ever reach here."""
+    her board whoever leads; without it, members are valued at 0.0."""
     members = tuple(members)
     # ONE plan per distinct CHARACTER (the game has one board per holomem),
     # leader first, so a leader whose holomem also fields a member card is
@@ -673,6 +669,19 @@ def plan_key(card: Card, role: str, budget: int, sings: bool | str) -> tuple:
 # boards. A bound on memory only — an entry is a pure function of its key, so
 # dropping one costs a rebuild and can never change a score.
 _TEAM_BOARDS_MAX = 20_000
+# `PlanCache.assembled` holds at most this many plans: the activation refinement assembles
+# one per board it tries (`selected_plan_key`), so a long-lived cache would grow without it.
+# Emptying it only costs re-assembling (a plan key names its assembly's content).
+_ASSEMBLED_MAX = 50_000
+# The first item of `selected_plan_key`'s keys (a `plan_key` starts with a chr id)
+SELECTED_PLAN = "selected-nodes"
+
+
+def selected_plan_key(chr_id: str, selected) -> tuple:
+    """The plan cache key of a board plan the cache did not make (one the activation
+    refinement changed): the board and its nodes in the set's own order -- the order
+    `assembled_for` lists them in, so equal keys are equal assemblies."""
+    return (SELECTED_PLAN, chr_id, tuple(selected))
 _NO_MULTS: frozenset = frozenset()
 
 
@@ -954,6 +963,9 @@ class PlanCache:
         asm = AssembledPlan(
             nodes=tuple(nodes), model_id=model_id, entries=tuple(entries),
             needed=tuple(sorted(needed)) if connect_cards is not None else None)
+        if len(self.assembled) >= _ASSEMBLED_MAX:
+            self.assembled.clear()
+            self._needed_recipes.clear()
         self.assembled[key] = asm
         return asm
 
@@ -1142,26 +1154,6 @@ def _chain_is_surplus(card: Card, plans: Mapping, members, leader: Card,
     cap = _grouping_cap()
     return all(_grouping_supply(tgt, plans, members, leader, skilltree) - amount >= cap
                for tgt, amount in chain.items())
-
-
-# CharacterLevel field 11, cumulative point grant: the real board
-# budget a character of a given level has. The full tree is 453 points.
-_POINT_GRANT = ((10, 26), (20, 83), (30, 161), (40, 261), (50, 361))
-_FULL_TREE_POINTS = 453
-
-
-def point_budget_for_level(level: int) -> int:
-    """The skill-tree points a character of `level` has earned, interpolated
-    between the game's grant milestones and capped at the full tree."""
-    if level <= _POINT_GRANT[0][0]:
-        return int(round(_POINT_GRANT[0][1] * level / _POINT_GRANT[0][0]))
-    for (l0, p0), (l1, p1) in zip(_POINT_GRANT, _POINT_GRANT[1:]):
-        if level <= l1:
-            return int(round(p0 + (p1 - p0) * (level - l0) / (l1 - l0)))
-    # above the last milestone, extrapolate the last slope, capped at the tree.
-    (l0, p0), (l1, p1) = _POINT_GRANT[-2], _POINT_GRANT[-1]
-    grant = p1 + (p1 - p0) * (level - l1) / (l1 - l0)
-    return min(_FULL_TREE_POINTS, int(round(grant)))
 
 
 def board_points_from_snapshot(snapshot: Mapping) -> dict[str, int]:
@@ -1714,8 +1706,12 @@ def _song_bonus_over_cap(team_rows, bench_characters, names: Mapping[str, str], 
     return total > SONG_ALL_CAP_PERMIL + 1e-9
 
 
+# `_yellow_capped_assignment`'s matchings after its first one, at most (the bisection's rounds)
+CAPPED_ROUNDS = 6
+
+
 def _yellow_capped_assignment(per_char, connect_cards, *, cast, skilltree, node_effect_ids,
-                              fixed_rows=(), rounds: int = 6, incumbent=None):
+                              fixed_rows=(), rounds: int = CAPPED_ROUNDS, incumbent=None):
     """`_team_connect_assignment` under the song bonus's per-song cap
     (`SONG_ALL_CAP_PERMIL`, `BoardModel.song_score_bonus_for`): the linear node values
     price every yellow permil at full worth, but past the cap a yellow adds nothing.
@@ -1849,38 +1845,65 @@ CONNECT_KERNEL: Callable | None = None
 # environment and nothing else): `<dir>/connect.py:assign`, loaded by path on
 # first use. A kernel that fails to load is reported once and Python is used.
 CONNECT_KERNEL_ENV = "HBUILDER_CONNECT_KERNEL"
-_env_connect_kernel: tuple[str, Callable | None] = ("", None)
+
+# The seam for the COMPILED board assembly (`tools/web/kernel/connect.py`'s
+# `assemble`), injected the same way: on the plan cache with the song's cast known,
+# the team-wide Connect matching under the song bonus's cap exactly as
+# `board_model_from_plan` runs it in Python (`_song_bonus_over_cap` before and after
+# the matching, `_yellow_capped_assignment` when either binds, the incumbent tie where
+# the Python applies it). Called as `kernel(inputs, members, overall_power=,
+# bonus_permil=, k_constant=, active_pool_rate=, song_scope=, yellows=, bench=, cap=,
+# rounds=, incumbent=, tie_factor=, tie_first=, checks=)`; it returns the MATCHED
+# `ConnectTriple`s, or `None` to decline, and then the Python runs. It must never
+# return an approximation.
+BOARD_KERNEL: Callable | None = None
+BOARD_KERNEL_ENV = "HBUILDER_BOARD_KERNEL"
+
+# env variable -> (its value, the kernel it names or None), and file -> its module: the
+# seams that name one file share one module and its packing caches
+_ENV_KERNELS: dict[str, tuple[str, Callable | None]] = {}
+_KERNEL_MODULES: dict[str, object] = {}
 
 
-def _connect_kernel() -> Callable | None:
-    """The injected kernel: the module attribute if set, else the one the
-    environment names (resolved once per distinct value)."""
-    global _env_connect_kernel
-    if CONNECT_KERNEL is not None:
-        return CONNECT_KERNEL
-    spec = os.environ.get(CONNECT_KERNEL_ENV, "")
-    if spec == _env_connect_kernel[0]:
-        return _env_connect_kernel[1]
+def _env_kernel(env: str) -> Callable | None:
+    """The kernel the environment variable `env` names (`<file>:<function>`), loaded by
+    path on first use and resolved once per distinct value; reported once, and None,
+    when it cannot be loaded."""
+    spec = os.environ.get(env, "")
+    hit = _ENV_KERNELS.get(env)
+    if hit is not None and hit[0] == spec:
+        return hit[1]
     kernel: Callable | None = None
     if spec:
         try:
             import importlib.util
 
             file_name, _, attribute = spec.rpartition(":")
-            module_spec = importlib.util.spec_from_file_location(
-                "_hbuilder_connect_kernel", file_name
-            )
-            module = importlib.util.module_from_spec(module_spec)
-            module_spec.loader.exec_module(module)
+            module = _KERNEL_MODULES.get(file_name)
+            if module is None:
+                module_spec = importlib.util.spec_from_file_location(
+                    "_hbuilder_kernel_" + os.path.splitext(os.path.basename(file_name))[0],
+                    file_name)
+                module = importlib.util.module_from_spec(module_spec)
+                module_spec.loader.exec_module(module)
+                _KERNEL_MODULES[file_name] = module
             kernel = getattr(module, attribute)
         except Exception as exc:  # noqa: BLE001 - any failure means "use Python"
-            print(
-                f"connect kernel {spec!r} could not be loaded ({exc!r}); "
-                "the assignment continues on the Python path",
-                file=sys.stderr,
-            )
-    _env_connect_kernel = (spec, kernel)
+            print(f"kernel {spec!r} could not be loaded ({exc!r}); "
+                  "this step continues on the Python path", file=sys.stderr)
+    _ENV_KERNELS[env] = (spec, kernel)
     return kernel
+
+
+def _connect_kernel() -> Callable | None:
+    """The injected Connect kernel: the module attribute if set, else the one the
+    environment names."""
+    return CONNECT_KERNEL if CONNECT_KERNEL is not None else _env_kernel(CONNECT_KERNEL_ENV)
+
+
+def _board_kernel() -> Callable | None:
+    """The injected board assembly kernel, found like `_connect_kernel`."""
+    return BOARD_KERNEL if BOARD_KERNEL is not None else _env_kernel(BOARD_KERNEL_ENV)
 
 
 _HELD_VIEWS: dict = {}
@@ -2083,7 +2106,25 @@ def board_model_from_plan(
     # the account's own placements: on a tie a card stays where it is
     incumbent = {(chr_id, socket): card for chr_id, slots in (bench_sockets or {}).items()
                  for socket, card in (slots or {}).items() if card}
-    if plan_cache is not None and plan.plan_keys:
+    if plan_cache is not None and cast is not None and connect_cards is not None \
+            and bench_characters is not None and (kernel := _board_kernel()) is not None:
+        # the compiled assembly: the same model as the two paths below, or None to run them
+        model = _board_model_by_kernel(
+            kernel, plan, leader, members, skilltree, node_effect_ids, names,
+            overall_power=overall_power, bonus_permil=bonus_permil, k_constant=k_constant,
+            active_pool_rate=active_pool_rate, connect_cards=connect_cards,
+            placements_out=placements_out, bench_characters=bench_characters,
+            name_by_chr=name_by_chr, sings=sings, cache=plan_cache, cast=cast, held=held,
+            incumbent=incumbent)
+        if model is not None:
+            return model
+    if plan_cache is not None and plan.plan_keys and not (
+            connect_cards is not None and cast is not None
+            and _song_bonus_over_cap(_team_yellow_rows(plan, leader, members), bench_characters,
+                                     names, cast=cast, skilltree=skilltree,
+                                     node_effect_ids=node_effect_ids)):
+        # (over the cap with every multiplier at 1 -- Connect multipliers are >= 1, so the
+        # fast path's own check after its matching would say so too: skip that matching)
         fast = _board_model_from_cache(
             plan, leader, members, skilltree, node_effect_ids, names,
             overall_power=overall_power, bonus_permil=bonus_permil,
@@ -2094,6 +2135,7 @@ def board_model_from_plan(
         if fast is not None:
             return fast
         # the song bonus is over its cap: only the capped matching below is right
+    connect_all = connect_cards           # the plan cache's assembly key (`assembled_for`)
     if held and connect_cards is not None:
         connect_cards = {k: v for k, v in connect_cards.items() if k not in held}
     chars: dict[str, list] = {
@@ -2119,15 +2161,27 @@ def board_model_from_plan(
         seen.add(chr_id)
         model_id = model_for_character(skilltree, chr_id) or ""
         # base node values (grouping on, connect OFF) to place the sockets.
-        base = power_node_values(
-            node_effect_ids, is_leader=is_leader,
-            own_card=member_by_chr.get(chr_id, card) if is_leader else card, member_cards=members,
-            bonus_permil=bonus_permil, overall_power=overall_power,
-            k_constant=k_constant, active_pool_rate=active_pool_rate,
-            skilltree={"nodes": skilltree["nodes"]}, model_id="", own_chr=chr_id,
-            singer_weight=singer_weight_for(sings, chr_id, is_leader),
-            song_scope=song_scope_of(sings),
-        )
+        own = member_by_chr.get(chr_id, card) if is_leader else card
+        if plan_cache is not None:
+            # `power_node_values` below with no grouping room and no Connect step: its
+            # recipes, compiled once per character by the plan cache
+            plan_cache._sync_sources(node_effect_ids, skilltree, connect_all)
+            base = node_values_from_recipes(
+                plan_cache.recipes_for(chr_id, node_effect_ids, skilltree), is_leader=is_leader,
+                own_card=own, member_cards=members, bonus_permil=bonus_permil,
+                overall_power=overall_power, k_constant=k_constant,
+                active_pool_rate=active_pool_rate,
+                singer_weight=singer_weight_for(sings, chr_id, is_leader),
+                song_scope=song_scope_of(sings))
+        else:
+            base = power_node_values(
+                node_effect_ids, is_leader=is_leader, own_card=own, member_cards=members,
+                bonus_permil=bonus_permil, overall_power=overall_power,
+                k_constant=k_constant, active_pool_rate=active_pool_rate,
+                skilltree={"nodes": skilltree["nodes"]}, model_id="", own_chr=chr_id,
+                singer_weight=singer_weight_for(sings, chr_id, is_leader),
+                song_scope=song_scope_of(sings),
+            )
         ctx.append((card, chr_id, model_id, cplan, base))
     if connect_cards is not None:
         per_char = {
@@ -2171,7 +2225,13 @@ def board_model_from_plan(
                      if model_id else {})
             for _card, chr_id, model_id, _cplan, base in ctx
         }
+    # with the plan cache, a team board whose plan it holds is built from its assembly
+    # (`team_board`, as on the fast path) instead of from these lists
+    cached = (plan_cache is not None and bench_characters is not None
+              and bool(plan.plan_keys) and all(card.id in plan.plan_keys for card, *_ in ctx))
     for card, chr_id, _model_id, cplan, _base in ctx:
+        if cached:
+            break
         cmult = mults_by_chr.get(chr_id, {})
         nodes = []
         for node_id in cplan.selected:
@@ -2190,13 +2250,35 @@ def board_model_from_plan(
         # parsed -- the same `CharacterBoard`s, the same scores, ~5 s less per request
         boards = dict(plan_cache.bench_boards(bench_characters))
         digests = dict(plan_cache.bench_digests(bench_characters))
-        for card, _chr_id, _model_id, _cplan, _base in ctx:
+        for card, chr_id, _model_id, cplan, _base in ctx:
+            if cached:
+                key = plan.plan_keys[card.id]
+                asm = plan_cache.assembled_for(key, cplan, chr_id, skilltree=skilltree,
+                                               node_effect_ids=node_effect_ids,
+                                               connect_cards=connect_all)
+                boards[card.member], digests[card.member] = plan_cache.team_board(
+                    key, card.member, asm, mults_by_chr.get(chr_id, {}))
+                continue
             boards[card.member] = board_from_mapping(
                 {"characters": {card.member: chars[card.member]}}).characters[card.member]
             digests.pop(card.member, None)
         return BoardModel(characters=boards, name_by_chr=dict(names), _digests=digests,
                           _base=plan_cache.bench_base(bench_characters))
     return board_from_mapping({"characters": chars, "name_by_chr": names})
+
+
+def _team_yellow_rows(plan: TeamBoardPlan, leader: Card, members: Sequence[Card]) -> list:
+    """`_song_bonus_over_cap`'s team rows with every Connect multiplier at 1: one row per
+    character, leader first, as both paths of `board_model_from_plan` build them."""
+    rows, seen = [], set()
+    for card in (leader, *members):
+        chr_id = "chr-" + card.id.split("-")[1]
+        cplan = plan.per_character.get(card.id)
+        if chr_id in seen or cplan is None:
+            continue
+        seen.add(chr_id)
+        rows.append((chr_id, cplan.selected, {}))
+    return rows
 
 
 def _board_model_from_cache(
@@ -2266,6 +2348,142 @@ def _board_model_from_cache(
     for card, chr_id, asm in ctx:
         chars[card.member], digests[card.member] = cache.team_board(
             plan.plan_keys[card.id], card.member, asm, mults_by_chr.get(chr_id, {}))
+    return BoardModel(characters=chars, name_by_chr=dict(names), _digests=digests,
+                      _base=cache.bench_base(bench_characters))
+
+
+
+_PAYING_YELLOWS: dict = {}
+
+
+def _paying_yellows(selected: frozenset, chr_id: str, cast, skilltree: Mapping,
+                    node_effect_ids) -> tuple[tuple[tuple[str, float], ...], float]:
+    """One board's paying yellows on this song as `(rows, their sum)`: the `(node,
+    permil)` of `_yellow_capped_assignment`'s `paying(selected)` in the set's own order,
+    and their sum as it takes it. Remembered per (set, board, cast)."""
+    key = (id(selected), chr_id, cast, getattr(cast, "scope", None), id(skilltree),
+           id(node_effect_ids))
+    hit = _PAYING_YELLOWS.get(key)
+    if hit is not None and hit[0] is selected and hit[1] is skilltree and hit[2] is node_effect_ids:
+        return hit[3]
+    rows = tuple((n, p) for n in selected
+                 if (p := _yellow_permil(skilltree, n, chr_id, cast, node_effect_ids)))
+    value = (rows, sum(p for _n, p in rows))
+    if len(_PAYING_YELLOWS) > 50_000:
+        _PAYING_YELLOWS.clear()
+    _PAYING_YELLOWS[key] = (selected, skilltree, node_effect_ids, value)
+    return value
+
+
+_BENCH_YELLOWS: dict = {}
+
+
+def _bench_yellow_rows(bench_characters: Mapping, name_by_chr: Mapping[str, str], cast,
+                       skilltree: Mapping, node_effect_ids) -> tuple[tuple[str, float], ...]:
+    """The off-team boards' paying yellows as `(chr id, permil x Connect multiplier)` in
+    the bench's order, the rows worth 0 left out: what `_song_bonus_over_cap` and
+    `_yellow_capped_assignment`'s room read from `bench_characters` (both skip the rows of
+    a board on the team). Remembered per (bench, roster, cast)."""
+    key = (id(bench_characters), id(name_by_chr), cast, getattr(cast, "scope", None),
+           id(skilltree), id(node_effect_ids))
+    hit = _BENCH_YELLOWS.get(key)
+    if hit is not None and hit[0] is bench_characters and hit[1] is name_by_chr \
+            and hit[2] is skilltree and hit[3] is node_effect_ids:
+        return hit[4]
+    inverse = {name: chr_id for chr_id, name in name_by_chr.items()}
+    rows = []
+    for name, entries in bench_characters.items():
+        chr_id = inverse.get(name)
+        if not chr_id:
+            continue
+        for e in entries:
+            if e.get("node"):
+                value = _yellow_permil_memo(skilltree, e["node"], chr_id, cast,
+                                            node_effect_ids) * float(e.get("connect_multiplier") or 1.0)
+                if value:
+                    rows.append((chr_id, value))
+    if len(_BENCH_YELLOWS) > 512:
+        _BENCH_YELLOWS.clear()
+    hit = _BENCH_YELLOWS[key] = (bench_characters, name_by_chr, skilltree, node_effect_ids,
+                                 tuple(rows))
+    return hit[4]
+
+
+def _board_model_by_kernel(
+    kernel: Callable, plan: TeamBoardPlan, leader: Card, members: tuple[Card, ...],
+    skilltree: Mapping, node_effect_ids: Mapping[str, list[str]], names: dict[str, str], *,
+    overall_power: float, bonus_permil: float, k_constant: float, active_pool_rate: float,
+    connect_cards, placements_out, bench_characters, name_by_chr, sings, cache: PlanCache,
+    cast, held: frozenset, incumbent: Mapping,
+) -> BoardModel | None:
+    """`board_model_from_plan` with the Connect matching from `BOARD_KERNEL`: the plan
+    cache's team boards under the multipliers it chose, over the cached bench -- the model
+    either Python path builds -- or None to run the Python: a call the kernel does not
+    express (a board without a model, a team name the roster maps elsewhere) or one it
+    declines. A plan the cache did not make (the activation refinement's: no `plan_keys`)
+    is assembled by its nodes (`selected_plan_key`) and matched as the plain path matches it:
+    straight to `_yellow_capped_assignment`, the incumbents winning ties from its first
+    matching on, with no cap checks before.
+
+    The account's case is the Python's too: the cards `held` on off-team sockets are out of
+    every group the matching sees (`_held_view`, as the plan cache's own matching drops
+    them), and the account's own placements (`incumbent`) win ties in every matching the
+    capped path solves, as `_yellow_capped_assignment` passes them on -- but in the first
+    matching only when the cards are named (`tie_first`), as the plan cache's matching
+    applies them, so a team below the cap gets the fast path's sockets."""
+    if not name_by_chr or any(
+            name_by_chr.get("chr-" + card.id.split("-")[1]) != card.member
+            for card in (leader, *members)):
+        return None
+    name_cards = placements_out is not None
+    seen: set[str] = set()
+    ctx: list[tuple[Card, str, AssembledPlan, tuple]] = []
+    inputs: list[ConnectInput] = []
+    yellows = []
+    # one entry per character, the leader valued with her member card's blues too
+    # (the plain path's rule, see there)
+    member_by_chr = {"chr-" + m.id.split("-")[1]: m for m in members}
+    for card, is_leader in [(leader, True), *[(m, False) for m in members]]:
+        chr_id = "chr-" + card.id.split("-")[1]
+        if chr_id in seen:
+            continue
+        cplan = plan.per_character.get(card.id)
+        if cplan is None:
+            continue
+        seen.add(chr_id)
+        # a plan the cache did not make (the activation refinement's) is assembled by its nodes
+        key = plan.plan_keys.get(card.id) or selected_plan_key(chr_id, cplan.selected)
+        asm = cache.assembled_for(key, cplan, chr_id, skilltree=skilltree,
+                                  node_effect_ids=node_effect_ids, connect_cards=connect_cards)
+        if not asm.model_id:
+            return None
+        recipes = cache.needed_recipes(key, asm, chr_id, node_effect_ids, skilltree)
+        ctx.append((card, chr_id, asm, key))
+        inputs.append((chr_id, _held_view(asm, held) if held else asm, recipes, is_leader,
+                       member_by_chr.get(chr_id, card) if is_leader else card,
+                       singer_weight_for(sings, chr_id, is_leader)))
+        yellows.append(_paying_yellows(cplan.selected, chr_id, cast, skilltree, node_effect_ids))
+    matched = kernel(
+        inputs, members, overall_power=overall_power, bonus_permil=bonus_permil,
+        k_constant=k_constant, active_pool_rate=active_pool_rate, song_scope=song_scope_of(sings),
+        yellows=yellows,
+        bench=_bench_yellow_rows(bench_characters, name_by_chr, cast, skilltree, node_effect_ids),
+        cap=SONG_ALL_CAP_PERMIL, rounds=CAPPED_ROUNDS, incumbent=incumbent or None,
+        tie_factor=1.0 + INCUMBENT_TIE, tie_first=name_cards,
+        # the Python flow the plan takes: the fast path's checks for a plan the cache made,
+        # the plain path (`_yellow_capped_assignment` at once) for one it did not
+        checks=bool(plan.plan_keys))
+    if matched is None:
+        return None
+    mults_by_chr, placements = _placements_from_matched(matched, name_cards=name_cards,
+                                                        incumbent=incumbent)
+    if placements_out is not None:
+        placements_out.extend(placements)
+    chars: dict[str, CharacterBoard] = dict(cache.bench_boards(bench_characters))
+    digests: dict[str, BoardDigest] = dict(cache.bench_digests(bench_characters))
+    for card, chr_id, asm, key in ctx:
+        chars[card.member], digests[card.member] = cache.team_board(
+            key, card.member, asm, mults_by_chr.get(chr_id, {}))
     return BoardModel(characters=chars, name_by_chr=dict(names), _digests=digests,
                       _base=cache.bench_base(bench_characters))
 
@@ -2418,8 +2636,8 @@ def refine_activation_nodes(
     assembled from `plan`); a move is kept only when it raises it, so the result
     is never worse than the start. Freed points stay unspent.
 
-    The returned plan carries no `plan_keys`: it is not the plan cache's
-    assembled plan, so assemble its board WITHOUT `plan_cache`. Returns
+    The returned plan carries no `plan_keys`: it is not one of the plan cache's
+    plans (`board_model_from_plan` assembles it by its nodes). Returns
     `(plan, its score, the moves made)`."""
     best = score(plan)
     moves: list[str] = []
@@ -2512,8 +2730,8 @@ def develop_refined_team(
             connect_cards=connect_cards, placements_out=placements,
             bench_characters=bench_characters, name_by_chr=name_by_chr, sings=sings,
             bench_sockets=bench_sockets,
-            # a refined plan carries no `plan_keys` (`refine_activation_nodes`), so this
-            # never takes the cache's fast path: it only reuses the parsed bench
+            # a refined plan carries no `plan_keys` (`refine_activation_nodes`): the
+            # compiled assembly takes it by its nodes, the Python's plain path otherwise
             plan_cache=plan_cache)
 
     cards = {c.id: c for c in (team.leader, *team.members)}
@@ -2538,99 +2756,3 @@ def develop_and_refine(team: Team, cfg: ScoringConfig, charts_score: Callable[[B
     return bt.board, bt.plan, value, moves
 
 
-def refine_members(
-    seed: BoardOptimisedTeam,
-    *,
-    candidates: Sequence[Card],
-    develop_fn: Callable[[Team], BoardOptimisedTeam],
-    score_fn: Callable[[Team, BoardModel | None], float],
-    prefilter_fn: Callable[[Team, BoardModel | None], float] | None = None,
-    batch_score_fn: Callable[[Sequence[Team]], Sequence[float]] | None = None,
-    shortlist: int = 8,
-    max_rounds: int = 2,
-    min_gain: float = 1.0,
-) -> tuple[BoardOptimisedTeam, float, list[dict]]:
-    """Hill-climb the five MEMBER slots of one developed team by the TARGET
-    metric, leader fixed. The beam picks each leader's members by Unit Score,
-    but the per-song winner can differ (e.g. Noel's per-song members are not her
-    Unit-Score members).
-
-    Two-stage per slot, so the full metric is paid only where it can matter:
-    every candidate is first scored on the SEED'S OWN developed board without
-    re-developing (`score_fn(team, incumbent board)` — 1 ms, rank agreement
-    with the full metric Spearman ~+0.82..0.86, top-5 overlap 3-4/5), then only the `shortlist` best are
-    re-developed (`develop_fn`, ~20 ms each) and scored exactly. The best
-    exact improvement across all five slots is accepted per round (steepest
-    ascent); rounds stop when no swap beats the incumbent by `min_gain`.
-
-    `develop_fn(team)` returns the team's `BoardOptimisedTeam` (board + real
-    sockets); `score_fn(team, board)` is the target metric — per-song estimate,
-    across-sample mean, whatever the caller ranks by. Injected so this stays
-    pure orchestration: the server wires the real ones, a test wires stubs.
-
-    `prefilter_fn`, when given, replaces `score_fn` in the CHEAP stage only —
-    the across case, where even one `score_fn` (a mean over sampled charts) is
-    too dear to pay per candidate; a coarser sample orders the shortlist and
-    the real metric still makes every accept/reject decision. Ranking noise in
-    the prefilter costs recall (a good candidate can miss the shortlist),
-    never correctness.
-
-    `batch_score_fn(teams)`, when given, computes the EXACT stage for a whole
-    round's shortlists at once — `score_fn(team, develop_fn(team).board)` for
-    each, in the same order — which is what a process pool parallelises
-    (`solver/parallel_refine.py`). The accepted winner is then re-developed
-    in-process through `develop_fn` so the returned `BoardOptimisedTeam`
-    carries its board and sockets. Same accept/reject decisions, same numbers,
-    fewer wall-clock seconds; the default is the serial equivalent.
-
-    Returns `(refined, refined_score, swaps)`; `swaps` records each accepted
-    change as `{"slot", "out", "in", "gain"}`. No improvement -> the seed
-    itself, its score, and `[]`."""
-    cheap_fn = prefilter_fn if prefilter_fn is not None else score_fn
-    current = seed
-    current_score = score_fn(seed.team, seed.board)
-    swaps: list[dict] = []
-    for _round in range(max_rounds):
-        # every slot's shortlist first, then ONE exact stage over all of them
-        pending: list[tuple[int, Card, Team]] = []
-        for slot in range(len(current.team.members)):
-            incumbent = current.team.members[slot]
-            scored: list[tuple[float, Card, Team]] = []
-            for cand in candidates:
-                if cand.id == incumbent.id:
-                    continue
-                members = list(current.team.members)
-                members[slot] = cand
-                try:
-                    mutated = Team(leader=current.team.leader,
-                                   members=tuple(members))
-                except TeamError:
-                    continue
-                scored.append((cheap_fn(mutated, current.board), cand, mutated))
-            scored.sort(key=lambda s: -s[0])
-            pending.extend((slot, cand, mutated)
-                           for _keep, cand, mutated in scored[:shortlist])
-        built: dict[int, BoardOptimisedTeam] = {}
-        if batch_score_fn is not None:
-            exacts = list(batch_score_fn([m for _s, _c, m in pending]))
-        else:
-            exacts = []
-            for k, (_s, _c, m) in enumerate(pending):
-                built[k] = develop_fn(m)
-                exacts.append(score_fn(m, built[k].board))
-        best: tuple[float, int, Card, Team, int] | None = None
-        for k, ((slot, cand, mutated), exact) in enumerate(zip(pending, exacts)):
-            if exact > current_score + min_gain and (
-                best is None or exact > best[0]
-            ):
-                best = (exact, slot, cand, mutated, k)
-        if best is None:
-            break
-        exact, slot, cand, mutated, k = best
-        # serial: the winner was developed in the exact stage; batched: the
-        # workers returned scores only, so develop the ONE winner here.
-        developed = built.get(k) or develop_fn(mutated)
-        swaps.append({"slot": slot, "out": current.team.members[slot].id,
-                      "in": cand.id, "gain": exact - current_score})
-        current, current_score = developed, exact
-    return current, current_score, swaps

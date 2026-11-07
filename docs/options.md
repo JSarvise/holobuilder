@@ -24,7 +24,7 @@ the page itself (`tools/oss/options_glossary.py`): the wording is the app's own.
 ## Holomem Boards
 
 - **Optimize Holomem Boards** (switch): On: every team's boards are planned for it, within the options below. Off: every team plays on your boards as they are now (bought nodes and socketed cards); nothing is planned.
-- **Max Holomem Board Pt** (switch): Every holomem at level 50, 361 Pt each.
+- **Max Holomem Board Pt** (switch): Every holomem at level 50, the most Holomem Board Pt the game gives.
 - **Every holomem invited** (switch): A holomem you have not invited plans at max level.
 - **Unlimited Cubes and Hexas** (switch): Ignore cubes and hexas (the other holomems' spare points go to green too). Off: the best teams are re-planned within your cubes and hexas.
 - **Don't refund resets** (switch): A reset returns no cubes or hexas.

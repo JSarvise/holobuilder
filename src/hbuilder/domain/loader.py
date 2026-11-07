@@ -9,19 +9,15 @@ so a default run answers "what is the best team if every card were
 maxed?" — mode A, and it stays the default. A *mode B* document is the
 same cards.json shape carrying the account's **real** per-card
 stats, plus one extra top-level `provenance` object naming where those
-numbers came from and when. `card_provenance` parses that block;
-`load_cards_and_provenance` returns it alongside the cards so a caller
-can announce which basis it ranked on. A document with no `provenance`
-key is mode A — the absence is the default, never an error.
-
-Nothing here builds a mode-B document: `tools/recon/proxy/build_mode_b.py`
-does, by hand, and it emits a *new* file. `data/cards.json` and
-`data/owned.json` remain read-only to every code path in this package.
+numbers came from and when. `card_provenance` parses that block. A
+document with no `provenance` key is mode A — the absence is the default,
+never an error. Nothing in this repository writes a mode-B document;
+`data/cards.json` and `data/owned.json` are read-only to every code path in
+this package.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,8 +40,6 @@ def _split_error(error: str) -> tuple[str, str]:
 
 
 PROVENANCE_KEY = "provenance"
-MODE_B = "B"
-REAL_STATS_BASIS = "real"
 
 _PROVENANCE_STRING_FIELDS: tuple[str, ...] = (
     "mode",
@@ -77,19 +71,6 @@ class CardProvenance:
     skills_source_sha256: str
     card_count: int
     description: str
-
-    def is_mode_b(self) -> bool:
-        return self.mode == MODE_B
-
-    def banner(self) -> str:
-        """The one line the CLI prints so a mode-B run announces itself.
-        Composed here from the parsed fields rather than read out of the
-        file as free text: a document cannot understate what it is."""
-        return (
-            f"MODE {self.mode}: ranking on {self.stats_basis.upper()} per-card stats "
-            f"from {self.stats_source} (generated {self.generated_at}, "
-            f"{self.card_count} cards) — NOT the maxed default."
-        )
 
 
 def card_provenance(doc: object) -> CardProvenance | None:
@@ -145,33 +126,6 @@ def card_provenance(doc: object) -> CardProvenance | None:
     )
 
 
-def stale_source_note(provenance: CardProvenance, root: Path) -> str | None:
-    """One-line staleness warning, or `None` if the mode-B document is still
-    in step with the hand-edited file it copied skills out of.
-
-    A mode-B document duplicates `data/cards.json`'s skills, gates and
-    identity at build time, so a later hand edit there — the 54
-    untranscribed 3★ `costume_skill`s are the live example — silently makes
-    it stale. `skills_source_sha256` is what turns that into a visible
-    warning instead of a wrong answer nobody notices. Read-only: hashes the
-    named file, never writes it."""
-    source = (root / provenance.skills_source).resolve()
-    try:
-        digest = hashlib.sha256(source.read_bytes()).hexdigest()
-    except OSError:
-        return (
-            f"STALENESS UNCHECKED: {provenance.skills_source} (the file this "
-            "document copied skills from) could not be read"
-        )
-    if digest == provenance.skills_source_sha256:
-        return None
-    return (
-        f"STALE: {provenance.skills_source} has changed since this document was "
-        f"generated ({provenance.generated_at}); its skills/gates may be out of "
-        "date. Rebuild with tools/recon/proxy/build_mode_b.py."
-    )
-
-
 def load_cards(path: Path) -> tuple[Card, ...]:
     """Read, validate, and construct `Card`s from a cards.json-shaped file.
 
@@ -219,30 +173,12 @@ def load_cards(path: Path) -> tuple[Card, ...]:
     return tuple(cards)
 
 
-def card_provenance_of(
-    path: Path, *, require_mode_b: bool = False
-) -> CardProvenance | None:
+def card_provenance_of(path: Path) -> CardProvenance | None:
     """The stat basis of a cards-shaped document: `None` for the maxed
-    default (mode A), a `CardProvenance` for a mode-B real-stat document.
-
-    `require_mode_b=True` makes a document without a mode-B provenance
-    block a `SchemaError` rather than a silent mode-A load: it is what
-    `--real-stats` uses, so naming the wrong file fails loudly instead of
-    quietly ranking on maxed stats under a flag that promised real ones.
-    """
+    default (mode A), a `CardProvenance` for a mode-B real-stat document."""
     with open(path, "r", encoding="utf-8") as fh:
         doc = json.load(fh)
-
-    provenance = card_provenance(doc)
-    if require_mode_b and (provenance is None or not provenance.is_mode_b()):
-        raise SchemaError(
-            f"provenance: {path} does not declare mode {MODE_B} stats — it carries "
-            "no real-stat provenance block. Generate one with "
-            "tools/recon/proxy/build_mode_b.py.",
-            card_id=None,
-            field=PROVENANCE_KEY,
-        )
-    return provenance
+    return card_provenance(doc)
 
 
 def load_owned(path: Path, cards: tuple[Card, ...]) -> tuple[Card, ...]:

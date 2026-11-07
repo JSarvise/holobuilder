@@ -1,5 +1,5 @@
 """The leaders' Live2D figure routes: `GET /api/live2d/index`, `/live2d/core.js` and
-`/live2d/<converted file>` (written by tools/recon/proxy/live2d_build.py into a gitignored
+`/live2d/<converted file>` (written by tools/refresh/live2d_build.py into a gitignored
 folder). The index must always answer (the page falls back to the card art when it says
 nothing is available); the file route must refuse anything outside its own name pattern.
     python -m pytest tools/web/test_live2d_routes.py
@@ -7,33 +7,11 @@ nothing is available); the file route must refuse anything outside its own name 
 from __future__ import annotations
 
 import json
-import socket
-import threading
 import urllib.error
 import urllib.request
 
 import pytest
 
-import server as web_server
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def web_base():
-    port = _free_port()
-    server = web_server.ThreadingServer((web_server.BIND_HOST, port), web_server.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 def _get(url):
@@ -73,7 +51,7 @@ def test_a_missing_model_is_a_404_not_a_substitute(web_base):
 def test_served_model_files_resolve_their_relative_references(web_base):
     doc = json.loads(_get(web_base + "/api/live2d/index")[1])
     if not doc["models"]:
-        pytest.skip("no converted Live2D model on disk (run tools/recon/proxy/live2d_build.py)")
+        pytest.skip("no converted Live2D model on disk (run tools/refresh/live2d_build.py)")
     url = next(iter(doc["models"].values()))["model"]
     status, body, kind = _get(web_base + url)
     assert status == 200 and kind == "application/json"

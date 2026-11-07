@@ -18,12 +18,13 @@ import pytest
 
 from hbuilder.domain.board import (
     GROUPING_ALL_CAP, SONG_ALL_CAP_PERMIL, STAT_NAMES, BoardBase, BoardDigest, BoardEffect, BoardError,
-    BoardModel, BoardNode, CharacterBoard, _reaches, resolve,
+    BoardModel, BoardNode, CharacterBoard, _reaches,
 )
+from support.board_reference import resolve
 from hbuilder.domain.board_plan import PlanCache
 from hbuilder.domain.card import Stats
 
-from conftest import make_card, make_scoring_config
+from support.builders import make_card, make_scoring_config
 from test_fast_leaf import BENCH, CONNECT, _both_boards, _team
 
 _HOLOMEM = [f"Chr{n}" for n in range(1, 13)]

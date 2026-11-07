@@ -1,45 +1,32 @@
-"""The swap-refine's EXACT stage across processes — same numbers, fewer seconds.
+"""The exact per-song leaf, across processes — same numbers, fewer seconds.
 
-`board_plan.refine_members` hill-climbs one team's five member slots by the
-target metric. Its cost is the exact stage: every shortlisted candidate is
-DEVELOPED (`optimize_and_rerank`, ~20 ms) and SCORED on the chart
-(`score_song_detailed`, ~50-100 ms with the joint slot-order walk). A round is
-5 slots x `shortlist` candidates of that — 100 evaluations at shortlist 20 —
-and a wide refine over a dozen leaders plus alternative seeds takes ~3-8 minutes
-serially. Those evaluations share no state, so this is
-`parallel_songs.py`'s pattern applied to them: `spawn` context, initializer
-carries the context once per worker, small tasks dispatched dynamically, and
-the parent keeps the decision.
-
-## What a worker holds and what a task is
-
-The initializer receives everything the server's `_develop_one` and
-`_song_est_of` closures close over, as plain data: the card catalogue (Card
-dataclasses), the scoring config, the chart(s), the skilltree/master dumps,
-node effect ids, Connect cards, bench boards, the chr->name map and the
-budget rule. Each worker rebuilds the same `tree_for`/`budget_for` the server
-builds and caches its trees. A task is one team as ids; it returns the exact
-score — the MEAN over the given charts, so one pool serves the song mode (one
-chart) and the across mode's sampled-mean metric (16 charts) alike. Boards do
-not cross the process boundary: `refine_members` re-develops only the accepted
-winner in-process, so the returned `BoardOptimisedTeam` is built by the same
-code path as a serial refine.
+`evaluate` scores one team the way the web ranks it: the team's boards are
+developed for the chart (`optimize_and_rerank`, with the singer bench when the
+song is sung by a member) and the team is scored on it (`score_song_detailed`
+with the joint slot-order walk); the result is the MEAN over the given charts,
+so one pool serves the one-song and the across-songs searches alike.
+`RefinePool` runs that over many teams: `spawn` context, an initializer that
+carries the `RefineContext` (cards, config, charts, board dumps, budget rule)
+once per worker, small tasks dispatched dynamically, results returned in the
+order of the input (`batch_score`, `batch_score_per_chart`).
 
 ## Why the answer cannot depend on the pool
 
-Workers compute; the parent decides. `RefinePool.batch_score(teams)` returns
-scores in the order of `teams`, and `refine_members` applies the same accept
-rule it applies to serial scores. Each score is the same `optimize_and_rerank`
-+ `score_song_detailed` on the same inputs in the same interpreter, so it is
-the same float. Any failure to stand the pool up, or a worker dying, falls
-back to computing the batch serially IN THIS PROCESS with the same functions —
-the score is then computed here instead of there, never approximated.
+Workers compute; the parent decides. Each score is the same develop + score on
+the same inputs in the same interpreter, so it is the same float. With one
+worker, or when the pool cannot be stood up, the batch is scored serially IN
+THIS PROCESS with the same functions — computed here instead of there, never
+approximated.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import multiprocessing
+import os
+import pickle
+import tempfile
+from multiprocessing.reduction import ForkingPickler
 from typing import Callable, Mapping, Sequence
 
 from hbuilder.domain.board_optimizer import BoardPlan
@@ -63,7 +50,7 @@ from hbuilder.domain.board_plan import (
 from hbuilder.domain.card import Card
 from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown
 from hbuilder.domain.scoring_config import ScoringConfig
-from hbuilder.domain.song import SongChart, overall_power_for, score_song_detailed
+from hbuilder.domain.song import OverallPower, SongChart, overall_power_for, score_song_detailed
 from hbuilder.domain.team import Team
 from hbuilder.solver.parallel import default_workers
 
@@ -168,8 +155,12 @@ _PLAN_CACHE: PlanCache | None = None
 _STOP = None
 
 
-def _init_worker(ctx: RefineContext, stop=None) -> None:
+def _init_worker(ctx: RefineContext | str, stop=None) -> None:
+    """A worker's context: the context itself, or the file `RefinePool` pickled it to once."""
     global _CTX, _BY_ID, _TREES, _PLAN_CACHE, _STOP
+    if isinstance(ctx, str):
+        with open(ctx, "rb") as fh:
+            ctx = pickle.load(fh)
     _CTX = ctx
     _BY_ID = {c.id: c for c in ctx.cards}
     _TREES = {}
@@ -285,11 +276,11 @@ def evaluate(ctx: RefineContext, by_id: Mapping[str, Card], tree_for, budget_for
     leader_id, member_ids, *selection = team_ids
     if len(selection) > 1 and selection[1] is not None:
         ctx = dataclasses.replace(ctx, refine_activation=bool(selection[1]))
-    charts = ctx.charts if not selection or selection[0] is None else         tuple(ctx.charts[i] for i in selection[0])
+    charts = (ctx.charts if not selection or selection[0] is None
+              else tuple(ctx.charts[i] for i in selection[0]))
     team = Team(leader=by_id[leader_id],
                 members=tuple(by_id[m] for m in member_ids))
-    leader_chr = "chr-" + team.leader.id.split("-")[1]
-    powers: dict[int, tuple[object, float]] = {}   # id(board) -> (that board, power)
+    powers: dict[int, tuple[object, OverallPower]] = {}   # id(board) -> (that board, power)
 
     def song_score(chart, cfg) -> float:
         """One chart's score on the deck power `cfg` asks for: with
@@ -458,7 +449,6 @@ def develop_team(ctx: RefineContext, team: Team, tree_for, budget_for, chart, *,
     the same per-chart score `evaluate` uses. `tests` pin that the board this
     returns scores to `evaluate`'s float."""
     refine = ctx.refine_activation if refine is None else refine
-    leader_chr = "chr-" + team.leader.id.split("-")[1]
     sings = song_cast(chart) if chart is not None else False
     if ctx.board_state is not None:
         # boards as they are: nothing developed, the same board `evaluate` scores
@@ -554,10 +544,9 @@ def _task_per_chart(item):
 # Parent side.
 # ---------------------------------------------------------------------------
 class RefinePool:
-    """A process pool that scores developed teams for `refine_members`'s
-    `batch_score_fn`. Use as a context manager; `batch_score(teams)` returns
-    one float per team, in order. `workers=1` (or a pool that fails to start)
-    computes the same floats in-process."""
+    """A process pool that scores developed teams. Use as a context manager;
+    `batch_score(teams)` returns one float per team, in order. `workers=1` (or a
+    pool that fails to start) computes the same floats in-process."""
 
     def __init__(
         self,
@@ -574,6 +563,7 @@ class RefinePool:
         self._trees: dict = {}
         self._plan_cache: PlanCache | None = None
         self._stop = None           # shared with the workers (`_init_worker`)
+        self._ctx_file: str | None = None
         self._generation = 0
 
     def new_generation(self) -> int:
@@ -608,9 +598,18 @@ class RefinePool:
             try:
                 context = multiprocessing.get_context("spawn")
                 self._stop = context.RawValue("q", 0)
+                # the context (~6 MB with a difficulty's charts) pickled ONCE, to a file each
+                # worker reads: handed over as an argument, it is pickled again for every
+                # worker and each start waits for that worker to boot and read it (16 workers:
+                # ~6.7 s before the pool exists, against ~0.3 s); the same pickler, the same
+                # objects
+                with tempfile.NamedTemporaryFile("wb", prefix="hbctx_", suffix=".pickle",
+                                                 delete=False) as fh:
+                    fh.write(ForkingPickler.dumps(self.ctx))
+                    self._ctx_file = fh.name
                 self._pool = context.Pool(
                     processes=self.workers, initializer=_init_worker,
-                    initargs=(self.ctx, self._stop))
+                    initargs=(self._ctx_file, self._stop))
             except Exception as exc:  # noqa: BLE001 — never a new answer
                 self._pool = None
                 if self.on_fallback:
@@ -629,6 +628,12 @@ class RefinePool:
                 self._pool.join()
             finally:
                 self._pool = None
+        if self._ctx_file is not None:
+            try:
+                os.unlink(self._ctx_file)
+            except OSError:
+                pass            # a worker still holding it open: the temp folder's to clear
+            self._ctx_file = None
 
     def _serial(self, items: list[tuple[str, tuple[str, ...]]]) -> list[float]:
         if self.ctx.use_plan_cache and self._plan_cache is None:

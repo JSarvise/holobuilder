@@ -61,7 +61,6 @@ def test_lazy_prefers_local_then_caches_then_serves_from_cache(tmp_path):
     calls.clear()
     assert s.lazy("d/live2d/m.moc3") == p and calls == []       # second view: from disk
     assert s.lazy("d/nope.moc3") is None
-    assert s.known("d/live2d/n.moc3") and not s.known("d/nope.moc3")
 
 
 def test_cache_cap_evicts_the_oldest_and_zero_is_unlimited(tmp_path):

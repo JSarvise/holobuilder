@@ -8,49 +8,21 @@ different skills: 600 ("When LIFE is 600 or higher, Score UP 120%") and 1000
 (`ライフ1000以上で発動率が45%UP`). The threshold is therefore a per-skill
 parameter, and the run state carries the numeric value it is compared against.
 
-The behavioural half of this file pins that comparison. The structural half
-pins the thing that would otherwise rot silently: `RUN_STATE_DIMENSIONS` has
-three readers, and if one of them (e.g. `cli.py`) hardcoded the dimension
-names instead of iterating the constant, a change to the dimensions would adapt
-in two renderers and keep emitting the old shape in the third — producing
-*plausible* output, never an error. That is the failure class of a constant
-most call sites read through and one does not, which
-`tests/test_unknown_condition_is_data_missing.py` guards one layer down. A behaviour test cannot catch it, because the wrong
-output is well-formed; only a structural walk can.
-
-Follows the AST-walk convention of `tests/test_source_of_truth.py`: a walk over
-real syntax, never a string search of the source text, so a comment or
-docstring that merely mentions a dimension name cannot fool it.
+This file pins that comparison, and that `RunState` carries exactly the
+dimensions `RUN_STATE_DIMENSIONS` names.
 """
 
 from __future__ import annotations
 
-import ast
 import dataclasses
-from pathlib import Path
 
 import pytest
 
-from hbuilder.domain.card import GateCondition
 from hbuilder.domain.gates import GatePredicate, RunState
 from hbuilder.domain.schema import RUN_STATE_DIMENSIONS, validate_skill_slot
 from hbuilder.domain.scoring_config import load_scoring_config
 
-from conftest import DEFAULT_RUN_STATE, make_card, make_skill
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-PACKAGE_ROOT = REPO_ROOT / "src" / "hbuilder"
-
-# Every module that renders `assumed_run_state` for a human or a machine.
-RENDERERS = (
-    PACKAGE_ROOT / "cli.py",
-    PACKAGE_ROOT / "output" / "json_output.py",
-    PACKAGE_ROOT / "output" / "assumptions.py",
-)
-
-# The pre-revision flag names. These must not survive anywhere as identifiers
-# or as literal strings in executable positions.
-RETIRED_FLAG_NAMES = ("combo_100_reached", "life_at_or_above_600")
+from support.builders import make_card
 
 
 def _aggregates_for(cards):
@@ -179,67 +151,4 @@ def test_a_boolean_run_state_value_is_rejected_rather_than_coerced():
     assert any("life" in e for e in errors), (
         "a pre-revision boolean must be rejected by name, not coerced to 1. "
         "Silent coercion is the migration failure this check exists to stop"
-    )
-
-
-# --- Structural: no renderer may hardcode dimension names ------------------
-
-
-def _string_constants(tree: ast.AST) -> list[str]:
-    """Every string constant in an executable position — docstrings and
-    comments excluded, so prose naming a retired flag cannot trip this."""
-    docstrings = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            body = getattr(node, "body", None)
-            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
-                if isinstance(body[0].value.value, str):
-                    docstrings.add(id(body[0].value))
-    return [
-        node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and id(node) not in docstrings
-    ]
-
-
-@pytest.mark.parametrize("path", RENDERERS, ids=lambda p: p.name)
-def test_no_renderer_hardcodes_a_run_state_dimension_name(path):
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    literals = set(_string_constants(tree))
-    attributes = {
-        node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
-    }
-
-    offenders = [d for d in RUN_STATE_DIMENSIONS if d in literals]
-    assert offenders == [], (
-        f"{path.name} names run-state dimension(s) {offenders} as a string "
-        "literal instead of iterating RUN_STATE_DIMENSIONS. Every renderer "
-        "must read the constant: this is exactly how cli.py drifted, and the "
-        "drift is invisible at behaviour level because the hardcoded "
-        "renderer keeps producing well-formed output"
-    )
-
-    retired = [f for f in RETIRED_FLAG_NAMES if f in literals or f in attributes]
-    assert retired == [], (
-        f"{path.name} still references retired flag name(s) {retired}. These "
-        "were replaced by numeric dimensions; a survivor means a renderer "
-        "was not migrated"
-    )
-
-
-def test_no_module_in_the_package_still_references_a_retired_flag_name():
-    survivors = []
-    for path in PACKAGE_ROOT.rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        literals = set(_string_constants(tree))
-        attributes = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-        names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
-        for flag in RETIRED_FLAG_NAMES:
-            if flag in literals or flag in attributes or flag in names:
-                survivors.append(f"{path.relative_to(PACKAGE_ROOT)}:{flag}")
-    assert survivors == [], (
-        f"retired run-state flag names survive in executable positions: "
-        f"{survivors}"
     )

@@ -25,9 +25,7 @@ from hbuilder.domain.card import EffectTarget, Stats
 from hbuilder.domain.scoring import _effective_stat_sum
 from hbuilder.domain.song import ChartNote, SongChart, score_song_detailed
 
-from conftest import make_card, make_scoring_config, make_skill
-
-CERTAIN_TIERS = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
+from support.builders import CERTAIN_TIERS, make_card, make_scoring_config, make_skill
 
 BIG = Stats(performance=900, technique=900, sense=900)
 SMALL = Stats(performance=10, technique=10, sense=10)
@@ -181,10 +179,9 @@ def test_when_no_count_limit_binds_the_stat_sum_is_order_invariant():
     assert best.member_order[4] == "card-A"
 
 
-def test_the_retired_free_rule_leaves_the_cue_search_intact():
-    """`cfg.slot_order_rule = "free"` retires the ordered *passive* rule (it is
-    an upper bound on `best_order`, kept runnable under test). It must not also
-    retire the SPECIAL cue search: the cue binding is a different attested
+def test_the_free_rule_leaves_the_cue_search_intact():
+    """`cfg.slot_order_rule = "free"` resolves passive recipients without a slot
+    order. It must not also retire the SPECIAL cue search: the cue binding is a different attested
     mechanism and `"free"` says nothing about it.
 
     Under `"free"` every effect keeps the recipients `resolve_target_card_ids`

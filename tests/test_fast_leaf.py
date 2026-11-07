@@ -11,18 +11,17 @@ the recon dumps are present."""
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import json
 import random
+import sys
 from pathlib import Path
 
 import pytest
 
 from hbuilder.domain import board as board_mod
 from hbuilder.domain.board import BoardError, parse_effect_id
-from hbuilder.domain.board_optimizer import BoardPlan
 from hbuilder.domain.board_plan import (
-    PlanCache, TeamBoardPlan, _team_connect_assignment,
+    PlanCache, _team_connect_assignment,
     _team_connect_assignment_grouped, board_model_from_plan, cached_team_plan,
     compile_node_recipes, node_values_from_recipes, optimize_and_rerank,
     power_node_values, song_cast,
@@ -31,11 +30,11 @@ from hbuilder.domain.card import Stats
 from hbuilder.domain.skilltree import SkillTree, TreeNode, ROOT_NODE
 from hbuilder.domain.team import Team, TeamError
 
-from conftest import make_card, make_scoring_config
+from support.builders import make_card, make_scoring_config
 
 K = 2.03734
 REPO = Path(__file__).resolve().parents[1]
-RESEARCH = REPO / "tools" / "recon" / "RESEARCH-2026-08-18"
+RESEARCH = REPO / "tests" / "fixtures" / "research"
 
 # ---------------------------------------------------------------------------
 # parse_effect_id memo
@@ -288,10 +287,10 @@ def test_refine_context_defaults_off_and_the_seed_is_required():
 # real rosters (skipped without the recon dumps)
 # ---------------------------------------------------------------------------
 _DATA_DIR = "".join(("da", "ta"))   # the real catalogue/account dir, see the note below
-_PROBE = REPO / "tools" / "recon" / "probes" / "exhaustive_song_leader.py"
+_LEAF_INPUTS = REPO / "tools" / "web" / "leaf_inputs.py"
 _DUMPS = REPO / "tools" / "recon" / "proxy" / "dumps"
 _HAVE_REAL = all(p.is_file() for p in (
-    _PROBE, _DUMPS / "skilltree.json", _DUMPS / "master_SkillTreeNode.json",
+    _LEAF_INPUTS, _DUMPS / "skilltree.json", _DUMPS / "master_SkillTreeNode.json",
     # the catalogue + account files, spelled through a joined name so the
     # fixture-isolation guard (tests/test_fixture_isolation.py) does not
     # read this real-data skip guard as a fixture recoupling
@@ -318,9 +317,10 @@ def test_twenty_real_rosters_score_identically_on_the_fast_leaf():
         return score_song_detailed(team.members, (team.leader,), chart, cfg_b,
                                    deck_power=power)[0].total_score
 
-    spec = importlib.util.spec_from_file_location("exhaustive_song_leader", _PROBE)
-    ex = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(ex)
+    if str(_LEAF_INPUTS.parent) not in sys.path:
+        sys.path.insert(0, str(_LEAF_INPUTS.parent))
+    import leaf_inputs as ex  # noqa: PLC0415
+
     cards, _cfg, ctx, chart = ex.load_context("finite", 453, "m0334")
     by_id = {c.id: c for c in cards}
     leader = by_id["card-04001-5-uniq-0042-00"]
@@ -418,3 +418,54 @@ def test_fast_assembly_equals_plain_with_cards_held_on_a_bench_green(sings):
         assert [dataclasses.astuple(p) for p in p_fast] == [dataclasses.astuple(p) for p in p_pl]
         assert not {p.card for p in p_pl} & {"cc-c", "cc-a1"}
         assert p_pl  # the free cards still socket
+
+
+@pytest.mark.parametrize("cap, over", [(0.0, True), (1e9, False)])
+def test_a_team_over_the_song_cap_at_multiplier_one_skips_the_fast_matching(monkeypatch, cap, over):
+    """Connect multipliers are >= 1, so a team whose paying yellows pass the song cap with
+    every multiplier at 1 passes it after any matching: `board_model_from_plan` goes
+    straight to the capped path instead of computing the plan cache's matching only for
+    `_board_model_from_cache` to give it up. The board is the one the plain path builds, and
+    the fast path, asked anyway, would have returned None. The capped path, too, takes the
+    team's boards from the plan cache."""
+    import hbuilder.domain.board_plan as bp
+    monkeypatch.setattr(bp, "SONG_ALL_CAP_PERMIL", cap)
+    family = "live_score_bonus_add_permil_up_by_music_skill_tree_character_and_music_singer_type"
+    y_solo = (f"skill_tree_effect-{family}-50-skill_tree_effect_passive_trigger-"
+              "music_skill_tree_character_and_music_singer_type-solo-always-solo")
+    effects = {**EFFECTS, "Y-001": [y_solo]}
+    skilltree = {**SKILLTREE, "nodes": {**SKILLTREE["nodes"],
+                                        "Y-001": {"chr": {}, "e": {"t": family, "tr": "solo"}}}}
+    # an off-team singer's bought solo yellow pays on this song (m0342's case: the bench
+    # singers' yellows alone pass the cap)
+    sings = bp.SongCast({"chr-00099"}, "solo")
+    bench = {"Chr99": [*BENCH["Chr99"], {"node": "Y-001", "effects": [y_solo]}]}
+    names_bench = {"chr-00099": "Chr99"}
+    team = _team(1, [2, 3, 4, 5, 6])
+    cache = PlanCache.from_team(team, make_scoring_config())
+    plan = cached_team_plan(team.leader, team.members, cache=cache, tree_for=lambda c: TREE,
+                            budget_for=lambda c: 453, node_effect_ids=effects,
+                            skilltree=skilltree, sings=sings)
+    calls = []
+    fast_path = bp._board_model_from_cache
+    monkeypatch.setattr(bp, "_board_model_from_cache",
+                        lambda *a, **k: calls.append(1) or fast_path(*a, **k))
+    kw = dict(overall_power=20000.0, bonus_permil=300.0, k_constant=K, active_pool_rate=0.4,
+              connect_cards=CONNECT, bench_characters=bench, sings=sings, name_by_chr=names_bench)
+    p_cached, p_plain = [], []
+    cached = board_model_from_plan(plan, team.leader, team.members, skilltree, effects,
+                                   plan_cache=cache, placements_out=p_cached, **kw)
+    assert bool(calls) is not over
+    # either way the team's boards come from the plan cache's assemblies (`team_board`)
+    assert {k[1] for k in cache._team_boards} == {c.member for c in (team.leader, *team.members)}
+    plain = board_model_from_plan(plan, team.leader, team.members, skilltree, effects,
+                                  placements_out=p_plain, **kw)
+    assert cached == plain
+    assert [dataclasses.astuple(p) for p in p_cached] == [dataclasses.astuple(p) for p in p_plain]
+    if over:
+        names = {**names_bench, **{"chr-" + c.id.split("-")[1]: c.member
+                                   for c in (team.leader, *team.members)}}
+        assert fast_path(plan, team.leader, team.members, skilltree, effects, names,
+                         overall_power=20000.0, bonus_permil=300.0, k_constant=K,
+                         active_pool_rate=0.4, connect_cards=CONNECT, placements_out=None,
+                         bench_characters=bench, sings=sings, cache=cache) is None

@@ -15,7 +15,7 @@ from hbuilder.domain.board_plan import (
 )
 from hbuilder.solver.parallel_refine import board_from_state
 
-from conftest import make_scoring_config
+from support.builders import make_scoring_config
 from test_fast_leaf import CONNECT, EFFECTS, K, SKILLTREE, TREE, _POS, _team
 
 ALL = frozenset(EFFECTS) - {"Y-001"}  # every stat node bought (sockets need not be)

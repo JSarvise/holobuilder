@@ -10,8 +10,6 @@ from __future__ import annotations
 import itertools
 import json
 import random
-import socket
-import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -20,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 import event_mode as em
-import server as web_server
+from hbweb import config, event, jobs
 from hbuilder.domain import marathon as mar
 
 TYPES = ("Cute", "Cool", "Pure", "Happy")
@@ -246,7 +244,7 @@ def _in_memory_event(monkeypatch):
     replaced by the in-memory parse of EVENT_RAW, and the path made to look present."""
     monkeypatch.setattr(em, "load_event_bundle",
                         lambda _path, key=None: em.bundle_from_raw(EVENT_RAW, key))
-    monkeypatch.setattr(web_server, "EVENT_BONUS_PATH", Path(__file__))
+    monkeypatch.setattr(config, "EVENT_BONUS_PATH", Path(__file__))
 
 
 def test_bundle_picks_the_newest_open_event():
@@ -261,7 +259,7 @@ def test_bundle_picks_the_newest_open_event():
 
 def test_job_emits_plan_result_end(tmp_path, monkeypatch):
     _in_memory_event(monkeypatch)
-    monkeypatch.setattr(web_server, "COLLECTION_PATH", tmp_path / "none.json")
+    monkeypatch.setattr(config, "COLLECTION_PATH", tmp_path / "none.json")
     seen = {}
 
     def runner(opts, *, emit, cancel, event, collection, song_info, workers):
@@ -269,10 +267,10 @@ def test_job_emits_plan_result_end(tmp_path, monkeypatch):
         emit({"type": "stage", "stage": "build", "state": "done"})
         return {"rows": [], "objective": opts["objective"]}
 
-    job = web_server.Job(job_id="t1")
-    web_server.run_event_job(job, {"objective": "event_points", "song": "m0001", "boosts": 3,
-                                   "holopass": True, "top": 5, "difficulty": "EXPERT",
-                                   "workers": 1, "event": None}, runner=runner)
+    job = jobs.Job(job_id="t1")
+    jobs.run_event_job(job, {"objective": "event_points", "song": "m0001", "boosts": 3,
+                             "holopass": True, "top": 5, "difficulty": "EXPERT",
+                             "workers": 1, "event": None}, runner=runner)
     types = [e["type"] for e in _drain(job)]
     assert types == ["plan", "stage", "result", "end"]
     assert seen["event"] == "marathon_event-normal-009-chapter-01"
@@ -284,32 +282,13 @@ def test_job_reports_a_cancel(monkeypatch):
     def runner(opts, **_kw):
         raise em.EventCancelled()
 
-    job = web_server.Job(job_id="t2")
-    web_server.run_event_job(job, {"song": "m0001", "objective": "event_points", "event": None},
-                             runner=runner)
+    job = jobs.Job(job_id="t2")
+    jobs.run_event_job(job, {"song": "m0001", "objective": "event_points", "event": None},
+                       runner=runner)
     assert [e["type"] for e in _drain(job)] == ["plan", "cancelled", "end"]
 
 
 # --- HTTP ---------------------------------------------------------------------------
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def web_base():
-    port = _free_port()
-    server = web_server.ThreadingServer((web_server.BIND_HOST, port), web_server.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
-
-
 def _get(url: str) -> tuple[int, dict]:
     try:
         with urllib.request.urlopen(url, timeout=30) as response:
@@ -343,7 +322,7 @@ def test_event_points_route_takes_the_room_multi_score(web_base):
 
 
 def test_event_route_is_503_without_the_bonus_file(web_base, tmp_path, monkeypatch):
-    monkeypatch.setattr(web_server, "EVENT_BONUS_PATH", tmp_path / "missing.json")
+    monkeypatch.setattr(config, "EVENT_BONUS_PATH", tmp_path / "missing.json")
     status, doc = _get(web_base + "/api/event")
     assert status == 503 and doc["available"] is False and "marathon_bonus.json" in doc["error"]
     status, doc = _post(web_base + "/api/event/run", {"song": "m0342"})
@@ -352,21 +331,21 @@ def test_event_route_is_503_without_the_bonus_file(web_base, tmp_path, monkeypat
 
 def test_event_route_shape(web_base, tmp_path, monkeypatch):
     _in_memory_event(monkeypatch)
-    monkeypatch.setattr(web_server, "EVENT_META_PATH", tmp_path / "no_meta.json")
+    monkeypatch.setattr(config, "EVENT_META_PATH", tmp_path / "no_meta.json")
     card = lambda cid, member, rarity: SimpleNamespace(  # noqa: E731
         id=cid, member=member, costume_name="X", rarity=rarity, type="Cute",
         generations=frozenset())
     cards = (card("card-00001-5-uniq-0001-00", "One", "5★"),
              card("card-00002-4-cmmn-0000-00", "Two", "4★"),
              card("card-00003-3-nrml-0000-00", "Three", "3★"))
-    monkeypatch.setattr(web_server, "load_inputs", lambda *a, **k: (cards, cards, None, None))
+    monkeypatch.setattr(event, "load_inputs", lambda *a, **k: (cards, cards, None, None))
     collection = {"cards": {
         "card-00001-5-uniq-0001-00": {"level": 80, "bloom": 1},
         "card-00002-4-cmmn-0000-00": {"level": 60, "bloom": 2},
         "card-00003-3-nrml-0000-00": {"level": 40, "bloom": 2}}}
-    real_read = web_server._read_json
-    monkeypatch.setattr(web_server, "_read_json", lambda path: collection
-                        if path == web_server.COLLECTION_PATH else real_read(path))
+    real_read = config.read_json
+    monkeypatch.setattr(config, "read_json", lambda path: collection
+                        if path == config.COLLECTION_PATH else real_read(path))
     status, doc = _get(web_base + "/api/event")
     assert status == 200
     assert doc["event"] == {"key": "marathon_event-normal-009-chapter-01", "title": None,
@@ -409,7 +388,7 @@ def test_event_songs_route(web_base):
 
 
 def test_event_page_is_served(web_base):
-    if not (web_server.STATIC_DIR / "event.html").is_file():
+    if not (config.STATIC_DIR / "event.html").is_file():
         pytest.skip("static/event.html is not on disk yet")
     with urllib.request.urlopen(web_base + "/event", timeout=30) as response:
         assert response.status == 200
@@ -457,14 +436,14 @@ def _get_raw(url: str) -> tuple[int, bytes]:
 
 
 def test_eventart_route_404s_on_missing_and_bad_names(web_base, tmp_path, monkeypatch):
-    monkeypatch.setattr(web_server, "EVENT_ART_DIR", tmp_path)
+    monkeypatch.setattr(config, "EVENT_ART_DIR", tmp_path)
     assert _get_raw(web_base + "/eventart/marathon_event-normal-009.webp")[0] == 404
     assert _get_raw(web_base + "/eventart/..%2Fsecret.webp")[0] == 404
     assert _get_raw(web_base + "/eventart/x.png")[0] == 404
 
 
 def test_eventart_route_serves_the_refreshed_banner(web_base):
-    files = sorted(web_server.EVENT_ART_DIR.glob("*.webp")) if web_server.EVENT_ART_DIR.is_dir() else []
+    files = sorted(config.EVENT_ART_DIR.glob("*.webp")) if config.EVENT_ART_DIR.is_dir() else []
     if not files:
         pytest.skip("no event art on disk (event_art.py has not run)")
     status, body = _get_raw(web_base + "/eventart/" + files[0].name)

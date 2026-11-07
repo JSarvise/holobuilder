@@ -139,8 +139,8 @@ deterministic in the sorted per-card `(mag, P, cd, dur, E, u, c)` multiset,
 non-additive over cards, absent from both window sums and from every
 multi-quota deck, and it persists under a song read.
 Its formula is not known; the model does not add it. A caller that needs the
-displayed total on a single-line deck should treat `nonspecial_total` as exact
-or one low.
+displayed total on a single-line deck should treat `Active + Outfit + Passive +
+Board` as exact or one low.
 
 The Special line is a deck-wide multiplier on the Active INTEGER, additive over
 the cards, with the special's activation-rate rider counting HALF:
@@ -194,7 +194,7 @@ magnitude. Skill level 2 iff bloom >= 1; special skill level 2 iff bloom >= 3
 the master's `LiveActiveSkillLevel` field 8 (Low 370 / Medium 460 / High 550),
 NOT the tier label in `data/cards.json`.
 
-`tools/recon/proxy/deck_panel_params.py` does that resolution against the
+`tests/support/deck_panel_params.py` does that resolution against the
 game's own master tables; this module deliberately takes plain numbers and does
 no I/O.
 """
@@ -338,11 +338,6 @@ class DeckPanel:
     clamped: bool
     """True when `tot <= A` zeroed the three effect-up lines together."""
 
-    @property
-    def nonspecial_total(self) -> int:
-        """`Active + Outfit + Passive + Board` — the sum of the displayed lines."""
-        return self.active + self.outfit + self.passive + self.board
-
 
 def live_seconds(
     *, cooldown_s: int, duration_s: int, shorten_permil: int = 0
@@ -440,18 +435,6 @@ def _exact_window_average(terms: Sequence[tuple[int, int]]) -> Fraction:
     return total / PANEL_WINDOW_S
 
 
-def _window_average(
-    cards: Sequence[PanelCard], magnitudes: Sequence[int], *, buffed: bool,
-    pre20_magnitudes: Sequence[int] | None = None,
-) -> Fraction:
-    """`_exact_window_average` straight from the cards. `deck_panel` builds the
-    terms once and takes both the exact and the float64 sum of them, so this is
-    the convenience form for anything outside that path."""
-    return _exact_window_average(
-        _second_terms(cards, magnitudes, buffed=buffed, pre20_magnitudes=pre20_magnitudes)
-    )
-
-
 def _forward_float_sum(terms: Sequence[tuple[int, int]]) -> float:
     """The server's accumulation: `s = 0.0; for each live second s += n/d; s / 200`.
 
@@ -463,16 +446,6 @@ def _forward_float_sum(terms: Sequence[tuple[int, int]]) -> float:
     for n, d in terms:
         s += n / d
     return s / PANEL_WINDOW_S
-
-
-def _float_window_average(
-    cards: Sequence[PanelCard], magnitudes: Sequence[int], *, buffed: bool,
-    pre20_magnitudes: Sequence[int] | None = None,
-) -> float:
-    """`_window_average` as the server computes it, in float64."""
-    return _forward_float_sum(
-        _second_terms(cards, magnitudes, buffed=buffed, pre20_magnitudes=pre20_magnitudes)
-    )
 
 
 def _attribution_weights(cards: Sequence[PanelCard]) -> list[Fraction]:
@@ -559,37 +532,6 @@ def _independent_ceilings(quotas: Sequence[Fraction], base: int) -> list[int]:
     if total <= 0 or base <= 0:
         return [0] * len(quotas)
     return [ceil(base * q / total) if q > 0 else 0 for q in quotas]
-
-
-def _adams(quotas: Sequence[int], target: int) -> list[int] | None:
-    """Adams' method (smallest divisors): `line_s = ceil(kappa * q_s)` with
-    `kappa` DETERMINED by `SUM line_s == target`.
-
-    ⚠ Not called by `deck_panel`: the server ceils each share of `base` on its
-    own (`_independent_ceilings`) and does not force a target. Kept as a
-    reference implementation.
-
-    Implemented as the equivalent sequential divisor allocation — every unit with
-    a positive quota takes a seat first, then each further seat goes to the
-    largest `q_s / a_s`. Exact integer arithmetic; ties break on source order.
-
-    Returns `None` when the method cannot apply (no positive quota, or fewer
-    seats than units).
-    """
-    live = [i for i, q in enumerate(quotas) if q > 0]
-    if not live or target < len(live):
-        return None
-    alloc = [0] * len(quotas)
-    for i in live:
-        alloc[i] = 1
-    for _ in range(target - len(live)):
-        # argmax of q_i / a_i, compared by cross-multiplication to stay integral
-        best = live[0]
-        for i in live[1:]:
-            if quotas[i] * alloc[best] > quotas[best] * alloc[i]:
-                best = i
-        alloc[best] += 1
-    return alloc
 
 
 def _largest_remainder(total: int, weights: Sequence[int]) -> list[int]:

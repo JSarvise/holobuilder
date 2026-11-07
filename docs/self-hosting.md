@@ -16,8 +16,8 @@ They are all in this repository:
 | Web front (TLS, `forward_auth` to hb_auth's `/check`, static `/app` and `/content`) | any reverse proxy, e.g. Caddy | see the routes `hb_auth.py` documents |
 | Release signing (Ed25519) | `tools/app/signing.py` | `python tools/app/signing.py --new-key` once; the public key goes in `RELEASE_PUBKEY` |
 | Publishing the shared game data | `tools/app/publish.py` | `HB_PUBLISH_SSH=user@host` (content-addressed store under `/srv/holobuilder/content`) |
-| Building the app and the installer | `tools/app/build_app.py`, `tools/app/build_setup.py` | `HB_SERVER_URL=https://your.server` when building |
-| Event borders tracker (optional) | `tools/recon/proxy/event_tracker.py` | guest accounts and, if your host's IP is refused by the game, `HB_API_PROXY` |
+| Building the app and the installer | `tools/app/build_app.py`, `tools/app/build_setup.py` (the installer needs `pip install -r requirements-build.txt`) | `HB_SERVER_URL=https://your.server` when building |
+| Event borders tracker (optional) | `tools/refresh/event_tracker.py` | guest accounts and, if your host's IP is refused by the game, `HB_API_PROXY` |
 
 ## Typical order
 

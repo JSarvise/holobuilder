@@ -1,0 +1,5 @@
+# Building the desktop app's installer (tools/app/build_setup.py) on top of requirements.txt:
+#   pip install -r requirements-build.txt
+# tools/app/build_app.py needs nothing beyond requirements.txt.
+-r requirements.txt
+pyinstaller==6.22.3

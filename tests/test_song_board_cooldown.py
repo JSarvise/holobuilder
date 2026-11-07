@@ -23,17 +23,11 @@ from __future__ import annotations
 import dataclasses
 
 from hbuilder.domain.board import BoardEffect, BoardModel, BoardNode, CharacterBoard
-from hbuilder.domain.song import ChartNote, SongChart, score_song
+from hbuilder.domain.song import ChartNote, OverallPower, SongChart, score_song
 
-from conftest import make_card, make_scoring_config, make_skill
+from support.builders import certain_config as cfg, make_card, make_scoring_config, make_skill
 
-CERTAIN_TIERS = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
 UNCERTAIN_TIERS = {"Low": 0.5, "Medium": 0.5, "High": 0.5}
-
-
-def cfg(**overrides):
-    base = make_scoring_config(probability_tiers=CERTAIN_TIERS)
-    return dataclasses.replace(base, **overrides) if overrides else base
 
 
 def cfg_uncertain(**overrides):
@@ -101,8 +95,8 @@ def test_a_board_cooldown_node_raises_a_cooldown_sensitive_active_score():
     chart = _chart_with_note_in_the_gap()
     board = _board("Member A", _cooldown(500.0))  # interval 30 -> 20
 
-    without = score_song(members, leaders, chart, cfg(), deck_power=2000)[0]
-    with_board = score_song(members, leaders, chart, cfg(board=board), deck_power=2000)[0]
+    without = score_song(members, leaders, chart, cfg(), deck_power=OverallPower.fixed(2000))[0]
+    with_board = score_song(members, leaders, chart, cfg(board=board), deck_power=OverallPower.fixed(2000))[0]
 
     assert with_board.total_score > without.total_score, (
         "the board cooldown node must shorten the interval and cover the gap note; "
@@ -122,8 +116,8 @@ def test_a_board_activation_rate_node_raises_an_uncertain_active_score():
     )
     board = _board("Member A", _rate(400.0))
 
-    without = score_song(members, leaders, chart, cfg_uncertain(), deck_power=2000)[0]
-    with_board = score_song(members, leaders, chart, cfg_uncertain(board=board), deck_power=2000)[0]
+    without = score_song(members, leaders, chart, cfg_uncertain(), deck_power=OverallPower.fixed(2000))[0]
+    with_board = score_song(members, leaders, chart, cfg_uncertain(board=board), deck_power=OverallPower.fixed(2000))[0]
 
     assert with_board.total_score > without.total_score, (
         "the board activation-rate node must raise the ACTIVE proc chance; equal "
@@ -140,8 +134,8 @@ def test_a_team_with_no_active_is_untouched_by_a_board_cooldown_node():
     chart = _chart_with_note_in_the_gap()
     board = _board("Member A", _cooldown(500.0))
 
-    without = score_song(plain, leaders, chart, cfg(), deck_power=2000)[0]
-    with_board = score_song(plain, leaders, chart, cfg(board=board), deck_power=2000)[0]
+    without = score_song(plain, leaders, chart, cfg(), deck_power=OverallPower.fixed(2000))[0]
+    with_board = score_song(plain, leaders, chart, cfg(board=board), deck_power=OverallPower.fixed(2000))[0]
     assert with_board.total_score == without.total_score
 
 
@@ -157,14 +151,14 @@ def test_active_all_fire_is_a_ceiling_above_the_probabilistic_estimate():
         _chart_with_note_in_the_gap(),
         notes=(ChartNote(time=32.0, perfect_permil=1000),))
 
-    estimate = score_song(members, leaders, chart, cfg_uncertain(), deck_power=2000)[0]
+    estimate = score_song(members, leaders, chart, cfg_uncertain(), deck_power=OverallPower.fixed(2000))[0]
     ceiling = score_song(members, leaders, chart,
-                         cfg_uncertain(active_all_fire=True), deck_power=2000)[0]
+                         cfg_uncertain(active_all_fire=True), deck_power=OverallPower.fixed(2000))[0]
     assert ceiling.total_score > estimate.total_score, (
         "all-fire must raise a probabilistic active's score above the estimate")
 
-    certain = score_song(members, leaders, chart, cfg(), deck_power=2000)[0]
+    certain = score_song(members, leaders, chart, cfg(), deck_power=OverallPower.fixed(2000))[0]
     certain_all = score_song(members, leaders, chart,
-                             cfg(active_all_fire=True), deck_power=2000)[0]
+                             cfg(active_all_fire=True), deck_power=OverallPower.fixed(2000))[0]
     assert certain_all.total_score == certain.total_score, (
         "an active that already fires with probability 1 is unchanged by all-fire")

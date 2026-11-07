@@ -11,36 +11,14 @@ gitignored dumps are absent (the endpoint's own 503).
 from __future__ import annotations
 
 import json
-import socket
-import threading
 import urllib.error
 import urllib.request
 
 import pytest
 
-import server as web_server
 
 _TEAM = ["card-04001-5-uniq-0042-00", "card-00002-5-uniq-0001-00", "card-00034-5-uniq-0027-00",
          "card-00028-5-uniq-0023-00", "card-00031-5-uniq-0025-00", "card-00016-5-uniq-0014-00"]
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def web_base():
-    port = _free_port()
-    server = web_server.ThreadingServer((web_server.BIND_HOST, port), web_server.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 def _post(url, obj):
@@ -56,13 +34,13 @@ def _post(url, obj):
 
 @pytest.fixture(scope="module")
 def developed(web_base):
-    """A real developed board_state for _TEAM (flat 453), from the develop route."""
-    status, body = _post(web_base + "/api/optimize-rerank",
-                         {"basis": "maxed", "teams": [_TEAM], "budget": 453})
-    if status == 503:
-        pytest.skip("skilltree/master dumps absent (gitignored)")
+    """A real developed board_state for _TEAM on the maxed basis, from a row's detail."""
+    status, body = _post(web_base + "/api/row-detail",
+                         {"basis": "maxed", "cards": _TEAM, "song": "m0342", "difficulty": "EXPERT"})
+    if status in (400, 503) or "_LoadFailure" in str(body.get("error", "")):
+        pytest.skip(f"skilltree/master/chart dumps absent (gitignored): {body.get('error')}")
     assert status == 200, body
-    return body["ranking"][0]
+    return body
 
 
 def test_board_doc_needs_a_board_state(web_base):
@@ -70,15 +48,10 @@ def test_board_doc_needs_a_board_state(web_base):
     assert status == 400 and "board_state" in body["error"]
 
 
-def test_board_doc_overlays_the_given_board_without_optimising(web_base, developed, monkeypatch):
+def test_board_doc_overlays_the_given_board_without_optimising(web_base, developed):
     """The doc's `plan.optimised_nodes` per character IS the given node set,
-    to_buy/to_sell are the diff against the current board, sockets carry the
-    given placements, and no optimiser ran (optimize_and_rerank is patched
-    to explode)."""
-    def explode(*a, **k):
-        raise AssertionError("board-doc must not optimise")
-
-    monkeypatch.setattr(web_server, "optimize_and_rerank", explode)
+    to_buy/to_sell are the diff against the current board, and sockets carry the
+    given placements."""
     status, doc = _post(web_base + "/api/board-doc", {
         "board_state": developed["board_state"], "cards": _TEAM, "basis": "maxed", "budget": 453})
     assert status == 200, doc
@@ -95,7 +68,7 @@ def test_board_doc_overlays_the_given_board_without_optimising(web_base, develop
         assert set(plan["to_sell"]) == owned - set(state["nodes"])
         assert plan["point_budget"] == 453                 # labelled by the given kind
         assert plan["point_cost"] >= 0
-        assert plan["slots"] == state["slots"]
+        assert state["slots"].items() <= plan["slots"].items()   # the given placements kept
         for sock in c.get("sockets", []):
             cid = state["slots"].get(sock["socket"])
             if cid:

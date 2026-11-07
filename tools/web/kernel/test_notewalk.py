@@ -56,7 +56,7 @@ def _random_terms(rng: random.Random) -> list[_Term]:
 
 def test_pool_is_bit_identical_to_the_python_score_up_pool():
     cfg = load_scoring_config(REPO / "config.json")
-    assert cfg.active_stacking_model.name == "max" and cfg.active_instant_model is None
+    assert cfg.active_stacking_model.name == "max"
     lib = notewalk.load()
     rng = random.Random(20261013)
     checked = nonzero = targeted = 0
@@ -76,6 +76,44 @@ def test_pool_is_bit_identical_to_the_python_score_up_pool():
         targeted += any(t.is_boost and t.targets is not None for t in chosen)
     # The comparison must have had something to disagree about.
     assert checked == 20000 and nonzero > 5000 and targeted > 3000
+
+
+# sha256 of the 20000 pools of `test_pool_is_bit_identical_to_the_python_score_up_pool`, as
+# '<d' bytes, recorded from the Windows build (MinGW gcc): the Linux build gives the same bits.
+POOL_FINGERPRINT = "74011ab389d7e02bfb5a96483f478c7a7e92dc2fd123bb0bf55cee37064385df"
+
+
+def test_pool_bits_are_the_same_on_every_platform():
+    import hashlib
+    import struct
+
+    lib = notewalk.load()
+    rng = random.Random(20261013)
+    digest = hashlib.sha256()
+    for _ in range(20000):
+        terms = _random_terms(rng)
+        effect_up = rng.choice((0.0, 0.0, 0.02, 0.221, 0.251))
+        packed = notewalk.pack_terms(terms, MEMBERS)
+        live = (1 << len(terms)) - 1 if rng.random() < 0.5 else rng.getrandbits(len(terms) or 1)
+        digest.update(struct.pack("<d", lib.hd_pool(packed, len(terms), live, effect_up)))
+    assert digest.hexdigest() == POOL_FINGERPRINT
+
+
+def test_the_library_name_cannot_shadow_the_module():
+    import cbuild
+
+    assert cbuild.library(HERE, "notewalk", "win32").name == "notewalk.dll"
+    assert cbuild.library(HERE, "notewalk", "linux").name == "libnotewalk.so"   # not notewalk.so
+
+
+def test_a_build_leaves_no_partial_file(tmp_path):
+    import cbuild
+
+    src = tmp_path / "k.c"
+    src.write_text("double one(void) { return 1.0; }\n")
+    out = cbuild.build(src, cbuild.library(tmp_path, "k"), "test")
+    assert out.is_file() and sorted(p.name for p in tmp_path.iterdir()) == sorted(["k.c", out.name])
+    assert cbuild.build(src, out, "test") == out                 # current: not rebuilt
 
 
 def test_py_sum_matches_cpython_compensated_sum():

@@ -1,15 +1,14 @@
-"""Event cutoffs: the prediction model (`cutoffs_view.predict`) and the two routes,
-`GET /api/event/cutoffs` and `POST /api/event/cutoffs/sync`.
+"""Event cutoffs: the prediction model (`cutoffs_view.predict`), the route
+`GET /api/event/cutoffs`, and the local poller (`cutoffs_poller`).
 
 No network and NO files written (`test_no_writes.py` walks this file too): the store is an
-in-memory dict swapped in for `cutoffs_view.list_chapters` / `read_chapter`, and the sync's
-subprocess is replaced by a stub of `Handler._run_recon_script`. The disk round trip (append
--> read back) is tested on the recon side, `tools/recon/proxy/test_event_cutoffs.py`.
+in-memory dict swapped in for `cutoffs_view.list_chapters` / `read_chapter`, and the poller's
+runner is a stub. The disk round trip (append -> read back) is tested on the recon side,
+`tools/refresh/test_event_cutoffs.py`.
 """
 from __future__ import annotations
 
 import json
-import socket
 import threading
 import urllib.error
 import urllib.request
@@ -17,7 +16,7 @@ import urllib.request
 import pytest
 
 import cutoffs_view as cv
-import server as web_server
+from hbweb import config
 
 H = 3_600_000
 START = 1_000 * H
@@ -124,7 +123,7 @@ def store(monkeypatch):
 
 
 def test_build_view_shape(store):
-    v = cv.build_view(web_server.CUTOFFS_STORE_DIR, "us", now=START + 11 * H,
+    v = cv.build_view(config.CUTOFFS_STORE_DIR, "us", now=START + 11 * H,
                       grades={"g-dream": {"name": "Dream", "color1": "1", "color2": "2"}})
     assert v["available"] and v["chapter_id"] == "ch-1" and v["kind"] == "points"
     assert v["regions"] == {"us": True, "as": False, "jp": False}
@@ -139,27 +138,14 @@ def test_build_view_shape(store):
 
 def test_build_view_without_data_raises_lookup(store):
     with pytest.raises(LookupError):
-        cv.build_view(web_server.CUTOFFS_STORE_DIR, "jp", now=START)
+        cv.build_view(config.CUTOFFS_STORE_DIR, "jp", now=START)
 
 
 # ------------------------------------------------------------------ routes
-def _free_port():
-    with socket.socket() as s:
-        s.bind((web_server.BIND_HOST, 0))
-        return s.getsockname()[1]
-
-
 @pytest.fixture
-def web_base():
-    port = _free_port()
-    srv = web_server.ThreadingServer((web_server.BIND_HOST, port), web_server.Handler)
-    t = threading.Thread(target=srv.serve_forever, daemon=True)
-    t.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        srv.shutdown()
-        srv.server_close()
+def web_base(serve_web):
+    with serve_web() as base:
+        yield base
 
 
 def _req(url, body=None):
@@ -186,34 +172,6 @@ def test_cutoffs_route_503_when_nothing_synced(web_base, store):
 def test_cutoffs_route_400_on_bad_region(web_base):
     st, body = _req(web_base + "/api/event/cutoffs?region=eu")
     assert st == 400
-
-
-def test_sync_route_passes_region_and_self(web_base, monkeypatch):
-    seen = {}
-
-    def fake(self, script, tag, args=None):
-        seen.update(script=script, tag=tag, args=args)
-        return 0, ("[jp] FAILED: RuntimeError: grpc-status 3 DATE_CHANGED\n"
-                   "cutoffs: 2 series point(s) appended, 1 region(s) failed\n")
-
-    monkeypatch.setattr(web_server.Handler, "_run_recon_script", fake)
-    st, body = _req(web_base + "/api/event/cutoffs/sync", {"region": "us"})
-    assert st == 200 and body["appended"] == 2 and body["failed_regions"] == ["jp"]
-    assert seen["script"] == web_server.CUTOFFS_SYNC_SCRIPT
-    assert seen["args"] == ["--region", "us", "--self"]
-    st, _ = _req(web_base + "/api/event/cutoffs/sync", {"region": "all", "self": False})
-    assert st == 200 and seen["args"] == ["--region", "all"]
-
-
-def test_sync_route_rejects_bad_region_and_concurrent_runs(web_base, monkeypatch):
-    st, _ = _req(web_base + "/api/event/cutoffs/sync", {"region": "eu"})
-    assert st == 400
-    assert web_server._CUTOFFS_SYNC_LOCK.acquire(blocking=False)
-    try:
-        st, body = _req(web_base + "/api/event/cutoffs/sync", {})
-        assert st == 409 and "already running" in body["error"]
-    finally:
-        web_server._CUTOFFS_SYNC_LOCK.release()
 
 
 # ------------------------------------------------------------------ the optional poller
@@ -271,7 +229,7 @@ def test_poller_partial_failure_keeps_the_interval_and_idle_waits_an_hour():
     assert p.next_delay_min() == cp.IDLE_INTERVAL_MIN
 
 
-def test_poller_skips_while_a_manual_sync_holds_the_lock():
+def test_poller_skips_while_another_read_holds_the_lock():
     lock = threading.Lock()
     p = _poller([], lock=lock)
     assert lock.acquire(blocking=False)
@@ -294,32 +252,6 @@ def test_poller_thread_runs_and_stops_cleanly():
     assert ran.wait(5)
     p.stop()
     assert p.status()["running"] is False and p.status()["next_run"] is None
-
-
-@pytest.fixture
-def fake_poller(monkeypatch):
-    calls = []
-
-    def runner():
-        calls.append(1)
-        return 0, "cutoffs: 1 series point(s) appended, 0 region(s) failed\n"
-    p = cp.CutoffsPoller(runner, threading.Lock())
-    monkeypatch.setattr(web_server, "_CUTOFFS_POLLER", p)
-    yield p
-    p.stop()
-
-
-def test_poller_routes(web_base, fake_poller):
-    st, body = _req(web_base + "/api/event/cutoffs/poller")
-    assert st == 200 and body["enabled"] is False and body["interval_min"] == 5
-    st, body = _req(web_base + "/api/event/cutoffs/poller", {"interval_min": 0})
-    assert st == 400
-    st, body = _req(web_base + "/api/event/cutoffs/poller", {"enabled": "yes"})
-    assert st == 400
-    st, body = _req(web_base + "/api/event/cutoffs/poller", {"enabled": True, "interval_min": 2})
-    assert st == 200 and body["enabled"] is True and body["interval_min"] == 2
-    st, body = _req(web_base + "/api/event/cutoffs/poller", {"enabled": False})
-    assert st == 200 and body["enabled"] is False
 
 
 def test_fit_exponent_reads_a_curve_as_a_power():

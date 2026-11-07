@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pytest
 
-from hbuilder.cli import apply_collection, build_parser
+from hbuilder.inputs import apply_collection, default_paths
 from hbuilder.domain.collection import (
     caps_by_rarity_from_mapping,
     collection_stats,
@@ -89,7 +89,7 @@ def test_stat_up_moves_overall_power_by_what_the_server_says(tmp_path):
     """The check itself, over every capture that carries the line."""
     caps = caps_by_rarity_from_mapping(json.loads(_CAPS_FILE.read_text(encoding="utf-8")))
     basis_curve = stat_basis_from_mapping(json.loads(_CURVE.read_text(encoding="utf-8")))
-    defaults = build_parser().parse_args(["solve"])
+    defaults = default_paths()
     catalogue = load_cards(_REPO / defaults.cards)
     owned = load_owned(_REPO / defaults.owned, catalogue)
     cfg = load_scoring_config(_REPO / "config.json")

@@ -1,4 +1,4 @@
-"""The backend fields docs/redesign/critique/A-data.md §8 asks for: the song
+"""The backend fields the pages need: the song
 cache's GLOBAL `ranking[]` and per-leader `alternatives[]`, the run-score
 quantiles on the first rows, `plan_cost` / `song_est_as_is` on a row detail,
 and `eta_s` / `best_so_far` on a job's progress events. Synthetic inputs only;
@@ -13,18 +13,18 @@ from types import SimpleNamespace
 import pytest
 
 HERE = Path(__file__).resolve().parent
-for extra in (HERE, HERE / "kernel", HERE.parents[1] / "src", HERE.parent / "recon" / "proxy"):
+for extra in (HERE, HERE / "kernel", HERE.parents[1] / "src", HERE.parent / "refresh"):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
 import event_mode  # noqa: E402
 import row_detail  # noqa: E402
-import two_stage_build as tsb  # noqa: E402
+import leaf_inputs  # noqa: E402
 from job_progress import JobProgress  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# the global ranking + alternatives (two_stage_build)
+# the global ranking + alternatives (leaf_inputs)
 # ---------------------------------------------------------------------------
 def _card(i, member=None):
     return SimpleNamespace(id=f"card-{i}", member=member or f"Chr{i}", costume_name=f"C{i}")
@@ -46,7 +46,7 @@ def test_the_global_ranking_merges_every_leaders_sets_best_first():
     rows, a, b = _found_rows()
     reps = [_card(i) for i in range(8)]
     pool_ids = [c.id for c in reps]
-    got = tsb.global_ranking(rows, pool_ids, reps, lambda c: c.member, [b], size=4)
+    got = leaf_inputs.global_ranking(rows, pool_ids, reps, lambda c: c.member, [b], size=4)
     assert [(r["leader"], r["best"]) for r in got] == [
         ("card-100", 100.0), ("card-100", 99.0), ("card-100", 98.0), ("card-101", 97.0)]
     assert got[1]["members"] == ["card-0", "card-1", "card-2", "card-3", "card-5"]
@@ -57,10 +57,10 @@ def test_the_global_ranking_merges_every_leaders_sets_best_first():
 def test_alternatives_are_the_next_sets_of_the_same_leader_without_its_own():
     rows, _a, _b = _found_rows()
     reps = [_card(i) for i in range(8)]
-    alts = tsb.alternatives(rows[0], [c.id for c in reps], reps, count=2)
+    alts = leaf_inputs.alternatives(rows[0], [c.id for c in reps], reps, count=2)
     assert [x["best"] for x in alts] == [99.0, 98.0]
     assert all(x["refined"] is False for x in alts)
-    assert tsb.alternatives(rows[1], [c.id for c in reps], reps, count=5)[0]["best"] == 50.0
+    assert leaf_inputs.alternatives(rows[1], [c.id for c in reps], reps, count=5)[0]["best"] == 50.0
 
 
 def test_refine_scores_a_team_once_across_the_ranking_and_the_rows(monkeypatch):
@@ -79,8 +79,8 @@ def test_refine_scores_a_team_once_across_the_ranking_and_the_rows(monkeypatch):
                {"leader": "L", "members": list("abcdf"), "best": 980.0}]
     rows = [{"leader": "L", "members": list("edcba"), "best": 990.0}]
     known: dict = {}
-    assert tsb._refine_rows(ranking, (0,), Pool(), by_id, known=known) == 2
-    assert tsb._refine_rows(rows, (0,), Pool(), by_id, known=known) == 1
+    assert leaf_inputs._refine_rows(ranking, (0,), Pool(), by_id, known=known) == 2
+    assert leaf_inputs._refine_rows(rows, (0,), Pool(), by_id, known=known) == 1
     assert calls == [2]                                # the row reused the ranking's score
     assert rows[0]["best"] == 1000.0 and rows[0]["best_plain"] == 990.0 and rows[0]["refined"]
 
@@ -103,8 +103,8 @@ def test_slot_orders_write_order_and_quantiles_and_develop_a_team_once(monkeypat
     ranking = [{"leader": "L", "members": list("abcde"), "best": 100.5}]
     rows = [{"leader": "L", "members": list("abcde"), "best": 100.5}]
     known: dict = {}
-    tsb._slot_orders(ranking, built, None, known=known)
-    tsb._slot_orders(rows, built, None, known=known)
+    leaf_inputs._slot_orders(ranking, built, None, known=known)
+    leaf_inputs._slot_orders(rows, built, None, known=known)
     assert len(seen) == 1
     for r in (ranking[0], rows[0]):
         assert r["member_order"] == ["e", "d", "c", "b", "a"]
@@ -118,8 +118,8 @@ def test_quantile_fields_are_empty_when_the_law_is_unavailable():
 
 
 def test_the_cache_version_moved_with_the_shape():
-    assert tsb.VERSION == "two-stage-build-4"
-    assert tsb.SETTINGS["ranking"]["size"] >= 10 and tsb.SETTINGS["alternatives"] >= 3
+    assert leaf_inputs.VERSION == "two-stage-build-4"
+    assert leaf_inputs.SETTINGS["ranking"]["size"] >= 10 and leaf_inputs.SETTINGS["alternatives"] >= 3
 
 
 def test_search_song_rows_all_carry_a_ranking_led_by_their_own_set():

@@ -16,7 +16,10 @@ import time
 import urllib.request
 from pathlib import Path
 
-CONF = Path(__file__).resolve().parents[2] / "state" / "server_api.json"
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
+from hbuilder import paths  # noqa: E402
+
+CONF = paths.STATE / "server_api.json"
 
 
 def call(method: str, route: str) -> dict:

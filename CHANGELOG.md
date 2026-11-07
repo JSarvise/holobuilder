@@ -2,6 +2,30 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.1.53 (2026-11-07)
+- Same results as 0.1.52, faster: the step that places the Connect cards on each team's boards under the song's score-bonus cap now runs compiled, for every team a search scores and every board the refinement tries. With every card maxed, a search on one song takes about 10 s instead of 19 s, on every song about 1 min instead of 2 min 12 s, Highlight about 16 s instead of 40 s; with your account, one song about 22 s instead of 24 s, every song about 49 s instead of 55 s, Highlight about 58 s instead of 67 s (measured on an 8-core PC). Running from source now needs Python 3.12 or newer (3.13 is the tested one): setup names an older one it finds and makes a .venv made with one again.
+
+## 0.1.52 (2026-11-07)
+- Same results as 0.1.51, faster event searches: event points on one song about 30 s instead of 33 s, Highlight about 84 s instead of 101 s with your account and 49 s instead of 55 s with every card maxed (measured on an 8-core PC). The search now sends every leader's teams of a round to the workers at once, and the quick screen that picks which teams to score runs on every core while the workers wait.
+
+## 0.1.51 (2026-11-06)
+- Maxed account: every holomem now gets the Holomem Board points the game gives at max level (361, read from the game's data) instead of the cost of the whole board (453), which no account can hold. The answers are the same, because every node that adds score fits in 361, and maxed searches are faster: one song about 21 s instead of 29 s, every song about 2.5 min instead of 4 min (measured on an 8-core PC). The maxed board plan now warns when your boards already hold more than that, from nodes that add no score.
+
+## 0.1.50 (2026-11-06)
+- A search on every song now also tries each leader on the kind of team its outfit favours: the members strong in the stat it raises, holding the cards it needs. With every card maxed it no longer misses a leader such as Noel / Soleil Kiss, so the recommended team can change and score higher (up to about +1 % on the measured cases); those searches take up to about 15 % longer. On every song with an account's own cards, the test account's answer did not change.
+
+## 0.1.49 (2026-11-06)
+- Same results as 0.1.48, faster: a search on one song with your account takes about 25 s instead of 37 s, one with every card maxed about 25 s instead of 38 s, an event search about 27 s instead of 34 s (measured on an 8-core PC). An available update now shows as a band at the top of every page until you update or close it; before, the start screen opened the Optimizer before you could click Update.
+
+## 0.1.48 (2026-11-06)
+- Boards planned within your materials: the planner tries two more plans for every team it shows and keeps whichever scores best, so a planned team never scores lower than before and some score higher (up to about +0.2 % on one song, up to about +1.9 % on every song). A row's details open on the very plan it was ranked with, and re-plan when the account or the options change. Searches that plan boards take a few seconds more.
+
+## 0.1.47 (2026-11-05)
+- Same results as 0.1.46. After a game update, the account refresh no longer guesses the game's new version: it retries once with the published one and otherwise says the app is waiting for it. The Event page warns when the live borders stop updating during an event.
+
+## 0.1.46 (2026-11-04)
+- Same results as 0.1.45. Running from source: the refresh scripts are in `tools/refresh` and `start.cmd` opens the app. A search that hits a missing account file now ends with an error naming the file instead of waiting forever, and the Inventory page says why it is empty. Sign-in and downloads no longer fail with "CERTIFICATE_VERIFY_FAILED" on a Windows that has not yet fetched the needed root certificate (a fresh install, Windows Sandbox): the app and the installer now let Windows check HTTPS certificates. On a PC without the game installed, a search with boards no longer fails with "SkillTreeNode is not in the local master cache": the board prices and point budgets come from the synced data. The Park page no longer logs into the game (which ended the game's own session): it shows the pick saved by the last Refresh. The Free-Style Cosplay Night banners have their art.
+
 ## 0.1.45 (2026-11-04)
 - Unit Score Details on a chosen song now match the game: Overall Power and Score Bonus include the singing leader's red nodes and the song's yellow bonus; rankings shift slightly for teams whose leader sings.
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 from hbuilder.domain import board_plan as bp
 from hbuilder.domain.board_optimizer import BoardPlan
 
-from conftest import make_card
+from support.builders import make_card
 
 GEN1, GAMERS = "character_grouping-grp-gen_1-always", "character_grouping-grp-gamers-always"
 SKILLTREE = {"nodes": {

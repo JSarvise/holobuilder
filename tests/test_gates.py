@@ -10,7 +10,6 @@ import inspect
 import itertools
 import typing
 
-import pytest
 
 from hbuilder.domain.card import Card, GateCondition, SkillSlot, Stats
 from hbuilder.domain.gates import (
@@ -24,6 +23,8 @@ from hbuilder.domain.gates import (
 )
 from hbuilder.domain.schema import CARD_TYPES, GENERATIONS
 from hbuilder.domain.team import MEMBER_COUNT, Team
+
+from support.team_reference import effective_skill_instances
 
 _STATS = Stats(performance=100, technique=100, sense=100)
 
@@ -260,7 +261,7 @@ def test_resolve_team_gates_returns_one_resolved_skill_per_instance():
     team = Team(leader=_card("outfit_01", type_="Pure"), members=members)
 
     resolved = resolve_team_gates(team, _RUN_STATE)
-    assert len(resolved) == len(team.effective_skill_instances())
+    assert len(resolved) == len(effective_skill_instances(team))
 
     gated = [r for r in resolved if r.slot_kind == "ACTIVE" and r.card_id == leader.id]
     assert len(gated) == 1

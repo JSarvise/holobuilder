@@ -9,16 +9,16 @@ extracted/
 state/
 data/owned.json
 data/gacha/
-tools/recon/proxy/_game_keys.py
+tools/refresh/_game_keys.py
 
 # built by the refresh from the game install and the account
 tools/recon/proxy/dumps/
-tools/recon/proxy/*.db
-tools/recon/proxy/*.dat
-tools/recon/proxy/*.txt
-tools/recon/proxy/*.mitm
-tools/recon/proxy/*key*.bin
-tools/recon/proxy/master_*.json
+tools/refresh/*.db
+tools/refresh/*.dat
+tools/refresh/*.txt
+tools/refresh/*.mitm
+tools/refresh/*key*.bin
+tools/refresh/master_*.json
 tools/explorer/*.html
 tools/explorer/*_art/
 

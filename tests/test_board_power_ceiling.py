@@ -42,12 +42,12 @@ from hbuilder.domain.board import (
     BoardModel,
     BoardNode,
     CharacterBoard,
-    resolve,
 )
+from support.board_reference import resolve
 
-from conftest import make_card
+from support.builders import make_card
 
-# `conftest.make_card` gives every stat 300, so a rate of 0.01 lands on 3.0
+# `builders.make_card` gives every stat 300, so a rate of 0.01 lands on 3.0
 # exactly. Anything that must land OFF an integer says so with its own stats.
 BASE = 300
 

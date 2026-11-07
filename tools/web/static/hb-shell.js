@@ -1,7 +1,7 @@
 // The shared shell: the section rail, the same on every page. A page includes
 // <nav class="rail" data-page="<id>"></nav> and this script. Icons are the game's OFFICIAL
 // white-silhouette sprites (dumps/ui_official, served by GET /ui/<category>/<sprite>.png),
-// tinted with CSS masks (`.ico`), never hand-drawn. Sections without a page in BUILT open `/`.
+// tinted with CSS masks (`.ico`), never hand-drawn.
 (function () {
   const SECTIONS = [
     { id: "optimizer", label: "Optimizer", href: "/optimizer", icon: "nav/ui_999_ico_unit.png" },
@@ -13,17 +13,13 @@
     { id: "park", label: "Park", href: "/parkview", icon: "nav/ui_999_ico_map_marker.png" },
     { id: "resources", label: "Inventory", href: "/inventory", icon: "nav/ui_999_ico_resource_coin.png" },
   ];
-  // the sections that have their own page; the rest open `/`.
-  const BUILT = new Set(["optimizer", "event", "collection", "board", "compare", "gacha", "park", "resources"]);
   const ico = path => `<i class="ico" style="--ico:url(/ui/${path})" aria-hidden="true"></i>`;
   function render(nav) {
     const current = nav.dataset.page;
     nav.setAttribute("aria-label", "Sections");
-    nav.innerHTML = `<a class="mark" href="/optimizer" aria-label="hololive builder">${ico("nav/ui_999_ico_unit.png")}</a>` + SECTIONS.map(s => {
-      const built = BUILT.has(s.id);
-      return `<a href="${built ? s.href : "/"}"${s.id === current ? ' aria-current="page"' : ""}${built ? "" : ' title="Not redesigned yet: opens the current page"'}>
-        ${ico(s.icon)}${s.label}${built ? "" : '<small class="old">old</small>'}</a>`;
-    }).join("");
+    nav.innerHTML = `<a class="mark" href="/optimizer" aria-label="hololive builder">${ico("nav/ui_999_ico_unit.png")}</a>` + SECTIONS.map(s =>
+      `<a href="${s.href}"${s.id === current ? ' aria-current="page"' : ""}>
+        ${ico(s.icon)}${s.label}</a>`).join("");
     // Inside the desktop app (tools/app/launcher.py) the window exposes its Settings; in a
     // browser there is no such API and no button. pywebview injects the API after load.
     const settings = () => {
@@ -57,29 +53,29 @@
       });
     }).catch(() => {});
   }
-  // the update notice (desktop app only): bottom right; "Later" hides that version until the app reopens
+  // the update notice (desktop app only): a band across the top of every page, from the start
+  // check or a poll while open, until "Update now" or the close button (the launcher remembers
+  // the dismissed version for every page; a newer one shows again)
   window.hbUpdate = u => {
-    if (!u || document.getElementById("hb-update") || sessionStorageGet("hb-update-later") === u.latest) return;
+    if (!u || document.getElementById("hb-update")) return;
+    const host = document.querySelector("main") || document.body;
     const el = document.createElement("div");
-    el.id = "hb-update"; el.setAttribute("role", "status");
-    el.style.cssText = "position:fixed;right:24px;bottom:24px;z-index:1000;width:340px;padding:16px 18px;border-radius:16px;" +
-      "background:var(--sheet);border:1px solid var(--line);box-shadow:inset 3px 0 0 var(--sky),0 12px 32px rgb(0 0 0/.45);" +
-      "display:grid;gap:10px;animation:hbUp .35s cubic-bezier(.2,.8,.2,1) both";
+    el.id = "hb-update"; el.className = "hb-update"; el.setAttribute("role", "status");
     const Q = String.fromCharCode(34);   // spelled out: a quote inside a regex trips test_js_syntax
     const esc = s => String(s ?? "").replace(new RegExp("[&<>" + Q + "]", "g"), c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", [Q]: "&quot;" }[c]));
-    el.innerHTML = `<style>@keyframes hbUp{from{opacity:0;transform:translateY(12px)}}</style>
-      <b style="font-size:15px">holobuilder ${esc(u.latest)} is out${u.state === "required" ? " (required)" : ""}</b>
-      ${u.notes ? `<span style="color:var(--ink-2);font-size:13px">${esc(u.notes)}</span>` : ""}
-      <span style="color:var(--ink-3);font-size:12px">The app closes, updates in a few seconds and opens again. Your data stays.</span>
-      <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button class="btn small" type="button" data-later>Later</button>
-        <button class="btn primary small" type="button" data-now>Update now</button></div>`;
-    el.querySelector("[data-later]").onclick = () => { sessionStorageSet("hb-update-later", u.latest); el.remove(); };
+    el.innerHTML = `<div class="hb-update-t">
+        <b>holobuilder ${esc(u.latest)} is out${u.state === "required" ? " (required)" : ""}</b>
+        ${u.notes ? `<span class="hb-update-n" title="${esc(u.notes)}">${esc(u.notes)}</span>` : ""}
+        <small>The app closes, updates in a few seconds and opens again. Your data stays.</small></div>
+      <button class="btn small" type="button" data-now>Update now</button>
+      <button class="hb-update-x" type="button" data-later aria-label="Dismiss this update notice" title="Dismiss">×</button>`;
+    el.querySelector("[data-later]").onclick = () => {
+      el.remove();
+      if (window.pywebview && window.pywebview.api.dismiss_update) window.pywebview.api.dismiss_update().catch(() => {});
+    };
     el.querySelector("[data-now]").onclick = e => { e.target.disabled = true; e.target.textContent = "Updating…"; window.pywebview.api.update_now(); };
-    document.body.appendChild(el);
+    host.prepend(el);
   };
-  function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
-  function sessionStorageSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* private mode */ } }
   document.querySelectorAll("nav.rail[data-page]").forEach(render);
   window.HBShell = { SECTIONS };
 })();

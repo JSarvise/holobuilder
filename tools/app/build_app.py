@@ -1,12 +1,12 @@
 """Build the desktop app as one self-contained folder.
 
-    proxyenv/Scripts/python tools/app/build_app.py 0.1.0             # build/holobuilder/ + zip
-    proxyenv/Scripts/python tools/app/build_app.py 0.1.0 --publish   # ...and put it on the server
+    python tools/app/build_app.py 0.1.0             # build/holobuilder/ + zip
+    python tools/app/build_app.py 0.1.0 --publish   # ...and put it on the server
 
     build/holobuilder/
-      runtime/   the official embeddable CPython (the exact version proxyenv runs) + the app's
-                 packages, pinned to proxyenv's versions -- same interpreter, same speed
-      app/       the code: src/, tools/web, tools/app, the recon scripts the refresh runs,
+      runtime/   the official embeddable CPython (the exact version .venv runs) + the app's
+                 packages, pinned to .venv's versions -- same interpreter, same speed
+      app/       the code: src/, tools/web, tools/app, the refresh scripts (tools/refresh),
                  data/cards.json, the C kernels' DLLs (gcc -O2, no -march=native: any x64)
 
 Why not PyInstaller: the server and the refresh start their helpers as `[sys.executable, ...]`
@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -32,38 +31,46 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
+from hbuilder import paths  # noqa: E402
+
+HERE = paths.APP_DIR
+REPO = paths.REPO
 BUILD = REPO / "build"
 OUT = BUILD / "holobuilder"
-CACHE = REPO / "tools" / "recon" / "proxy" / "dumps" / "build_cache"
+CACHE = paths.DUMPS / "build_cache"
 PY_VERSION = "3.13.7"
 PY_URL = f"https://www.python.org/ftp/python/{PY_VERSION}/python-{PY_VERSION}-embed-amd64.zip"
 REMOTE_APP = "/srv/holobuilder/app"
 
-# Pinned to what proxyenv runs (pip freeze); pywebview brings pythonnet/bottle/...
+# Pinned to what .venv runs (pip freeze); pywebview brings pythonnet/bottle/...
 PACKAGES = ["pycryptodome==3.23.0", "h2==4.3.0", "hpack==4.2.0", "hyperframe==6.1.0",
-            "highspy==1.15.1", "pillow==12.3.0", "pywebview==5.4"]
+            "highspy==1.15.1", "pillow==12.3.0", "pywebview==5.4", "truststore==0.10.5"]
+
+SITECUSTOMIZE = """try:
+    import system_trust
+    system_trust.use_system_trust()
+except Exception:  # noqa: BLE001 -- never stop the interpreter from starting
+    pass
+"""
 
 APP_PATHS = ["..\\app\\src", "..\\app\\tools\\web", "..\\app\\tools\\web\\kernel",
-             "..\\app\\tools\\recon\\proxy", "..\\app\\tools\\app"]
+             "..\\app\\tools\\refresh", "..\\app\\tools\\app"]
 
-INCLUDE = ["src/", "tools/web/", "tools/app/", "tools/explorer/fonts/", "data/cards.json",
+INCLUDE = ["src/", "tools/web/", "tools/app/", "data/cards.json",
            "config.json", "pyproject.toml",
            # the account snapshot's protobuf schema (account_snapshot.PROTO_DIR)
            "tools/recon/protobufs/"]
 # read at run time out of the research tree (found with an audit-hook trace): the
-# certificates behind the optimizer's "Verified" badge and the per-leader tables (certindex.py)
-INCLUDE_RE = re.compile(r"^tools/recon/RESEARCH-2026-08-18/.*(certificate_|per_leader_table_)[^/]*\.json$")
-# the recon scripts: the top level of tools/recon/proxy only (no dumps, no venv, no captures)
-RECON = "tools/recon/proxy/"
+# the refresh scripts: the top level of tools/refresh only (no tests, no schema files)
+REFRESH = "tools/refresh/"
 EXCLUDE_PARTS = ("/test_", "/tests/", "__pycache__", "/.pytest_cache/", ".old-", ".bak")
 # the publisher's own tools: they run on this PC or the VPS, never inside a user's app (the app
 # imports none of them)
 # gitignored on purpose (never in the public repo) but the app's refresh needs it: always shipped
-PRIVATE_SHIPPED = ("tools/recon/proxy/_game_keys.py",)
+PRIVATE_SHIPPED = ("tools/refresh/_game_keys.py",)
 PUBLISHER_ONLY = {"tools/app/build_app.py", "tools/app/build_setup.py", "tools/app/publish.py",
-                  "tools/app/users.py", "tools/recon/proxy/event_tracker.py"}
+                  "tools/app/users.py", "tools/refresh/event_tracker.py"}
 
 
 def app_files() -> list[str]:
@@ -73,13 +80,10 @@ def app_files() -> list[str]:
                              cwd=REPO, capture_output=True, check=True).stdout.decode().split("\0")
     out = []
     for rel in filter(None, tracked):
-        # top-level scripts of the recon tree's two script folders; probes/ holds modules the
-        # server and the solver load BY PATH (ondemand, event_mode, two_stage_build), which an
-        # import scan cannot see
-        top_recon = any(rel.startswith(d) and "/" not in rel[len(d):] and rel.endswith(".py")
-                        for d in (RECON, "tools/recon/probes/"))
-        if not (top_recon or any(rel == p or rel.startswith(p) for p in INCLUDE if p.endswith("/"))
-                or rel in INCLUDE or INCLUDE_RE.match(rel)):
+        # top-level scripts of the refresh folder
+        top_refresh = rel.startswith(REFRESH) and "/" not in rel[len(REFRESH):] and rel.endswith(".py")
+        if not (top_refresh or any(rel == p or rel.startswith(p) for p in INCLUDE if p.endswith("/"))
+                or rel in INCLUDE):
             continue
         if (any(x in "/" + rel for x in EXCLUDE_PARTS) or rel.split("/")[-1].startswith("test_")
                 or rel in PUBLISHER_ONLY):
@@ -114,12 +118,14 @@ def build_runtime(dest: Path) -> None:
                               *APP_PATHS, "import site", ""]), "utf8")
     site = dest / "Lib" / "site-packages"
     site.mkdir(parents=True, exist_ok=True)
-    # proxyenv IS the target platform (CPython 3.13, win_amd64), so a plain --target install
+    # .venv IS the target platform (CPython 3.13, win_amd64), so a plain --target install
     # picks the same wheels; proxy_tools (a pywebview dependency) ships as an sdist only
     if sys.version_info[:2] != tuple(int(x) for x in PY_VERSION.split(".")[:2]):
-        raise SystemExit(f"build with Python {PY_VERSION} (proxyenv): the wheels must match the runtime")
+        raise SystemExit(f"build with Python {PY_VERSION} (.venv): the wheels must match the runtime")
     subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
                     "--no-warn-script-location", "--target", str(site), *PACKAGES], check=True)
+    # every process of the runtime verifies HTTPS through Windows (system_trust.py)
+    (site / "sitecustomize.py").write_text(SITECUSTOMIZE, "utf8")
 
 
 def build(version: str) -> Path:
@@ -138,7 +144,7 @@ def build(version: str) -> Path:
     from PIL import Image  # noqa: PLC0415
     faces = OUT / "app" / "tools" / "app" / "ui" / "faces"
     faces.mkdir(parents=True, exist_ok=True)
-    for png in sorted((REPO / "tools/recon/proxy/dumps/member_icons").glob("chr-*.png")):
+    for png in sorted((paths.DUMPS / "member_icons").glob("chr-*.png")):
         with Image.open(png) as im:
             im = im.convert("RGBA")
             im.thumbnail((128, 128))

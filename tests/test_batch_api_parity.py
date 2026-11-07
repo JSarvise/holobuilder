@@ -43,7 +43,8 @@ from hbuilder.domain.unknown import UNKNOWN
 
 import dataclasses
 
-from conftest import FIXTURE_CARDS_PATH, make_card, make_scoring_config, make_skill
+from support.builders import FIXTURE_CARDS_PATH, make_card, make_scoring_config, make_skill
+from support.team_reference import effective_skill_instances
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCORING_PATH = REPO_ROOT / "src" / "hbuilder" / "domain" / "scoring.py"
@@ -51,11 +52,9 @@ GATES_PATH = REPO_ROOT / "src" / "hbuilder" / "domain" / "gates.py"
 
 _FIXTURE_MEMBER_IDS = ["fubuki_01", "mio_01", "matsuri_01", "polka_01", "lamy_01"]
 
+# The shipped stacking / activation-rate pair: every model the registries carry.
 _MODEL_COMBINATIONS = [
-    ("additive", "pp"),
     ("additive", "multiplicative"),
-    ("multiplicative", "pp"),
-    ("multiplicative", "multiplicative"),
 ]
 
 
@@ -87,7 +86,7 @@ def _synthetic_pool():
     (`synth_00`/`synth_01`/`synth_02`) -- rather than the team-wide
     default, so this pool's existing bit-identical parity sweep also
     covers a targeted stat effect. Every card's stats are deliberately
-    non-uniform (unlike `conftest.STATS`'s evenly-split baseline) so the
+    non-uniform (unlike `builders.STATS`'s evenly-split baseline) so the
     targeted subset's stat contribution is distinguishable from the whole
     set's -- with uniform stats, targeted and team-wide arithmetic would
     agree by coincidence and this parity assertion would pin nothing
@@ -432,9 +431,8 @@ def test_leader_classes_collapse_the_pool_rather_than_scoring_every_leader():
 
 
 def test_a_leader_that_is_also_a_member_never_merges_with_another_leader():
-    """Its own id reaches the score through target re-resolution and through
-    `_best_order_stat_sum`'s ordering signature, so it is not interchangeable
-    even with a card wearing an identical outfit."""
+    """Its own id reaches the score through target re-resolution, so it is not
+    interchangeable even with a card wearing an identical outfit."""
     costume = make_skill("costume", family="stat_up", effect_type="all_stats")
     inside = make_card("inside", costume_skill=costume)
     outside = make_card("outside", costume_skill=costume)
@@ -637,13 +635,13 @@ def test_contribution_ordering_is_unchanged_by_the_batch_refactor():
     cfg = load_scoring_config()
 
     breakdown = score_with_breakdown(team, cfg)
-    instances = team.effective_skill_instances()
+    instances = effective_skill_instances(team)
 
     assert [(c.card_id, c.slot_kind, c.source) for c in breakdown.contributions] == [
         (i.card_id, i.slot_kind, i.source) for i in instances
     ], (
         "SCOR-09: contribution ordering must still exactly match "
-        "Team.effective_skill_instances() order after the D-16/D-17 batch "
+        "the reference skill-instance order after the D-16/D-17 batch "
         "refactor -- the batched path shares gate resolution and EVs, but "
         "must never reorder the attribution the owner reads"
     )

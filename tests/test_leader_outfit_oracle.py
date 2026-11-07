@@ -2,7 +2,7 @@
 
 ACCEPTANCE TEST against the game's own answer. Two `Live/GetDeck` evaluations
 with the **same five members** and **only the leader changed**, isolated from
-the captured deck corpus by `deck_oracle.py`.
+the captured deck corpus.
 
                         leader Ina'nis    leader Nene
     Overall Power            164,449        181,079
@@ -62,7 +62,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import FIXTURES_DIR
+from support.builders import FIXTURES_DIR
 from hbuilder.domain.board import load_board
 from hbuilder.domain.loader import load_cards
 from hbuilder.domain.scoring import score_with_breakdown
@@ -77,7 +77,7 @@ from hbuilder.domain.team import build_team
 PAIR_CARDS_PATH = FIXTURES_DIR / "leader_outfit_pair_cards.json"
 PAIR_BOARD_PATH = FIXTURES_DIR / "leader_outfit_pair_board.json"
 
-# DEFAULT_CONFIG via the same missing-path fallback `conftest.py` uses, so the
+# DEFAULT_CONFIG via the same missing-path fallback `support/builders.py` uses, so the
 # result cannot drift with a local `config.json` edit.
 _NONEXISTENT_CONFIG = Path("tests/__leader_outfit_nonexistent_config__.json")
 

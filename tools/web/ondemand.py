@@ -23,24 +23,25 @@ import dataclasses
 import sys
 import threading
 import time
-from pathlib import Path
 from typing import Callable, Mapping
 
-_PROXY = Path(__file__).resolve().parents[1] / "recon" / "proxy"
-if str(_PROXY) not in sys.path:
-    sys.path.insert(0, str(_PROXY))
+from hbuilder import paths
+
+if str(paths.REFRESH_DIR) not in sys.path:
+    sys.path.insert(0, str(paths.REFRESH_DIR))
+DUMPS = paths.DUMPS
 
 import joint_search  # noqa: E402
 import two_stage  # noqa: E402
-import two_stage_build as tsb  # noqa: E402
+import leaf_inputs  # noqa: E402
+from hbuilder.domain.song import load_charts  # noqa: E402
+from hbuilder.solver import members_first  # noqa: E402
+from hbuilder.solver.parallel import default_workers  # noqa: E402
+from hbuilder.solver.parallel_refine import RefinePool  # noqa: E402
 
-# the teams re-scored with the activation refinement (`two_stage_build.SETTINGS
-# ["refine"]`: within 4 % of the best, at most this many; ~0.04 s a team)
-REFINE_CAP = 12
-REFINE_MARGIN = 0.04
 # the served ranking with the activation refinement is the best REFINE_HEAD teams of the
-# search, every one refined, in refined order: refining only the best REFINE_CAP within
-# REFINE_MARGIN would serve the rest at plain values beside refined ones, so a true #3 could
+# search, every one refined, in refined order (~0.04 s a team): refining only a few teams
+# near the best would serve the rest at plain values beside refined ones, so a true #3 could
 # sit at #22 and the same team score differently with and without a leader filter
 # (refinement gains 0-3.3 %, mean about 0.5 %; plain teams ranked in the 50s-70s can be
 # refined top 10)
@@ -87,6 +88,13 @@ SETTLE_PAIR_MOVES = 20
 SAMPLE_TRAIN = 300
 SAMPLE_SEED = 20261022
 GENERAL_RESCORE = 200
+# In general the joint search seeds every leader region (`joint_search.search`'s `tilt_of`):
+# an outfit that raises one stat leans its leader's best sets towards the members strong in
+# that stat. A card's tilt is its share of the stat around the even third, at the log gain
+# of a +100 % boost on a fifth of the set (0.75 / 5), times 3 so the seed leans into the stat;
+# the exact leaf judges every seed
+OUTFIT_TILT = 3 * 0.75 / 5
+OUTFIT_STATS = ("performance", "technique", "sense")
 # boards planned within the account's own materials: the search's best this many
 # teams are re-planned exactly within the wallet and re-scored (`materials_plan.py`)
 # 24: the ranking served is the re-planned teams, so this bounds it -- 20 shown plus room
@@ -103,11 +111,18 @@ SINGER_CANDIDATES = 4
 # staircase adds +2.1 % on average and up to +7.5 % depending on the team (the exact top
 # 16 can come from as deep as the leaf's #87, the refined #39)
 REPLAN_SCREEN = 96
-MATERIALS_CANDIDATES = REPLAN_CANDIDATES  # alias kept for callers that use this name
+# the re-planned teams are planned with the board planner's first plan; the best this many
+# are re-planned again with its other candidates (`materials_plan.refine_rows`): the rows the
+# Optimizer page lists (at least 20; Versus takes the best 20). A row below them keeps its
+# first plan, so it could have risen into them by what a candidate adds (on the golden: up to
+# 0.18 % on a song, 1.9 % off a song). Off a song every re-planned team gets them, in its own
+# plan: there that lift is the largest, and 20 of 24 in a second pass would cost more than
+# all of them in the first
+SHOWN_ROWS = 20
 
 
 def is_five_star(card_id: str) -> bool:
-    """The id's 3rd segment is the rarity (`card-00001-5-uniq-...`), as server._is_five_star."""
+    """The id's 3rd segment is the rarity (`card-00001-5-uniq-...`)."""
     parts = str(card_id).split("-")
     return len(parts) > 2 and parts[2] == "5"
 
@@ -119,6 +134,25 @@ def replan_pick(ranked: list, sings, n: int = REPLAN_CANDIDATES,
     head = list(range(min(n, len(ranked))))
     more = [k for k in range(len(head), len(ranked)) if sings(ranked[k])][:extra]
     return head + more
+
+
+def outfit_tilt(pool) -> Callable[[object], tuple[float, ...] | None]:
+    """`tilt_of(leader)` for `joint_search.search` over `pool`: an outfit that raises one stat
+    (`stat_up` of performance, technique or sense) adds OUTFIT_TILT x (the card's share of
+    that stat - 1/3) to each card; any other outfit, None. One tuple per stat, shared by every
+    leader whose outfit raises it."""
+    by_stat: dict[str, tuple[float, ...]] = {}
+
+    def tilt_of(leader):
+        skill = getattr(leader, "costume_skill", None)
+        stat = getattr(skill, "effect_type", None)
+        if skill is None or getattr(skill, "family", None) != "stat_up" or stat not in OUTFIT_STATS:
+            return None
+        if stat not in by_stat:
+            by_stat[stat] = tuple(OUTFIT_TILT * (getattr(c.stats, stat) / c.stats.total() - 1.0 / 3)
+                                  for c in pool)
+        return by_stat[stat]
+    return tilt_of
 
 
 def candidates(reps, filters: "Filters") -> tuple[list, list]:
@@ -166,8 +200,8 @@ class Assumptions:
     Boards: `boards` "as_is" (each character's nodes as captured, nothing
     planned) | "plan" (each team's boards planned from scratch: a full reset,
     points refunded). With "plan": `max_points` (every character at max level,
-    361 points), `infinite` (cubes / hexas ignored; off-team idle points on
-    green), `all_invited` (a character with no points plans at 361),
+    `leaf_inputs.maxed_budget()` points), `infinite` (cubes / hexas ignored; off-team idle
+    points on green), `all_invited` (a character with no points plans at that grant),
     `max_resets` (cap on owned nodes the plan may reset; None = no cap; each
     costs 1,000 Hologold), `no_refund` (a reset returns no materials), `branches`
     (only these of G/B/R/Y are bought or reset; the rest stay as owned) and
@@ -273,7 +307,7 @@ class Assumptions:
             if self.targets:
                 extra.append(f"{len(self.targets)} target node(s)")
             boards = ("each team's boards planned from scratch with "
-                      + ("every character's max points (361)" if self.max_points
+                      + (f"every character's max points ({leaf_inputs.maxed_budget()})" if self.max_points
                          else "each character's own points")
                       + ", " + ", ".join(extra))
         return f"{cards}; {boards}"
@@ -330,7 +364,7 @@ def parse_assumptions(raw: Mapping | None) -> Assumptions:
 
 
 def _card_levers(ns, a: Assumptions):
-    """`ns` with `a`'s card levers as `two_stage_account` reads them."""
+    """`ns` with `a`'s card levers as `leaf_inputs.build_account` reads them."""
     if a.level != "account":
         ns.assume_level = a.level
     if a.bloom != "account":
@@ -346,9 +380,7 @@ def account_bonuses(a: Assumptions):
     `cfg.account` the leaf of `build_inputs` scores with, without building the leaf.
     Raising every card's level raises the Member Power-Up, so the account's own
     figure is not the one an "Upgraded cards" search uses."""
-    acct = tsb._account()
-    ex = tsb._load("_ex_account_bonuses", "tools/recon/probes/exhaustive_song_leader.py")
-    _cards, _owned, cfg = acct._cards_and_cfg(_card_levers(tsb._namespace(), a), ex)
+    _cards, _owned, cfg = leaf_inputs.account_cards_and_cfg(_card_levers(leaf_inputs._namespace(), a))
     return cfg.account
 
 
@@ -356,10 +388,9 @@ def maxed_bonuses():
     """The Memory / Member Power-Up bonuses of the Maxed account basis: every card in the
     game owned at max level (the roster's power-up ceiling) and every poster the game has,
     as its leaf scores (`apply_collection(maxed=True)`)."""
-    from hbuilder.cli import apply_collection, load_inputs  # noqa: PLC0415
+    from hbuilder.inputs import apply_collection, load_inputs  # noqa: PLC0415
 
-    ex = tsb._load("_ex_maxed_bonuses", "tools/recon/probes/exhaustive_song_leader.py")
-    cards, owned, _cfg, _prov = load_inputs(ex.CARDS_PATH, ex.OWNED_PATH, False)
+    cards, owned, _cfg, _prov = load_inputs(leaf_inputs.CARDS_PATH, leaf_inputs.OWNED_PATH)
     _cards, basis = apply_collection(cards, None, owned_ids=[c.id for c in owned], maxed=True)
     return basis.bonuses
 
@@ -367,26 +398,25 @@ def maxed_bonuses():
 def build_inputs(a: Assumptions, difficulty: str, song: str = "m0334", *,
                  split_key=None) -> dict:
     """The leaf inputs of the user's account under `a` (the shape of
-    `two_stage_build.leaf_inputs`) -- shared by the engine, the event search and
+    `leaf_inputs.leaf_inputs`) -- shared by the engine, the event search and
     the row detail so a row is re-developed on the very leaf that ranked it.
-    `split_key`: `two_stage_account.build`'s (the event search keeps cards with
+    `split_key`: `leaf_inputs.build_account`'s (the event search keeps cards with
     different event bonuses apart)."""
     import json as _json  # noqa: PLC0415
 
-    acct = tsb._account()
-    ns = _card_levers(tsb._namespace(song, difficulty), a)
+    ns = _card_levers(leaf_inputs._namespace(song, difficulty), a)
     if a.boards == "as_is":
-        state = _json.loads((_PROXY / "dumps" / "board_state.json").read_text(encoding="utf-8"))
-        built = acct.build(ns, bench="captured", board_state=state, split_key=split_key)
+        state = _json.loads((DUMPS / "board_state.json").read_text(encoding="utf-8"))
+        built = leaf_inputs.build_account(ns, bench="captured", board_state=state, split_key=split_key)
         # the account's boards: its socketed Connect cards as they are, not re-assigned
         return dict(built, ctx=dataclasses.replace(built["ctx"], board_state_slots=True))
-    built = acct.build(ns, flat_budget=acct.MAX_LEVEL_POINTS if a.max_points else None,
+    built = leaf_inputs.build_account(ns, flat_budget=leaf_inputs.maxed_budget() if a.max_points else None,
                        bench="infinite" if a.infinite else "captured", split_key=split_key)
     if a.all_invited and not a.max_points:
         # a holomem with no board points (not invited) plans at the max-level grant
         ctx = built["ctx"]
-        granted = {c: int(ctx.granted.get(c) or 0) or acct.MAX_LEVEL_POINTS
-                   for c in ctx.name_by_chr}
+        top = leaf_inputs.maxed_budget()
+        granted = {c: int(ctx.granted.get(c) or 0) or top for c in ctx.name_by_chr}
         built = dict(built, ctx=dataclasses.replace(ctx, granted=granted))
     # the generation greens' cap in the per-character plans: each chain valued at the
     # room the OTHER boards (this leaf's bench) leave under 900 (`board_plan.grouping_room`)
@@ -401,7 +431,7 @@ def build_inputs(a: Assumptions, difficulty: str, song: str = "m0334", *,
         # on it; the materials re-plan plans them, `board_plan.singer_bench_characters`)
         plan_singer_bench=True,
         bench_sockets=bench_sockets_of(
-            _json.loads((_PROXY / "dumps" / "board_state.json").read_text(encoding="utf-8")))))
+            _json.loads((DUMPS / "board_state.json").read_text(encoding="utf-8")))))
     return built
 
 
@@ -424,42 +454,39 @@ class Engine:
         self.basis = basis
         self.play = tuple(play)
         self.assumptions = assumptions
-        self.difficulty = tsb._difficulty(difficulty)
+        self.difficulty = leaf_inputs._difficulty(difficulty)
         # holodori.best's "any song" level range: every chart of ANY difficulty whose level
         # is in it (In general only; `difficulty` then only names the leaf's nominal chart)
         self.levels = tuple(levels) if levels else None
         t0 = time.perf_counter()
         built = (build_inputs(assumptions, self.difficulty) if assumptions is not None
-                 else tsb.leaf_inputs(basis, self.difficulty))
-        ex, mfp = built["ex"], built.get("mfp")
-        if mfp is None:
-            mfp = tsb._load("_mfp_ondemand", "tools/recon/probes/members_first_2026_08_19.py")
-        self.mf = mfp.mf
-        path = tsb.charts_path(self.difficulty)
+                 else leaf_inputs.leaf_inputs(basis, self.difficulty))
+        self.mf = members_first
+        path = leaf_inputs.charts_path(self.difficulty)
         if self.levels:
             lo, hi = self.levels
-            library = ex.load_charts(str(tsb.charts_path("HARD")))      # charts_all.json
+            library = load_charts(str(leaf_inputs.charts_path("HARD")))      # charts_all.json
             self.charts = tuple(c for _k, c in sorted(library.charts.items())
                                 if lo <= c.difficulty_level <= hi)
             if not self.charts:
                 raise KeyError(f"no chart has a level in {lo}..{hi}")
             self.index = {}
         else:
-            self.charts = ex.load_charts(str(path)).at(self.difficulty)
+            self.charts = load_charts(str(path)).at(self.difficulty)
             self.index = {chart.music_id: k for k, chart in enumerate(self.charts)}
-        digests = tsb.chart_digests(path, self.difficulty)
+        digests = leaf_inputs.chart_digests(path, self.difficulty)
         if assumptions is not None:
             # any input file moving (a refresh) changes the account basis' key
             self.key = account_key(self.difficulty)
         else:
-            _songs, self.key = tsb.keys_for(built["reference_key"], digests, basis, self.difficulty)
+            _songs, self.key = leaf_inputs.keys_for(built["reference_key"], digests, basis, self.difficulty)
         self.built = built
         self.reps = list(built["reps"])
         self.by_id = built["by_id"]
         ctx = dataclasses.replace(with_play(built["ctx"], self.play), charts=tuple(self.charts),
                                   board_per_chart=True)
-        self.workers = workers or mfp.default_workers()
-        self.pool = mfp.pr.RefinePool(ctx, workers=self.workers)
+        self.workers = workers or default_workers()
+        self.pool = RefinePool(ctx, workers=self.workers)
         self.pool.__enter__()
         self.lock = threading.Lock()
         self.hints: dict[tuple, list[tuple[str, tuple[str, ...]]]] = {}
@@ -469,21 +496,27 @@ class Engine:
         self._wide: tuple[int, ...] = ()
 
     def _within_materials(self, ranking, leaders, pool, song, chart_indices, cancel, progress=None):
-        """The best MATERIALS_CANDIDATES distinct teams re-planned within the
+        """The best REPLAN_CANDIDATES distinct teams re-planned within the
         wallet and re-scored on those boards (`materials_plan.plan_and_score`, in
         the engine's workers). Returns `(ranking of the re-planned teams, best
-        first, [why a team could not be planned])`."""
+        first, [why a team could not be planned], {(leader index, members): whether
+        that team's plan solved to optimality})`."""
         import materials_plan  # noqa: PLC0415
 
         a = self.assumptions
+        opts = materials_plan.judged_opts(a.plan_opts(), a, self.difficulty, self.pool.ctx,
+                                          self.levels)
+        # on a song every team on the planner's first plan, the rows shown get its other
+        # candidates below; off a song every team gets them in its own plan (`SHOWN_ROWS`)
+        first = materials_plan.first_opts(opts) if song else opts
         singers = set(self.charts[self.index[song]].singers or ()) if song in self.index else set()
         cands = [ranking[k] for k in replan_pick(
             ranking, lambda r: "chr-" + leaders[r[1]].id.split("-")[1] in singers)]
         # each with the plan this process already holds for it (`carried_plan`): a filter
         # or option toggle re-plans mostly the teams the previous search planned
         items = [(k, leaders[li].id, tuple(pool[i].id for i in s), song, chart_indices,
-                  a.plan_opts(), materials_plan.carried_plan(
-                      leaders[li].id, tuple(pool[i].id for i in s), song, a.plan_opts()))
+                  first, materials_plan.carried_plan(
+                      leaders[li].id, tuple(pool[i].id for i in s), song, first))
                  for k, (_v, li, s) in enumerate(cands)]
         # the longest plans first, so they do not start in the last wave: a singing
         # leader's plan runs ~2x the solves (and about twice the time); the order changes
@@ -491,28 +524,48 @@ class Engine:
         items.sort(key=lambda it: it[1].split("-")[1] not in {c.split("-")[1] for c in singers})
         # by its own index, never by position: the list is not in index order
         item_of = {it[0]: it for it in items}
-        workers = getattr(self.pool, "_pool", None)
-        if workers is None:
-            raise RuntimeError("planning within materials needs the worker pool")
         got: dict[int, float] = {}
+        optimal: dict = {}
+        held_of: dict = {}
         failed: list[str] = []
-        for done, (index, value, _state, reason, held) in enumerate(
-                materials_plan.dispatch(self.pool, items, cancel), 1):
-            if progress:
-                progress(done, len(items))          # a real count: the page's ETA is a rate
+
+        def on_plan(out):
+            index, value, _state, reason, held = out
             if value is None:
                 failed.append(f"{leaders[cands[index][1]].member}: {reason}")
             else:
                 got[index] = value
+                held_of[index] = held
+                optimal[cands[index][1:]] = None if held is None else held[2] is False
                 materials_plan.remember(*item_of[index][1:4], item_of[index][5], held)
+        if song:
+            # the rows shown (the best SHOWN_ROWS) re-planned with the planner's other
+            # candidates (only ever higher), each row's as soon as it is sure to be shown
+            refined = materials_plan.plan_and_refine(
+                self.pool, items, opts=opts, shown=SHOWN_ROWS,
+                rank=lambda k, value: (-value, cands[k][1], cands[k][2]), cancel=cancel,
+                progress=progress, on_plan=on_plan)  # a real count: the page's ETA is a rate
+        else:
+            for done, out in enumerate(materials_plan.dispatch(self.pool, items, cancel), 1):
+                if progress:
+                    progress(done, len(items))
+                on_plan(out)
+            refined = {}
         if cancel is not None and cancel.is_set():
             raise Cancelled()
+        for index in got:
+            # the plan each row is served on, under this search's judge: the row's detail
+            # opens on it, and a request with other levers plans its own
+            if index in refined:
+                got[index], _state, held_of[index] = refined[index]
+                optimal[cands[index][1:]] = held_of[index][2] is False
+            materials_plan.remember(*item_of[index][1:4], opts, held_of[index])
         out = sorted(((got[k], li, s) for k, (_v, li, s) in enumerate(cands) if k in got),
                      key=lambda r: (-r[0], r[1], r[2]))
         if not out:
             raise KeyError("no team could be planned within your materials: "
                            + "; ".join(failed[:3]))
-        return out, failed
+        return out, failed, optimal
 
     def _screen_for_replan(self, ranking, leaders, pool, chart_indices):
         """The search's best REPLAN_SCREEN teams re-ranked by their score with the
@@ -632,11 +685,15 @@ class Engine:
                       "evaluated": record["pairs"], "best_so_far": None if record["best"] is None
                       else {"value": record["best"], "metric": "song_est"}})
 
+        # In general every leader region is seeded (`outfit_tilt`); a song search keeps the
+        # gate repair
+        tilt_of = outfit_tilt(pool) if general else None
         t0 = time.perf_counter()
         with self.lock:
             found = joint_search.search(pool, leaders, score_pairs, gate_of=self.mf.gate_of,
                                         require=require, allowed=allowed, seeds=seeds,
-                                        always=always, seed=seed, on_round=on_round)
+                                        always=always, seed=seed, on_round=on_round,
+                                        tilt_of=tilt_of)
             ranking = found["ranking"]
             if general and len(self._wide) > len(chart_indices):
                 # In general on the two-tier (fitted) sample: further independent starts, merged. One search settles in
@@ -647,7 +704,8 @@ class Engine:
                 for extra in range(1, GENERAL_STARTS):
                     more = joint_search.search(pool, leaders, score_pairs, gate_of=self.mf.gate_of,
                                                require=require, allowed=allowed,
-                                               seed=seed + 104729 * extra, on_round=on_round)
+                                               seed=seed + 104729 * extra, on_round=on_round,
+                                               tilt_of=tilt_of)
                     merged.update({(li, s): v for v, li, s in more["ranking"]})
                 ranking = sorted(((v, li, s) for (li, s), v in merged.items()),
                                  key=lambda r: (-r[0], r[1], r[2]))
@@ -724,11 +782,12 @@ class Engine:
         t_refine = time.perf_counter() - t0 - search_seconds
         better = {(li, s): max(float(v), plain) for (plain, li, s), v in zip(chosen, refined)}
         materials_failed: list[str] = []
+        plan_optimal: dict | None = None          # set when the boards were re-planned
         t_replan = time.perf_counter()
         if self.assumptions is not None and self.assumptions.replan:
             if emit:
                 emit({"type": "progress", "stage": "refine", "evaluated": 0, "sub": "materials"})
-            ranking, materials_failed = self._within_materials(
+            ranking, materials_failed, plan_optimal = self._within_materials(
                 ranking, leaders, pool, None if general else song,
                 None if general else chart_indices, cancel,
                 progress=(lambda k, n: emit({"type": "progress", "stage": "refine", "sub": "materials",
@@ -741,14 +800,18 @@ class Engine:
             leader = leaders[li]
             members = [pool[i] for i in s]
             ref = better.get((li, s))
-            return {"leader": leader.id, "leader_name": f"{leader.member} / {leader.costume_name}",
-                    "sings": "chr-" + leader.id.split("-")[1] in singers, "status": "searched",
-                    "best": ref if ref is not None else value,
-                    "best_plain": value if ref is not None else None,
-                    "members": [c.id for c in members], "member_names": [c.member for c in members],
-                    "member_order": None, "refined": ref is not None,
-                    "p10": None, "p50": None, "p90": None, "song_max": None,
-                    "dist_mean": None, "dist_verified": None}
+            row = {"leader": leader.id, "leader_name": f"{leader.member} / {leader.costume_name}",
+                   "sings": "chr-" + leader.id.split("-")[1] in singers, "status": "searched",
+                   "best": ref if ref is not None else value,
+                   "best_plain": value if ref is not None else None,
+                   "members": [c.id for c in members], "member_names": [c.member for c in members],
+                   "member_order": None, "refined": ref is not None,
+                   "p10": None, "p50": None, "p90": None, "song_max": None,
+                   "dist_mean": None, "dist_verified": None}
+            if plan_optimal is not None:
+                # False: a MILP of this team's plan stopped on the solver's time limit
+                row["plan_optimal"] = plan_optimal.get((li, s))
+            return row
 
         # refined: only the refined head, so every served value is on the same basis
         served = [team(v, li, s) for v, li, s in (chosen if better else ranking)]
@@ -758,10 +821,11 @@ class Engine:
         rows, by_leader = [], {}
         for t in served:
             by_leader.setdefault(t["leader"], []).append(t)
-        for lid, ts in by_leader.items():
+        for ts in by_leader.values():
             head = dict(ts[0])
             head["alternatives"] = [{"members": t["members"], "member_names": t["member_names"],
-                                     "best": t["best_plain"] or t["best"], "refined": False}
+                                     "best": t["best_plain"] or t["best"], "refined": False,
+                                     **({"plan_optimal": t["plan_optimal"]} if "plan_optimal" in t else {})}
                                     for t in ts[1:5]]
             rows.append(head)
         rows.sort(key=lambda t: -t["best"])
@@ -782,7 +846,7 @@ class Engine:
             "certified": False, "state": "fresh",
             "basis_id": self.basis,
             "basis": (self.assumptions.describe() if self.assumptions is not None
-                      else tsb.BASIS_TEXT[self.basis]),
+                      else leaf_inputs.basis_text(self.basis)),
             "assumptions": dataclasses.asdict(self.assumptions) if self.assumptions else None,
             "notes": self.assumptions.notes() if self.assumptions else [],
             "difficulty": self.difficulty, "written": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -821,7 +885,7 @@ _ENGINES_LOCK = threading.Lock()
 MAX_ENGINES = 2
 
 
-# account files a refresh rewrites that the scoring key (`tsb.today_keys`) does not hash:
+# account files a refresh rewrites that the scoring key (`leaf_inputs.today_keys`) does not hash:
 # the boards as they stand -- socketed cards and nodes (`board_state.json`, read for the
 # bench sockets and "boards as they are") -- and the materials (`inventory.json`, the
 # wallet the re-plan spends). Without them a refresh that only moved a socket or the
@@ -835,7 +899,7 @@ _BASIS_KEY_TTL = 20.0
 
 
 def basis_key(basis: str, difficulty: str) -> str | None:
-    """Today's key of `basis`'s inputs (`tsb.today_keys`, the in-general key), or None
+    """Today's key of `basis`'s inputs (`leaf_inputs.today_keys`, the in-general key), or None
     when they cannot be read: an engine is rebuilt when it moves."""
     now = time.monotonic()
     slot = f"{basis}/{difficulty}"
@@ -843,7 +907,7 @@ def basis_key(basis: str, difficulty: str) -> str | None:
     if held is not None and now - held[0] < _BASIS_KEY_TTL:
         return held[1]
     try:
-        key = tsb.today_keys(basis, difficulty)[1]
+        key = leaf_inputs.today_keys(basis, difficulty)[1]
     except Exception:  # noqa: BLE001 - "cannot vouch" keeps the engine in hand
         return None
     _BASIS_KEYS[slot] = (now, key)
@@ -853,7 +917,7 @@ def basis_key(basis: str, difficulty: str) -> str | None:
 def account_key(difficulty: str) -> str | None:
     """Today's key of the account's inputs (None when unreadable)."""
     try:
-        base = tsb.today_keys("account", difficulty)[1]
+        base = leaf_inputs.today_keys("account", difficulty)[1]
     except Exception:  # noqa: BLE001 - "cannot vouch" keeps the engine in hand
         return None
     import hashlib  # noqa: PLC0415
@@ -861,7 +925,7 @@ def account_key(difficulty: str) -> str | None:
     h = hashlib.sha256(base.encode("utf-8"))
     for name in ACCOUNT_STATE_FILES:
         try:
-            h.update(name.encode() + b"=" + hashlib.sha256((_PROXY / "dumps" / name).read_bytes()).digest())
+            h.update(name.encode() + b"=" + hashlib.sha256((DUMPS / name).read_bytes()).digest())
         except OSError:
             h.update(name.encode() + b"=missing")
     return h.hexdigest()
@@ -875,7 +939,7 @@ def engine(basis: str, difficulty: str, *, workers: int | None = None,
     """The live engine of (basis, difficulty[, assumptions]), rebuilt when the
     inputs' key moved (`current_key()` -> today's key, or None when it cannot
     be read: then the engine in hand is kept)."""
-    difficulty = tsb._difficulty(difficulty)
+    difficulty = leaf_inputs._difficulty(difficulty)
     slot = (basis, difficulty, assumptions.key() if assumptions is not None else None,
             tuple(levels) if levels else None, tuple(play))
     with _ENGINES_LOCK:
@@ -895,13 +959,6 @@ def engine(basis: str, difficulty: str, *, workers: int | None = None,
         return held
 
 
-def shutdown() -> None:
-    with _ENGINES_LOCK:
-        for e in _ENGINES.values():
-            e.close()
-        _ENGINES.clear()
-
-
 PLATFORMS = ("mobile", "pc")
 
 
@@ -914,7 +971,7 @@ def parse_play(body: Mapping) -> tuple[str, bool]:
 
 def with_play(ctx, play: tuple[str, bool]):
     """`ctx` (a `RefineContext`) scored for `play`. AUTO sets BOTH halves, as
-    `server._auto_premise` does for the older routes: the AUTO judgement column (a
+    `hbweb.basis.auto_premise` does for the other routes: the AUTO judgement column (a
     note scores like a GREAT, ~80 % of manual) AND `run_state.combo = 0`,
     since on AUTO the combo never accumulates and a `combo >= N` override never fires.
     The on-demand and event searches must honour the page's Auto toggle, or every AUTO

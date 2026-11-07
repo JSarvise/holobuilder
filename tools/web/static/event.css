@@ -107,6 +107,7 @@ dialog.ev-hist::backdrop{background:rgb(5 6 10 / .62)}
 .ev-note{color:var(--ink-3);font:700 12px/1.4 var(--f-ui)}
 .ev-empty{margin:0;color:var(--ink-2);font:700 13.5px/1.5 var(--f-ui)}
 .ev-err{margin:0;color:var(--bad);font:700 13.5px/1.5 var(--f-ui)}
+.ev-stale{margin:0 0 14px;padding:10px 14px;border:1px solid var(--warn);border-radius:10px;color:var(--warn);font:700 13.5px/1.5 var(--f-ui)}
 .n.ok{color:var(--good)}
 .n.mute{color:var(--ink-3)}
 

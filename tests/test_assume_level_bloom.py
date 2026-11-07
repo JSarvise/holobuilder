@@ -10,9 +10,8 @@ checks below cover the transform and the cap lift.)
 
 from __future__ import annotations
 
-from hbuilder.cli import _override_collection_levels
+from hbuilder.inputs import _override_collection_levels
 from hbuilder.domain.collection import (
-    MAX,
     UNKNOWN,
     CardLevelCaps,
     resolve_card_state,

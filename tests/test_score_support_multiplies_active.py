@@ -28,7 +28,7 @@ and the last of them is a measurement rather than a reading:
 The tests here pin the *consequences*, each with a number computed by hand in
 the test's own docstring rather than copied from the implementation.
 
-Fixtures come from `tests/conftest.py`. `make_team` takes `cards[0]` as the
+Fixtures come from `tests/support/builders.py`. `make_team` takes `cards[0]` as the
 LEADER — whose own normal slots are never emitted — and `cards[1:6]` as
 the five members, so every ACTIVE under test sits at index 1 or later.
 """
@@ -40,9 +40,9 @@ import pytest
 from hbuilder.domain.card import EffectTarget
 from hbuilder.domain.scoring import score_card_set, score_fast, score_with_breakdown
 
-from conftest import make_card, make_scoring_config, make_skill, make_team
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
-# conftest's STATS baseline is 300 total per card, so five members are 1500.0.
+# the builders' STATS baseline is 300 total per card, so five members are 1500.0.
 BASE_STAT_SUM = 1500.0
 
 # An ACTIVE's uptime is the FINITE activation lattice over

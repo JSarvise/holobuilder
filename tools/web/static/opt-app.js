@@ -7,6 +7,7 @@ import { showScoreIdle, runScore, cancelScore } from "/opt-score.js";
 import { showEventIdle, runEvent, cancelEvent, HL, isHighlight, highlightTile, highlightPool, hlPct } from "/opt-event.js";
 import { initTargets } from "/opt-targets.js";
 import { openSongPicker } from "/hb-songpick.js";
+import { showMaxPoints } from "/hbd-util.js";
 
 /* ------------------------------------------------------------------ state */
 const DEFAULTS = {
@@ -216,7 +217,8 @@ function renderFresh() {
   // Score and Event alike: both goals offer the maxed account, so the notice follows S.cards
   // whichever goal is shown
   sc.hidden = S.cards !== "maxed";
-  sc.textContent = "Maxed account: every card in the game at max level and bloom, every holomem at max level with its Holomem Board complete (453 Pt); your cubes, hexas and Hologold are not used."
+  const pts = M && M.max_level_board_points ? ` (${fmt(M.max_level_board_points)} Pt each)` : "";
+  sc.textContent = `Maxed account: every card in the game at max level and bloom, every holomem at max level with its Holomem Board developed${pts}; your cubes, hexas and Hologold are not used.`
     + (isEvent() ? " Every event card counts at bloom 5." : "");
 }
 // a refresh in flight: the button stays "Refreshing…" across re-renders and across a
@@ -231,7 +233,7 @@ async function refresh() {
     // game day; the project never does that daily login for you
     toast(r.returncode === 0 ? "Refresh finished."
       : r.returncode === 3 ? "hololive Dreams is in maintenance: nothing was refreshed. Refresh again once it ends."
-      : r.returncode === 4 ? "This PC does not have the game's build constants yet: run refresh.cmd once (it finds them in your game install). Nothing was refreshed."
+      : r.returncode === 4 ? "This PC does not have the game's build constants yet: run refresh.cmd (refresh.sh on Linux) once (it finds them in your game install). Nothing was refreshed."
       : /DATE_CHANGED/.test(r.stdout || "") ? "The game refused your account for today: open hololive Dreams once, then refresh again."
       : `Refresh exited ${r.returncode}: partial (see the server log).`);
     D.meta = await getJSON("/api/meta");
@@ -484,6 +486,7 @@ async function init() {
     loadRanks(), loadGradeRanks(),
   ]);
   D.meta = meta;
+  showMaxPoints(meta);
   for (const c of coll.cards || []) D.cards.set(c.id, normCard(c));
   const diffs = (meta.difficulties && meta.difficulties.available) || ["EASY", "NORMAL", "HARD", "EXPERT"];
   if (!diffs.includes(S.difficulty)) S.difficulty = "EXPERT";

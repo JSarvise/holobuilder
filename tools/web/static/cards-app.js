@@ -131,7 +131,7 @@ function notes() {
   const out = [];
   const d = doc.data;
   if (d && d.curve_available === false)
-    out.push(`<div class="cd-note warn">dumps/card_level_curve.json is missing, so no level can be resolved. Run <code>python tools/recon/proxy/card_level_curve.py</code>.</div>`);
+    out.push(`<div class="cd-note warn">dumps/card_level_curve.json is missing, so no level can be resolved. Run <code>python tools/refresh/card_level_curve.py</code>.</div>`);
   if (doc.staleDraft)
     out.push(`<div class="cd-note warn"><b>This browser holds an unsaved draft started before the collection on disk last changed</b> (an account refresh rewrites it). Saving the draft would put its older values back. <button type="button" class="cd-linkbtn" data-act="discard">Discard the draft</button></div>`);
   else if (doc.dirty)

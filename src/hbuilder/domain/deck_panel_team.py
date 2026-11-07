@@ -1,8 +1,8 @@
 """The deck screen's Score Bonus lines for a TEAM the solver built.
 
 `deck_panel.deck_panel` computes the panel's five Score Bonus lines (Active,
-Outfit, Passive, Holomem Board, Special) from per-card integers. Its recon
-adapter (`tools/recon/proxy/deck_panel_params.py`) fills those integers from a
+Outfit, Passive, Holomem Board, Special) from per-card integers. Its test
+adapter (`tests/support/deck_panel_params.py`) fills those integers from a
 CAPTURED server panel; this module fills them from the domain's own objects —
 a `Team`, the `ScoringConfig` it is scored on (its board included) and the slot
 order — so any hypothetical deck the optimiser proposes gets the split too.
@@ -17,7 +17,7 @@ Where this adapter follows a RULE rather than a measurement it says so:
 
 * run-state overrides (LIFE / COMBO) are taken outright, a COMBO one with its
   base magnitude before t = 20 s — `deck_panel`'s own law (it matches the
-  server's panels) and the recon adapter's rule;
+  server's panels) and the test adapter's rule;
 * the board's effect-up is the unconditional leader-scope term
   (`skill_effect_up_for`), the quantity `deck_panel_params` derives from the
   account's board, plus — with a song's `singers` — the singer-conditional

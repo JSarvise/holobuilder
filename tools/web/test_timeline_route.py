@@ -19,38 +19,16 @@ crash, it is a plausible drawing of the wrong arrangement:
 from __future__ import annotations
 
 import json
-import socket
-import threading
 import urllib.request
 from pathlib import Path
 
 import pytest
 
-import server as web_server
+from hbweb import config
+from hbuilder.domain.team import MEMBER_COUNT
 
 _REPO = Path(__file__).resolve().parents[2]
 _OWNED = _REPO / "data" / "owned.json"
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def web_base():
-    port = _free_port()
-    server = web_server.ThreadingServer(
-        (web_server.BIND_HOST, port), web_server.Handler
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 def _post(base: str, body: dict) -> dict:
@@ -84,7 +62,7 @@ def test_an_unknown_song_is_a_state_not_a_crash(web_base):
 
 
 @pytest.mark.skipif(
-    not web_server.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
+    not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
 )
 def test_the_drawing_is_of_the_arrangement_the_scorer_chose(web_base):
     """⛔ The one that matters.
@@ -98,7 +76,7 @@ def test_the_drawing_is_of_the_arrangement_the_scorer_chose(web_base):
     assert answer["available"], answer.get("reason")
 
     order = answer["member_order"]
-    assert len(order) == web_server.MEMBER_COUNT
+    assert len(order) == MEMBER_COUNT
     assert sorted(order) == sorted(cards[1:]), (
         "the arrangement must be a permutation of the members sent, not a "
         f"different set: {order} vs {cards[1:]}"
@@ -121,7 +99,7 @@ def test_the_drawing_is_of_the_arrangement_the_scorer_chose(web_base):
 
 
 @pytest.mark.skipif(
-    not web_server.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
+    not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
 )
 def test_every_lane_gets_its_own_cue_and_its_SPECIAL_sits_on_it(web_base):
     """A chart carries five cues, one per slot. A lane whose SPECIAL floated
@@ -144,7 +122,7 @@ def test_every_lane_gets_its_own_cue_and_its_SPECIAL_sits_on_it(web_base):
 
 
 @pytest.mark.skipif(
-    not web_server.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
+    not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
 )
 def test_active_windows_are_ordered_and_never_silently_clamped(web_base):
     """`song.py` deliberately does not clip windows to the song's end. A route

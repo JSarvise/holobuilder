@@ -8,9 +8,10 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / "tools" / "recon" / "proxy"))
+sys.path.insert(0, str(REPO / "tools" / "refresh"))
 import account_snapshot as A  # noqa: E402
-import game_paths  # noqa: E402
+from hbuilder import paths  # noqa: E402
+from hbuilder.errors import MissingInput  # noqa: E402
 import refresh_all as R  # noqa: E402
 
 import pytest  # noqa: E402
@@ -36,8 +37,8 @@ def test_the_app_refresh_reads_its_own_event_rank_and_only_its_own_region():
 
 def test_no_game_means_no_install_lookup(monkeypatch):
     monkeypatch.setenv("HB_NO_GAME", "1")
-    with pytest.raises(SystemExit, match="HB_NO_GAME"):
-        game_paths.game_root()
+    with pytest.raises(MissingInput, match="HB_NO_GAME"):
+        paths.game_root()
 
 
 def test_app_version_falls_back_to_the_published_file(tmp_path, monkeypatch):
@@ -54,8 +55,10 @@ def test_app_version_falls_back_to_the_published_file(tmp_path, monkeypatch):
     assert A.app_version() is None
 
 
-def test_outdated_app_tries_the_base_version_before_the_next_ones(tmp_path, monkeypatch):
-    """The server answers profile 1.1.1 -> OUTDATED_APP, 1.2.1 accepted, 1.2.2 -> INVALID."""
+def test_outdated_app_retries_once_with_the_current_version(tmp_path, monkeypatch):
+    """The server answers profile 1.1.1 -> OUTDATED_APP and accepts the generic 1.2.1: one
+    retry with the current version (here the generic header's: no install, nothing published),
+    never a guessed one."""
     monkeypatch.delenv("HOLODREAMS_APP_VERSION", raising=False)
     monkeypatch.setattr(A, "_app_version_cache", [None])          # no install, nothing published
     monkeypatch.setattr(A, "CLIENT_VERSION_FILE", tmp_path / "client_version.json")
@@ -75,7 +78,7 @@ def test_outdated_app_tries_the_base_version_before_the_next_ones(tmp_path, monk
         A.fetch_master_version("us.example", ident)
     except Exception:                                             # noqa: BLE001 -- empty body
         pass
-    assert tried[:2] == ["1.1.1", "1.2.1"]
+    assert tried == ["1.1.1", "1.2.1"]
     assert json.loads((tmp_path / "client_version.json").read_text())["version"] == "1.2.1"
     A.os.environ.pop("HOLODREAMS_APP_VERSION", None)
 

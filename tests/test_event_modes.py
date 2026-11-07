@@ -14,14 +14,11 @@ from hbuilder.domain.card import Card, Stats
 from hbuilder.domain.marathon import (
     MarathonBonusRow,
     MarathonEvent,
-    event_point_bonus_permil,
     event_points,
     event_points_base,
-    event_song_bonus_permil,
     event_song_score,
-    holomem_rating_total,
-    holomem_song_rating,
 )
+from support.event_bonus import event_point_bonus_permil, event_song_bonus_permil
 
 STATS = Stats(performance=5000, technique=5000, sense=5000)
 
@@ -135,46 +132,6 @@ def test_event_song_bonus_is_song_gated():
 def test_event_song_score_applies_the_bonus_to_the_whole_score():
     # rounding is a ceil, as community tool holodori.best does; the server's rounding is not known
     assert event_song_score(1_208_510, 100) == 1_329_361
-
-
-# --- Holomem Score Rating ----------------------------------------------------------
-
-def test_holomem_song_rating_divides_by_5000():
-    assert holomem_song_rating(1_208_510) == 242   # ceil (server rounding not known)
-
-
-def test_holomem_rating_sums_the_three_best_songs():
-    assert holomem_rating_total([242, 230, 228, 200]) == 700
-
-
-# --- The current event, from the refresh's marathon_bonus.json ----------------------
-
-def test_the_newest_open_event_is_loaded_with_its_three_channels(tmp_path):
-    import json
-
-    from hbuilder.domain.marathon import load_current_event, open_events
-
-    doc = {"current_group_ids": [
-        "live_marathon_score_bonus-marathon_event-normal-006-chapter-01",
-        "live_marathon_score_bonus-marathon_event-normal-007-chapter-01",
-        "music_score_bonus-marathon_event-normal-007-chapter-01"],
-        "groups": [
-        {"group_id": "live_marathon_score_bonus-marathon_event-normal-006-chapter-01", "kind": "live",
-         "rows": [{"character_id": "chr-00001", "permil": 300}]},
-        {"group_id": "live_marathon_score_bonus-marathon_event-normal-007-chapter-01", "kind": "live",
-         "rows": [{"character_id": "chr-00023", "permil": 300},
-                  {"rarity": 5, "bloom": 5, "permil": 300}]},
-        {"group_id": "music_score_bonus-marathon_event-normal-007-chapter-01", "kind": "music",
-         "rows": [{"card_id": "card-00023-5-uniq-0085-00", "music_id": "m0354", "permil": 100}]}]}
-    path = tmp_path / "marathon_bonus.json"
-    path.write_text(json.dumps(doc), encoding="utf-8")
-    assert open_events(path) == ["marathon_event-normal-006-chapter-01",
-                                 "marathon_event-normal-007-chapter-01"]
-    ev = load_current_event(path)
-    assert ev.name == "marathon_event-normal-007-chapter-01"
-    assert len(ev.rows_for("live")) == 2 and len(ev.rows_for("music")) == 1
-    older = load_current_event(path, event="marathon_event-normal-006-chapter-01")
-    assert older.rows_for("live")[0].character_id == "chr-00001"
 
 
 # --- The search objective ---------------------------------------------------------

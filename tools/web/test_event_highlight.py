@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 import event_mode as em
-import server as web_server
+from hbweb import basis, config, songs
 from hbuilder.domain import marathon as mar
 
 
@@ -55,11 +55,11 @@ def test_pool_of_the_real_open_event_is_the_holomems_songs():
     """On the refreshed dumps: every pool song has an event holomem among its singers and
     every song with one is in the pool (or skipped for want of a chart)."""
     try:
-        _raw, event, _k = em.load_event_bundle(web_server.EVENT_BONUS_PATH)
+        _raw, event, _k = em.load_event_bundle(config.EVENT_BONUS_PATH)
     except (OSError, ValueError, mar.SchemaError):
         pytest.skip("no event on disk")
-    music = web_server._music_rows()
-    charted = set(web_server._chart_note_counts("EXPERT") or ())
+    music = songs.music_rows()
+    charted = set(songs.chart_note_counts("EXPERT") or ())
     hol = set(em.event_holomems(event))
     pool, skipped = em.highlight_pool(sorted(hol), music, charted)
     assert pool, "the open chapter's holomems sing no charted song"
@@ -128,5 +128,5 @@ def test_event_run_route_takes_highlight_and_refuses_its_song_score(monkeypatch)
     """The route parses Highlight without asking for a chart of a song called 'highlight'."""
     body = {"song": "highlight", "objective": "event_points", "difficulty": "HARD"}
     opts = em.parse_event_body(body)
-    assert web_server._parse_difficulty(body, "") == "HARD"
+    assert basis.parse_difficulty(body, "") == "HARD"
     assert json.dumps(opts)                                  # the job echoes its opts

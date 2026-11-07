@@ -13,10 +13,10 @@ See [Run it from source](docs/run-locally.md): Python 3.13, `gcc` on the PATH (t
 | Folder | What it is |
 |---|---|
 | `src/hbuilder` | the optimizer: cards, gates, scoring, Holomem Boards, the searches. Standard library only. |
-| `tools/web` | the local web app: `server.py` and the pages in `static/` |
+| `tools/web` | the local web app: `server.py` (the entry), the server package `hbweb/` and the pages in `static/` |
 | `tools/app` | the desktop app: launcher, installer, updater, settings, content store, server pieces |
 | `tools/local`, `*.cmd` | running it from a clone: `setup.cmd`, `refresh.cmd`, `start.cmd` |
-| `tools/recon/proxy` | reading the game: account refresh, master data, charts, card data |
+| `tools/refresh` | reading the game: account refresh, master data, charts, card data |
 | `tests`, `tools/*/test_*.py` | the tests |
 
 ## Rules that keep it trustworthy

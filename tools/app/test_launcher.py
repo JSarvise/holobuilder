@@ -52,37 +52,35 @@ def test_workers_setting_reaches_the_solver(monkeypatch):
     assert parallel.default_workers() >= 1
 
 
-def test_a_collection_read_before_0_1_7_is_read_again(tmp_path):
-    """After updating, the Member Power-Up must not stay missing until a Refresh."""
-    p, b = tmp_path / "collection.json", tmp_path / "board.json"
-    b.write_text(json.dumps({"connect_level": "auto"}), "utf-8")
-    p.write_text(json.dumps({"player": {"posters": 41}}), "utf-8")
-    assert not launcher._collection_current(p, b)
-    p.write_text(json.dumps({"player": {"posters": 41, "power_up_permyriad": "auto"}}), "utf-8")
-    assert launcher._collection_current(p, b)
-    assert not launcher._collection_current(tmp_path / "absent.json", b)
-    b.write_text(json.dumps({"connect_level": 1}), "utf-8")         # before 0.1.9: sockets forced to 1
-    assert not launcher._collection_current(p, b)
-    b.write_text(json.dumps({"connect_level": "auto"}), "utf-8")
-    h = tmp_path / "event_history.json"
-    h.write_text(json.dumps({"events": {}}), "utf-8")               # the publisher's, synced
-    assert not launcher._collection_current(p, b)
-    h.write_text(json.dumps({"events": {}, "built_for": "this account"}), "utf-8")
-    assert launcher._collection_current(p, b)
+def _serve_versions(monkeypatch, docs, local="0.1.7"):
+    """The server's version.json, one doc per check (signature accepted), for an app at `local`."""
+    import io
+    import signing
+    seq = iter(docs)
+    monkeypatch.setattr(launcher.urllib.request, "urlopen",
+                        lambda req, timeout=0: io.BytesIO(json.dumps(next(seq)).encode()))
+    monkeypatch.setattr(signing, "verify", lambda data, sig, pub=None: None)
+    monkeypatch.setattr(launcher.app_settings, "load", lambda: {"server_url": "https://x", "server_token": ""})
+    monkeypatch.setattr(launcher, "app_version", lambda: local)
 
 
-def test_a_new_version_while_open_reaches_the_page(monkeypatch):
-    """The update notice arrives with the app open, not only at start."""
-    api = launcher.Api()
+def _page(api):
     calls = []
 
     class W:
         def evaluate_js(self, js):
             calls.append(js)
     api._window = W()
-    found = {"state": "available", "local": "0.1.7", "latest": "0.1.8", "notes": ""}
-    seq = iter([{"state": "none"}, found, found])
-    monkeypatch.setattr(api, "check_update", lambda: next(seq))
+    return calls
+
+
+def test_a_new_version_while_open_reaches_the_page(monkeypatch):
+    """The update notice arrives with the app open, not only at start."""
+    v8 = {"latest": "0.1.8", "min_version": "0.1.0", "notes": "n", "sig": "s"}
+    _serve_versions(monkeypatch, [{"latest": "0.1.7", "min_version": "0.1.0", "sig": "s"}, v8, v8])
+    api = launcher.Api()
+    calls = _page(api)
+    monkeypatch.setattr(api, "can_update", lambda: True)
     ticks = iter(range(3))
     monkeypatch.setattr(launcher.time, "sleep", lambda s: next(ticks))   # 3 polls, then StopIteration
     try:
@@ -90,10 +88,65 @@ def test_a_new_version_while_open_reaches_the_page(monkeypatch):
     except StopIteration:
         pass
     assert len(calls) == 1 and "0.1.8" in calls[0]          # shown once, not on every poll
-    monkeypatch.setattr(api, "can_update", lambda: True)
-    assert api.pending_update() == found
+    assert api.pending_update()["latest"] == "0.1.8"
     monkeypatch.setattr(api, "can_update", lambda: False)    # a dev checkout never offers it
     assert api.pending_update() is None
+
+
+def test_the_start_check_is_held_for_every_page(monkeypatch):
+    """An optional update found by the start screen's check stays offered once the Optimizer
+    opens: the pages read it from `pending_update` on load, with no poll needed."""
+    _serve_versions(monkeypatch, [{"latest": "0.1.8", "min_version": "0.1.0", "notes": "n", "sig": "s"}])
+    api = launcher.Api()
+    monkeypatch.setattr(api, "can_update", lambda: True)
+    assert api.pending_update() is None
+    assert api.check_update()["state"] == "available"
+    assert api.pending_update() == {"state": "available", "local": "0.1.7", "latest": "0.1.8", "notes": "n"}
+    assert api.pending_update() is not None                   # every page load, not once
+
+
+def test_a_dismissed_notice_stays_hidden_until_a_newer_version(monkeypatch):
+    v8 = {"latest": "0.1.8", "min_version": "0.1.0", "sig": "s"}
+    v9 = {"latest": "0.1.9", "min_version": "0.1.0", "sig": "s"}
+    _serve_versions(monkeypatch, [v8, v8, v9])
+    api = launcher.Api()
+    calls = _page(api)
+    monkeypatch.setattr(api, "can_update", lambda: True)
+    api.check_update()                                        # the start check
+    assert api.dismiss_update() == {"ok": True}
+    assert api.pending_update() is None                       # on every page from now on
+    ticks = iter(range(2))
+    monkeypatch.setattr(launcher.time, "sleep", lambda s: next(ticks))
+    try:
+        api._watch_updates()                                  # 0.1.8 again, then 0.1.9
+    except StopIteration:
+        pass
+    assert len(calls) == 1 and "0.1.9" in calls[0]
+    assert api.pending_update()["latest"] == "0.1.9"
+
+
+def test_no_update_and_no_server_offer_nothing(monkeypatch):
+    _serve_versions(monkeypatch, [{"latest": "0.1.7", "min_version": "0.1.0", "sig": "s"}])
+    api = launcher.Api()
+    monkeypatch.setattr(api, "can_update", lambda: True)
+    assert api.check_update()["state"] == "none" and api.pending_update() is None
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", lambda req, timeout=0: (_ for _ in ()).throw(OSError("offline")))
+    assert api.check_update()["state"] == "unknown" and api.pending_update() is None
+    assert api.dismiss_update() == {"ok": True}               # nothing to dismiss is not an error
+
+
+def test_the_shell_draws_the_notice_on_top_of_every_page():
+    """hb-shell.js (on every page) puts the band first in <main> and its close button tells the
+    launcher, which keeps it closed across pages; no per-page storage decides it."""
+    js = (HERE.parents[1] / "tools" / "web" / "static" / "hb-shell.js").read_text("utf8")
+    notice = js[js.index("window.hbUpdate = u =>"):]
+    assert 'document.querySelector("main")' in notice and "host.prepend(el)" in notice
+    assert "dismiss_update()" in notice and "update_now()" in notice
+    assert "sessionStorage" not in js
+    static = HERE.parents[1] / "tools" / "web" / "static"
+    for page in ("optimizer", "event", "cards", "holoboard", "versus", "pulls", "parkview", "inventory"):
+        html = (static / f"{page}.html").read_text("utf8")
+        assert '<script src="/hb-shell.js"></script>' in html and "<main" in html, page
 
 
 def test_a_username_is_asked_only_when_the_server_says_one_is_missing(monkeypatch):

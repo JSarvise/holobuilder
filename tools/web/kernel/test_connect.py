@@ -169,18 +169,16 @@ def test_the_leaf_scores_real_teams_identically_with_the_kernel_injected():
     """End to end on the enumeration's own leaf: real cards, the real plan cache
     and bench, the real chart — the developed score with and without it."""
     import argparse
-    import importlib.util
 
-    probe = REPO / "tools" / "recon" / "probes" / "members_first_2026_08_19.py"
-    for extra in (REPO / "tools" / "web", REPO / "tools" / "recon" / "proxy"):
+    for extra in (REPO / "tools" / "web", REPO / "tools" / "refresh"):
         if str(extra) not in sys.path:
             sys.path.insert(0, str(extra))
     try:
-        spec = importlib.util.spec_from_file_location("_mfp_connect_test", probe)
-        mfp = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mfp)
-        built = mfp.build(argparse.Namespace(song="m0334", budget=453, uptime="finite",
-                                             platform="mobile"), mfp.PROXIES["nonsinger"])
+        import leaf_inputs
+
+        built = leaf_inputs.build_maxed(argparse.Namespace(song="m0334", budget=453, uptime="finite",
+                                                           platform="mobile"),
+                                        leaf_inputs.PROXIES["nonsinger"])
     except Exception as exc:  # noqa: BLE001 - no dumps on this machine
         pytest.skip(f"the enumeration inputs are not available here: {exc!r}")
     from hbuilder.domain.team import Team

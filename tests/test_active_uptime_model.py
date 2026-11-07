@@ -20,7 +20,7 @@ import dataclasses
 
 from hbuilder.domain.scoring import _active_occupancy, _finite_window_uptime
 
-from conftest import make_resolved, make_scoring_config, make_skill
+from support.builders import make_resolved, make_scoring_config, make_skill
 
 # A long-cooldown active where the dead zone bites: interval (30 s) well above
 # duration (8 s), so finite-window < steady-state by more than a rounding wobble.

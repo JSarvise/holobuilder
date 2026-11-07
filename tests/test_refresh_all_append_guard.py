@@ -9,7 +9,7 @@ These tests exist because the guard is the only thing standing between a bad
 draft and the one hand-corrected file in the repo, and a guard that is never
 seen to FAIL has not been tested at all — it has been assumed.
 
-`tools/recon/proxy/` is outside `src/hbuilder/`, so it is imported via an
+`tools/refresh/` is outside `src/hbuilder/`, so it is imported via an
 explicit `sys.path` insert.
 """
 
@@ -20,9 +20,9 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PROXY_DIR = REPO_ROOT / "tools" / "recon" / "proxy"
-if str(PROXY_DIR) not in sys.path:
-    sys.path.insert(0, str(PROXY_DIR))
+REFRESH_DIR = REPO_ROOT / "tools" / "refresh"
+if str(REFRESH_DIR) not in sys.path:
+    sys.path.insert(0, str(REFRESH_DIR))
 
 import refresh_all  # noqa: E402
 
@@ -40,15 +40,11 @@ def _install(tmp_path, monkeypatch, cards: list[dict]) -> Path:
     return path
 
 
-def test_both_authoritative_files_are_append_only_and_neither_is_digest_guarded():
-    """`owned.json` is not in the never-written guard.
-
-    The refresh should NOTICE a new card and append it, so the file follows the
+def test_both_authoritative_files_are_append_only():
+    """The refresh notices a new card and appends it, so `owned.json` follows the
     same append-only contract the catalogue has: a whole new id may appear, an
-    existing entry may never move. If it ever reappears in
-    `SACRED` the merge fails every run for the wrong reason; if the guard is ever
-    dropped entirely, nothing checks that an append stayed an append."""
-    assert refresh_all.SACRED == ()
+    existing entry may never move. If the guard is ever dropped, nothing checks
+    that an append stayed an append."""
     assert refresh_all.APPEND_ONLY.name == "cards.json"
     assert refresh_all.APPEND_ONLY_OWNED.name == "owned.json"
     assert hasattr(refresh_all, "owned_guard")

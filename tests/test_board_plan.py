@@ -11,7 +11,7 @@ from hbuilder.domain.card import Stats
 from hbuilder.domain.board_plan import node_costs_from_master, power_node_values
 
 import pytest
-from conftest import make_card
+from support.builders import make_card
 
 K = 2.03734
 _STATS = Stats(performance=1000, technique=1000, sense=1000)
@@ -154,18 +154,6 @@ def test_leader_whose_holomem_is_also_a_member_gets_ONE_board_valued_as_leader()
         overall_power=0.0, bonus_permil=0.0, k_constant=K, active_pool_rate=0.0)
     got = {n.node_id for n in board.characters["Mori Calliope"].nodes}
     assert got == {"R-001", "B-001"}
-
-
-def test_point_budget_for_level_matches_the_grant_milestones():
-    from hbuilder.domain.board_plan import point_budget_for_level
-    # the game's grant milestones: exact at the knots.
-    assert point_budget_for_level(10) == 26
-    assert point_budget_for_level(30) == 161
-    assert point_budget_for_level(50) == 361
-    # interpolated between, and capped at the full 453-point tree above.
-    assert 161 < point_budget_for_level(35) < 261
-    assert point_budget_for_level(80) == 453
-    assert point_budget_for_level(500) == 453  # never exceeds the tree
 
 
 def test_board_points_from_snapshot_reads_the_point_list():
@@ -482,169 +470,6 @@ def test_connect_cards_none_keeps_the_idealised_multipliers():
     assert placements == []
     assert _mult(board, "Alpha", "B-001") == pytest.approx(2.0)
     assert _mult(board, "Beta", "B-001") == pytest.approx(2.0)
-
-
-# ---------------------------------------------------------------------------
-# Member swap-refine (`refine_members`): hill-climb the five member slots by
-# the injected target metric, leader fixed. develop_fn/score_fn are stubs, so
-# these pin the ORCHESTRATION: shortlist -> exact accept, stop, rounds, and
-# the Team rules filtering invalid mutations.
-# ---------------------------------------------------------------------------
-
-
-def _refine_fixture(values):
-    """A developed seed team plus stub develop/score wired to `values`
-    (card id -> worth; a team scores the sum of its members' worths)."""
-    from hbuilder.domain.board_plan import BoardOptimisedTeam, TeamBoardPlan
-    from hbuilder.domain.team import Team
-
-    leader = make_card("card-L-5-uniq-0000-00", member="Leader", stats=_STATS)
-    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS)
-                    for i in range(5))
-    seed = BoardOptimisedTeam(
-        team=Team(leader=leader, members=members), board_off_us=0.0,
-        optimised_us=0.0, plan=TeamBoardPlan(total_gain=0.0, per_character={}))
-    developed = []
-
-    def develop_fn(team):
-        developed.append(team)
-        return BoardOptimisedTeam(team=team, board_off_us=0.0, optimised_us=0.0,
-                                  plan=TeamBoardPlan(total_gain=0.0, per_character={}))
-
-    def score_fn(team, board):
-        return sum(values.get(c.id, 0.0) for c in team.members)
-
-    return seed, develop_fn, score_fn, developed
-
-
-def test_refine_members_accepts_the_best_improving_swap_and_logs_it():
-    from hbuilder.domain.board_plan import refine_members
-
-    values = {f"card-m{i}-5-uniq-0000-00": 10.0 for i in range(5)}
-    good = make_card("card-good-5-uniq-0000-00", member="Good", stats=_STATS)
-    better = make_card("card-better-5-uniq-0000-00", member="Better", stats=_STATS)
-    values[good.id], values[better.id] = 15.0, 30.0
-    seed, develop_fn, score_fn, developed = _refine_fixture(values)
-
-    refined, score, swaps = refine_members(
-        seed, candidates=[good, better], develop_fn=develop_fn,
-        score_fn=score_fn, max_rounds=1)
-    # one round -> ONE accepted swap, and it is the best one (better, not good).
-    assert len(swaps) == 1
-    assert swaps[0]["in"] == better.id
-    assert swaps[0]["gain"] == pytest.approx(20.0)
-    assert better.id in {c.id for c in refined.team.members}
-    assert refined.team.leader.id == seed.team.leader.id
-    assert score == pytest.approx(70.0)  # 4x10 + 30
-
-
-def test_refine_members_batch_score_fn_gives_the_same_answer_and_is_used_for_the_shortlist():
-    """`batch_score_fn(teams)` replaces the per-candidate develop+score of the
-    EXACT stage (what a process pool parallelises); the accepted swap, its
-    gain and the final score must be identical to the serial path, and only
-    the accepted winner is developed in-process."""
-    from hbuilder.domain.board_plan import refine_members
-
-    values = {f"card-m{i}-5-uniq-0000-00": 10.0 for i in range(5)}
-    good = make_card("card-good-5-uniq-0000-00", member="Good", stats=_STATS)
-    better = make_card("card-better-5-uniq-0000-00", member="Better", stats=_STATS)
-    values[good.id], values[better.id] = 15.0, 30.0
-    seed, develop_fn, score_fn, developed = _refine_fixture(values)
-    serial = refine_members(seed, candidates=[good, better], develop_fn=develop_fn,
-                            score_fn=score_fn, max_rounds=1)
-    seed2, develop_fn2, score_fn2, developed2 = _refine_fixture(values)
-    batches = []
-
-    def batch_score_fn(teams):
-        batches.append(len(teams))
-        return [score_fn2(t, None) for t in teams]
-
-    batched = refine_members(seed2, candidates=[good, better], develop_fn=develop_fn2,
-                             score_fn=score_fn2, batch_score_fn=batch_score_fn,
-                             max_rounds=1)
-    assert batched[1] == pytest.approx(serial[1])
-    assert batched[2] == serial[2]
-    assert {c.id for c in batched[0].team.members} == {c.id for c in serial[0].team.members}
-    # one batch per round covering every slot's shortlist (5 slots x 2 candidates)
-    assert batches == [10]
-    # only the accepted winner was developed in-process
-    assert len(developed2) == 1
-
-
-def test_refine_members_returns_the_seed_when_nothing_improves():
-    from hbuilder.domain.board_plan import refine_members
-
-    values = {f"card-m{i}-5-uniq-0000-00": 10.0 for i in range(5)}
-    worse = make_card("card-worse-5-uniq-0000-00", member="Worse", stats=_STATS)
-    values[worse.id] = 1.0
-    seed, develop_fn, score_fn, developed = _refine_fixture(values)
-
-    refined, score, swaps = refine_members(
-        seed, candidates=[worse], develop_fn=develop_fn, score_fn=score_fn)
-    assert refined is seed and swaps == [] and score == pytest.approx(50.0)
-
-
-def test_refine_members_skips_mutations_the_team_rules_reject():
-    from hbuilder.domain.board_plan import refine_members
-
-    values = {f"card-m{i}-5-uniq-0000-00": 10.0 for i in range(5)}
-    # Same holomem as slot 0's card: replacing ANY OTHER slot with it duplicates
-    # the member and must be skipped, not crash. Only slot 0 itself may take it.
-    twin = make_card("card-twin-5-uniq-0000-00", member="M0", stats=_STATS)
-    values[twin.id] = 99.0
-    seed, develop_fn, score_fn, developed = _refine_fixture(values)
-
-    refined, _score, swaps = refine_members(
-        seed, candidates=[twin], develop_fn=develop_fn, score_fn=score_fn,
-        max_rounds=1)
-    # accepted exactly once, in slot 0 (the only legal spot).
-    assert [s["slot"] for s in swaps] == [0]
-    assert refined.team.members[0].id == twin.id
-
-
-def test_refine_members_shortlist_bounds_the_develop_calls():
-    from hbuilder.domain.board_plan import refine_members
-
-    values = {f"card-m{i}-5-uniq-0000-00": 10.0 for i in range(5)}
-    pool = []
-    for i in range(20):
-        c = make_card(f"card-c{i:02d}-5-uniq-0000-00", member=f"C{i}", stats=_STATS)
-        values[c.id] = 20.0 + i          # all improve; ranked by the cheap stage
-        pool.append(c)
-    seed, develop_fn, score_fn, developed = _refine_fixture(values)
-
-    refine_members(seed, candidates=pool, develop_fn=develop_fn,
-                   score_fn=score_fn, shortlist=3, max_rounds=1)
-    # 5 slots x top-3 shortlist -> at most 15 develops, never the full 100.
-    assert len(developed) <= 15
-
-
-def test_refine_members_prefilter_orders_the_shortlist_but_never_decides():
-    from hbuilder.domain.board_plan import refine_members
-
-    values = {f"card-m{i}-5-uniq-0000-00": 10.0 for i in range(5)}
-    pool = []
-    for i in range(10):
-        c = make_card(f"card-p{i}-5-uniq-0000-00", member=f"P{i}", stats=_STATS)
-        values[c.id] = 20.0 + i
-        pool.append(c)
-    seed, develop_fn, score_fn, developed = _refine_fixture(values)
-
-    # The prefilter ranks candidates BACKWARDS: with shortlist=3 only the three
-    # candidates the prefilter likes best (the WORST by the real metric) are
-    # developed, and the accepted swap is the best of those by the REAL metric.
-    def prefilter_fn(team, board):
-        return -score_fn(team, board)
-
-    refined, _score, swaps = refine_members(
-        seed, candidates=pool, develop_fn=develop_fn, score_fn=score_fn,
-        prefilter_fn=prefilter_fn, shortlist=3, max_rounds=1)
-    assert len(swaps) == 1
-    # prefilter's top-3 are p0/p1/p2 (real worths 20/21/22); the exact stage
-    # accepts the best of THOSE — p2 — never p9, which the prefilter buried.
-    assert swaps[0]["in"] == pool[2].id
-    assert all(t.members not in () for t in developed)  # developed only shortlisted
-    assert len(developed) <= 3 * 5
 
 
 def test_bench_characters_ride_along_and_the_team_overrides_its_own():
@@ -1033,7 +858,6 @@ def test_a_holomem_who_leads_and_plays_a_member_card_is_one_board_in_the_matchin
     her reds would read 0 (worth up to ~4 %). One entry per holomem,
     valued as the leader WITH her member card's blues -- so a plan listing both cards
     places sockets exactly like a plan listing the leader alone."""
-    from hbuilder.domain.board_optimizer import BoardPlan
     from hbuilder.domain.board_plan import TeamBoardPlan
     leader, member, skilltree, effects, plan = _connect_fixture()
     twin = make_card("card-00001-5-uniq-0001-00", member="Alpha", stats=_STATS)

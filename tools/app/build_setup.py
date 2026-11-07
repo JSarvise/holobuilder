@@ -1,7 +1,9 @@
 """Build holobuilder-setup.exe, the one file that installs the app on another PC.
 
-    proxyenv/Scripts/python tools/app/build_setup.py              # build/holobuilder-setup.exe
-    proxyenv/Scripts/python tools/app/build_setup.py --publish    # ...and put a copy on the server
+    python tools/app/build_setup.py              # build/holobuilder-setup.exe
+    python tools/app/build_setup.py --publish    # ...and put a copy on the server
+
+Needs PyInstaller: `pip install -r requirements-build.txt`.
 
 PyInstaller, one file, no console. Unlike the app (build_app.py), the installer starts no Python
 helpers of its own, so freezing it costs nothing. Inside: installer.py, the shared look
@@ -18,8 +20,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
+from hbuilder import paths  # noqa: E402
+
+HERE = paths.APP_DIR
+REPO = paths.REPO
 WORK = REPO / "build" / "_setup"
 EXE = REPO / "build" / "holobuilder-setup.exe"
 
@@ -30,7 +35,7 @@ def build() -> Path:
     WORK.mkdir(parents=True)
     # NO access key inside: the exe is public. Only the Google OAuth
     # DESKTOP client, which Google documents as not confidential (PKCE + loopback protect it).
-    g = json.loads((REPO / "state" / "google_oauth.json").read_text("utf8"))
+    g = json.loads((paths.STATE / "google_oauth.json").read_text("utf8"))
     (WORK / "_baked.py").write_text(
         "# written by build_setup.py -- public by design: Google's installed-app client and the\n"
         "# server it installs from (HB_SERVER_URL at build time, else the official one)\n"
@@ -80,6 +85,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--publish", action="store_true")
     args = ap.parse_args(argv)
+    import importlib.util  # noqa: PLC0415
+    if importlib.util.find_spec("PyInstaller") is None:
+        ap.error("PyInstaller is not installed: pip install -r requirements-build.txt")
     exe = build()
     for p in sums([exe], exe.parent):
         print(f"wrote {p}")

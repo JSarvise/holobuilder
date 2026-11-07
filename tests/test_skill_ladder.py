@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_card
+from support.builders import make_card
 from hbuilder.domain.card import SkillSlot, skill_slot_from_record
 from hbuilder.domain.collection import (
     CARDS_JSON_SKILL_LEVEL,
@@ -272,7 +272,7 @@ def test_apply_collection_down_levels_a_bloom_0_passive(tmp_path):
     and the collection is a temp file, so this touches no `data/` path. Without
     this wiring, `apply_collection` would restate `stats` only and hand the
     solver a 32 % skill on a card the game scores at 24 %."""
-    from hbuilder.cli import apply_collection
+    from hbuilder.inputs import apply_collection
 
     ladder = skill_ladder_from_mapping(
         json.loads(LADDER_PATH.read_text(encoding="utf-8"))
@@ -303,7 +303,7 @@ def test_apply_collection_down_levels_a_bloom_0_passive(tmp_path):
 def test_apply_collection_leaves_a_full_bloom_card_alone(tmp_path):
     """The other side of the same wiring: bloom 4 bought the PASSIVE, so the
     catalogue's level-2 magnitude is the right one and nothing moves."""
-    from hbuilder.cli import apply_collection
+    from hbuilder.inputs import apply_collection
 
     ladder = skill_ladder_from_mapping(
         json.loads(LADDER_PATH.read_text(encoding="utf-8"))

@@ -1,4 +1,4 @@
-"""The three collection scenarios of BOARD-EXPORT-CONTRACT.md, as the Oracle
+"""The three collection scenarios of docs/dev/board-export.md, as the Oracle
 builds them.
 
 `tree_optimise.Oracle(scenario=...)` is two axes at once — the scoring BASIS
@@ -23,8 +23,10 @@ from pathlib import Path
 
 import pytest
 
+from hbuilder.errors import MissingInput
+
 _REPO = Path(__file__).resolve().parents[1]
-_TREE_OPTIMISE = _REPO / "tools" / "recon" / "proxy" / "tree_optimise.py"
+_TREE_OPTIMISE = _REPO / "tools" / "refresh" / "tree_optimise.py"
 
 
 def _load_tree_optimise():
@@ -37,7 +39,7 @@ def _load_tree_optimise():
 
 try:
     _TREE = _load_tree_optimise()
-except SystemExit as exc:  # gitignored account data missing
+except MissingInput as exc:  # gitignored account data missing
     _TREE = None
     _WHY = str(exc)
 else:
@@ -92,7 +94,7 @@ def test_the_default_scenario_is_account():
 
 
 def test_an_unknown_scenario_is_refused_not_guessed():
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError):
         _oracle("everything-maxed")
 
 
@@ -116,12 +118,12 @@ def test_my_cards_maxed_defaults_to_max_and_toggles_to_real():
 def test_full_collection_maxed_is_forced_to_level_50():
     r = _TREE.resolve_at_max_level
     assert r("full-collection-maxed", False, False) is True
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError):
         r("full-collection-maxed", False, True)  # cannot drop a complete account
 
 
 def test_the_two_toggles_cannot_both_be_set():
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError):
         _TREE.resolve_at_max_level("account", True, True)
 
 

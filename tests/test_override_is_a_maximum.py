@@ -28,7 +28,7 @@ from hbuilder.domain.card import GateCondition, SlotOverride
 from hbuilder.domain.gates import GateResolution, predicate_from_condition
 from hbuilder.domain.scoring import _effective_magnitude
 
-from conftest import make_resolved, make_skill
+from support.builders import make_resolved, make_skill
 
 _MET = GateCondition(kind="run_state", target="life", count=600, operator="gte")
 

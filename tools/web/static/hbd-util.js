@@ -14,8 +14,12 @@ export const plural = (n, one, many) => `${fmt(n)} ${n === 1 ? one : (many || on
 // Board reset: 1,000 Hologold per node reset (main_Setting skillTreeResetConsumptionGoldQuantity,
 // read from the client).
 export const RESET_GOLD = 1000;
-// Every holomem at level 50 (the "Max Holomem Board Pt" preset the Optimizer also uses).
-export const MAX_LEVEL_POINTS = 361;
+// "<n> Pt each." after the "Max Holomem Board Pt" switch: `n` is /api/meta's
+// max_level_board_points (what a max-level holomem holds, read from the game's master).
+export function showMaxPoints(meta) {
+  const n = meta && meta.max_level_board_points;
+  for (const el of document.querySelectorAll("[data-maxpt]")) el.textContent = n ? ` ${fmt(n)} Pt each.` : "";
+}
 
 // The four branches + Connect. Names follow the Optimizer's plan block; `hue` is the
 // skilltree palette, `g1/g2` the game's node gradient
@@ -99,13 +103,6 @@ export function fmtValue(v, unit) {
 // The game's connect colour (palette Blu2nd: SkillTreeCell ConnectArrow + boosted-cell base).
 export const CONNECT_HUE = "#5FDCF0";
 
-/** A node's base value as the board-doc serves it: {value, unit}, both null when none. */
-export function nodeValue(chr, id) {
-  const c = D.chars.get(chr);
-  const n = c && (c.nodes || []).find(x => x.id === id);
-  return n ? { value: n.value ?? null, unit: n.value_unit || null } : { value: null, unit: null };
-}
-
 /** What the Connect cards on `ch` do in the board shown. `card(sock)` names the card a
  *  socket holds in this view (placed now, or the plan's). Returns
  *  {bySocket: socket -> {card, info, covers[]}, permil: node -> summed permil,
@@ -134,8 +131,6 @@ export function matFamily(itemId) {
   const m = /^item-skill_tree_([a-z]+)-(\d)$/.exec(itemId || "");
   return m ? { fam: m[1], tier: +m[2] } : null;
 }
-const FAM_BRANCH = { leader: "R", card: "B", allmember: "G", content: "Y" };
-export const matBranch = itemId => FAM_BRANCH[(matFamily(itemId) || {}).fam] || null;
 export const MAT_ORDER = ["leader", "card", "allmember", "content"];
 export function matSort(a, b) {
   const fa = matFamily(a) || { fam: "", tier: 9 }, fb = matFamily(b) || { fam: "", tier: 9 };

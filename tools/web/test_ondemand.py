@@ -11,10 +11,10 @@ import queue
 import pytest
 
 import ondemand
-import server as web_server
+from hbweb import config, jobs
 
 # the account's own files (gitignored): absent on a fresh checkout
-_ACCOUNT = all((web_server.REPO_ROOT / p).exists() for p in (
+_ACCOUNT = all((config.REPO_ROOT / p).exists() for p in (
     "data/owned.json", "state/collection.json", "tools/recon/proxy/dumps/board_state.json",
     "tools/recon/proxy/dumps/holodori/main_Poster.json"))
 needs_account = pytest.mark.skipif(not _ACCOUNT, reason="needs the account's data (gitignored)")
@@ -52,8 +52,8 @@ def _opts(**kw):
 
 def test_job_emits_plan_progress_result_end():
     stub = _Stub()
-    job = web_server.Job(job_id="s1")
-    web_server.run_search_job(job, _opts(), engine_for=lambda b, d: stub)
+    job = jobs.Job(job_id="s1")
+    jobs.run_search_job(job, _opts(), engine_for=lambda b, d: stub)
     events = _drain(job)
     assert [e["type"] for e in events] == ["plan", "stage", "stage", "stage", "progress", "result", "end"]
     # the account load is its own stage (the page shows "Loading your account"), then the search
@@ -65,11 +65,11 @@ def test_job_emits_plan_progress_result_end():
 
 
 def test_job_reports_cancel_and_a_filter_error_as_events():
-    job = web_server.Job(job_id="s2")
-    web_server.run_search_job(job, _opts(), engine_for=lambda b, d: _Stub(ondemand.Cancelled()))
+    job = jobs.Job(job_id="s2")
+    jobs.run_search_job(job, _opts(), engine_for=lambda b, d: _Stub(ondemand.Cancelled()))
     assert [e["type"] for e in _drain(job)] == ["plan", "stage", "stage", "stage", "cancelled", "end"]
-    job = web_server.Job(job_id="s3")
-    web_server.run_search_job(job, _opts(), engine_for=lambda b, d: _Stub(KeyError("no card matches")))
+    job = jobs.Job(job_id="s3")
+    jobs.run_search_job(job, _opts(), engine_for=lambda b, d: _Stub(KeyError("no card matches")))
     events = _drain(job)
     assert [e["type"] for e in events] == ["plan", "stage", "stage", "stage", "error", "end"]
     assert events[4]["message"] == "no card matches"
@@ -274,8 +274,10 @@ def test_song_board_bonus_reports_yellow_per_singer_capped_and_the_singer_reds(m
     from types import SimpleNamespace as NS
 
     import row_detail
+    from hbuilder.domain.song import OverallPower
 
-    monkeypatch.setattr(row_detail, "overall_power_for", lambda members, leader, cfg: 100000.0)
+    monkeypatch.setattr(row_detail, "overall_power_for",
+                        lambda members, leader, cfg: OverallPower.fixed(100000.0))
     monkeypatch.setattr(row_detail, "song_overall_power",
                         lambda members, leader, cfg, chart: 101274.4)
 
@@ -304,8 +306,8 @@ def test_the_engine_key_moves_when_a_refresh_moves_the_boards_or_the_wallet(tmp_
     dumps.mkdir()
     (dumps / "board_state.json").write_text('{"chr-00001": {"nodes": []}}')
     (dumps / "inventory.json").write_text('{"items": {}}')
-    monkeypatch.setattr(ondemand, "_PROXY", tmp_path)
-    monkeypatch.setattr(ondemand.tsb, "today_keys", lambda basis, difficulty: ({}, "scoring-key"))
+    monkeypatch.setattr(ondemand, "DUMPS", dumps)
+    monkeypatch.setattr(ondemand.leaf_inputs, "today_keys", lambda basis, difficulty: ({}, "scoring-key"))
     k0 = ondemand.account_key("EXPERT")
     assert k0 and ondemand.account_key("EXPERT") == k0                    # stable
     (dumps / "board_state.json").write_text('{"chr-00001": {"nodes": [], "slots": {"S-001": "card-1"}}}')
@@ -324,7 +326,7 @@ def test_materials_plan_rereads_a_file_a_refresh_rewrote(tmp_path, monkeypatch):
     dumps.mkdir()
     path = dumps / "board_state.json"
     path.write_text('{"a": 1}')
-    monkeypatch.setattr(materials_plan, "_PROXY", tmp_path)
+    monkeypatch.setattr(materials_plan, "DUMPS", dumps)
     monkeypatch.setattr(materials_plan, "_FILES", {})
     assert materials_plan._read("board_state.json") == {"a": 1}
     path.write_text('{"a": 2}')
@@ -334,7 +336,7 @@ def test_materials_plan_rereads_a_file_a_refresh_rewrote(tmp_path, monkeypatch):
 
 
 def test_with_play_sets_both_halves_of_auto():
-    # AUTO = the AUTO judgement column AND no combo, together (`server._auto_premise`'s
+    # AUTO = the AUTO judgement column AND no combo, together (`basis.auto_premise`'s
     # rule): the column alone would keep granting combo-gated overrides AUTO never earns
     import dataclasses
     from pathlib import Path
@@ -384,13 +386,17 @@ def test_a_replanned_team_is_remembered_under_its_own_name(monkeypatch):
     monkeypatch.setattr(materials_plan, "remember",
                         lambda leader_id, members, _song, _opts, entry: held.append(
                             ((leader_id, members), entry[1:])))
+    leaf = SimpleNamespace(cfg=SimpleNamespace(platform="mobile", song_auto=False,
+                                               run_state=SimpleNamespace(combo=None)))
     engine = SimpleNamespace(
-        assumptions=SimpleNamespace(plan_opts=lambda: {}),
+        assumptions=SimpleNamespace(plan_opts=lambda: {}, key=lambda: ()),
+        difficulty="EXPERT", levels=None,
         charts=[SimpleNamespace(singers=("chr-00031",))], index={"m0020": 0},
         pool=SimpleNamespace(_pool=FakeWorkers(), new_generation=lambda: 1,
-                             stop_through=lambda _g: None))
-    out, failed = ondemand.Engine._within_materials(engine, ranking, leaders, pool, "m0020", (0,), None)
-    assert failed == [] and len(out) == 3
+                             stop_through=lambda _g: None, ctx=leaf))
+    out, failed, optimal = ondemand.Engine._within_materials(engine, ranking, leaders, pool, "m0020",
+                                                             (0,), None)
+    assert failed == [] and len(out) == 3 and len(optimal) == 3
     assert held and all(team == entry for team, entry in held)
 
 
@@ -408,9 +414,9 @@ def test_account_bonuses_follow_the_card_levers():
 def test_maxed_bonuses_are_the_maxed_leaf_s():
     """`maxed_bonuses` is the `cfg.account` the Maxed account leaf scores with (every card
     in the game at max level: the roster's power-up ceiling)."""
-    import two_stage_build as tsb
+    import leaf_inputs
 
-    assert ondemand.maxed_bonuses() == tsb.leaf_inputs("maxed", "EXPERT")["ctx"].cfg.account
+    assert ondemand.maxed_bonuses() == leaf_inputs.leaf_inputs("maxed", "EXPERT")["ctx"].cfg.account
 
 
 @needs_account

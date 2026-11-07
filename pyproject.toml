@@ -2,19 +2,19 @@
 name = "hbuilder"
 version = "0.1.0"
 description = "Team composition optimizer for hololive Dreams"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = []
-
-[project.scripts]
-hbuilder = "hbuilder.cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests", "tools/web", "tools/explorer", "tools/pokajan", "tools/visual", "tools/app"]
+testpaths = ["tests", "tools/web", "tools/visual", "tools/app", "tools/oss/test_options_glossary.py",
+             "tools/refresh",
+             "tools/recon/re"]
 markers = [
     "slow: deselected by default; measures rather than asserts",
+    "recall: deselected by default; a full search on the real data (minutes), run with -m recall",
 ]
-addopts = "-m 'not slow'"
+addopts = "-m 'not slow and not recall'"
 
 [build-system]
 requires = ["setuptools>=68"]

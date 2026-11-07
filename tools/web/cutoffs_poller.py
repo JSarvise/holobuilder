@@ -4,8 +4,7 @@ Predictions need a time series of the borders. This is that, kept small and loca
 
 * **On when the server starts** (otherwise no event would ever get a series): `server.main`
   enables it every DEFAULT_INTERVAL_MIN minutes, or
-  `HBUILDER_CUTOFFS_POLL_MIN=<minutes>`; `=0` keeps it off. The Event page's toggle
-  (`POST /api/event/cutoffs/poller`) switches it at runtime; that choice is not persisted.
+  `HBUILDER_CUTOFFS_POLL_MIN=<minutes>`; `=0` keeps it off.
 * **Guests only.** Each cycle runs `event_cutoffs.py --region all` WITHOUT `--self`, so every
   region is read with its own disposable guest account (`state/ranking_accounts.json`) and the
   user's own account is never logged in by the poller (`build_args` is the one place the

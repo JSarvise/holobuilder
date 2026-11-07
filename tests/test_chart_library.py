@@ -177,7 +177,7 @@ def test_the_real_library_is_scorable_end_to_end():
     if not path.exists():
         pytest.skip("dumps/ is gitignored; run build_charts.py to produce charts.json")
 
-    from conftest import FIXTURE_CARDS_PATH, make_scoring_config
+    from support.builders import FIXTURE_CARDS_PATH, make_scoring_config
     from hbuilder.domain.loader import load_cards
     from hbuilder.domain.song import score_song
 

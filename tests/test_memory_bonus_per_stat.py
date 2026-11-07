@@ -20,7 +20,6 @@ assertion so the check does not compare the code to itself.
 """
 
 import json
-import math
 from pathlib import Path
 
 import pytest

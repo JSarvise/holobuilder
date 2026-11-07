@@ -13,7 +13,7 @@ def test_formats_match_the_captured_profile():
     assert cp.os_version("10", 19045) == "Windows 10  (10.0.19045)"
     assert cp.device_name("B550M-X", "Example Board Co., Ltd.") == \
         "B550M-X (Example Board Co., Ltd.)"
-    assert cp.vendor_id("PCI\VEN_10DE&DEV_2487&SUBSYS_1") == "4318"
+    assert cp.vendor_id(r"PCI\VEN_10DE&DEV_2487&SUBSYS_1") == "4318"
     assert cp.vendor_id(None) == "0"
     assert cp.cpu_name("AMD Ryzen 5 5600X 6-Core Processor             ") == \
         "AMD Ryzen 5 5600X 6-Core Processor "

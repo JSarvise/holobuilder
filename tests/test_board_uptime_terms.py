@@ -36,10 +36,10 @@ from hbuilder.domain.board import (
     BoardModel,
     BoardNode,
     CharacterBoard,
-    resolve,
 )
+from support.board_reference import resolve
 
-from conftest import (
+from support.builders import (
     make_card,
     make_resolved,
     make_scoring_config,
@@ -258,16 +258,16 @@ def _socketed(kind: str, permil: float, multiplier: float) -> BoardModel:
 
 def test_a_socketed_activation_rate_node_raises_the_per_song_score():
     """Same node, twice the socket multiplier, on a real chart."""
-    from hbuilder.domain.song import score_song_detailed
+    from hbuilder.domain.song import OverallPower, score_song_detailed
 
     chart = _song_chart()
     plain_team, plain_cfg = _active_team(_socketed("activation_rate_up", 100.0, 1.0))
     socket_team, socket_cfg = _active_team(_socketed("activation_rate_up", 100.0, 2.0))
     plain = score_song_detailed(
-        plain_team.members, (plain_team.leader,), chart, plain_cfg, deck_power=2000
+        plain_team.members, (plain_team.leader,), chart, plain_cfg, deck_power=OverallPower.fixed(2000)
     )[0]
     socketed = score_song_detailed(
-        socket_team.members, (socket_team.leader,), chart, socket_cfg, deck_power=2000
+        socket_team.members, (socket_team.leader,), chart, socket_cfg, deck_power=OverallPower.fixed(2000)
     )[0]
     assert socketed.total_score > plain.total_score
 

@@ -26,7 +26,7 @@ from hbuilder.domain.card import GateCondition
 from hbuilder.domain.gates import GatePredicate, RunState, predicate_from_condition
 from hbuilder.domain.schema import validate_skill_slot
 
-from conftest import make_card
+from support.builders import make_card
 
 
 def _agg():

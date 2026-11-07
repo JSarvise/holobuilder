@@ -7,7 +7,7 @@ measure 0 and the first check sits one whole cooldown in, so the run opens with
 a **dead zone** in which the skill cannot be up at all; and the run ends, so the
 last window is truncated.
 
-Measured with `tools/recon/proxy/active_lattice.py`: driving the
+Measured against the per-song scorer: driving the
 shipped `song.py` over all **704** charts the game ships — real note times, real
 `#mmm0B` cues, note-weighted exactly as `CalcScore` weights — a single skill is
 up for **84 % to 95 %** of what `duration / interval` claims, across every
@@ -31,7 +31,7 @@ from hbuilder.domain.scoring import _finite_window_uptime
 from hbuilder.domain.scoring_config import REFERENCE_RUN_SECONDS
 from hbuilder.domain.song import _active_windows
 
-from conftest import make_resolved, make_scoring_config, make_skill
+from support.builders import make_resolved, make_scoring_config, make_skill
 
 T = REFERENCE_RUN_SECONDS
 

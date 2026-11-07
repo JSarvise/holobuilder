@@ -1,4 +1,4 @@
-"""tools/recon/proxy/game_keys.py --find: the seed is the one literal whose MD5 opens the server's
+"""tools/refresh/game_keys.py --find: the seed is the one literal whose MD5 opens the server's
 own Master/Get answer. Driven with a made-up seed, so no game, no keys and no network."""
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-PROXY = ROOT / "tools" / "recon" / "proxy"
-sys.path.insert(0, str(PROXY))
+REFRESH = ROOT / "tools" / "refresh"
+sys.path.insert(0, str(REFRESH))
 
 pytest.importorskip("Crypto")
 import account_snapshot as A  # noqa: E402

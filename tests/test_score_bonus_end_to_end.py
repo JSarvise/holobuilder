@@ -64,7 +64,7 @@ from pathlib import Path
 
 import pytest
 
-from hbuilder.cli import apply_collection, build_parser
+from hbuilder.inputs import apply_collection, default_paths
 from hbuilder.domain.loader import load_cards, load_owned
 from hbuilder.domain import scoring
 from hbuilder.domain.scoring import score_with_breakdown
@@ -181,7 +181,7 @@ def test_our_score_bonus_agrees_with_the_games_own(tmp_path):
     (`model.active_uptime = "steady"`). Read the module docstring before
     touching a bound. The interval-contrast decks are excluded on purpose --
     they carry the residual synchronisation SPREAD and get their own test below."""
-    defaults = build_parser().parse_args(["solve"])
+    defaults = default_paths()
     catalogue = load_cards(_REPO / defaults.cards)
     owned = load_owned(_REPO / defaults.owned, catalogue)
     cfg = load_scoring_config(_REPO / "config.json")
@@ -212,7 +212,7 @@ def test_our_score_bonus_agrees_with_the_games_own(tmp_path):
         f"{outside}. Under steady uptime the skills-only rows sit in "
         f"[{100 * _GAP_LOW:.0f}%, {100 * _GAP_HIGH:.0f}%]; a row outside it means a "
         "model change regressed the deck-screen match. If the shift is real and "
-        "measured, re-derive the band from the new numbers (see IN-RUN-SCORER.md), "
+        "measured, re-derive the band from the new numbers, "
         "do not widen it to hide a regression."
     )
 
@@ -248,7 +248,7 @@ def test_the_score_bonus_gap_is_not_a_uniform_scale(tmp_path):
     corpus-average model correctly does NOT reproduce; a green here is the model
     behaving as designed.
     """
-    defaults = build_parser().parse_args(["solve"])
+    defaults = default_paths()
     catalogue = load_cards(_REPO / defaults.cards)
     owned = load_owned(_REPO / defaults.owned, catalogue)
     cfg = load_scoring_config(_REPO / "config.json")

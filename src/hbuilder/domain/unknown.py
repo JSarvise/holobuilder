@@ -73,15 +73,3 @@ UNKNOWN = Unknown()
 def is_known(value: object) -> bool:
     """True unless `value` is the `UNKNOWN` sentinel."""
     return value is not UNKNOWN
-
-
-def require_known(value: object, card_id: str, field: str) -> float:
-    """Return `value` coerced to float, or raise `SchemaError` naming
-    `card_id` and `field` when `value` is `UNKNOWN`."""
-    if value is UNKNOWN:
-        raise SchemaError(
-            f"field '{field}' was never populated (UNKNOWN)",
-            card_id=card_id,
-            field=field,
-        )
-    return float(value)

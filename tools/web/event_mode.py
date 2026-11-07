@@ -29,7 +29,6 @@ Nothing here writes a file.
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import itertools
 import json
 import random
@@ -39,11 +38,13 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-REPO = Path(__file__).resolve().parents[2]
-_PROXY = REPO / "tools" / "recon" / "proxy"
-for _p in (REPO / "src", _PROXY):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+_SRC = str(Path(__file__).resolve().parents[2] / "src")   # this checkout's hbuilder
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+from hbuilder import paths  # noqa: E402
+
+if str(paths.REFRESH_DIR) not in sys.path:
+    sys.path.insert(0, str(paths.REFRESH_DIR))
 
 from hbuilder.domain import marathon as mar  # noqa: E402
 
@@ -443,7 +444,7 @@ def songs_payload(music_rows: Sequence[Mapping], *, titles: Mapping[str, str], b
     return {"boosts": boosts, "difficulty": difficulty, "length_multiplier_estimated": True,
             "formula": LENGTH_FORMULA,
             "note": ("Ranked by L alone; real Event Pt also depends on the team's score, but "
-                     "weakly (the 120 floor dominates, EVENT-MODES.md §8c)."),
+                     "weakly (the 120 floor dominates)."),
             "songs": songs}
 
 
@@ -551,6 +552,16 @@ def search_event(*, reps: Sequence, leaders: Sequence, score: Callable, bonus: S
         for members, value in zip(sets, values):
             raw_cache.setdefault((leader.id, tuple(members)), float(value))
         return values
+
+    if getattr(score, "many", None) is not None:
+        def recording_many(groups):
+            groups = [(leader, list(sets)) for leader, sets in groups]
+            values_by_group = score.many(groups)
+            for (leader, sets), values in zip(groups, values_by_group):
+                for members, value in zip(sets, values):
+                    raw_cache.setdefault((leader.id, tuple(members)), float(value))
+            return values_by_group
+        recording.many = recording_many
 
     # A: by score (S_max for the bound, and the naive re-sort as candidates). Only
     # when certifying: S_max is what the bound needs, and B already ranks by the
@@ -706,8 +717,7 @@ def event_points_for(body: Mapping) -> dict:
 def _current_event_key() -> str | None:
     """The chapter open now at the last refresh (`bundle_from_raw`'s choice), or None."""
     try:
-        path = Path(__file__).resolve().parents[1] / "recon" / "proxy" / "dumps" / "marathon_bonus.json"
-        return load_event_bundle(path)[1].name
+        return load_event_bundle(paths.DUMPS / "marathon_bonus.json")[1].name
     except Exception:  # noqa: BLE001 - no event file: the relay default
         return None
 
@@ -725,12 +735,15 @@ def row_payload(rank: int, r: Mapping, *, reps: Sequence, bonus_of: Callable,
     e, p = r["live_permil"], r["song_permil"]
     ep = (mar.event_points(raw, e, boosts=boosts, length_permil=length_permil, holopass=holopass)
           if length_permil is not None else None)
-    return {"rank": rank, "leader": card(r["leader"], False),
-            "members": [card(reps[i], True) for i in r["members"]],
-            "score": raw, "live_permil": e, "song_permil": p, "objective": r["objective"],
-            "event_points_base": mar.event_points_base(raw, e),
-            "event_points": ep, "event_song_score": mar.event_song_score(raw, p),
-            "source": r["source"], "status": r.get("status"), "refined": bool(r.get("refined"))}
+    out = {"rank": rank, "leader": card(r["leader"], False),
+           "members": [card(reps[i], True) for i in r["members"]],
+           "score": raw, "live_permil": e, "song_permil": p, "objective": r["objective"],
+           "event_points_base": mar.event_points_base(raw, e),
+           "event_points": ep, "event_song_score": mar.event_song_score(raw, p),
+           "source": r["source"], "status": r.get("status"), "refined": bool(r.get("refined"))}
+    if "plan_optimal" in r:
+        out["plan_optimal"] = r["plan_optimal"]
+    return out
 
 
 # rows that also get the run-score quantiles (p10/p50/p90), as the two-stage cache's ORDER_ROWS
@@ -781,16 +794,6 @@ def add_row_detail(row: dict, built: Mapping, leader, members: Sequence, *,
 
 
 # --- the real account basis -------------------------------------------------------
-def _load(name: str, rel: str):
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, REPO / rel)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 # the rows re-planned when a board constraint applies (the Score search's
 # `ondemand.REPLAN_CANDIDATES`)
 REPLAN_CANDIDATES = 24   # `ondemand.REPLAN_CANDIDATES` (20 rows shown)
@@ -840,12 +843,14 @@ def _refine_rows(rows, reps, bonus, objective, pool, n):
 
 
 def _replan_rows(rows, reps, bonus, objective, song, assumptions, pool, check, progress=None,
-                 singers=frozenset(), cancel=None):
+                 singers=frozenset(), cancel=None, shown=REPLAN_CANDIDATES, difficulty="EXPERT"):
     """The best REPLAN_CANDIDATES rows re-planned exactly under `assumptions`
     (`materials_plan.plan_and_score` in the pool's workers, `materials_plan.dispatch`:
     a set `cancel` stops the plans), re-scored on that board and re-sorted by the
-    objective. Returns `(rows, [why a row could not be planned])`; a row that cannot be
-    planned is dropped (the account cannot reach its board)."""
+    objective; the best `shown` (the rows the page lists) re-planned again with the
+    planner's other candidates (`materials_plan.refine_rows`). Returns `(rows, [why a row
+    could not be planned])`; a row that cannot be planned is dropped (the account cannot
+    reach its board)."""
     import materials_plan  # noqa: PLC0415
 
     import ondemand as _od  # noqa: PLC0415
@@ -853,42 +858,68 @@ def _replan_rows(rows, reps, bonus, objective, song, assumptions, pool, check, p
     # the best rows, plus the singer-led ones the quick plan undervalues (`ondemand.replan_pick`)
     cands = [rows[k] for k in _od.replan_pick(rows, lambda r: _chr_of(r["leader"].id) in singers,
                                               n=REPLAN_CANDIDATES)]
+    opts = materials_plan.judged_opts(assumptions.plan_opts(), assumptions, difficulty, pool.ctx)
+    # every row on the planner's first plan; the rows shown get its other candidates below
+    first = materials_plan.first_opts(opts)
     # each with the plan this process already holds for it (`materials_plan.carried_plan`)
     items = [(k, r["leader"].id, tuple(reps[i].id for i in r["members"]), song, None,
-              assumptions.plan_opts(), materials_plan.carried_plan(
-                  r["leader"].id, tuple(reps[i].id for i in r["members"]), song,
-                  assumptions.plan_opts()))
+              first, materials_plan.carried_plan(
+                  r["leader"].id, tuple(reps[i].id for i in r["members"]), song, first))
              for k, r in enumerate(cands)]
     # the singers' plans (the longest) first, as `ondemand._within_materials` does
     items.sort(key=lambda it: _chr_of(it[1]) not in singers)
     item_of = {it[0]: it for it in items}        # by index, not position (sorted above)
-    workers = getattr(pool, "_pool", None)
-    if workers is None:
-        raise RuntimeError("re-planning the boards needs the worker pool")
     got: dict[int, float] = {}
+    optimal: dict[int, bool | None] = {}
+    held_of: dict = {}
     failed: list[str] = []
-    for done, (index, value, _state, reason, held) in enumerate(
-            materials_plan.dispatch(pool, items, cancel), 1):
+
+    def on_plan(out):
         check()
-        if progress:
-            progress(done, len(items))
+        index, value, _state, reason, held = out
         if value is None:
             failed.append(f"{cands[index]['leader'].member}: {reason}")
         else:
             got[index] = float(value)
+            held_of[index] = held
+            optimal[index] = None if held is None else held[2] is False
             # the row's detail opens on this same plan: held here, it is not solved again
             materials_plan.remember(*item_of[index][1:4], item_of[index][5], held)
-    check()                 # `dispatch` returns early on a cancel: raise it here
-    out = []
-    for k, r in enumerate(cands):
-        if k in got:
-            e, p = _aggregate(bonus, r["members"])
-            out.append(dict(r, score=got[k], live_permil=e, song_permil=p, source="replanned",
-                            objective=mar.event_objective(got[k], objective=objective,
-                                                          live_permil=e, song_permil=p)))
+
+    def objective_of(k, value):
+        e, p = _aggregate(bonus, cands[k]["members"])
+        return mar.event_objective(value, objective=objective, live_permil=e, song_permil=p)
+
+    # the rows shown re-planned with the planner's other candidates (only ever higher), each
+    # row's as soon as it is sure to be among them; ranked as `ranked` below ranks them
+    refined = materials_plan.plan_and_refine(
+        pool, items, opts=opts, shown=shown, rank=lambda k, value: (-objective_of(k, value), k),
+        cancel=cancel, progress=progress, on_plan=on_plan)
+    check()                 # a cancel returns early: raise it here
+
+    def ranked():
+        out = []
+        for k, r in enumerate(cands):
+            if k in got:
+                e, p = _aggregate(bonus, r["members"])
+                # plan_optimal False: a MILP of the row's plan stopped on the solver's time limit
+                out.append((k, dict(r, score=got[k], live_permil=e, song_permil=p,
+                                    source="replanned", plan_optimal=optimal[k],
+                                    objective=mar.event_objective(got[k], objective=objective,
+                                                                  live_permil=e, song_permil=p))))
+        out.sort(key=lambda kr: -kr[1]["objective"])
+        return out
+    for index in got:
+        # the plan each row is served on, under this search's judge: the row's detail opens
+        # on it, and a request with other levers plans its own
+        if index in refined:
+            value, _state, held_of[index] = refined[index]
+            got[index] = float(value)
+            optimal[index] = held_of[index][2] is False
+        materials_plan.remember(*item_of[index][1:4], opts, held_of[index])
+    out = [r for _k, r in ranked()]
     if not out:
         raise KeyError("no team could be planned under these board options: " + "; ".join(failed[:3]))
-    out.sort(key=lambda r: -r["objective"])
     return out, failed
 
 
@@ -918,7 +949,9 @@ def run_account_search(opts: Mapping, *, emit: Callable[[dict], None], cancel: t
     """The job body: build the account basis for the song, run `search_event` on a
     RefinePool, and return the result payload. Raises EventCancelled on cancel."""
     import two_stage  # noqa: PLC0415
-    import two_stage_build as tsb  # noqa: PLC0415
+    import leaf_inputs  # noqa: PLC0415
+    from hbuilder.domain.song import load_charts  # noqa: PLC0415
+    from hbuilder.solver import members_first as mf  # noqa: PLC0415
 
     song, difficulty, objective = opts["song"], opts["difficulty"], opts["objective"]
     highlight = is_highlight(song)
@@ -962,7 +995,7 @@ def run_account_search(opts: Mapping, *, emit: Callable[[dict], None], cancel: t
         # gated on bloom matches the card's bloom (at bloom 5, 73 of 117 owned cards on
         # one account have another live bonus than at their real bloom). The same
         # override the search's cards and /api/card-states use; `bonus_of` reads it.
-        from hbuilder.cli import _override_collection_levels  # noqa: PLC0415
+        from hbuilder.inputs import _override_collection_levels  # noqa: PLC0415
 
         assumed = _override_collection_levels({"cards": dict(collection)}, None, assumptions.bloom,
                                               keep_higher_bloom=assumptions.keep_higher)
@@ -974,8 +1007,7 @@ def run_account_search(opts: Mapping, *, emit: Callable[[dict], None], cancel: t
         # holomem's complete board. Its pool keeps one card per feature set; a card collapsed
         # into another that carries a different Event Bonus is put back, as `split_key` does
         blooms = _AtBloom(5)
-        mfp = tsb._load("_mfp_ondemand", "tools/recon/probes/members_first_2026_08_19.py")
-        built = dict(tsb.leaf_inputs("maxed", difficulty, build_song, mfp=mfp), mfp=mfp)
+        built = dict(leaf_inputs.leaf_inputs("maxed", difficulty, build_song))
         by_id = built["by_id"]
         back = [by_id[d] for d, rep in built.get("dominated") or ()
                 if d in by_id and rep in by_id and bonus_of(by_id[d]) != bonus_of(by_id[rep])]
@@ -983,21 +1015,19 @@ def run_account_search(opts: Mapping, *, emit: Callable[[dict], None], cancel: t
     elif assumptions is not None:
         built = ondemand.build_inputs(assumptions, difficulty, build_song, split_key=bonus_of)
     else:
-        acct = _load("_two_stage_account_event", "tools/recon/probes/two_stage_account.py")
-        built = acct.build(tsb._namespace(build_song, difficulty), bench="captured", split_key=bonus_of)
+        built = leaf_inputs.build_account(leaf_inputs._namespace(build_song, difficulty), bench="captured", split_key=bonus_of)
     check()
     # scored for how the run is played: Auto = the AUTO column AND no combo (`ondemand.with_play`)
     built = dict(built, ctx=ondemand.with_play(built["ctx"], (opts.get("platform") or "mobile",
                                                               bool(opts.get("auto")))))
     proxy, chart = built["proxy"], built["chart"]
-    mf = built["mfp"].mf
     singers = tuple(chart.singers or ())
     pool_charts: tuple = ()
     if highlight:
         # every chart of the pool in the leaf's context, a board per chart: a batch with
         # no chart_indices scores the MEAN over them (`RefinePool.batch_score`), as the
         # Score search's In general does (`ondemand.Engine`)
-        library = built["ex"].load_charts(str(tsb.charts_path(difficulty))).at(difficulty)
+        library = load_charts(str(leaf_inputs.charts_path(difficulty))).at(difficulty)
         ctx, pool_charts, lost = highlight_context(built["ctx"], library, pool_ids)
         pool_skipped = sorted(set(pool_skipped) | set(lost))
         if not pool_charts:
@@ -1077,6 +1107,36 @@ def run_account_search(opts: Mapping, *, emit: Callable[[dict], None], cancel: t
             check()
             return out
 
+        def score_many(groups):
+            """`score` for several leaders' sets at once: ONE batch for the workers
+            (a score is a function of its team alone, so the values are the ones
+            `score` gives each group), the bookkeeping in group order."""
+            from hbuilder.domain.team import Team  # noqa: PLC0415
+
+            check()
+            groups = [(leader, list(sets)) for leader, sets in groups]
+            teams = [Team(leader=leader, members=tuple(reps[k] for k in idx))
+                     for leader, sets in groups for idx in sets]
+            flat = list(batch(teams)) if teams else []
+            out, at = [], 0
+            for leader, sets in groups:
+                values = flat[at:at + len(sets)]
+                at += len(sets)
+                out.append(values)
+                evaluated[0] += len(sets)
+                for value, members in zip(values, sets):
+                    if best[0] is None or float(value) > best[0]["value"]:
+                        best[0] = {"cards": [leader.id, *[reps[i].id for i in members]],
+                                   "value": float(value), "metric": "score", "stage": current[0]}
+            if time.monotonic() - last[0] >= 1.0:
+                last[0] = time.monotonic()
+                emit({"type": "progress", "stage": current[0], "evaluated": evaluated[0],
+                      "best_so_far": dict(best[0]) if best[0] else None})
+            check()
+            return out
+
+        score.many = score_many
+
         score(proxy, two_stage.random_legal_sets(hol, 64, random.Random(0)))
         # Highlight: the exact plan within materials is per song (one board for one chart),
         # so it is not run; the bound's certification neither (HIGHLIGHT notes)
@@ -1126,7 +1186,8 @@ def run_account_search(opts: Mapping, *, emit: Callable[[dict], None], cancel: t
             found["rows"], replan_failed = _replan_rows(
                 found["rows"], reps, bonus, objective, song, assumptions, pool, check,
                 progress=lambda k, n: emit({"type": "progress", "stage": "replan", "done": k, "total": n}),
-                singers=frozenset(singers), cancel=cancel)
+                singers=frozenset(singers), cancel=cancel, shown=opts["top"],
+                difficulty=difficulty)
             found["bound"] = None
             for r in found["rows"][:DETAIL_ROWS]:
                 whole = materials_plan_for(r, reps, song, assumptions)
@@ -1140,7 +1201,7 @@ def run_account_search(opts: Mapping, *, emit: Callable[[dict], None], cancel: t
         elif (not (assumptions is not None and assumptions.boards == "as_is")
               and not (found.get("bound") or {}).get("certified")):
             # boards planned without a wallet limit: the activation nodes are still chosen
-            # for THIS song (the Score search does the same, `ondemand.REFINE_CAP`); boards
+            # for THIS song (the Score search does the same, `ondemand.REFINE_HEAD`); boards
             # as they are have nothing to choose, and a certified answer keeps the leaf its
             # bound was proved on
             import ondemand as _od  # noqa: PLC0415
@@ -1296,9 +1357,9 @@ def event_chapters(meta: Mapping | None, key: str, open_keys: Sequence[str],
 
 def bundle_from_raw(raw: Mapping, event_key: str | None = None, *, windows=None,
                     now_ms: int | None = None):
-    """`(raw, MarathonEvent, open keys)` from marathon_bonus.json's parsed content —
-    the same selection as `marathon.load_current_event` (newest open chapter by
-    default), without the file. Raises `SchemaError` when nothing is open."""
+    """`(raw, MarathonEvent, open keys)` from marathon_bonus.json's parsed content:
+    the chapter `event_key` names, or `marathon.pick_chapter`'s choice among the open
+    ones. Raises `SchemaError` when nothing is open."""
     keys = sorted({mar._event_key(g) for g in raw.get("current_group_ids") or []})
     if not keys:
         raise mar.SchemaError("no event is open at the last refresh (current_group_ids is empty)")

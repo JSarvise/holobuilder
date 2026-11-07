@@ -11,7 +11,8 @@ import dataclasses
 
 import pytest
 
-import server as web_server
+from hbweb import config
+from hbuilder.inputs import apply_collection, load_inputs
 from hbuilder.domain.board_plan import node_effect_ids_from_master
 from hbuilder.domain.song import load_charts
 from hbuilder.domain.team import Team
@@ -19,17 +20,17 @@ from hbuilder.solver.parallel_refine import RefineContext, RefinePool
 
 
 def _context():
-    skilltree = web_server._read_json(web_server.SKILLTREE_PATH)
-    node_master = web_server._read_json(web_server.NODE_MASTER_PATH)
-    library = load_charts(str(web_server.CHARTS_PATH))
+    skilltree = config.read_json(config.SKILLTREE_PATH)
+    node_master = config.read_json(config.NODE_MASTER_PATH)
+    library = load_charts(str(config.CHARTS_PATH))
     if not skilltree or not node_master or library is None:
         pytest.skip("skilltree/master/charts dumps absent (gitignored)")
     chart = next((library.get(m) for m in library.music_ids), None)
     if chart is None:
         pytest.skip("no chart in the library")
-    cards, owned, cfg, _ = web_server.load_inputs(
-        web_server.CARDS_PATH, web_server.OWNED_PATH, False)
-    cards, cb = web_server.apply_collection(
+    cards, owned, cfg, _ = load_inputs(
+        config.CARDS_PATH, config.OWNED_PATH)
+    cards, cb = apply_collection(
         cards, None, owned_ids=[c.id for c in owned], maxed=True)
     if cb.bonuses is not None:
         cfg = dataclasses.replace(cfg, account=cb.bonuses)

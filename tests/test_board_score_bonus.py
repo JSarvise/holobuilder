@@ -26,9 +26,9 @@ import pytest
 
 from hbuilder.domain.scoring import score_card_set, score_fast, score_with_breakdown
 
-from conftest import make_card, make_scoring_config, make_skill, make_team
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
-# conftest's STATS baseline is 300 total per card, so five members are 1500.0.
+# the builders' STATS baseline is 300 total per card, so five members are 1500.0.
 BASE_STAT_SUM = 1500.0
 
 # The ACTIVE uptime is the finite activation lattice over the 128.8 s reference
@@ -254,9 +254,9 @@ def _board_with(rows):
 
 
 def _contribution(model):
-    from hbuilder.domain import board as board_module
+    from support import board_reference
 
-    return board_module.resolve(model, None, ())
+    return board_reference.resolve(model, None, ())
 
 
 def test_a_solo_song_counts_only_its_one_singer():
@@ -348,7 +348,7 @@ def test_an_absent_breakdown_returns_zero_rather_than_inventing_one():
     """A `BoardContribution` built without the per-holomem mapping must not
     fall back to the pooled total — that would silently reintroduce exactly
     the over-count of pooling across singers."""
-    from hbuilder.domain.board import BoardContribution
+    from support.board_reference import BoardContribution
 
     bare = BoardContribution(
         flat_by_card={}, rate_by_card={}, skill_effect_up=0.0,

@@ -11,7 +11,7 @@ nothing else. So:
    scored ONE time under a BARE proxy leader (`bare_leader`: a real card with
    its outfit skill removed — same holomem, so the plan role and `sings`
    behave like a real leader of that holomem). The scores are kept in
-   `exact_row.legal_rosters` order (lexicographic 5-combinations of pool
+   `legal_rosters` order (lexicographic 5-combinations of pool
    indices with distinct holomems) — the caller owns the bytes.
 2. **Per real leader, re-score only what can matter** (`candidate_tiers`):
    the top-K sets by bare score overall, the top-K among the sets that
@@ -43,7 +43,7 @@ the new enumeration in exactly the old order — ONE pass over the new
 `legal_rosters` consumes the old scores in sequence and sends ONLY the sets
 that contain a new card to the scorer (≈ C(n-1, 4)-scale for one new card,
 minutes, not the hour of a full enumeration). An old card that left the pool
-(a representative change — `exhaustive_song_leader.build_pool` collapses
+(a representative change — the web's `leaf_inputs.build_pool` collapses
 identical-feature cards to one representative) is handled the same way in
 reverse: its old sets are skipped, not reused.
 
@@ -57,11 +57,12 @@ from __future__ import annotations
 
 import array
 import dataclasses
+import itertools
 from typing import Callable, Iterable, Mapping, Sequence
 
 from hbuilder.domain.card import Card
+from hbuilder.domain.song import SPECIAL_CUE_COUNT
 from hbuilder.domain.team import Team
-from hbuilder.solver.exact_row import legal_rosters
 
 __all__ = [
     "BARE_TAG",
@@ -73,7 +74,7 @@ __all__ = [
     "candidate_tiers",
     "extended_order",
     "gate_of",
-    "gate_satisfied",
+    "legal_rosters",
     "merge_scores",
     "score_sets",
     "tabulate",
@@ -83,6 +84,15 @@ BARE_TAG = "bare"
 MEMBER_COUNT = 5
 
 Gate = tuple[str, str | None, int]
+
+
+def legal_rosters(holomems: Sequence[str], k: int = SPECIAL_CUE_COUNT):
+    """Lexicographic `k`-combinations of pool indices with distinct holomems —
+    the exhaustive route's own order."""
+    n = len(holomems)
+    for c in itertools.combinations(range(n), k):
+        if len({holomems[i] for i in c}) == k:
+            yield c
 
 
 def bare_leader(card: Card) -> Card:
@@ -106,9 +116,9 @@ def is_bare(card: Card) -> bool:
 def gate_of(card: Card) -> Gate | None:
     """`(kind, target, count)` of the outfit's gate, or None if the card has
     no outfit skill or the outfit is ungated. `kind` is "type" or
-    "generation" (anything else is reported as-is; `gate_satisfied` then
-    treats it as always-on, i.e. the gate tier collapses into the overall
-    tier — never as never-on)."""
+    "generation" (anything else is reported as-is; the gate tier then
+    treats it as always-on, i.e. it collapses into the overall tier — never
+    as never-on)."""
     cs = card.costume_skill
     if cs is None:
         return None
@@ -228,12 +238,6 @@ def _satisfier(tables: Tables, gate: Gate | None) -> Callable[[int], bool] | Non
             return lambda i: bool((gmask[i] >> gi) & 1) and sum(
                 1 for k in flat[5 * i:5 * i + 5] if (card_gmask[k] >> gi) & 1) >= cnt
     return lambda i: True
-
-
-def gate_satisfied(tables: Tables, gate: Gate | None, i: int) -> bool:
-    """Does set `i` fire `gate`? (No gate -> True.)"""
-    f = _satisfier(tables, gate)
-    return True if f is None else f(i)
 
 
 def candidate_tiers(order: Sequence[int], tables: Tables, leader: Card,

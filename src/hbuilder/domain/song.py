@@ -88,14 +88,11 @@ from hbuilder.domain.scoring import (
     _as_rate,
     _fold_activation_rate_up,
     _is_score_up_effect,
-    _order_varying_indices,
-    _ordered_target_card_ids,
     _pool_for,
     _resolve_skill,
     _score_up_implements_boost,
     _score_up_pool,
     _support_targets,
-    _stat_sum,
     active_magnitude_by_card,
     deck_screen_unit_score,
     score_with_breakdown,
@@ -239,7 +236,7 @@ class ChartNote:
 @dataclass(frozen=True, slots=True)
 class SongChart:
     """One chart, reduced to exactly what `CalcScore` reads. Pure data, built by
-    hand in tests and by `tools/recon/proxy/` from a `.sus` plus the master
+    hand in tests and by `tools/refresh/` from a `.sus` plus the master
     tables — `src/` never reads `dumps/`, which is gitignored.
 
     `difficulty_level` is `MusicDifficulty` field 3 and
@@ -322,7 +319,7 @@ class SongChart:
             raise SongError(
                 f"chart {self.music_id}/{self.difficulty} SPECIAL cues must be "
                 f"in ascending time order — slot i fires the i-th cue "
-                f"(MEASURED on 704/704 real charts); got {self.special_cues}"
+                f"(true of every real chart); got {self.special_cues}"
             )
         if self.notes_perfect_coefficient_sum() <= 0.0:
             raise SongError(
@@ -351,10 +348,6 @@ class SongChart:
 
         This is the divisor that makes chart length cancel in the ranking."""
         return sum(note.perfect_permil_for(platform) for note in self.notes) / 1000.0
-
-    def flick_count(self) -> int:
-        """How many notes carry the platform-dependent FLICK weight."""
-        return sum(1 for note in self.notes if note.flick)
 
     def combo_coefficient(self, combo: int) -> float:
         """`FloatFromPermil` of the highest `LiveCombo` tier the running combo
@@ -461,7 +454,7 @@ def _active_windows(
     counterpart here.
 
     ⚠ The window end is deliberately **not** clamped to `song_seconds`, even
-    though `tools/recon/proxy/chart_timeline.py` clamps it for display. Windows
+    though `tools/refresh/chart_timeline.py` clamps it for display. Windows
     are half-open `[start, end)`, so clamping would push the song's LAST note
     out of a window that in fact covers it — a silent one-note loss on every
     skill still live at the end of the chart, and the last note is the one
@@ -809,28 +802,7 @@ def _ratio_at(
         skill_effect_up,
         [term.owner for term in live_ratio],
         [term.targets for term in live_boost],
-        # The instant-model switch. `None` (the default) hands `_score_up_pool`
-        # no model at all, so it uses `cfg.active_stacking_model` — the same
-        # object, the same call. Set to `ACTIVE_INSTANT_MODELS["exclusive"]`
-        # the co-live ACTIVEs share one roll instead of each rolling
-        # independently.
-        # It is passed HERE and only here because this is the one place in the
-        # codebase where `occupancy` is an instantaneous probability: the
-        # run-average scorer's occupancies are fractions of a run and the
-        # exclusive law is meaningless against them.
-        cfg.active_instant_model,
     )
-
-
-def _fixed_liveness(term: _Term, times: tuple[float, ...]) -> list[bool]:
-    """Per-note liveness of an order-INVARIANT term."""
-    if term.windows is None:
-        return [True] * len(times)
-    if not term.windows:
-        return [False] * len(times)
-    return [
-        any(start <= time < end for start, end in term.windows) for time in times
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -840,7 +812,7 @@ def _fixed_liveness(term: _Term, times: tuple[float, ...]) -> list[bool]:
 
 def overall_power_for(
     members: tuple[Card, ...], leader: Card, cfg: ScoringConfig
-) -> float:
+) -> OverallPower:
     """The deck screen's own **Overall Power** for one (leader, members) pair —
     the right `deck_power` for an ABSOLUTE per-song score.
 
@@ -864,9 +836,9 @@ def overall_power_for(
     numbers are wrong.
 
     This is the SONG-LESS figure (the deck screen with no song chosen). It is
-    returned as an `OverallPower`, a float that also carries the per-member
-    Member Power-Up bases, so `score_song_detailed` can raise it to the song's
-    own Overall Power (`song_overall_power`) without scoring the team again."""
+    returned as an `OverallPower`, which also carries the per-member Member
+    Power-Up bases, so `score_song_detailed` can raise it to the song's own
+    Overall Power (`song_overall_power`) without scoring the team again."""
     from hbuilder.domain.team import Team
 
     breakdown = score_with_breakdown(Team(leader=leader, members=members), cfg)
@@ -879,29 +851,55 @@ def overall_power_for(
     )
 
 
-class OverallPower(float):
-    """A song-less Overall Power that remembers each member's Member Power-Up base.
+@dataclass(frozen=True, slots=True)
+class OverallPower:
+    """A song-less Overall Power and each member's Member Power-Up base.
 
-    A plain float everywhere a float is expected. The extra fields let a song
-    add its singer-conditional board power the way the deck screen does: that
-    power joins each member's power-up base and the power-up's per-member
-    ceilings are paid again (`cast_power_up`)."""
+    `value` is the deck screen's Overall Power. The other fields let a song add
+    its singer-conditional board power the way the deck screen does: that power
+    joins each member's power-up base and the power-up's per-member ceilings are
+    paid again (`cast_power_up`).
 
-    def __new__(cls, value: float, power_up_bases: tuple[float, ...] | None = None,
-                member_ids: tuple[str, ...] = (), power_up_permyriad: int | None = None):
-        obj = super().__new__(cls, value)
-        obj.power_up_bases = power_up_bases
-        obj.member_ids = member_ids
-        obj.power_up_permyriad = power_up_permyriad
-        return obj
+    It is a type of its own, not a float, so the scorer can tell it from a bare
+    number: a bare float carries no bases, and scoring it as a deck power would
+    silently pay 0 extra Power-Up on a song whose singer holds a conditional stat
+    node. `overall_power_for` builds the real one; `OverallPower.fixed` is the one
+    way to ask for a raw figure, and it declares no bases."""
 
-    def __reduce__(self):
-        return (OverallPower, (float(self), self.power_up_bases, self.member_ids,
-                               self.power_up_permyriad))
+    value: float
+    power_up_bases: tuple[float, ...] | None = None
+    member_ids: tuple[str, ...] = ()
+    power_up_permyriad: int | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
+            raise TypeError(f"OverallPower.value must be a number, got {self.value!r}")
+        object.__setattr__(self, "value", float(self.value))
+
+    @classmethod
+    def fixed(cls, value: float) -> OverallPower:
+        """A fixed raw deck power with no Member Power-Up bases.
+
+        `cast_power_up` pays 0 on it, so a song's singer-conditional board power
+        adds only its own stat power. For tests and studies that score at a
+        chosen power on purpose; a real team's power is `overall_power_for`."""
+        return cls(value)
+
+    def __float__(self) -> float:
+        return self.value
+
+
+def _not_overall_power(where: str, got: object) -> TypeError:
+    """The error for a bare number (or anything else) where an `OverallPower` belongs."""
+    return TypeError(
+        f"{where} must be an OverallPower, got {type(got).__name__} {got!r}. Pass "
+        f"overall_power_for(members, leader, cfg) for a team's deck screen Overall "
+        f"Power, or OverallPower.fixed(value) for a fixed raw figure with no Member "
+        f"Power-Up bases.")
 
 
 def cast_power_up(
-    power: float, members: Sequence[Card], leader_holomem: str | None,
+    power: OverallPower, members: Sequence[Card], leader_holomem: str | None,
     cfg: ScoringConfig, singers: Sequence[str],
 ) -> int:
     """The Member Power-Up a song's singer-conditional board power adds.
@@ -911,13 +909,16 @@ def cast_power_up(
     holds a conditional stat node (R-044/062/063), that node's power is part of
     the Holomem Board line, so it is part of the base too
     (9,301 -> 9,701 on a five-card team gaining 12,013 board power).
-    `power` must be an `OverallPower` (from `overall_power_for`) for the same
-    members; anything else carries no bases and gets 0."""
-    bases = getattr(power, "power_up_bases", None)
-    permyriad = getattr(power, "power_up_permyriad", None)
+    `power` is an `OverallPower` (from `overall_power_for`) for the same
+    members; an `OverallPower.fixed` carries no bases and gets 0, and anything
+    that is not an `OverallPower` raises `TypeError`."""
+    if not isinstance(power, OverallPower):
+        raise _not_overall_power("cast_power_up's power", power)
+    bases = power.power_up_bases
+    permyriad = power.power_up_permyriad
     if not bases or permyriad is None or cfg.board is None or not singers:
         return 0
-    base_by_id = dict(zip(getattr(power, "member_ids", ()), bases))
+    base_by_id = dict(zip(power.member_ids, bases))
     if any(card.id not in base_by_id for card in members):
         return 0
     old: list[float] = []
@@ -941,10 +942,10 @@ def song_overall_power(
     power = overall_power_for(members, leader, cfg)
     singers = tuple(getattr(chart, "singers", None) or ()) if chart is not None else ()
     if cfg.board is None or not singers:
-        return float(power)
+        return power.value
     holomem = leader.member
     cast = cfg.board.conditional_stat_power_for(members, holomem, singers)
-    return float(power) + cast + cast_power_up(power, members, holomem, cfg, singers)
+    return power.value + cast + cast_power_up(power, members, holomem, cfg, singers)
 
 
 # ---------------------------------------------------------------------------
@@ -958,7 +959,7 @@ def score_song(
     chart: SongChart,
     cfg: ScoringConfig,
     *,
-    deck_power: float | Callable[[Card], float] | None = None,
+    deck_power: OverallPower | Callable[[Card], OverallPower] | None = None,
     auto: bool | None = None,
 ) -> tuple[LeaderScore, ...]:
     """The per-song sibling of `scoring.score_card_set`, with the identical
@@ -991,8 +992,10 @@ def score_song(
     which additionally carries the passive-skill uplift, the Holomem Board and
     the Memory Bonus, and which `data/cards.json` does not hold. For an
     absolute number that means anything, pass the deck screen's own Overall
-    Power. For a *comparison* between teams on one song the default is the right
-    quantity and the absolute scale is arbitrary.
+    Power (`overall_power_for`, per leader). For a *comparison* between teams on
+    one song the default is the right quantity and the absolute scale is
+    arbitrary. A bare number raises `TypeError`: a fixed raw figure is
+    `OverallPower.fixed(value)`.
 
     Use `score_song_detailed` when the slot order matters to the caller — on a
     real recommendation it always does."""
@@ -1097,65 +1100,6 @@ def notes_per_second(note_times: Sequence[float]) -> list[int]:
     for t in note_times:
         bins[max(0, int(t))] += 1
     return bins
-
-
-def active_coverage(drawing: Mapping) -> dict:
-    """Two visibility numbers for a ranking row, read off `timeline()`'s OWN
-    windows so they cannot disagree with the picture:
-
-    * `active_cover_pct` — share of the song `[0, song_seconds)` with at least
-      one ACTIVE window live (union, clamped to the song's end).
-    * `active_overlap_loss_pct` — how much of the SUMMED active value the
-      engine's MAX rule discards: `1 - ∫E[max] / ∫Σ(mag·p)`, with independent
-      per-window proc chances `probability_base` (`None` counts as certain).
-      0 when actives never overlap; grows as they stack on top of each other.
-    * `active_dead_start_s` — seconds from measure 0 to the first ACTIVE window
-      (structural: no ACTIVE fires before its own first interval).
-
-    ⚠ These are DISPLAY numbers built from `probability_base` (the tier alone,
-    a lower bound on the real chance — see `_activation_probability`); the
-    ranking's own metric is the exact per-song score. Not a second scorer."""
-    song_seconds = float(drawing.get("song_seconds") or 0.0)
-    windows: list[tuple[float, float, float, float]] = []
-    for lane in drawing.get("lanes", ()):
-        for w in lane.get("active", ()):
-            start = float(w["start"])
-            end = min(float(w["end"]), song_seconds)
-            if end <= start or start >= song_seconds:
-                continue
-            p = w.get("probability_base")
-            windows.append((start, end, float(w.get("magnitude") or 0.0),
-                            1.0 if p is None else float(p)))
-    if song_seconds <= 0.0:
-        return {"active_cover_pct": 0.0, "active_overlap_loss_pct": 0.0,
-                "active_dead_start_s": 0.0}
-    if not windows:
-        return {"active_cover_pct": 0.0, "active_overlap_loss_pct": 0.0,
-                "active_dead_start_s": song_seconds}
-    points = sorted({0.0, song_seconds, *(x for w in windows for x in w[:2])})
-    covered = 0.0
-    e_max = 0.0
-    e_sum = 0.0
-    for a, b in zip(points, points[1:]):
-        mid = (a + b) / 2.0
-        live = [(m, p) for s, e, m, p in windows if s <= mid < e]
-        if not live:
-            continue
-        covered += b - a
-        live.sort(reverse=True)
-        acc = 1.0
-        em = 0.0
-        for m, p in live:
-            em += m * p * acc
-            acc *= 1.0 - p
-        e_max += em * (b - a)
-        e_sum += sum(m * p for m, p in live) * (b - a)
-    loss = 0.0 if e_sum <= 0.0 else 100.0 * (1.0 - e_max / e_sum)
-    return {
-        "active_cover_pct": 100.0 * covered / song_seconds,
-        "active_overlap_loss_pct": loss,
-        "active_dead_start_s": min(s for s, _e, _m, _p in windows),
-    }
 
 
 # An optional compiled replacement for the separable fast path's note walk in
@@ -1274,11 +1218,18 @@ def score_song_detailed(
     chart: SongChart,
     cfg: ScoringConfig,
     *,
-    deck_power: float | Callable[[Card], float] | None = None,
+    deck_power: OverallPower | Callable[[Card], OverallPower] | None = None,
     auto: bool | None = None,
     order_totals: dict | None = None,
 ) -> tuple[SongScore, ...]:
     """`score_song`, plus the slot order and the deck power each total used.
+
+    `deck_power` is `None` (the modelled stat pool), an `OverallPower`, or a
+    per-leader callable returning one (`lambda ldr: overall_power_for(members,
+    ldr, cfg)`). Anything else -- a bare float or int, or a callable returning
+    one -- raises `TypeError`, because a bare number carries no Member Power-Up
+    bases and would silently score a singing leader's conditional stat node
+    without its Power-Up. `OverallPower.fixed(value)` asks for a raw figure.
 
     `order_totals` (a dict, opt-in): every leader's 120 slot orders are walked by the
     verbatim reference walk below -- the one the fast paths are proven bit-identical to --
@@ -1307,6 +1258,12 @@ def score_song_detailed(
             f"deck slot, because the chart carries one `#mmm0B` cue per slot; "
             f"got {len(members)}"
         )
+    if deck_power is None or isinstance(deck_power, OverallPower):
+        resolve_power = None
+    elif callable(deck_power):
+        resolve_power = deck_power
+    else:
+        raise _not_overall_power("deck_power", deck_power)
     times = _chart_times(chart)
     song_seconds = times[-1]
     card_set_gates = resolve_card_set_gates(members, cfg.run_state)
@@ -1418,13 +1375,17 @@ def score_song_detailed(
     # `deck_power` may be a per-leader CALLABLE (see `overall_power_for`), and it
     # is resolved ONCE per leader, here — never inside the note walk or the
     # 120-order loop, which run millions of times on a real chart and would pay
-    # a caller's real work (scoring a whole team) every iteration.
-    resolve_power = deck_power if callable(deck_power) else None
-
+    # a caller's real work (scoring a whole team) every iteration. Its result is
+    # type-checked here too, once per leader.
     results: list[SongScore] = []
     for leader in leaders:
-        raw_power = resolve_power(leader) if resolve_power is not None else deck_power
-        leader_power = None if raw_power is None else float(raw_power)
+        if resolve_power is not None:
+            raw_power = resolve_power(leader)
+            if not isinstance(raw_power, OverallPower):
+                raise _not_overall_power("deck_power's per-leader result", raw_power)
+        else:
+            raw_power = deck_power
+        leader_power = None if raw_power is None else raw_power.value
         # ⚠ Read PER LEADER, and it cannot be hoisted. `skill_effect_up` is
         # leader-scoped — a red node applies to the whole team, but only while
         # its own holomem leads — so hoisting it out of this loop would hand
@@ -1548,26 +1509,21 @@ def score_song_detailed(
             if leader_stat_entry is not None
             else member_stat_entries
         )
-        varying = _order_varying_indices(stat_entries, members)
-        order_binds_stats = bool(varying) and cfg.slot_order_rule == "best_order"
-        fixed_stat_sum = 0.0
-        if not order_binds_stats:
-            # Provably order-invariant, so one call answers every permutation —
-            # and it is `_effective_stat_sum`'s own call, so the number is
-            # bit-identical to `score_card_set`'s.
-            fixed_stat_sum, _order = _effective_stat_sum(
-                members, stat_entries, cfg, orderings_cache
-            )
+        # The stat stage is order-invariant (`scoring_config.SLOT_ORDER_RULES`), so one
+        # call answers every permutation — `_effective_stat_sum`'s own call, so the
+        # number is bit-identical to `score_card_set`'s.
+        fixed_stat_sum, _order = _effective_stat_sum(
+            members, stat_entries, cfg, orderings_cache
+        )
 
         # Liveness as a bitmask per note, so the 120-permutation walk is dict
         # lookups rather than interval arithmetic. Bit `i` is `terms[i]`.
         # Built with `bisect` over the ascending note times rather than a
         # per-note scan. `times` is ascending (`SongChart.__post_init__`
         # enforces it), so `[bisect_left(times, start), bisect_left(times, end))`
-        # is exactly `{i : start <= times[i] < end}` — `_fixed_liveness`'s own
-        # predicate. Index logic only, and `_fixed_liveness` is kept as the
-        # reference the tests compare this against. A per-note scan costs ~31 %
-        # of the fast path.
+        # is exactly `{i : start <= times[i] < end}`, the per-note scan's
+        # predicate (`tests/test_score_song.py` keeps that scan as the reference).
+        # A per-note scan costs ~31 % of the fast path.
         note_count = len(times)
         # The always-live terms first, so every note STARTS from their mask
         # instead of having it OR-ed in by a second pass over the notes. Bitwise
@@ -1584,8 +1540,7 @@ def score_song_detailed(
                 continue
             if term.windows is None:
                 continue
-            # `windows == []` falls through here and sets nothing, which is
-            # `_fixed_liveness`'s "never live" case.
+            # `windows == []` falls through here and sets nothing: never live.
             window_ranges.append((bit, _window_note_ranges(times, term.windows)))
 
         def _spread_liveness() -> list[int]:
@@ -1680,7 +1635,7 @@ def score_song_detailed(
         # below 2^53 and re-associating the sum is EXACT — the 120 totals are
         # bit-identical to the walk's, so the argmax and the strict-`>`
         # tie-break pick the identical `member_order`.
-        separable_power = ((leader_power is not None) or not order_binds_stats) and order_totals is None
+        separable_power = order_totals is None
         coupled = False
         if separable_power and special_terms:
             spans = [
@@ -1841,19 +1796,7 @@ def score_song_detailed(
             for slot, member in enumerate(permutation):
                 slot_of[member] = slot
 
-            if order_binds_stats:
-                ordered = tuple(members[i] for i in permutation)
-                recipients = [
-                    _ordered_target_card_ids(
-                        entry[3], entry[4], ordered, cfg.target_under_supply
-                    )
-                    if index in varying
-                    else entry[2]
-                    for index, entry in enumerate(stat_entries)
-                ]
-                stat_sum = _stat_sum(members, stat_entries, cfg, recipients)
-            else:
-                stat_sum = fixed_stat_sum
+            stat_sum = fixed_stat_sum
             power = (stat_sum + board_power) if leader_power is None else leader_power + cast_power
 
             bits = list(fixed_bits)
@@ -1955,7 +1898,7 @@ class ChartLibrary:
 
     ⚠ **`src/` never reads `dumps/`** — this takes a PATH, exactly as
     `load_board` does, and the default the CLI passes happens to point there.
-    The file is built by `tools/recon/proxy/build_charts.py`."""
+    The file is built by `tools/refresh/build_charts.py`."""
 
     charts: Mapping[str, SongChart]
     source: str = "<mapping>"

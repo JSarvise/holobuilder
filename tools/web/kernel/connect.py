@@ -1,33 +1,36 @@
-"""ctypes binding for `connect.c` — the team-wide Connect socket assignment,
-compiled.
+"""ctypes binding for `connect.c` — the team-wide Connect socket assignment and the
+team board assembly on it, compiled.
 
 Web/recon side only: nothing under `src/hbuilder/` imports this. The domain
-exposes a seam (`board_plan.CONNECT_KERNEL`) and the caller injects the kernel,
-exactly as `notewalk.py` does for the note walk.
+exposes two seams (`board_plan.CONNECT_KERNEL`, `board_plan.BOARD_KERNEL`) and the
+caller injects the kernels, exactly as `notewalk.py` does for the note walk.
 
     python tools/web/kernel/connect.py --build      # compile the shared library
 
 What is compiled is `node_values_from_recipes` + the candidate gains + the exact
-matching; what stays in Python is everything with a name in it (which card goes
-where, the multipliers per node). A plan is packed into C arrays ONCE and reused
-for every team that carries it.
+matching (`assign`), and for `assemble` that matching under the song bonus's cap:
+the checks before and after it and the capped matching with its bisection. What
+stays in Python is everything with a name in it (which card goes where, the
+multipliers per node, the boards built from them). A plan is packed into C arrays
+ONCE and reused for every team that carries it.
 
-The flags are part of the contract: `-ffp-contract=off` and no `-ffast-math`, so
-the result is bit-identical to the Python it replaces.
+Compiled with `cbuild.py`'s flags, so the result is bit-identical to the Python it replaces.
 """
 from __future__ import annotations
 
 import ctypes
 import re
-import shutil
-import subprocess
 import sys
+import threading
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "connect.c"
-LIBRARY = HERE / ("connect.dll" if sys.platform == "win32" else "connect.so")
-CFLAGS = ["-O2", "-ffp-contract=off", "-fno-fast-math", "-shared", "-fPIC"]
+if str(HERE) not in sys.path:          # loaded by file path in a worker too
+    sys.path.insert(0, str(HERE))
+import cbuild  # noqa: E402
+
+LIBRARY = cbuild.library(HERE, "connect")
 MAX_CHARS = 8
 MAX_MEMBERS = 8
 MAX_NODES = 512
@@ -74,13 +77,7 @@ class Plan(ctypes.Structure):
 
 def build(force: bool = False) -> Path:
     """Compile the kernel if the library is missing or older than its source."""
-    if not force and LIBRARY.exists() and LIBRARY.stat().st_mtime >= SOURCE.stat().st_mtime:
-        return LIBRARY
-    gcc = shutil.which("gcc")
-    if gcc is None:
-        raise RuntimeError("no gcc on PATH; the connect kernel cannot be built")
-    subprocess.run([gcc, *CFLAGS, "-o", str(LIBRARY), str(SOURCE)], check=True)
-    return LIBRARY
+    return cbuild.build(SOURCE, LIBRARY, "connect", force)
 
 
 _lib = None
@@ -104,6 +101,18 @@ def load():
             ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32),
             ctypes.POINTER(ctypes.c_double),
         ]
+        i32p, f64p = ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_double)
+        lib.hd_assemble.restype = ctypes.c_int
+        lib.hd_assemble.argtypes = [
+            ctypes.c_int, ctypes.POINTER(Plan), ctypes.POINTER(Yel), i32p, i32p, i32p, i32p,
+            f64p, ctypes.c_int, ctypes.c_int, f64p, ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double,
+            ctypes.c_int, i32p, f64p, ctypes.c_double, ctypes.c_int,
+            ctypes.POINTER(_U8P), ctypes.c_double, ctypes.c_int, ctypes.c_int,
+            i32p, i32p, f64p, i32p,
+        ]
+        lib.hd_py_sum.restype = ctypes.c_double
+        lib.hd_py_sum.argtypes = [f64p, ctypes.c_int]
         _lib = lib
     return _lib
 
@@ -293,11 +302,193 @@ def assign(inputs, members, *, overall_power, bonus_permil, k_constant, active_p
     return triples
 
 
+# --- the adapter `board_plan.BOARD_KERNEL` is set to ---------------------------
+
+class Yel(ctypes.Structure):
+    _fields_ = [("n_pay", ctypes.c_int32), ("pad_", ctypes.c_int32),
+                ("pay_idx", ctypes.POINTER(ctypes.c_int32)),
+                ("pay_p", ctypes.POINTER(ctypes.c_double)),
+                ("pay_sum", ctypes.c_double)]
+
+
+_U8P = ctypes.POINTER(ctypes.c_uint8)
+# chr id -> the small code the team's boards and the off-team rows share
+_chr_code: dict[str, int] = {}
+# (id(recipes), id(rows)) -> (recipes, rows, Yel, keep-alive)
+_yels: dict[tuple, tuple] = {}
+# id(bench rows) -> (rows, codes, values, count)
+_benches: dict[int, tuple] = {}
+# (id(asm), id(incumbent)) -> (asm, incumbent, flags or None)
+_ties: dict[tuple, tuple] = {}
+
+
+def _code(chr_id: str) -> int:
+    code = _chr_code.get(chr_id)
+    if code is None:
+        code = _chr_code[chr_id] = len(_chr_code)
+    return code
+
+
+def _yel_for(recipes, paying):
+    """One board's paying yellows (`(rows, their sum)`, rows `(node, permil)` in the board's
+    own order) as a `Yel`: each node's index among the packed plan's nodes (the recipes'
+    order; -1 for a node no socket entry covers)."""
+    rows, total = paying
+    key = (id(recipes), id(rows))
+    hit = _yels.get(key)
+    if hit is not None and hit[0] is recipes and hit[1] is rows:
+        return hit[2]
+    index = {recipe[0]: i for i, recipe in enumerate(recipes)}
+    idx = (ctypes.c_int32 * max(1, len(rows)))(*(index.get(node, -1) for node, _p in rows))
+    permil = (ctypes.c_double * max(1, len(rows)))(*(float(p) for _node, p in rows))
+    yel = Yel(len(rows), 0, idx, permil, float(total))
+    if len(_yels) > 50_000:
+        _yels.clear()
+    _yels[key] = (recipes, rows, yel, (idx, permil))
+    return yel
+
+
+def _bench_for(rows):
+    """The off-team rows `(chr id, value)` as C arrays (codes, values, count)."""
+    hit = _benches.get(id(rows))
+    if hit is None or hit[0] is not rows:
+        codes = (ctypes.c_int32 * max(1, len(rows)))(*(_code(chr_id) for chr_id, _v in rows))
+        values = (ctypes.c_double * max(1, len(rows)))(*(float(v) for _c, v in rows))
+        if len(_benches) > 64:
+            _benches.clear()
+        hit = _benches[id(rows)] = (rows, codes, values, len(rows))
+    return hit[1:]
+
+
+def _tie_for(chr_id, asm, incumbent):
+    """Per socket entry, whether its group holds the card the account already has on that
+    (board, socket) -- `_connect_assignment_exact`'s `incumbent.get((chr, socket)) in
+    card_ids` -- as a uint8 array, or None when no entry does."""
+    key = (id(asm), id(incumbent))
+    hit = _ties.get(key)
+    if hit is None or hit[0] is not asm or hit[1] is not incumbent:
+        flags = [1 if incumbent.get((chr_id, socket)) in card_ids else 0
+                 for socket, _permil, _covered, card_ids in asm.entries]
+        array = (ctypes.c_uint8 * max(1, len(flags)))(*flags) if any(flags) else None
+        if len(_ties) > 50_000:
+            _ties.clear()
+        hit = _ties[key] = (asm, incumbent, array)
+    return hit[2]
+
+
+class _Buffers(threading.local):
+    """One call's argument arrays, allocated once per thread (the server answers requests
+    on several threads; each fills its own)."""
+
+    def __init__(self):
+        self.plans = (Plan * MAX_CHARS)()
+        self.yels = (Yel * MAX_CHARS)()
+        self.rank = (ctypes.c_int32 * MAX_CHARS)()
+        self.team = (ctypes.c_int32 * MAX_CHARS)()
+        self.lead = (ctypes.c_int32 * MAX_CHARS)()
+        self.own = (ctypes.c_int32 * MAX_CHARS)()
+        self.sing = (ctypes.c_double * MAX_CHARS)()
+        self.stats = (ctypes.c_double * (3 * MAX_MEMBERS))()
+        self.gen = (ctypes.c_uint64 * MAX_MEMBERS)()
+        self.tie = (_U8P * MAX_CHARS)()
+        self.out_char = (ctypes.c_int32 * MAX_ROWS)()
+        self.out_entry = (ctypes.c_int32 * MAX_ROWS)()
+        self.out_gain = (ctypes.c_double * MAX_ROWS)()
+        self.out_info = (ctypes.c_int32 * 4)()
+
+
+_buffers = _Buffers()
+# the last call's out_info: [path, matchings solved, the check that bound] (`hd_assemble`;
+# for the tests: one process, one call at a time)
+LAST_INFO = [0, 0, 0]
+
+
+def assemble(inputs, members, *, overall_power, bonus_permil, k_constant, active_pool_rate,
+             song_scope="", yellows, bench, cap, rounds, incumbent=None, tie_factor=1.0,
+             tie_first=False, checks=True):
+    """The chosen Connect placements of one team under the song bonus's cap, as the
+    `ConnectTriple`s `board_plan.board_model_from_plan` would have matched -- `(gain, chr_id,
+    socket, permil, covered, card_ids)` -- or `None` to make the caller run its own Python.
+
+    `inputs` is `board_plan`'s per-character list (`ConnectInput`, the held cards already
+    out of each plan's groups); `yellows` per input, its board's paying yellows `(rows, their
+    sum)`; `bench` the off-team boards' paying yellow rows `(chr id, permil x multiplier)`;
+    `incumbent` `(chr, socket) -> card` the account's own placements (None: none),
+    `tie_factor` the weight an incumbent placement gets, `tie_first` whether the matching
+    before the cap binds uses it too (a call that names its cards); `checks` False goes
+    straight to the capped matching (a plan the plan cache did not make)."""
+    count = len(inputs)
+    if count > MAX_CHARS or len(members) > MAX_MEMBERS or len(_names()[0]) != 3:
+        return None
+    if count == 0:
+        return []
+    lib = load()
+    while True:
+        # packing a plan with an unseen card group re-ranks the columns and
+        # empties the packs, so the plans are (re)collected until none does
+        seen_groups = len(_col_rank)
+        hits = [_plan_for(i[1], i[2]) for i in inputs]
+        if len(_col_rank) == seen_groups:
+            break
+    if any(hit[2] is None for hit in hits):
+        return None
+    buf = _buffers
+    ranks = {chr_id: rank for rank, chr_id in enumerate(sorted(i[0] for i in inputs))}
+    any_tie = False
+    for c, (i, hit, paying) in enumerate(zip(inputs, hits, yellows)):
+        buf.plans[c] = hit[2]
+        buf.yels[c] = _yel_for(i[2], paying)
+        buf.rank[c] = ranks[i[0]]
+        buf.team[c] = _code(i[0])
+        buf.lead[c] = 1 if i[3] else 0
+        own_card, own = i[4], -1
+        if own_card is not None:
+            for position, member in enumerate(members):
+                if member is own_card or member == own_card:
+                    own = position
+                    break
+        buf.own[c] = own
+        buf.sing[c] = float(i[5])
+        flags = _tie_for(i[0], i[1], incumbent) if incumbent else None
+        buf.tie[c] = ctypes.cast(flags, _U8P) if flags is not None else _U8P()
+        any_tie = any_tie or flags is not None
+    for position, card in enumerate(members):
+        _c, card_stats, mask = _card(card)
+        buf.stats[3 * position], buf.stats[3 * position + 1], buf.stats[3 * position + 2] = card_stats
+        buf.gen[position] = mask
+    who, values, nb = _bench_for(bench)
+    d_us_per_power = (1.0 + bonus_permil / 1000.0) * k_constant
+    chosen = lib.hd_assemble(
+        count, buf.plans, buf.yels, buf.rank, buf.team, buf.lead, buf.own, buf.sing,
+        _SONG_MASK.get(song_scope, 0), len(members), buf.stats, buf.gen,
+        d_us_per_power, overall_power * k_constant,
+        overall_power * d_us_per_power,           # d_us_per_song, as `assign` computes it
+        active_pool_rate, nb, who, values, float(cap), int(rounds),
+        buf.tie if any_tie else None, float(tie_factor), 1 if tie_first else 0,
+        1 if checks else 0, buf.out_char, buf.out_entry, buf.out_gain, buf.out_info)
+    if chosen < 0:
+        return None
+    LAST_INFO[:] = buf.out_info[0], buf.out_info[1], buf.out_info[2]
+    triples = []
+    for k in range(chosen):
+        i = inputs[buf.out_char[k]]
+        socket, permil, covered, card_ids = i[1].entries[buf.out_entry[k]]
+        triples.append((buf.out_gain[k], i[0], socket, permil, covered, card_ids))
+    return triples
+
+
+def py_sum(values) -> float:
+    """The kernel's `sum()` over floats (`hd_py_sum`), for its own test."""
+    array = (ctypes.c_double * max(1, len(values)))(*values)
+    return load().hd_py_sum(array, len(values))
+
+
 def enable() -> bool:
-    """Switch the compiled assignment on for this process AND every worker it
-    spawns — the module attribute here, `HBUILDER_CONNECT_KERNEL` for spawned
-    children. Returns False, having changed nothing, when the kernel cannot be
-    built; the callers then simply run the Python path."""
+    """Switch the compiled assignment and the compiled board assembly on for this
+    process AND every worker it spawns — the module attributes here,
+    `HBUILDER_CONNECT_KERNEL` / `HBUILDER_BOARD_KERNEL` for spawned children. Returns
+    False, having changed nothing, when the kernel cannot be built; the callers then
+    simply run the Python path."""
     import os
 
     try:
@@ -308,5 +499,7 @@ def enable() -> bool:
     from hbuilder.domain import board_plan
 
     os.environ[board_plan.CONNECT_KERNEL_ENV] = f"{Path(__file__).resolve()}:assign"
+    os.environ[board_plan.BOARD_KERNEL_ENV] = f"{Path(__file__).resolve()}:assemble"
     board_plan.CONNECT_KERNEL = assign
+    board_plan.BOARD_KERNEL = assemble
     return True

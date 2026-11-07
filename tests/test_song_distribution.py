@@ -8,7 +8,7 @@ of a sibling. Plus the distribution's own invariants."""
 from __future__ import annotations
 
 import pytest
-from conftest import FIXTURE_CARDS_PATH, make_scoring_config
+from support.builders import FIXTURE_CARDS_PATH, make_scoring_config
 
 from hbuilder.domain.loader import load_cards
 from hbuilder.domain.song import ChartNote, SongChart, overall_power_for, score_song_detailed
@@ -41,7 +41,8 @@ def test_the_expectation_is_the_scorers_own_number(cards, cfg, leader_index):
     chart = _chart()
     power = overall_power_for(members, leader, cfg)
     best = score_song_detailed(members, (leader,), chart, cfg, deck_power=power)[0]
-    law = run_score_distribution(members, leader, chart, cfg, best.member_order, power)
+    law = run_score_distribution(members, leader, chart, cfg, best.member_order,
+                                 best.deck_power)
     assert law["expected_total"] == best.total_score
     assert law["min"] <= law["p50"] <= law["max"]
     assert law["min"] <= law["mean"] <= law["max"]

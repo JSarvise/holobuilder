@@ -10,7 +10,7 @@ Everything here tests a REFUSAL or a byte, because "it added the card" is not th
 claim that matters -- "it added the card and touched nothing else, in a file
 whose formatting it reproduced exactly" is.
 
-`tools/recon/proxy/` is outside `src/hbuilder/`, so it is imported via an
+`tools/refresh/` is outside `src/hbuilder/`, so it is imported via an
 explicit `sys.path` insert, the same way `test_import_to_cards_passive_target_guard`
 does it.
 """
@@ -24,21 +24,21 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PROXY_DIR = REPO_ROOT / "tools" / "recon" / "proxy"
-if str(PROXY_DIR) not in sys.path:
-    sys.path.insert(0, str(PROXY_DIR))
+REFRESH_DIR = REPO_ROOT / "tools" / "refresh"
+if str(REFRESH_DIR) not in sys.path:
+    sys.path.insert(0, str(REFRESH_DIR))
 
 import card_append  # noqa: E402
 
-from hbuilder.cli import build_parser  # noqa: E402
+from hbuilder.inputs import default_paths  # noqa: E402
 
 # The catalogue path comes from the CLI's own declared default, never a literal:
 # `tests/test_fixture_isolation.py` forbids a hardcoded `data/` path anywhere in
 # `tests/` so the user's real files can live there without coupling tests to
 # their contents. These tests are about that file's INVIOLABILITY rather than its
 # contents, which is the same exemption `test_mode_b` takes, the same way.
-CARDS_JSON = REPO_ROOT / build_parser().parse_args(["solve"]).cards
-DRAFT_JSON = PROXY_DIR / "dumps" / "cards_import_draft.json"
+CARDS_JSON = REPO_ROOT / default_paths().cards
+DRAFT_JSON = REPO_ROOT / "tools" / "recon" / "proxy" / "dumps" / "cards_import_draft.json"
 
 
 # --------------------------------------------------------------------------

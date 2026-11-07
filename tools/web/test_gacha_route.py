@@ -8,9 +8,9 @@ committed, read-only `data/gacha/art/gacha-pickup-normal-260807/` directory
 (banner.png/logo.png/icon.png) rather than writing a fixture PNG.
 """
 from __future__ import annotations
-import json, socket, threading, urllib.request, urllib.error
+import json, threading, urllib.request, urllib.error
 import pytest
-import server as web_server
+from hbweb import admin, gacha, scripts
 
 
 STORE = {
@@ -30,21 +30,11 @@ STORE = {
 }
 
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind((web_server.BIND_HOST, 0)); return s.getsockname()[1]
-
-
 @pytest.fixture
-def web_base(monkeypatch):
-    monkeypatch.setattr(web_server.gacha_view, "load_store", lambda _d: STORE)
-    port = _free_port()
-    srv = web_server.ThreadingServer((web_server.BIND_HOST, port), web_server.Handler)
-    t = threading.Thread(target=srv.serve_forever, daemon=True); t.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        srv.shutdown(); srv.server_close()
+def web_base(monkeypatch, serve_web):
+    monkeypatch.setattr(gacha.gacha_view, "load_store", lambda _d: STORE)
+    with serve_web() as base:
+        yield base
 
 
 def _get(url):
@@ -106,12 +96,12 @@ def _post(url, data=b""):
 def test_gacha_sync_refuses_a_second_run_while_one_holds_the_lock(web_base, monkeypatch):
     """The sync SPENDS a login and appends to the store; two at once would do both twice.
     The lock is held here by the test, so NO subprocess is spawned -- that is the point:
-    the refusal happens before `_run_recon_script` is ever reached."""
+    the refusal happens before `scripts.run_recon_script` is ever reached."""
     held = threading.Lock()
     assert held.acquire(blocking=False)
-    monkeypatch.setattr(web_server, "_GACHA_SYNC_LOCK", held)
-    monkeypatch.setattr(web_server.Handler, "_run_recon_script",
-                        lambda self, script, tag: pytest.fail("a subprocess was started"))
+    monkeypatch.setattr(gacha, "SYNC_LOCK", held)
+    monkeypatch.setattr(scripts, "run_recon_script",
+                        lambda h, script, tag: pytest.fail("a subprocess was started"))
     st, body = _post(web_base + "/api/gacha/sync")
     assert st == 409 and json.loads(body) == {"error": "a gacha sync is already running"}
     held.release()
@@ -119,15 +109,15 @@ def test_gacha_sync_refuses_a_second_run_while_one_holds_the_lock(web_base, monk
 
 def test_parse_sync_summary_takes_last_summary_line():
     out = "login OK\nSUMMARY {\"pulls\": 1}\nnoise\nSUMMARY {\"pulls\": 2, \"banners\": 0}\n"
-    assert web_server._parse_sync_summary(out) == {"pulls": 2, "banners": 0}
-    assert web_server._parse_sync_summary("nothing") is None
+    assert gacha.parse_sync_summary(out) == {"pulls": 2, "banners": 0}
+    assert gacha.parse_sync_summary("nothing") is None
 
 
 def test_parse_wrote_takes_last_wrote_line():
     out = "3 banners\nWROTE C:\\a\\old.html\nnoise\nWROTE C:\\a\\gacha_export_1.html\n"
-    assert web_server._parse_wrote(out) == "C:\\a\\gacha_export_1.html"
-    assert web_server._parse_wrote("nothing written") is None
-    assert web_server._parse_wrote("WROTE   \n") is None
+    assert gacha.parse_wrote(out) == "C:\\a\\gacha_export_1.html"
+    assert gacha.parse_wrote("nothing written") is None
+    assert gacha.parse_wrote("WROTE   \n") is None
 
 
 def test_refresh_refuses_a_second_run_while_one_is_running(web_base, monkeypatch):
@@ -136,13 +126,13 @@ def test_refresh_refuses_a_second_run_while_one_is_running(web_base, monkeypatch
     the test, so no subprocess is started; the lock is free again afterwards."""
     held = threading.Lock()
     assert held.acquire(blocking=False)
-    monkeypatch.setattr(web_server, "_REFRESH_LOCK", held)
-    monkeypatch.setattr(web_server.Handler, "_refresh",
-                        lambda self: pytest.fail("a refresh was started"))
+    monkeypatch.setattr(admin, "REFRESH_LOCK", held)
+    monkeypatch.setattr(admin, "refresh",
+                        lambda h: pytest.fail("a refresh was started"))
     st, body = _post(web_base + "/api/refresh")
     assert st == 409 and "already running" in json.loads(body)["error"]
     held.release()
-    monkeypatch.setattr(web_server.Handler, "_refresh",
-                        lambda self: self._json(200, {"returncode": 0}))
+    monkeypatch.setattr(admin, "refresh",
+                        lambda h: h.reply_json(200, {"returncode": 0}))
     assert _post(web_base + "/api/refresh")[0] == 200
     assert not held.locked()

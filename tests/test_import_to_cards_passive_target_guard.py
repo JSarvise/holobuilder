@@ -4,7 +4,7 @@ extracted cards a PASSIVE target never resolves to `all` (38 self, 65 type-max-2
 type-max-3, 32 generation-max-2) -- so this guard is exercised here directly rather than
 relying on "the current data happens not to violate it".
 
-`tools/recon/proxy/` is outside `src/hbuilder/`, so it is imported here via an explicit
+`tools/refresh/` is outside `src/hbuilder/`, so it is imported here via an explicit
 `sys.path` insert rather than a package-relative import -- the module itself does the same
 thing to reach `hbuilder.domain.schema` (see its own `sys.path.insert` at import time).
 """
@@ -17,9 +17,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PROXY_DIR = REPO_ROOT / "tools" / "recon" / "proxy"
-if str(PROXY_DIR) not in sys.path:
-    sys.path.insert(0, str(PROXY_DIR))
+REFRESH_DIR = REPO_ROOT / "tools" / "refresh"
+if str(REFRESH_DIR) not in sys.path:
+    sys.path.insert(0, str(REFRESH_DIR))
 
 import import_to_cards  # noqa: E402
 

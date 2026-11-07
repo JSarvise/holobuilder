@@ -1,2 +1,4 @@
 # the Windows launchers keep CRLF line endings in every checkout and download
 *.cmd text eol=crlf
+# the Linux launchers keep LF (bash reads a CR as part of the line)
+*.sh text eol=lf

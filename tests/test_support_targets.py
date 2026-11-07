@@ -23,15 +23,8 @@ from hbuilder.domain.scoring import (
     score_fast,
     score_with_breakdown,
 )
-from hbuilder.domain.song import ChartNote, SongChart, score_song_detailed
-from conftest import make_card, make_scoring_config, make_skill, make_team
-
-CERTAIN_TIERS = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
-
-
-def cfg(**overrides):
-    base = make_scoring_config(probability_tiers=CERTAIN_TIERS)
-    return dataclasses.replace(base, **overrides) if overrides else base
+from hbuilder.domain.song import ChartNote, OverallPower, SongChart, score_song_detailed
+from support.builders import certain_config as cfg, make_card, make_skill, make_team
 
 
 def _active(magnitude: float):
@@ -176,7 +169,7 @@ def test_song_driver_agrees_with_deck_screen_ratio():
     for target, pool in ((COOL_2, 0.50), (CUTE_2, 0.55), (ALL, 0.55)):
         members = _members(target)
         (result,) = score_song_detailed(
-            members, (LEADER,), _chart(), cfg(), deck_power=2000.0
+            members, (LEADER,), _chart(), cfg(), deck_power=OverallPower.fixed(2000.0)
         )
         expected_note = 2300.0 * (1.0 + pool)
         assert result.total_score == 2 * expected_note, (target, result.total_score)
@@ -235,5 +228,5 @@ def test_every_driver_pays_the_strongest_actives():
     c = cfg()
     full = score_with_breakdown(team, c).total_score
     assert full == score_fast(team, c) == score_card_set(members, (LEADER,), c)[0].total_score
-    (result,) = score_song_detailed(members, (LEADER,), _chart(), c, deck_power=2000.0)
+    (result,) = score_song_detailed(members, (LEADER,), _chart(), c, deck_power=OverallPower.fixed(2000.0))
     assert result.total_score == 2 * 3540.0

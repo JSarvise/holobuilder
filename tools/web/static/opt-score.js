@@ -1,6 +1,5 @@
-// Optimizer page, goal "Score": the on-demand search (POST /api/search), the live search
-// (POST /solve + SSE, then POST /api/optimize-rerank — the classic page's default path), and the
-// results laid out as the Night Deck setlist (hb-rank.js, left) and the selected team (right).
+// Optimizer page, goal "Score": the on-demand search (POST /api/search + SSE), and the results
+// laid out as the Night Deck setlist (hb-rank.js, left) and the selected team (right).
 // Scores are the server's.
 import { byId, esc, fmt, sgn, info, thumb, getJSON, postJSON, toast, reveal, outfitText, NOTES, when, stash, unstash, withState, loadStates } from "/opt-util.js";
 import { score } from "/hb-grade.js";
@@ -8,16 +7,14 @@ import { list as rankList } from "/hb-rank.js";
 import { progressCard, countLine } from "/opt-progress.js";
 import { unitPanel, runPanel, timelinePanel, wireTimeline, boardPanel, matchLine, deckUnit, leaderColumn, wakeFigure, wirePlan } from "/opt-detail.js";
 
-let live = null;      // {key, rows, cards, info} — the last live answer
 let cache = null;     // {key, doc, rows, cards}
-let run = null;       // {abort, job, t0, timer}
 let open = new Set([0]);   // always {sel}: the one team shown on the right
 let sel = 0, diffMode = true, onePer = false;
 const details = new Map();   // team key -> detail {dev, cur, tl, doc, err…}
 let wallet = null;
 
 const basisOf = S => S.cards === "maxed" ? "maxed" : "account";
-// the server basis of a team's numbers (two_stage_build.BASES); null = a what-if the
+// the server basis of a team's numbers (leaf_inputs.BASES); null = a what-if the
 // on-demand search does not cover (upgraded cards at a level other than Max, or a bloom)
 const tsBasis = S => {
   if (basisOf(S) !== "account") return "maxed";
@@ -33,15 +30,6 @@ function optsKey(S) {
     S.allinvited, S.norefund, S.branches, JSON.stringify(S.targets), S.lvmode === "range" ? [S.lvlo, S.lvhi] : 0, S.lmember, S.loutfit, S.nooverlap, S.require, S.exclude]);
 }
 const teamKey = (leader, members) => leader + "|" + [...members].sort().join(",");
-function common(S) {
-  const b = {
-    basis: basisOf(S), difficulty: S.difficulty, platform: S.platform, auto: !!S.auto, uptime_model: "finite",
-    assume_level: S.cards === "whatif" ? S.alevel : "account", assume_bloom: S.cards === "whatif" ? S.abloom : "account",
-    // the older paths' leader pin: the outfit chosen in the leader filter
-    pool: S.pool, require: S.require, leader: S.lmember && S.loutfit ? [S.loutfit] : [], exclude: S.exclude,
-  };
-  return b;
-}
 export const leaderOpts = S => {
   const o = {};
   if (S.lmember) o.leader_member = S.lmember;
@@ -51,17 +39,16 @@ export const leaderOpts = S => {
 };
 
 /* ------------------------------------------------------------------ the answer kept across pages */
-// the last live answer and the last on-demand search come back when the page is opened again
+// the last on-demand search comes back when the page is opened again
 // (cards travel as the response's own subset and are merged onto the catalogue again)
 let restored = false;
 function remember(ctx) {
   const bare = r => r && { ...r, cards: undefined };
-  stash("score", ctx, { live: bare(live), cache: cache && String(cache.url).startsWith("search:") ? bare(cache) : null, sel });
+  stash("score", ctx, { cache: cache && String(cache.url).startsWith("search:") ? bare(cache) : null, sel });
 }
 function restore(ctx) {
   restored = true;
   const k = unstash("score", ctx); if (!k) return;
-  if (k.live) live = { ...k.live, cards: ctx.mergeCards(k.live.raw) };
   if (k.cache) cache = { ...k.cache, cards: ctx.D.cards };
   sel = k.sel || 0; open = new Set([sel]);
 }
@@ -70,7 +57,6 @@ function restore(ctx) {
 export async function showScoreIdle(ctx, keepLive) {
   if (!restored) { restore(ctx); keepLive = true; }
   const S = ctx.S, key = optsKey(S);
-  if (live && live.key === key) { render(ctx, live); return; }
   if (!keepLive) { sel = 0; open = new Set([0]); }
   // the optimiser ON DEMAND (POST /api/search) -- searched for this request, no cache.
   // A search starts ONLY from Find best team -- never on load or on an option change
@@ -188,7 +174,7 @@ async function searchNow(ctx, key) {
   es.onerror = () => { es.close(); if (od === mine && !doc) { od = null; endCard(); ctx.out().innerHTML = `<div class="o-error">Lost the search's event stream.</div>`; } };
 }
 
-/* ------------------------------------------------------------------ the live search */
+/* ------------------------------------------------------------------ cancel and progress */
 // Cancel answers at once: the page drops the search and shows what it showed before; the
 // server is told too and stops at its next check (between batches of teams)
 export function cancelScore() {
@@ -199,14 +185,7 @@ export function cancelScore() {
     const pw = ctx.out().querySelector(":scope > .o-progwrap"); if (pw) pw.remove();
     toast("Search cancelled.");
     if (!ctx.out().querySelector(".o-split")) showScoreIdle(ctx, true);
-    return;
   }
-  if (!run) return;
-  if (run.job) fetch("/cancel/" + run.job, { method: "POST" }).catch(() => {});
-  if (run.abort) run.abort.abort();
-  run.cancelled = true;
-  if (run.es) run.es.close();
-  if (run.reject) run.reject(new Error("cancelled"));
 }
 // this search's progress card (opt-progress.js): made once per search, then only updated
 let pc = null;
@@ -222,118 +201,15 @@ function progress(ctx, kind, steps, active, detail, ev) {
     pc = progressCard(kind, steps);
     wrap.replaceChildren(pc.el);
   }
-  const e = ev || {}, shown = (live && live.key === optsKey(ctx.S) ? live : cache);
+  const e = ev || {}, shown = cache;
   const cached = out.querySelector(".o-split") && shown && shown.rows && shown.rows[0] ? shown.rows[0].expected : null;
   const upd = { active, detail: countLine(e) || detail, done: e.done, total: e.total };
   if (e.best_so_far && e.best_so_far.value != null) upd.best = e.best_so_far.value;
   if (cached != null) upd.note = "the answer below stays until this one finishes";
   pc.update(upd);
 }
-function solveSSE(ctx, body, onProgress) {
-  return new Promise(async (resolve, reject) => {
-    let started;
-    try { started = await postJSON("/solve", body); } catch (e) { reject(e); return; }
-    run.job = started.job_id;
-    const es = run.es = new EventSource("/events/" + started.job_id);
-    run.reject = reject;
-    let payload = null, failed = null;
-    es.onmessage = m => {
-      let ev; try { ev = JSON.parse(m.data); } catch (_) { return; }
-      if (ev.type === "progress" && typeof ev.evaluated === "number") onProgress(`${fmt(ev.evaluated)} arrangements scored`, ev);
-      else if (ev.type === "song_progress") onProgress(`${ev.scored} / ${ev.total} teams scored on the chart`, ev);
-      else if (ev.type === "status" && ev.message) onProgress(ev.message, ev);
-      else if (ev.type === "result") payload = ev.payload;
-      else if (ev.type === "error") failed = ev.message || "the search failed";
-      else if (ev.type === "cancelled") failed = "cancelled";
-      else if (ev.type === "end") { es.close(); run.job = null; if (payload) resolve(payload); else reject(new Error(failed || "the search ended without a result")); }
-    };
-    es.onerror = () => { es.close(); if (!payload) reject(new Error(failed || "lost the event stream")); };
-  });
-}
-
-export async function runScore(ctx) {
-  // the on-demand search covers these: "Find best team" simply searches again now
-  if (assumptionsOf(ctx.S) || basisOf(ctx.S) === "maxed") { cache = null; searchNow(ctx, optsKey(ctx.S)); return; }
-  const S = ctx.S, key = optsKey(S), song = S.song;
-  const pins = S.require.length + S.exclude.length > 0;
-  const pinMembers = S.require.length + S.exclude.length > 0;
-  const develop = S.boards === "develop";
-  // with a song, every leader's own best team is generated (as the classic page does with a song);
-  // a pin turns it off, because that path generates from the whole pool and would ignore the pin
-  const leaders = develop && !pins && (!!song || !!S.lmember);
-  const refine = develop && !!song && !pinMembers;
-  const steps = !develop ? ["Search", "Score on the chart"]
-    : leaders ? ["Every leader's best team, Holomem Boards planned" + (refine ? ", members refined" : "")]
-    : ["Search", "Plan each team's Holomem Boards" + (song ? "" : ", average over every chart")];
-  run = { t0: performance.now(), abort: new AbortController() };
-  newCard();
-  const kind = "live:" + steps.join("|") + (song ? ":song" : ":general");
-  ctx.setBusy(true);
-  run.detail = leaders ? "usually under a minute with a song" : "";
-  progress(ctx, kind, steps, 0, run.detail, null);
-  const warnings = [];
-  if (pins && develop && song) warnings.push("Locked or banned cards: the every-leader search and the refine are skipped, because they would ignore them.");
-  if (!develop && (S.lmember || S.nooverlap)) warnings.push("Leader options apply to the From scratch search only.");
-  try {
-    let doc, solved = null;
-    if (!leaders) {
-      solved = await solveSSE(ctx, {
-        ...common(S), top: develop ? 25 : Math.max(S.top, 5), board: !develop, song, across_songs: !song, exact: !!S.exact,
-      }, (d, ev) => { run.detail = d; progress(ctx, kind, steps, 0, d, ev); });
-    }
-    if (develop) {
-      run.detail = leaders ? "usually under a minute with a song" : "";
-      progress(ctx, kind, steps, leaders ? 0 : 1, run.detail, null);
-      const body = { ...common(S), ...leaderOpts(S), seeds: "all", materials: S.infmats ? "infinite" : "mine" };
-      if (song) body.song = song; else body.across = true;
-      if (leaders) body.leader_diverse = true;
-      else body.teams = (solved.teams || []).map(t => [t.leader_id, ...(t.member_ids || [])]).filter(t => t.length === 6);
-      if (refine) body.refine = true;
-      if (S.maxpoints) body.budget = 361;
-      doc = await postJSON("/api/optimize-rerank", body, run.abort.signal);
-      if (doc.warnings) warnings.push(...doc.warnings);
-    }
-    const res = develop ? fromRerank(ctx, doc) : fromSolve(ctx, solved);
-    res.key = key; res.warnings = warnings;
-    res.elapsed = (performance.now() - run.t0) / 1000;
-    live = res; sel = 0; open = new Set([0]);
-    endCard(true);
-    remember(ctx);
-    render(ctx, live);
-  } catch (e) {
-    const pw = ctx.out().querySelector(":scope > .o-progwrap");
-    if (run && run.cancelled) { if (pw) pw.remove(); toast("Search cancelled."); if (!ctx.out().querySelector(".o-split")) showScoreIdle(ctx, true); }
-    else if (pw && ctx.out().querySelector(".o-split")) pw.innerHTML = `<div class="o-error">The search failed: ${esc(e.message)}. The answer below is the one shown before the search.</div>`;
-    else ctx.out().innerHTML = `<div class="o-error">The search failed: ${esc(e.message)}</div>`;
-  } finally {
-    endCard(); run = null; ctx.setBusy(false);
-  }
-}
-
-function fromRerank(ctx, doc) {
-  const kind = doc.sorted_by === "song_est" ? "song" : doc.sorted_by === "across_song" ? "across" : "unit";
-  const rows = (doc.ranking || []).map(r => ({
-    key: teamKey(r.leader_id, r.member_ids), source: "live", boards: "develop", route: "the live search", api: "/api/optimize-rerank",
-    leader: r.leader_id, members: r.member_order || r.member_ids, ordered: !!r.member_order, orderShare: r.member_order_share ?? null, kind,
-    infmats: !!ctx.S.infmats, deck_power: r.deck_power ?? null,
-    expected: kind === "song" ? r.song_est : kind === "across" ? r.across_score : r.optimised_us,
-    max: kind === "song" ? r.song_max : null, off: kind === "song" ? r.song_off : r.board_off_us,
-    board_state: r.board_state, plan: r.board_plan_summary, cert: r.certificate, refined: r.refined, wins: r.wins,
-    cover: { active_cover_pct: r.active_cover_pct, active_overlap_loss_pct: r.active_overlap_loss_pct, active_dead_start_s: r.active_dead_start_s },
-  }));
-  return { rows, raw: doc.cards, cards: ctx.mergeCards(doc.cards), info: { searched: doc.ranking ? doc.ranking.length : 0, objective: doc.objective, kind,
-    basis: doc.certificate_basis, members_first: doc.members_first } };
-}
-function fromSolve(ctx, payload) {
-  const kind = payload.sorted_by === "song_score" ? "song" : payload.sorted_by === "across_song" ? "across" : "unit";
-  const rows = (payload.teams || []).map(t => ({
-    key: teamKey(t.leader_id, t.member_ids), source: "live", boards: "current", route: "the live search", api: "/solve",
-    leader: t.leader_id, members: t.member_order || t.member_ids, ordered: !!t.member_order, orderShare: t.member_order_share ?? null, kind,
-    expected: kind === "song" ? t.song_score : kind === "across" ? (t.across_score ?? t.score) : t.score,
-    max: t.song_max ?? null, cert: t.certificate, wins: t.wins, cover: {},
-  }));
-  return { rows, raw: payload.cards, cards: ctx.mergeCards(payload.cards), info: { searched: (payload.search || {}).evaluated, kind } };
-}
+// "Find best team" searches again now (never on load or on an option change)
+export async function runScore(ctx) { cache = null; searchNow(ctx, optsKey(ctx.S)); }
 
 /* ------------------------------------------------------------------ rendering */
 function sorted(ctx, res) {
@@ -347,7 +223,7 @@ function render(ctx, res) {
   const S = ctx.S;
   // the cards at the levels the search assumed (a maxed basis: every card maxed)
   const levers = basisOf(S) === "maxed" ? { level: "max", bloom: 5, sp_training: 4 } : assumptionsOf(S);
-  loadStates(rows.flatMap(T => [T.leader, ...T.members]), levers).then(changed => { if (changed && (cache === res || live === res)) render(ctx, res); });
+  loadStates(rows.flatMap(T => [T.leader, ...T.members]), levers).then(changed => { if (changed && cache === res) render(ctx, res); });
   if (!rows.length) {
     ctx.out().innerHTML = res.cached
       ? `<section class="o-empty"><h2>No cached answer for this yet</h2><p>${cacheLine(res.doc)} Press Find best team to search now.</p></section>`
@@ -394,7 +270,7 @@ function relist(ctxT) {
 function select(ctxT, i) {
   if (!ctxT.rows[i]) return;
   sel = i; open = new Set([i]);
-  if (ctxT.res === live || ctxT.res === cache) remember(ctxT.ctx);
+  if (ctxT.res === cache) remember(ctxT.ctx);
   const el = ctxT.ctx.out().querySelector(".o-sel > .o-team"); if (!el) return;
   el.id = "team" + i; el.innerHTML = block(ctxT, ctxT.rows[i], i);
   wakeFigure(el);
@@ -557,7 +433,7 @@ function fromRowDetail(d) {
 function baseOf(S) {
   const b = { basis: basisOf(S), song: S.song, across: !S.song, platform: S.platform, uptime_model: "finite", auto: !!S.auto,
     assume_level: S.cards === "whatif" ? S.alevel : null, assume_bloom: S.cards === "whatif" ? S.abloom : null, difficulty: S.difficulty };
-  if (S.maxpoints) b.budget = 361;
+  if (S.maxpoints) b.budget = "max";
   return b;
 }
 function boardDoc(ctxT, T, i, det, bs, cards) {
@@ -577,10 +453,10 @@ function boardDoc(ctxT, T, i, det, bs, cards) {
   }
   // a maxed account: EVERY holomem's target is its complete board (the team's sockets its row's,
   // the bench's the exact assignment the score used), shown against the account's REAL boards --
-  // what the user would have to unlock; measured against the full 453 Pt
+  // what the user would have to unlock; measured against a max-level holomem's points
   if (basisOf(S) === "maxed") {
     det.acctLoading = true;
-    return postJSON("/api/board-doc", { board_state: bs, cards, basis: "maxed", budget: 453, complete: true })
+    return postJSON("/api/board-doc", { board_state: bs, cards, basis: "maxed", budget: "max", complete: true })
       .then(d => { det.acct = det.doc = d; det.acctErr = det.docErr = null; })
       .catch(e => { det.acctErr = det.docErr = e.message; })
       .finally(() => { det.acctLoading = false; });
@@ -625,9 +501,7 @@ async function perSongDetail(ctxT, T, i, det) {
 }
 
 /* the detail fetches for an open team — every figure from the route that rebuilds the ROW's board:
-   a cached row -> /api/row-detail (its own two-stage leaf); a live developed row -> /api/compare
-   board "state" with the row's board_state and slot order; a /solve row (boards as they are) ->
-   /api/compare captured. "Now" is always /api/compare captured. */
+   /api/row-detail (the search's own leaf); "Now" is always /api/compare captured. */
 async function after(ctxT, T, i) {
   const { ctx, cardOf } = ctxT;
   const el = byId("team" + i);
@@ -668,29 +542,6 @@ async function after(ctxT, T, i) {
         await boardDoc(ctxT, T, i, det, d.board_state, cards);
         await withDistribution(det, body, () => repaint(ctxT, T, i));
       } catch (e) { det.err = e.message; }
-      repaint(ctxT, T, i);
-    })());
-  } else {
-    // a live row: its own board (state) when it carries one, else the boards as they are
-    const own = T.boards === "current" || !T.board_state;
-    const team = own ? { cards } : { cards, board_state: T.board_state, member_order: T.ordered ? T.members : undefined };
-    const pFig = cmp(own ? "captured" : "state", { teams: [team, team], distribution: !!song })
-      .then(d => { det.fig = fromCompare(d, own ? (T.boards === "current" ? "your boards as they are" : "the team scorer") : "the team's own board", own ? "/api/compare" : "/api/compare (board: state)"); })
-      .catch(e => { det.err = e.message; });
-    jobs.push(pFig.then(() => repaint(ctxT, T, i)));
-    jobs.push((async () => {
-      await pFig;
-      const order = det.fig && det.fig.member_order;
-      const tasks = [];
-      if (song) {
-        tasks.push(postJSON("/api/timeline", { song: S.song, cards, board_state: own ? undefined : T.board_state, member_order: order || undefined,
-          basis: basisOf(S), difficulty: S.difficulty, platform: S.platform, uptime_model: "finite", auto: !!S.auto,
-          assume_level: base.assume_level, assume_bloom: base.assume_bloom })
-          .then(d => { if (d.available === false) det.tlErr = d.reason || "not available"; else det.tl = d; })
-          .catch(e => { det.tlErr = e.message; }));
-      }
-      if (T.boards !== "current") tasks.push(boardDoc(ctxT, T, i, det, T.board_state, cards));
-      await Promise.all(tasks);
       repaint(ctxT, T, i);
     })());
   }

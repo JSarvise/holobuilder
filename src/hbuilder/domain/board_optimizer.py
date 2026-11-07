@@ -14,10 +14,6 @@ path (a cost-weighted shortest path over unbought nodes), buys the best bundle,
 and repeats until nothing affordable adds value. Approximate — like the team
 solver's own beam — but connectivity- and budget-exact by construction:
 `tree.reachable(plan.selected)` always returns the whole selection.
-
-`board_ceiling.py` decides WHICH teams reach this engine: its upper bound ranks
-the candidates and only the top-N are optimised, so the expensive search never
-runs on a team that cannot win.
 """
 
 from __future__ import annotations

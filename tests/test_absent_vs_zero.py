@@ -2,10 +2,8 @@
 are two different values that no code path can merge.
 
 `UNKNOWN` (never Python's `None`) is the in-memory sentinel for "never
-populated". `is_known()` distinguishes it from an explicit zero;
-`require_known()` is the only sanctioned way to turn an unknown-capable
-field into a number, and it raises — naming the card id and field — rather
-than substituting a default.
+populated". `is_known()` distinguishes it from an explicit zero, and turning
+it into a number raises `SchemaError` rather than substituting a default.
 """
 
 from __future__ import annotations
@@ -14,7 +12,7 @@ import pytest
 
 from hbuilder.domain.card import card_from_record
 from hbuilder.domain.schema import SchemaError
-from hbuilder.domain.unknown import UNKNOWN, is_known, require_known
+from hbuilder.domain.unknown import UNKNOWN, is_known
 
 
 def _card_record(magnitude: object) -> dict:
@@ -62,21 +60,6 @@ def test_is_known_is_false_for_unknown_and_true_for_explicit_zero():
     assert is_known(UNKNOWN) is False
     assert is_known(0.0) is True
     assert is_known(0) is True
-
-
-# --- require_known -----------------------------------------------------------
-
-
-def test_require_known_returns_explicit_zero_unchanged():
-    assert require_known(0.0, "nene_01", "skills.ACTIVE.magnitude") == 0.0
-
-
-def test_require_known_raises_schema_error_naming_card_id_and_field():
-    with pytest.raises(SchemaError) as exc_info:
-        require_known(UNKNOWN, "mio_01", "skills.ACTIVE.magnitude")
-    message = str(exc_info.value)
-    assert "mio_01" in message
-    assert "skills.ACTIVE.magnitude" in message
 
 
 # --- strict-explicit truthiness / coercion behavior -------------------------
@@ -138,18 +121,9 @@ def test_explicit_zero_card_reads_as_number_while_unknown_card_raises():
     unknown_card = card_from_record(_card_record(magnitude=None))
     zero_card = card_from_record(_card_record(magnitude=0))
 
-    assert (
-        require_known(
-            zero_card.skill("ACTIVE").magnitude, zero_card.id, "skills.ACTIVE.magnitude"
-        )
-        == 0.0
-    )
+    assert float(zero_card.skill("ACTIVE").magnitude) == 0.0
     with pytest.raises(SchemaError):
-        require_known(
-            unknown_card.skill("ACTIVE").magnitude,
-            unknown_card.id,
-            "skills.ACTIVE.magnitude",
-        )
+        float(unknown_card.skill("ACTIVE").magnitude)
 
 
 # ---------------------------------------------------------------------------
@@ -182,10 +156,10 @@ def test_the_unknown_sentinel_survives_pickle_and_copy_as_the_same_object():
 def test_a_pickled_card_keeps_its_unknown_fields_unknown():
     """The end-to-end statement, on a `Card` rather than the bare sentinel: a
     worker process must see exactly the same unknown fields the parent did.
-    Asserted through `unknown_fields()` and `require_known` — the two callers
-    that decide whether a number gets fabricated — not through `==`, which a
-    broken sentinel could still satisfy by comparing two distinct instances of
-    a class with no `__eq__`."""
+    Asserted through `unknown_fields()` and the float conversion — the two
+    places that decide whether a number gets fabricated — not through `==`,
+    which a broken sentinel could still satisfy by comparing two distinct
+    instances of a class with no `__eq__`."""
     import pickle
 
     original = card_from_record(_card_record(magnitude=None))
@@ -194,6 +168,4 @@ def test_a_pickled_card_keeps_its_unknown_fields_unknown():
     assert shipped.unknown_fields() == original.unknown_fields()
     assert shipped.skill("ACTIVE").magnitude is UNKNOWN
     with pytest.raises(SchemaError):
-        require_known(
-            shipped.skill("ACTIVE").magnitude, shipped.id, "skills.ACTIVE.magnitude"
-        )
+        float(shipped.skill("ACTIVE").magnitude)

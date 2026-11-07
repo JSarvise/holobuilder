@@ -5,6 +5,7 @@
 import { byId, esc, fmt, dec, sgn, mmss, toast, getJSON, postJSON, wirePopovers, normCard, info, reveal, LETTERS, MAX_TEAMS, loadRanks, thumb } from "/vs-util.js";
 import { loadRanks as loadGradeRanks, score as padScore } from "/hb-grade.js";
 import { openSongPicker as songPicker } from "/hb-songpick.js";
+import { showMaxPoints } from "/hbd-util.js";
 import { lineup, outfitLine, unitPanel, runPanel, timelinePanel, wireTimeline, boardPanel, glanceTable, gatesTable, skillsTable,
   teamHead, driverLine, covPeak, headline, headLabel, slotOrder } from "/vs-detail.js";
 
@@ -332,7 +333,7 @@ function pairBody(a, b, la, lb) {
   };
   if (S.scope === "song") { body.song = S.song; body.distribution = true; } else if (S.scope === "across") body.across = true;
   if (S.cards === "whatif") { body.assume_level = S.alevel; body.assume_bloom = S.abloom; }
-  if (S.maxpoints && basisOf() !== "maxed-account" && boardOf() === "develop") body.budget = 361;
+  if (S.maxpoints && basisOf() !== "maxed-account" && boardOf() === "develop") body.budget = "max";
   return body;
 }
 function setBusy(on) {
@@ -626,6 +627,7 @@ async function init() {
     loadRanks(), loadGradeRanks(),
   ]);
   for (const c of coll.cards || []) D.cards.set(c.id, normCard(c));
+  showMaxPoints(meta);
   const diffs = (meta.difficulties && meta.difficulties.available) || ["EASY", "NORMAL", "HARD", "EXPERT"];
   if (!diffs.includes(S.difficulty)) S.difficulty = "EXPERT";
   byId("difficulty").innerHTML = diffs.map(d => `<button type="button" data-v="${d}" aria-pressed="false">${d[0] + d.slice(1).toLowerCase()}</button>`).join("");

@@ -1,6 +1,6 @@
 """Read-only aggregation of data/gacha/*.jsonl into the Gacha tab's view model.
 
-READS ONLY (tools/web/test_no_writes.py). The store's writer is tools/recon/proxy/gacha_store.py;
+READS ONLY (tools/web/test_no_writes.py). The store's writer is tools/refresh/gacha_store.py;
 this module deliberately has its own tiny reader so the web package imports nothing that can write.
 Expected counts use the LATEST saved rate table per banner; a banner without one contributes
 nothing to `expected_by_rarity` and is flagged `has_rates: false` -- absence stays visible.
@@ -202,7 +202,7 @@ def _curve(groups: list[tuple[int, list[dict], dict, dict]], cards_by_id: dict) 
     time order, over the compared pulls. A group of n is (n - n//10) normal draws plus n//10
     from the 10th-slot table, as in `_expected`."""
     out, n, obs, exp, var = [], 0, 0, 0.0, 0.0
-    for _dt, ps, by_rar, fixed_rar in groups:
+    for _when, ps, by_rar, fixed_rar in groups:
         k = len(ps)
         n_fixed = (k // 10) if fixed_rar else 0
         for cnt, p5 in ((k - n_fixed, by_rar.get("5★", 0.0)), (n_fixed, fixed_rar.get("5★", 0.0))):

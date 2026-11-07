@@ -30,22 +30,14 @@ from hbuilder.domain.scoring import score_card_set
 from hbuilder.domain.song import (
     SCORE_COEFFICIENT,
     ChartNote,
+    OverallPower,
     SongChart,
     SongError,
     score_song,
     score_song_detailed,
 )
 
-from conftest import make_card, make_scoring_config, make_skill
-
-# Pinning every tier to 1.0 turns `E[max]` into a plain `max` over the live
-# magnitudes, which is what makes the hand arithmetic below readable.
-CERTAIN_TIERS = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
-
-
-def cfg(**overrides):
-    base = make_scoring_config(probability_tiers=CERTAIN_TIERS)
-    return dataclasses.replace(base, **overrides) if overrides else base
+from support.builders import certain_config as cfg, make_card, make_skill
 
 
 def make_chart(
@@ -162,8 +154,8 @@ def test_song_length_cancels_exactly_when_nothing_varies_with_time():
     members, leaders = plain_members(), (make_card("leader"),)
     four = make_chart(times=(1.0, 2.0, 3.0, 4.0))
     eight = make_chart(times=(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0))
-    short = score_song(members, leaders, four, cfg(), deck_power=2000)
-    long = score_song(members, leaders, eight, cfg(), deck_power=2000)
+    short = score_song(members, leaders, four, cfg(), deck_power=OverallPower.fixed(2000))
+    long = score_song(members, leaders, eight, cfg(), deck_power=OverallPower.fixed(2000))
     assert short[0].total_score == 4600
     assert long[0].total_score == 4600
 
@@ -180,8 +172,8 @@ def test_the_music_coefficient_does_NOT_cancel_and_is_why_this_module_exists():
     members, leaders = plain_members(), (make_card("leader"),)
     easy = make_chart(times=(1.0, 2.0, 3.0, 4.0), level=1, coefficient_permil=4)
     hard = make_chart(times=(1.0, 2.0, 3.0, 4.0), level=30, coefficient_permil=8)
-    assert score_song(members, leaders, easy, cfg(), deck_power=2000)[0].total_score == 4528
-    assert score_song(members, leaders, hard, cfg(), deck_power=2000)[0].total_score == 5520
+    assert score_song(members, leaders, easy, cfg(), deck_power=OverallPower.fixed(2000))[0].total_score == 4528
+    assert score_song(members, leaders, hard, cfg(), deck_power=OverallPower.fixed(2000))[0].total_score == 5520
 
 
 def test_the_ceil_is_applied_per_note_not_once_to_the_total():
@@ -196,7 +188,7 @@ def test_the_ceil_is_applied_per_note_not_once_to_the_total():
     The two differ by 1, which is the whole point."""
     members, leaders = plain_members(), (make_card("leader"),)
     chart = make_chart(times=(1.0, 2.0, 3.0))
-    total = score_song(members, leaders, chart, cfg(), deck_power=1000)[0].total_score
+    total = score_song(members, leaders, chart, cfg(), deck_power=OverallPower.fixed(1000))[0].total_score
     assert total == 2301
     assert total != math.ceil(1000 * SCORE_COEFFICIENT)
 
@@ -215,8 +207,8 @@ def test_a_note_whose_type_has_no_PERFECT_row_scores_nothing_and_costs_nothing()
         times=(1.0, 2.0, 3.0, 4.0, 5.0), permils=(1000, 1000, 1000, 1000, 0)
     )
     assert (
-        score_song(members, leaders, with_ghost, cfg(), deck_power=2000)[0].total_score
-        == score_song(members, leaders, without, cfg(), deck_power=2000)[0].total_score
+        score_song(members, leaders, with_ghost, cfg(), deck_power=OverallPower.fixed(2000))[0].total_score
+        == score_song(members, leaders, without, cfg(), deck_power=OverallPower.fixed(2000))[0].total_score
     )
 
 
@@ -235,17 +227,17 @@ def test_auto_play_scores_the_AUTO_column_taps_at_080_ticks_unchanged():
     total (bar the per-note ceil), and a hold-tick chart is unchanged."""
     members, leaders = plain_members(), (make_card("leader"),)
     taps = make_chart(times=(1.0, 2.0, 3.0, 4.0))
-    manual = score_song(members, leaders, taps, cfg(), deck_power=1_000_000)[0].total_score
+    manual = score_song(members, leaders, taps, cfg(), deck_power=OverallPower.fixed(1_000_000))[0].total_score
     auto = score_song(
-        members, leaders, taps, cfg(), deck_power=1_000_000, auto=True
+        members, leaders, taps, cfg(), deck_power=OverallPower.fixed(1_000_000), auto=True
     )[0].total_score
     assert auto < manual
     assert abs(auto / manual - 0.80) < 0.001
 
     ticks = make_chart(times=(1.0, 2.0, 3.0, 4.0), permil=100)
     assert (
-        score_song(members, leaders, ticks, cfg(), deck_power=1_000_000, auto=True)[0].total_score
-        == score_song(members, leaders, ticks, cfg(), deck_power=1_000_000)[0].total_score
+        score_song(members, leaders, ticks, cfg(), deck_power=OverallPower.fixed(1_000_000), auto=True)[0].total_score
+        == score_song(members, leaders, ticks, cfg(), deck_power=OverallPower.fixed(1_000_000))[0].total_score
     )
 
 
@@ -297,7 +289,7 @@ def test_the_active_cooldown_lattice_starts_at_the_interval_not_at_zero():
         total      = 1150 + 1150 + 1725 + 1725 = 5750"""
     members = (_active_scorer("card-a", 50.0),) + plain_members(4)
     chart = make_chart(times=(1.0, 15.0, 25.0, 45.0))
-    result = score_song(members, (make_card("leader"),), chart, cfg(), deck_power=2000)
+    result = score_song(members, (make_card("leader"),), chart, cfg(), deck_power=OverallPower.fixed(2000))
     assert result[0].total_score == 5750
 
 
@@ -317,7 +309,7 @@ def test_two_live_actives_take_the_maximum_not_the_sum():
         _active_scorer("card-b", 30.0),
     ) + plain_members(3)
     chart = make_chart(times=(1.0, 25.0))
-    result = score_song(members, (make_card("leader"),), chart, cfg(), deck_power=2000)
+    result = score_song(members, (make_card("leader"),), chart, cfg(), deck_power=OverallPower.fixed(2000))
     assert result[0].total_score == 5750
 
 
@@ -338,7 +330,7 @@ def test_the_active_roll_enters_as_an_exact_expectation_not_a_sample():
     half = dataclasses.replace(
         half, probability_tiers={"Low": 0.5, "Medium": 0.5, "High": 0.5}
     )
-    result = score_song(members, (make_card("leader"),), chart, half, deck_power=2000)
+    result = score_song(members, (make_card("leader"),), chart, half, deck_power=OverallPower.fixed(2000))
     assert result[0].total_score == 5175
 
 
@@ -358,8 +350,8 @@ def test_a_special_with_no_active_under_it_is_worth_exactly_nothing():
     chart = make_chart(times=(1.0, 15.0))
     leaders = (make_card("leader"),)
     assert (
-        score_song(with_special, leaders, chart, cfg(), deck_power=2000)[0].total_score
-        == score_song(without, leaders, chart, cfg(), deck_power=2000)[0].total_score
+        score_song(with_special, leaders, chart, cfg(), deck_power=OverallPower.fixed(2000))[0].total_score
+        == score_song(without, leaders, chart, cfg(), deck_power=OverallPower.fixed(2000))[0].total_score
         == 4600
     )
 
@@ -384,7 +376,7 @@ def test_a_special_multiplies_an_active_that_IS_live_under_it():
     ) + plain_members(3)
     chart = make_chart(times=(1.0, 25.0))
     result = score_song_detailed(
-        members, (make_card("leader"),), chart, cfg(), deck_power=2000
+        members, (make_card("leader"),), chart, cfg(), deck_power=OverallPower.fixed(2000)
     )
     assert result[0].total_score == 7130
     # `card-b` must be in slot 2 — cue 20 s — for the boost to land at all.
@@ -407,7 +399,7 @@ def test_slot_order_is_chosen_to_land_the_special_on_a_live_active():
     ) + plain_members(3)
     chart = make_chart(times=(1.0, 25.0))
     best = score_song_detailed(
-        members, (make_card("leader"),), chart, cfg(), deck_power=2000
+        members, (make_card("leader"),), chart, cfg(), deck_power=OverallPower.fixed(2000)
     )[0]
     assert best.member_order == ("card-a", "card-b", "card-0", "card-1", "card-2")
     assert best.total_score == 7130
@@ -442,7 +434,7 @@ def test_a_score_support_boosts_the_active_pool_and_a_special_adds_to_the_same_B
         ),
     )
     chart = make_chart(times=(1.0, 25.0))
-    result = score_song(members, (leader,), chart, cfg(), deck_power=2000)
+    result = score_song(members, (leader,), chart, cfg(), deck_power=OverallPower.fixed(2000))
     assert result[0].total_score == 7475
 
 
@@ -479,7 +471,7 @@ def test_two_overlapping_cue_windows_take_the_maximum_here_and_not_the_run_avera
         _special_scorer("card-c", 80.0, duration=15.0),
     ) + plain_members(2)
     chart = make_chart(times=(22.0,))
-    result = score_song(members, (make_card("leader"),), chart, cfg(), deck_power=2000)
+    result = score_song(members, (make_card("leader"),), chart, cfg(), deck_power=OverallPower.fixed(2000))
 
     assert result[0].total_score == 9660
     assert result[0].total_score != 11500  # the disjoint sum, wrong on a real overlap
@@ -503,7 +495,7 @@ def test_one_leader_score_per_leader_in_leaders_order():
         for magnitude in (10.0, 90.0, 50.0)
     )
     chart = make_chart(times=(1.0, 25.0))
-    result = score_song(members, leaders, chart, cfg(), deck_power=2000)
+    result = score_song(members, leaders, chart, cfg(), deck_power=OverallPower.fixed(2000))
     assert tuple(score.leader_id for score in result) == (
         "leader-10",
         "leader-90",
@@ -523,7 +515,7 @@ def test_a_team_that_is_not_five_members_raises_rather_than_guessing():
 
 def test_deck_power_defaults_to_the_same_stat_pool_score_card_set_uses():
     """Nothing here invents a DeckPower. With no `deck_power` argument the
-    modelled stat pool is used, and `conftest.STATS` is 300 per card, so five
+    modelled stat pool is used, and `builders.STATS` is 300 per card, so five
     plain members give 1500.0 — the same `base_stat_sum` `score_card_set`
     builds. `SongScore.deck_power` reports it, so a caller can never mistake it
     for the game's own Overall Power."""
@@ -542,7 +534,7 @@ def test_the_board_bonus_is_its_own_multiplicative_factor_here_too():
     members = plain_members()
     board = cfg(board_score_bonus={members[0].member: 0.20})
     chart = make_chart(times=(1.0, 2.0))
-    result = score_song(members, (make_card("leader"),), chart, board, deck_power=2000)
+    result = score_song(members, (make_card("leader"),), chart, board, deck_power=OverallPower.fixed(2000))
     assert result[0].total_score == 5520
 
 
@@ -572,7 +564,7 @@ def test_a_gated_skill_that_did_not_fire_neither_scores_nor_suppresses():
     )
     members = (gated, _active_scorer("card-b", 50.0)) + plain_members(3)
     chart = make_chart(times=(25.0,))
-    result = score_song(members, (make_card("leader"),), chart, cfg(), deck_power=2000)
+    result = score_song(members, (make_card("leader"),), chart, cfg(), deck_power=OverallPower.fixed(2000))
     # constant = 2000 x 2.300 / 1.0 = 4600.0; 4600 x 1.50 = 6900
     assert result[0].total_score == 6900
 
@@ -600,8 +592,8 @@ def test_stats_do_not_reach_the_score_when_deck_power_is_supplied():
     chart = make_chart(times=(1.0, 25.0))
     leaders = (make_card("leader"),)
     assert (
-        score_song(buffed, leaders, chart, cfg(), deck_power=2000)[0].total_score
-        == score_song(plain_members(), leaders, chart, cfg(), deck_power=2000)[0].total_score
+        score_song(buffed, leaders, chart, cfg(), deck_power=OverallPower.fixed(2000))[0].total_score
+        == score_song(plain_members(), leaders, chart, cfg(), deck_power=OverallPower.fixed(2000))[0].total_score
     )
 
 
@@ -673,7 +665,7 @@ def test_an_explicit_deck_power_still_overrides_everything():
     small, big = _stat_outfit_leaders()
     chart = make_chart(times=(1.0, 2.0))
     scores = score_song_detailed(
-        plain_members(), (small, big), chart, cfg(), deck_power=2000
+        plain_members(), (small, big), chart, cfg(), deck_power=OverallPower.fixed(2000)
     )
     assert scores[0].deck_power == scores[1].deck_power == 2000
     assert scores[0].total_score == scores[1].total_score
@@ -695,7 +687,7 @@ def test_an_explicit_deck_power_still_overrides_everything():
 # flipping the predicate without changing the inputs is not something a caller
 # can do. The direct comparison is a harness over many (team, chart) pairs,
 # not a unit test. What lives here is the part a unit test CAN own: that each path runs, returns a legal slot order, and that
-# the `bisect` liveness reproduces `_fixed_liveness` exactly.
+# the `bisect` liveness reproduces the per-note scan (`_fixed_liveness`) exactly.
 
 
 def _special(magnitude, duration):
@@ -738,14 +730,25 @@ def test_a_long_special_that_bridges_two_cues_still_scores():
     assert sorted(result.member_order) == sorted(c.id for c in members)
 
 
+def _fixed_liveness(term, times: tuple[float, ...]) -> list[bool]:
+    """Per-note liveness of an order-INVARIANT term, by a per-note scan: `None`
+    windows are always live, an empty tuple never, otherwise
+    `start <= time < end` for some window."""
+    if term.windows is None:
+        return [True] * len(times)
+    if not term.windows:
+        return [False] * len(times)
+    return [
+        any(start <= time < end for start, end in term.windows) for time in times
+    ]
+
+
 def test_the_liveness_bisect_agrees_with_the_reference_scan():
-    """`_fixed_liveness` is kept as the reference implementation for the
-    `bisect` index ranges. Its three cases — always live, never live, and
-    windowed — must all still be reproduced by `[bisect_left(times, start),
+    """`_fixed_liveness` is the reference implementation for the `bisect`
+    index ranges. Its three cases — always live, never live, and windowed —
+    must all still be reproduced by `[bisect_left(times, start),
     bisect_left(times, end))`, or every fixed term's liveness is wrong."""
     from bisect import bisect_left
-
-    from hbuilder.domain.song import _fixed_liveness
 
     times = tuple(float(t) for t in range(0, 40))
 
@@ -808,7 +811,7 @@ def test_a_flick_weighs_1050_on_mobile_and_1000_on_pc_and_nothing_else_moves():
 
 def test_the_perfect_sum_follows_the_platform_and_defaults_to_mobile():
     chart = _flick_chart((1.0, 2.0, 3.0, 4.0), flick_at={1, 3})
-    assert chart.flick_count() == 2
+    assert sum(note.flick for note in chart.notes) == 2
     assert chart.notes_perfect_coefficient_sum("pc") == pytest.approx(4.0)
     assert chart.notes_perfect_coefficient_sum("mobile") == pytest.approx(4.1)
     assert chart.notes_perfect_coefficient_sum() == pytest.approx(4.1)
@@ -825,10 +828,10 @@ def test_scoring_config_platform_defaults_to_mobile_and_reaches_the_scorer():
     times = tuple(float(t) for t in range(1, 121))
     chart = _flick_chart(times, flick_at=set(range(100, 120)))
     mobile = score_song(members, leaders, chart, cfg(platform="mobile"),
-                        deck_power=1_000_000)[0].total_score
+                        deck_power=OverallPower.fixed(1_000_000))[0].total_score
     pc = score_song(members, leaders, chart, cfg(platform="pc"),
-                    deck_power=1_000_000)[0].total_score
-    default = score_song(members, leaders, chart, cfg(), deck_power=1_000_000)[0].total_score
+                    deck_power=OverallPower.fixed(1_000_000))[0].total_score
+    default = score_song(members, leaders, chart, cfg(), deck_power=OverallPower.fixed(1_000_000))[0].total_score
     assert default == mobile
     assert mobile > pc
     # Hand check, bar the per-note ceil: total ~ P*2.3*MC * sum(w_n*(1+c_n)) / PS.
@@ -838,8 +841,8 @@ def test_scoring_config_platform_defaults_to_mobile_and_reaches_the_scorer():
 
     flat = _flick_chart(times, flick_at=set())
     assert (
-        score_song(members, leaders, flat, cfg(platform="mobile"), deck_power=1_000_000)[0].total_score
-        == score_song(members, leaders, flat, cfg(platform="pc"), deck_power=1_000_000)[0].total_score
+        score_song(members, leaders, flat, cfg(platform="mobile"), deck_power=OverallPower.fixed(1_000_000))[0].total_score
+        == score_song(members, leaders, flat, cfg(platform="pc"), deck_power=OverallPower.fixed(1_000_000))[0].total_score
     )
 
 

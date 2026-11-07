@@ -37,6 +37,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+import system_trust
+
 APP = "holobuilder"
 FROZEN = getattr(sys, "frozen", False)
 HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -555,6 +557,7 @@ class Api:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    system_trust.use_system_trust()             # before any HTTPS request (Google, our server)
     # our own agent: the server sits behind Cloudflare, whose browser checks stop Python's
     opener = urllib.request.build_opener()
     opener.addheaders = [("User-Agent", "holobuilder-setup")]

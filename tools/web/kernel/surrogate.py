@@ -12,15 +12,18 @@ and the exact leaf scores whatever it proposes (`tools/web/two_stage.py`).
 from __future__ import annotations
 
 import ctypes
-import shutil
-import subprocess
+import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "surrogate.c"
-LIBRARY = HERE / ("surrogate.dll" if sys.platform == "win32" else "surrogate.so")
-CFLAGS = ["-O2", "-ffp-contract=off", "-fno-fast-math", "-shared", "-fPIC"]
+if str(HERE) not in sys.path:          # loaded by file path in a worker too
+    sys.path.insert(0, str(HERE))
+import cbuild  # noqa: E402
+
+LIBRARY = cbuild.library(HERE, "surrogate")
 MAX_CARDS = 250
 MAX_KINDS = 64
 MAX_GENS_PER_CARD = 6
@@ -44,13 +47,7 @@ class Model(ctypes.Structure):
 
 def build(force: bool = False) -> Path:
     """Compile the kernel if the library is missing or older than its source."""
-    if not force and LIBRARY.exists() and LIBRARY.stat().st_mtime >= SOURCE.stat().st_mtime:
-        return LIBRARY
-    gcc = shutil.which("gcc")
-    if gcc is None:
-        raise RuntimeError("no gcc on PATH; the screen kernel cannot be built")
-    subprocess.run([gcc, *CFLAGS, "-o", str(LIBRARY), str(SOURCE)], check=True)
-    return LIBRARY
+    return cbuild.build(SOURCE, LIBRARY, "screen", force)
 
 
 _lib = None
@@ -74,8 +71,35 @@ def load():
             ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_double),
             ctypes.POINTER(ctypes.c_int64),
         ]
+        lib.hd_sur_scan_part.restype = ctypes.c_int
+        lib.hd_sur_scan_part.argtypes = [
+            ctypes.POINTER(Pool), ctypes.POINTER(Model), ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint64), ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_int64),
+        ]
         _lib = lib
     return _lib
+
+
+# The scan runs in this many threads, when the pool is large enough for it to pay: the
+# search's process scans while its workers wait, so the cores are free.
+SCAN_THREADS = min(16, os.cpu_count() or 1)
+SCAN_THREADS_MIN_CARDS = 40
+_EXECUTOR: list = []
+
+
+def scan_threads(count: int) -> int:
+    """How many threads scan a pool of `count` cards (1: the scan runs in the caller)."""
+    return SCAN_THREADS if count >= SCAN_THREADS_MIN_CARDS and SCAN_THREADS > 1 else 1
+
+
+def _executor(threads: int) -> ThreadPoolExecutor:
+    """One pool of scan threads for the process, made on first use."""
+    if not _EXECUTOR or _EXECUTOR[0][0] != threads:
+        _EXECUTOR[:] = [(threads, ThreadPoolExecutor(max_workers=threads,
+                                                     thread_name_prefix="screen-scan"))]
+    return _EXECUTOR[0][1]
 
 
 def set_key(indices) -> int:
@@ -134,6 +158,30 @@ class Screen:
         self.fitted = True
         return mae
 
+    def predict(self, indices) -> float:
+        """The fitted model's value of the cards `indices` (a set or part of one, any order):
+        the bias, their card weights, the gate features their kinds switch on and their pair
+        weights, as the scan values a full set."""
+        cards = sorted(indices)
+        value = self._model.bias + sum(self._card[i] for i in cards)
+        count: dict[int, int] = {}
+        for i in cards:
+            kinds = [self._type_of[i]]
+            for g in range(MAX_GENS_PER_CARD):
+                kind = self._gens[i * MAX_GENS_PER_CARD + g]
+                if kind < 0:
+                    break
+                kinds.append(kind)
+            for kind in kinds:
+                count[kind] = count.get(kind, 0) + 1
+        for kind, c in count.items():
+            for threshold in range(2, min(c, 5) + 1):
+                value += self._gate[(threshold - 2) * self.kinds + kind]
+        for a in range(len(cards)):
+            for b in range(a + 1, len(cards)):
+                value += self._pair[cards[a] * self.count + cards[b]]
+        return value
+
     def best(self, want: int, seen=()) -> tuple[list[tuple[int, ...]], list[float], int]:
         """`(sets, predictions, how many legal sets exist)`: the `want` legal
         sets the model ranks highest, best first, leaving out `seen` (ascending
@@ -141,16 +189,41 @@ class Screen:
         lexicographic one."""
         keys = [set_key(s) for s in seen]
         seen_array = (ctypes.c_uint64 * max(1, len(keys)))(*keys)
-        out_sets = (ctypes.c_uint8 * (5 * want))()
-        out_pred = (ctypes.c_double * want)()
-        legal = ctypes.c_int64(0)
-        got = load().hd_sur_scan(ctypes.byref(self._pool), ctypes.byref(self._model), len(keys),
-                                 seen_array, want, out_sets, out_pred, ctypes.byref(legal))
-        if got < 0:
-            raise RuntimeError("the screen scan failed")
-        raw = bytes(out_sets)[: 5 * got]
-        sets = [tuple(raw[5 * i: 5 * i + 5]) for i in range(got)]
-        return sets, list(out_pred[:got]), legal.value
+        parts = scan_threads(self.count)
+        if parts <= 1:
+            out_sets = (ctypes.c_uint8 * (5 * want))()
+            out_pred = (ctypes.c_double * want)()
+            legal = ctypes.c_int64(0)
+            got = load().hd_sur_scan(ctypes.byref(self._pool), ctypes.byref(self._model),
+                                     len(keys), seen_array, want, out_sets, out_pred,
+                                     ctypes.byref(legal))
+            if got < 0:
+                raise RuntimeError("the screen scan failed")
+            raw = bytes(out_sets)[: 5 * got]
+            sets = [tuple(raw[5 * i: 5 * i + 5]) for i in range(got)]
+            return sets, list(out_pred[:got]), legal.value
+        # The scan split by first card over `parts` threads (the C call releases the GIL),
+        # each keeping its own best `want`; the best `want` of their union under the scan's
+        # total order (prediction, then the earlier set) are the whole scan's, in its order.
+        def part(a0: int):
+            out_sets = (ctypes.c_uint8 * (5 * want))()
+            out_pred = (ctypes.c_double * want)()
+            legal = ctypes.c_int64(0)
+            got = load().hd_sur_scan_part(ctypes.byref(self._pool), ctypes.byref(self._model),
+                                          len(keys), seen_array, want, a0, parts, out_sets,
+                                          out_pred, ctypes.byref(legal))
+            if got < 0:
+                raise RuntimeError("the screen scan failed")
+            raw = bytes(out_sets)[: 5 * got]
+            return ([(out_pred[i], tuple(raw[5 * i: 5 * i + 5])) for i in range(got)],
+                    legal.value)
+
+        load()
+        results = list(_executor(parts).map(part, range(parts)))
+        items = [item for found, _legal in results for item in found]
+        items.sort(key=lambda item: (-item[0], set_key(item[1])))
+        items = items[:want]
+        return [s for _p, s in items], [p for p, _s in items], sum(n for _f, n in results)
 
 
 if __name__ == "__main__":

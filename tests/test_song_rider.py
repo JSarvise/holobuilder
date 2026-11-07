@@ -9,14 +9,13 @@ simply IS `p'`.
 """
 from __future__ import annotations
 
-import dataclasses
 
 import pytest
 
 from hbuilder.domain.card import GateCondition, SlotRider
 from hbuilder.domain.song import ChartNote, SongChart, score_song_detailed
 
-from conftest import make_card, make_scoring_config, make_skill
+from support.builders import make_card, make_scoring_config, make_skill
 
 CUES = (5.0, 15.0, 25.0, 35.0, 45.0)
 RIDER = 55.0                     # +55 %, as on card-00002-5-uniq-0001-00

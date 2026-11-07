@@ -1,29 +1,17 @@
-"""Marathon event-farming valuation.
+"""Marathon events: the bonus rows, Event Points and the event search objectives.
 
 Event points are NOT the deck-screen Unit Score the main optimiser ranks by. They are
-dominated by two things a stat-max deck ignores:
-
-  1. **Event bonus rows** — per-event server data (holomem / Member-card / rarity+bloom /
-     song rows) that ADD a percentage to the event score for every card in the deck that
-     matches. This is the deck lever that actually re-orders farming decks, and its matching
-     rule is read from the client code (see `event_bonus_permil`).
-  2. A flat ×2.0 for using the recommended deck, and a stamina→points curve — both
-     deck-INDEPENDENT scalars (they scale the absolute yield but never re-order two decks),
-     so they belong to absolute-points reporting, not the ranking objective.
-
-The bonus-row matcher and the master stamina/multiplier constants are read from the client
-and master data. The absolute-points COMPOSITION (multiply order, base score) is inferred,
-not read, and deliberately NOT part of the ranking objective — `points_scalar` exposes the
-deck-independent multiplier for reporting, clearly separated from it.
+driven by **event bonus rows** — per-event server data (holomem / Member-card /
+rarity+bloom / song rows) that ADD a percentage to the event score for every card in the
+deck that matches. Their matching rule is read from the client code (see
+`MarathonBonusRow.matches`), and the stamina→provide-count curve from the master data.
 
 Nothing here is imported by the solver's hot loop; it is a separate objective over the same
 `Card` team. Third-party deps: none (stdlib only).
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Iterable, Mapping
 
 from hbuilder.domain.card import Card
@@ -36,23 +24,13 @@ from hbuilder.domain.schema import SchemaError
 # tools/recon/proxy/dumps/holodori/master_setting.gen.proto. Recorded as literals with their
 # provenance so a master update that changes them is a visible diff, not a silent drift.
 
-# Setting field 2402 = 2000 permil -> ×2.0 for playing the game's recommended deck.
-MARATHON_RECOMMEND_DECK_MULTIPLIER: float = 2.0
 # Setting 1118 / 1121 / 1301.
 LIVE_STAMINA_MAX: int = 10
-LIVE_STAMINA_RECOMMEND_CONSUMPTION: int = 3  # the efficiency knee (linear ×8/stamina through 3)
-MINIGAME_STAMINA_MAX: int = 100
 
 # MarathonLiveRewardUpStaminaEffect: stamina consumed -> marathon_score_provide_count.
 # Linear ×8 through stamina 3, sub-linear after.
 MARATHON_LIVE_STAMINA_SCORE: dict[int, int] = {
     1: 8, 2: 16, 3: 24, 4: 30, 5: 37, 6: 42, 7: 46, 8: 50, 9: 53, 10: 56,
-}
-# MarathonMiniGameRewardUpStaminaEffect: {mini_game_type: {stamina: provide_count}}.
-# The per-type curves differ; only the shipped types are present.
-MARATHON_MINIGAME_STAMINA_SCORE: dict[int, dict[int, int]] = {
-    1: {1: 6, 2: 12, 3: 17, 4: 22, 5: 26, 6: 30},
-    3: {1: 6, 2: 11, 3: 15},
 }
 
 # The channels an event's bonus groups are keyed on (marathon_bonus.json `kind`). A live play
@@ -60,7 +38,6 @@ MARATHON_MINIGAME_STAMINA_SCORE: dict[int, dict[int, int]] = {
 LIVE_CHANNEL = "live"
 MINIGAME_CHANNEL = "minigame"
 MUSIC_CHANNEL = "music"
-CHANNELS: tuple[str, ...] = (LIVE_CHANNEL, MINIGAME_CHANNEL, MUSIC_CHANNEL)
 
 
 def _chr_id(card: Card) -> str:
@@ -112,8 +89,7 @@ class MarathonBonusRow:
             return False
         if self.bloom is not None:
             # A bloom row needs the card's OWNED bloom (collection state, not on the
-            # catalogue Card). Without it the row is unmatchable — reported by
-            # `event_bonus_permil`'s `bloom_rows_skipped`, never silently treated as 0-match.
+            # catalogue Card). Without it the row cannot match.
             if bloom is None or bloom != self.bloom:
                 return False
         return True
@@ -132,58 +108,6 @@ class MarathonEvent:
         return self.rows_by_channel.get(channel, ())
 
 
-@dataclass(frozen=True, slots=True)
-class EventBonusResult:
-    total_permil: int
-    per_card_permil: tuple[int, ...]
-    bloom_rows_skipped: int  # bloom rows that could not be evaluated for want of owned bloom
-
-
-def event_bonus_permil(
-    cards: Iterable[Card],
-    event: MarathonEvent,
-    *,
-    channel: str = LIVE_CHANNEL,
-    blooms: Mapping[str, int] | None = None,
-    music_id: str | None = None,
-) -> EventBonusResult:
-    """The deck's total event-bonus permil for one play — the farming ranking key.
-
-    For each card, SUM the permil of every matching row (rows are wildcard patterns and
-    all matches sum); the deck total sums those per-card contributions. Higher = more event
-    points. `channel` selects which bonus groups apply: a live play draws the live rows plus
-    the song-gated music rows; a minigame play draws the minigame rows.
-
-    `blooms` maps card.id -> owned bloom, needed only for `{rarity, bloom}` rows; when a bloom
-    row cannot be evaluated it is counted in `bloom_rows_skipped` rather than silently missed.
-    """
-    if channel not in CHANNELS:
-        raise ValueError(f"unknown channel {channel!r}; expected one of {CHANNELS}")
-    rows = list(event.rows_for(channel))
-    # A live play also earns the song-specific "Event Score Up" music rows.
-    if channel == LIVE_CHANNEL:
-        rows += list(event.rows_for(MUSIC_CHANNEL))
-
-    blooms = blooms or {}
-    per_card: list[int] = []
-    skipped = 0
-    for card in cards:
-        card_bloom = blooms.get(card.id)
-        card_permil = 0
-        for row in rows:
-            if row.bloom is not None and card_bloom is None:
-                skipped += 1
-                continue
-            if row.matches(card, bloom=card_bloom, music_id=music_id):
-                card_permil += row.permil
-        per_card.append(card_permil)
-    return EventBonusResult(
-        total_permil=sum(per_card),
-        per_card_permil=tuple(per_card),
-        bloom_rows_skipped=skipped,
-    )
-
-
 def live_stamina_score(stamina: int) -> int:
     """marathon_score_provide_count for a LIVE play at `stamina` consumed (master table)."""
     if stamina not in MARATHON_LIVE_STAMINA_SCORE:
@@ -191,34 +115,6 @@ def live_stamina_score(stamina: int) -> int:
             f"live stamina {stamina} out of range 1..{LIVE_STAMINA_MAX}"
         )
     return MARATHON_LIVE_STAMINA_SCORE[stamina]
-
-
-def minigame_stamina_score(mini_game_type: int, stamina: int) -> int:
-    """marathon_score_provide_count for a MINIGAME play (master per-type table)."""
-    table = MARATHON_MINIGAME_STAMINA_SCORE.get(mini_game_type)
-    if table is None:
-        raise ValueError(
-            f"no stamina curve for mini_game_type {mini_game_type}; "
-            f"known: {sorted(MARATHON_MINIGAME_STAMINA_SCORE)}"
-        )
-    if stamina not in table:
-        raise ValueError(f"minigame stamina {stamina} out of range for type {mini_game_type}")
-    return table[stamina]
-
-
-def points_scalar(*, stamina: int, recommended: bool, channel: str = LIVE_CHANNEL,
-                  mini_game_type: int | None = None) -> float:
-    """The DECK-INDEPENDENT multiplier on absolute event points: the stamina provide-count ×
-    the recommended-deck ×2.0. Deliberately separate from `event_bonus_permil` because it does
-    NOT re-order decks — it only scales the absolute yield. The exact composition with the base
-    score is inferred, not confirmed by a live capture, so this is a reporting aid, not the
-    ranking objective. Use it to turn a permil comparison into approximate absolute points, in
-    "× base score" units."""
-    if channel == MINIGAME_CHANNEL:
-        provide = minigame_stamina_score(mini_game_type or 1, stamina)
-    else:
-        provide = live_stamina_score(stamina)
-    return provide * (MARATHON_RECOMMEND_DECK_MULTIPLIER if recommended else 1.0)
 
 
 # --- The three event objectives -----------------------------------------------
@@ -241,29 +137,6 @@ def _card_permil(card: Card, rows: Iterable[MarathonBonusRow], *, bloom: int | N
         if row.matches(card, bloom=bloom, music_id=music_id):
             total += row.permil
     return total
-
-
-def event_point_bonus_permil(members: Iterable[Card], event: MarathonEvent, *,
-                             blooms: Mapping[str, int]) -> EventBonusResult:
-    """`E` for Event Points: the LIVE rows only, summed per card, summed over the members.
-    Pass the five members, never the leader."""
-    rows = event.rows_for(LIVE_CHANNEL)
-    per_card = []
-    skipped = 0
-    for card in members:
-        bloom = blooms.get(card.id)
-        skipped += sum(1 for r in rows if r.bloom is not None and bloom is None)
-        per_card.append(_card_permil(card, rows, bloom=bloom, music_id=None))
-    return EventBonusResult(total_permil=sum(per_card), per_card_permil=tuple(per_card),
-                            bloom_rows_skipped=skipped)
-
-
-def event_song_bonus_permil(members: Iterable[Card], event: MarathonEvent, *, music_id: str,
-                            blooms: Mapping[str, int]) -> int:
-    """`P` for Event Song Score: the song-gated rows, summed per card, then the LARGEST card."""
-    rows = event.rows_for(MUSIC_CHANNEL)
-    return max((_card_permil(c, rows, bloom=blooms.get(c.id), music_id=music_id)
-                for c in members), default=0)
 
 
 def _ceil_div(num: int, den: int) -> int:
@@ -356,96 +229,8 @@ def event_objective(score: float, *, objective: str, live_permil: int = 0,
     raise ValueError(f"unknown objective {objective!r}; one of {OBJECTIVES}")
 
 
-HOLOMEM_RATING_DENOMINATOR = 5000  # master data; not eligible on PC/Steam
+# --- The open event's bonus groups (marathon_bonus.json) ----------------------
 
-
-def holomem_song_rating(best_score: int) -> int:
-    """A song's contribution to a holomem's Score Rating: best score / 5000.
-    ceil as above; the server's rounding is not known."""
-    return _ceil_div(int(best_score), HOLOMEM_RATING_DENOMINATOR)
-
-
-def holomem_rating_total(song_ratings: Iterable[int]) -> int:
-    """The holomem's rating: the three best song ratings, summed (client @0x571b340)."""
-    return sum(sorted(song_ratings, reverse=True)[:3])
-
-
-# --- Loader (data/marathon.json) --------------------------------------------
-
-DEFAULT_MARATHON_PATH = Path(__file__).resolve().parents[3] / "data" / "marathon.json"
-
-_ROW_FIELDS = {"permil", "character_id", "card_id", "rarity", "bloom", "music_id", "attribute"}
-
-
-def _row_from_record(record: object, *, channel: str, index: int) -> MarathonBonusRow:
-    field = f"{channel}[{index}]"
-    if not isinstance(record, dict):
-        raise SchemaError("bonus row must be a JSON object", field=field)
-    extra = set(record) - _ROW_FIELDS
-    if extra:
-        raise SchemaError(f"unknown bonus-row field(s): {sorted(extra)}", field=field)
-    permil = record.get("permil")
-    if not isinstance(permil, int) or isinstance(permil, bool):
-        raise SchemaError("bonus row 'permil' must be an integer", field=f"{field}.permil")
-    rarity = record.get("rarity")
-    bloom = record.get("bloom")
-    if (rarity is None) != (bloom is None):
-        raise SchemaError(
-            "'rarity' and 'bloom' must be set together (a bloom row needs both)",
-            field=field,
-        )
-    if not any(record.get(k) is not None for k in ("character_id", "card_id", "rarity", "attribute")):
-        raise SchemaError(
-            "bonus row identifies no card (needs character_id, card_id, rarity+bloom or attribute)",
-            field=field,
-        )
-    return MarathonBonusRow(
-        permil=permil,
-        character_id=record.get("character_id"),
-        card_id=record.get("card_id"),
-        rarity=rarity,
-        bloom=bloom,
-        music_id=record.get("music_id"),
-        attribute=record.get("attribute"),
-    )
-
-
-def load_marathon_event(path: Path = DEFAULT_MARATHON_PATH) -> MarathonEvent:
-    """Load data/marathon.json -> MarathonEvent. Shape:
-        {"name": "...", "channels": {"live": [row, ...], "minigame": [...], "music": [...]}}
-    where each row is {permil, and one of character_id | card_id | rarity+bloom | +music_id}.
-    Raises SchemaError naming the offending field, never silently skipping a row."""
-    try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise SchemaError(f"marathon event file not found: {path}") from exc
-    except json.JSONDecodeError as exc:
-        raise SchemaError(f"marathon event file is not valid JSON: {exc}") from exc
-    if not isinstance(data, dict):
-        raise SchemaError("marathon event file must be a JSON object")
-    name = data.get("name")
-    if not isinstance(name, str) or not name:
-        raise SchemaError("marathon event 'name' must be a non-empty string", field="name")
-    channels = data.get("channels")
-    if not isinstance(channels, dict):
-        raise SchemaError("marathon event 'channels' must be a JSON object", field="channels")
-    unknown = set(channels) - set(CHANNELS)
-    if unknown:
-        raise SchemaError(f"unknown channel(s): {sorted(unknown)}", field="channels")
-    rows_by_channel: dict[str, tuple[MarathonBonusRow, ...]] = {}
-    for channel, rows in channels.items():
-        if not isinstance(rows, list):
-            raise SchemaError(f"channel '{channel}' must be a list of rows", field=channel)
-        rows_by_channel[channel] = tuple(
-            _row_from_record(r, channel=channel, index=i) for i, r in enumerate(rows)
-        )
-    return MarathonEvent(name=name, rows_by_channel=rows_by_channel)
-
-
-# --- The CURRENT event, straight from the refresh --------------------------------
-
-DEFAULT_EVENT_BONUS_PATH = (Path(__file__).resolve().parents[3] / "tools" / "recon" / "proxy"
-                            / "dumps" / "marathon_bonus.json")
 _KIND_CHANNEL = {"live": LIVE_CHANNEL, "minigame": MINIGAME_CHANNEL, "music": MUSIC_CHANNEL}
 
 
@@ -472,35 +257,4 @@ def pick_chapter(keys, windows=None, now_ms: int | None = None) -> str:
             return max(started, key=lambda k: windows[k][0])
     return keys[-1]
 
-
-def open_events(path: Path = DEFAULT_EVENT_BONUS_PATH) -> list[str]:
-    """The event chapters the server listed as open at the last refresh, newest last."""
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    return sorted({_event_key(g) for g in data.get("current_group_ids") or []})
-
-
-def load_current_event(path: Path = DEFAULT_EVENT_BONUS_PATH, *, event: str | None = None) -> MarathonEvent:
-    """The bonus tables of an open event, read from the refresh's marathon_bonus.json
-    (`Event/ListEventInfo`, fetched on every refresh). `event` picks one chapter key; by default
-    the newest open one. Raises SchemaError when nothing is open."""
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    keys = sorted({_event_key(g) for g in data.get("current_group_ids") or []})
-    if not keys:
-        raise SchemaError("no event is open at the last refresh (current_group_ids is empty)")
-    chosen = event or keys[-1]
-    if chosen not in keys:
-        raise SchemaError(f"event {chosen!r} is not open; open: {keys}")
-    rows_by_channel: dict[str, list[MarathonBonusRow]] = {}
-    for group in data.get("groups") or []:
-        if _event_key(group.get("group_id", "")) != chosen:
-            continue
-        channel = _KIND_CHANNEL.get(group.get("kind"))
-        if channel is None:
-            continue
-        for row in group.get("rows") or []:
-            rows_by_channel.setdefault(channel, []).append(MarathonBonusRow(
-                permil=int(row["permil"]), character_id=row.get("character_id"),
-                card_id=row.get("card_id"), rarity=row.get("rarity"), bloom=row.get("bloom"),
-                music_id=row.get("music_id"), attribute=row.get("attribute")))
-    return MarathonEvent(name=chosen, rows_by_channel={k: tuple(v) for k, v in rows_by_channel.items()})
 

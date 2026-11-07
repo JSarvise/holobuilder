@@ -31,10 +31,10 @@ from hbuilder.domain.board import (
     BoardModel,
     BoardNode,
     CharacterBoard,
-    resolve,
 )
+from support.board_reference import resolve
 
-from conftest import make_card, make_scoring_config, make_team
+from support.builders import make_card, make_scoring_config, make_team
 
 LEADER_SCOPE_PERMIL = 173.0  # Ina'nis' own leader-scope value
 MEMBER_SCOPE_PERMIL = 40.0
@@ -148,7 +148,7 @@ def test_the_memoised_accessor_agrees_with_resolve_bit_for_bit():
 
 
 def _active_card(card_id="scorer", member="Member 1"):
-    from conftest import make_skill
+    from support.builders import make_skill
 
     return make_card(
         card_id,

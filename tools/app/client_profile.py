@@ -25,7 +25,18 @@ The Steam ID (`x-app-steam-id`, the account's SteamID64: 17 digits, 7656119...) 
 client on every call after the first two, so a profile claiming Steam without it is a request
 no real client makes. It is read off this PC's Steam (`steam_id()`): the running account, else
 the most recent one of loginusers.vdf -- both give the id the real client sends.
-Typed in Settings it wins. Windows only: the game is.
+Typed in Settings it wins.
+
+On Linux the game runs under Proton and presents itself as Windows: the profile says what the
+client sees through Wine (`probe_proton`). From the game's Proton prefix: the Windows version
+Proton announces (`system.reg`, `Software\\Microsoft\\Windows NT\\CurrentVersion`), the BIOS and
+CPU names when Wine saved them there (`HKLM\\HARDWARE` is volatile, so usually not), the screen
+DPI (`user.reg` LogPixels, Wine's 96 otherwise) and the GPU name, vendor and VRAM from the game's
+own `Player.log`. What Wine reads from Linux itself fills the rest, from the same files Wine
+reads: `/sys/class/dmi/id` (device), `/proc/cpuinfo` (CPU), `/proc/meminfo` (RAM),
+`/sys/class/drm` (screen size). The Steam ID comes from Linux Steam (`registry.vdf`, then
+`loginusers.vdf`). A `state/client_profile.json` put there by hand (copied from a Windows PC, or
+captured) always wins; with neither, `ProfileUnavailable` says what to do. Nothing is made up.
 """
 from __future__ import annotations
 
@@ -38,8 +49,10 @@ import re
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-PROFILE = REPO / "state" / "client_profile.json"
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
+from hbuilder import paths  # noqa: E402
+
+PROFILE = paths.STATE / "client_profile.json"
 
 FIXED = {
     "user-agent": "grpc-dotnet/2.76.0 (Mono Unity; CLR 4.0.30319.17020; netstandard2.1; windows; x64)",
@@ -53,7 +66,7 @@ FIXED = {
     "x-app-graphics-device-version": "Direct3D 11.0 [level 11.1]",
     "x-app-graphics-shader-level": "50",
 }
-LOCALLOW = Path(os.environ.get("USERPROFILE", "~")).expanduser() / "AppData" / "LocalLow"     / "QualiArts, Inc_" / "hololive-Dreams"
+LOCALLOW = paths.GAME_DATA
 STEAM_BASE = 76561197960265728            # SteamID64 of account id 0 (individual, public universe)
 _GPU_CLASS = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
 
@@ -116,6 +129,10 @@ def player_log_vram(text: str) -> int | None:
     """Unity's own VRAM figure from Player.log ('    VRAM:     8155 MB'), in MB."""
     m = re.search(r"^\s*VRAM:\s*(\d+)\s*MB", text, re.M)
     return int(m.group(1)) if m else None
+
+
+class ProfileUnavailable(RuntimeError):
+    """No profile can be written from this PC: the message says what to do."""
 
 
 def pick_gpu(adapters: list[dict]) -> dict:
@@ -183,7 +200,7 @@ def steam_id() -> str | None:
     sid = steam_id64(_reg(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam\ActiveProcess", "ActiveUser"))
     if sid:
         return sid
-    root = _reg(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath")
+    root = paths.steam_path()
     try:
         return most_recent_login((Path(root) / "config" / "loginusers.vdf").read_text("utf8", "replace"))             if root else None
     except OSError:
@@ -217,6 +234,152 @@ def probe() -> dict:
     }
 
 
+# ------------------------------------------------------------------ Linux (Proton) probes
+
+GPU_VENDORS = {"nvidia": "4318", "amd": "4098", "ati": "4098", "intel": "32902"}   # PCI ids, decimal
+_REG_SECTION = re.compile(r"^\[(.+?)\](?:\s+\d+)?\s*$")
+_REG_VALUE = re.compile(r'^(@|"(?:[^"\\]|\\.)*")=(.*)$')
+
+
+def wine_reg(text: str) -> dict[str, dict[str, object]]:
+    """A Wine registry file (`system.reg`, `user.reg`) -> {key path, lower case: {value name,
+    lower case: value}}. Strings are unescaped, `dword:` values are ints; other types are kept
+    as their raw text."""
+    out: dict[str, dict[str, object]] = {}
+    current: dict[str, object] | None = None
+    for line in text.splitlines():
+        m = _REG_SECTION.match(line)
+        if m:
+            current = out.setdefault(m.group(1).replace("\\\\", "\\").lower(), {})
+            continue
+        m = _REG_VALUE.match(line)
+        if not m or current is None:
+            continue
+        name = "" if m.group(1) == "@" else _unescape(m.group(1)[1:-1])
+        raw = m.group(2)
+        if raw.startswith('"') and raw.endswith('"'):
+            value: object = _unescape(raw[1:-1])
+        elif raw.startswith("dword:"):
+            value = int(raw[6:], 16)
+        else:
+            value = raw
+        current[name.lower()] = value
+    return out
+
+
+def _unescape(s: str) -> str:
+    return re.sub(r"\\(.)", lambda m: m.group(1), s)
+
+
+def player_log_gpu(text: str) -> dict | None:
+    """Unity's own graphics lines from Player.log -> {"name", "vendor", "vram_mb"}, None without
+    a Renderer line ('    Renderer: NVIDIA GeForce RTX 3070 (ID=0x2484)')."""
+    renderer = re.search(r"^\s*Renderer:\s*(.+?)\s*$", text, re.M)
+    if not renderer:
+        return None
+    name = re.sub(r"\s*\(ID=0x[0-9a-fA-F]+\)$", "", renderer.group(1))
+    vendor = re.search(r"^\s*Vendor:\s*(.+?)\s*$", text, re.M)
+    words = (vendor.group(1) if vendor else name).lower().split()
+    return {"name": name, "vendor": next((GPU_VENDORS[w] for w in words if w in GPU_VENDORS), None),
+            "vram_mb": player_log_vram(text)}
+
+
+def drm_screen(sys_root: Path) -> tuple[int, int] | None:
+    """The preferred mode of the first connected display (`/sys/class/drm/*/modes`)."""
+    for conn in sorted((sys_root / "sys" / "class" / "drm").glob("card*-*")):
+        try:
+            if (conn / "status").read_text().strip() != "connected":
+                continue
+            first = (conn / "modes").read_text().split()[0]
+        except (OSError, IndexError):
+            continue
+        m = re.fullmatch(r"(\d+)x(\d+)\w*", first)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def _read(path: Path) -> str | None:
+    try:
+        return path.read_text("utf8", "replace")
+    except OSError:
+        return None
+
+
+def proton_prefix(game_data: Path) -> Path | None:
+    """The Proton prefix (`.../compatdata/<app id>/pfx`) the game's data folder is inside."""
+    for parent in game_data.parents:
+        if parent.name == "pfx" and (parent / "system.reg").is_file():
+            return parent
+    return None
+
+
+def probe_proton(game_data: Path | None = None, sys_root: Path = Path("/")) -> dict:
+    """This PC's facts as the client sees them under Proton (the module docstring lists the
+    sources). ProfileUnavailable, naming what is missing, when one cannot be read."""
+    game_data = paths.GAME_DATA if game_data is None else game_data
+    prefix = proton_prefix(game_data)
+    start = ("start hololive Dreams once through Steam (Proton) and get past its title screen, "
+             "or copy state/client_profile.json from a PC where the game runs on Windows")
+    if prefix is None:
+        raise ProfileUnavailable(f"no Proton prefix with a system.reg around {game_data}: {start}")
+    system = wine_reg(_read(prefix / "system.reg") or "")
+    user = wine_reg(_read(prefix / "user.reg") or "")
+    version = system.get(r"software\microsoft\windows nt\currentversion", {})
+    try:
+        build = int(str(version.get("currentbuild") or version.get("currentbuildnumber")))
+    except ValueError:
+        raise ProfileUnavailable(f"{prefix / 'system.reg'} names no Windows build: {start}") from None
+    release = str(version.get("currentmajorversionnumber") or "10")
+    log = _read(game_data / "Player.log") or _read(game_data / "Player-prev.log") or ""
+    gpu = player_log_gpu(log)
+    if gpu is None or not gpu["vram_mb"]:
+        raise ProfileUnavailable(f"no graphics lines in {game_data / 'Player.log'}: {start}")
+    bios = system.get(r"hardware\description\system\bios", {})
+    product = bios.get("systemproductname") or (_read(sys_root / "sys/class/dmi/id/product_name") or "").strip()
+    maker = bios.get("systemmanufacturer") or (_read(sys_root / "sys/class/dmi/id/sys_vendor") or "").strip()
+    cpu = system.get(r"hardware\description\system\centralprocessor\0", {}).get("processornamestring")
+    if not cpu:
+        m = re.search(r"^model name\s*:\s*(.+?)\s*$", _read(sys_root / "proc/cpuinfo") or "", re.M)
+        cpu = m.group(1) if m else None
+    ram = re.search(r"^MemTotal:\s*(\d+)\s*kB", _read(sys_root / "proc/meminfo") or "", re.M)
+    screen = drm_screen(sys_root)
+    missing = [what for what, v in (("the device name (/sys/class/dmi/id)", product or maker),
+                                    ("the CPU (/proc/cpuinfo)", cpu), ("the RAM (/proc/meminfo)", ram),
+                                    ("the screen size (/sys/class/drm)", screen),
+                                    ("the GPU vendor (Player.log)", gpu["vendor"])) if not v]
+    if missing:
+        raise ProfileUnavailable("cannot read " + ", ".join(missing) + " on this PC: copy "
+                                 "state/client_profile.json from a PC where the game runs on Windows")
+    dpi = user.get(r"control panel\desktop", {}).get("logpixels") or \
+        user.get(r"software\wine\fonts", {}).get("logpixels") or 96
+    return {
+        "product": product, "maker": maker, "cpu": cpu, "threads": os.cpu_count() or 1,
+        "ram_mb": int(ram.group(1)) // 1024,
+        "gpu": {"name": gpu["name"], "vendor": gpu["vendor"], "memory": gpu["vram_mb"] << 20},
+        "vram_mb": gpu["vram_mb"], "screen": [screen[0], screen[1], int(dpi)],
+        "build": build, "release": release,
+    }
+
+
+def steam_id_linux(roots: list[str] | None = None) -> str | None:
+    """Linux Steam's account: the running one (`registry.vdf` ActiveUser, beside the Steam
+    folders), else the most recent of `config/loginusers.vdf`."""
+    roots = paths.steam_roots() if roots is None else roots
+    for root in roots:
+        text = _read(Path(root).parent / "registry.vdf")
+        m = re.search(r'"ActiveUser"\s+"(\d+)"', text or "")
+        if m and steam_id64(m.group(1)):
+            return steam_id64(m.group(1))
+    for root in roots:
+        text = _read(Path(root) / "config" / "loginusers.vdf")
+        if text:
+            found = most_recent_login(text)
+            if found:
+                return found
+    return None
+
+
 def headers(facts: dict, *, version: str, steam_id: str | None = None) -> dict:
     gpu = facts.get("gpu") or {}
     w, h, dpi = facts["screen"]
@@ -242,10 +405,11 @@ def headers(facts: dict, *, version: str, steam_id: str | None = None) -> dict:
 
 
 GENERATED = "generated from this PC's hardware (tools/app/client_profile.py)"
+GENERATED_PROTON = "generated from this PC's Proton prefix and hardware (tools/app/client_profile.py)"
 
 
 def ensure(steam_override: str | None = None, *, path: Path = PROFILE, facts: dict | None = None,
-           find_steam=None, version: str | None = None) -> dict:
+           find_steam=None, version: str | None = None, platform: str = sys.platform) -> dict:
     """Make state/client_profile.json this PC's, at every start of the app.
 
     A CAPTURED profile (the real client's own headers) is never touched. A generated one is
@@ -257,24 +421,28 @@ def ensure(steam_override: str | None = None, *, path: Path = PROFILE, facts: di
         old = json.loads(path.read_text("utf8"))
     except (OSError, ValueError):
         old = None
-    if old is not None and old.get("source") != GENERATED:
+    # Linux: a profile put there by hand (a Windows PC's, a captured one) is kept as it is
+    mine = GENERATED if platform == "win32" else GENERATED_PROTON
+    if old is not None and old.get("source") != mine:
         return {"captured": True, "written": False,
                 "steam_id": "found" if old.get("headers", {}).get("x-app-steam-id") else None}
     typed = (steam_override or "").strip()
     sid, how = (typed, "typed") if valid_steam_id(typed) else (None, None)
     if not sid:
-        sid = (find_steam or steam_id)()
+        sid = (find_steam or (steam_id if platform == "win32" else steam_id_linux))()
         how = "found" if sid else None
     if version is None:
-        sys.path.insert(0, str(REPO / "tools" / "recon" / "proxy"))
+        sys.path.insert(0, str(paths.REFRESH_DIR))
         import account_snapshot as A  # noqa: PLC0415
         version = A.app_version() or dict(A.GENERIC_HEADERS)["x-app-version"]
-    hdrs = headers(facts or probe(), version=version, steam_id=sid)
+    if facts is None:
+        facts = probe() if platform == "win32" else probe_proton()
+    hdrs = headers(facts, version=version, steam_id=sid)
     if old is not None and old.get("headers") == hdrs:
         return {"captured": False, "written": False, "steam_id": how}
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps({
-        "headers": hdrs, "source": GENERATED,
+        "headers": hdrs, "source": mine,
         "_warning": "This PC's hardware identity" + (" and Steam ID" if sid else "")
                     + ". state/ is gitignored."}, indent=1), "utf8")
     return {"captured": False, "written": True, "steam_id": how}
@@ -293,7 +461,7 @@ def main(argv: list[str] | None = None) -> int:
               + f"; Steam ID {r['steam_id'] or 'NOT FOUND'}")
         return 0
     sid = args.steam_id if valid_steam_id(args.steam_id) else steam_id()
-    sys.path.insert(0, str(REPO / "tools" / "recon" / "proxy"))
+    sys.path.insert(0, str(paths.REFRESH_DIR))
     import account_snapshot as A  # noqa: PLC0415
     hdrs = headers(probe(), version=A.app_version() or dict(A.GENERIC_HEADERS)["x-app-version"],
                    steam_id=sid)

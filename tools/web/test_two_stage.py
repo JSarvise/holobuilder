@@ -7,7 +7,7 @@ scored one, returns its candidates in its own model's order, and is
 deterministic. The search is held to the property that makes it safe: every
 score it returns is the exact scorer's, and on pools small enough to brute-force
 it finds the true best. Synthetic pools only; the recall measured on the real
-enumerations is in `tools/recon/TWO-STAGE.md`.
+enumerations is on the archive/research branch.
 """
 from __future__ import annotations
 
@@ -401,3 +401,29 @@ def test_fitted_chart_sample_picks_the_charts_that_track_every_teams_full_mean()
     assert two_stage.fitted_chart_sample(scores, 12) == list(range(12))
     with pytest.raises(ValueError):
         two_stage.fitted_chart_sample([[1.0, 2.0], [1.0]], 1)
+
+
+@pytest.mark.parametrize("threads", [2, 3, 7, 16])
+def test_the_scan_split_over_threads_is_the_whole_scan(monkeypatch, threads):
+    """`Screen.best` split by first card over threads (`hd_sur_scan_part`) returns the
+    whole scan's sets, predictions and legal count, in its order: flat model (all ties),
+    fitted model, sets left out, and more sets asked than exist."""
+    cards = _pool(26, seed=8, holomems=19)
+    legal = _legal(cards)
+    score, _score_sets, _calls = _scorer(cards, seed=9)
+    train = random.Random(10).sample(legal, 2500)
+    cases = []
+    for fitted in (False, True):
+        screen = surrogate.Screen(cards)
+        if fitted:
+            screen.fit(train, [math.log(score(s)) for s in train])
+        for want, seen in ((300, ()), (300, train[:900]), (len(legal) + 10, train[:50])):
+            monkeypatch.setattr(surrogate, "SCAN_THREADS", 1)
+            serial = screen.best(want, seen)
+            monkeypatch.setattr(surrogate, "SCAN_THREADS", threads)
+            monkeypatch.setattr(surrogate, "SCAN_THREADS_MIN_CARDS", 1)
+            split = screen.best(want, seen)
+            monkeypatch.setattr(surrogate, "SCAN_THREADS_MIN_CARDS", 10_000)
+            cases.append((fitted, want))
+            assert split == serial, (fitted, want, len(seen))
+    assert len(cases) == 6

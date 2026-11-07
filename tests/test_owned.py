@@ -7,9 +7,6 @@ distinction against the shipped fixture (now at tests/fixtures/)."""
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -17,7 +14,7 @@ import pytest
 from hbuilder.domain.loader import completeness_report, load_cards, load_owned
 from hbuilder.domain.schema import SCHEMA_VERSION, SchemaError
 
-from conftest import FIXTURE_CARDS_PATH, FIXTURE_OWNED_PATH
+from support.builders import FIXTURE_CARDS_PATH, FIXTURE_OWNED_PATH
 
 CARDS_PATH = FIXTURE_CARDS_PATH
 OWNED_PATH = FIXTURE_OWNED_PATH
@@ -146,73 +143,3 @@ def test_completeness_report_omits_cards_with_no_unknown_fields(cards):
 # --- CLI: OWNED and COMPLETENESS lines --------------------------------------
 
 
-def test_cli_prints_owned_and_completeness_lines():
-    # D-09: the standalone gate-report script folded into `hbuilder
-    # gates`; this now runs through hbuilder.cli's `gates` subcommand
-    # instead of a standalone module.
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "hbuilder.cli",
-            "gates",
-            "--cards",
-            str(CARDS_PATH),
-            "--owned",
-            str(OWNED_PATH),
-            "--leader",
-            "nene_01",
-            "--members",
-            "fubuki_01,mio_01,matsuri_01,polka_01,lamy_01",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=env,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "OWNED: 6/6" in result.stdout
-    assert "COMPLETENESS: 5/6" in result.stdout
-    assert "mio_01.skills.ACTIVE.magnitude" in result.stdout
-    assert "lamy_01" not in result.stdout.split("COMPLETENESS:")[1]
-
-
-def test_cli_reports_missing_owned_file_on_stderr_with_exit_code_3(tmp_path):
-    # D-24b: this failure class is reassigned from exit 2 to exit 3
-    # (EXIT_INPUT_DATA) as part of folding the standalone gate-report
-    # script into `hbuilder gates` behind the shared load-and-guard — 2
-    # is now reserved for argparse's own usage errors alone.
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-    missing_owned = tmp_path / "does_not_exist.json"
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "hbuilder.cli",
-            "gates",
-            "--cards",
-            str(CARDS_PATH),
-            "--owned",
-            str(missing_owned),
-            "--leader",
-            "nene_01",
-            "--members",
-            "fubuki_01,mio_01,matsuri_01,polka_01,lamy_01",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=env,
-    )
-
-    assert result.returncode == 3
-    assert result.stdout == ""
-    assert str(missing_owned) in result.stderr

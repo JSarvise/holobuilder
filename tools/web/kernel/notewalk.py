@@ -3,26 +3,27 @@
 Web/recon side only: nothing under `src/hbuilder/` imports this. The domain
 exposes a seam and the caller injects the kernel, the way the exact board solver
 is injected. `ctypes` is stdlib; the only build requirement is a C compiler
-(e.g. `gcc` from WinLibs on Windows).
+(`gcc`: WinLibs on Windows, the distribution's on Linux).
 
     python tools/web/kernel/notewalk.py --build      # compile the shared library
 
-The flags are part of the contract, not a preference: `-ffp-contract=off` and no
-`-ffast-math`, so the result is bit-identical to the Python it replaces.
+Compiled with `cbuild.py`'s flags, so the result is bit-identical to the Python it
+replaces, on Windows and Linux alike.
 """
 from __future__ import annotations
 
 import ctypes
 import threading
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "notewalk.c"
-LIBRARY = HERE / ("notewalk.dll" if sys.platform == "win32" else "notewalk.so")
-CFLAGS = ["-O2", "-ffp-contract=off", "-fno-fast-math", "-shared", "-fPIC"]
+if str(HERE) not in sys.path:          # loaded by file path in a worker too
+    sys.path.insert(0, str(HERE))
+import cbuild  # noqa: E402
+
+LIBRARY = cbuild.library(HERE, "notewalk")
 MAX_TERMS = 64          # 64-bit live masks (riders add ~10 terms a team)
 SLOTS = 5
 
@@ -42,13 +43,7 @@ class Term(ctypes.Structure):
 
 def build(force: bool = False) -> Path:
     """Compile the kernel if the library is missing or older than its source."""
-    if not force and LIBRARY.exists() and LIBRARY.stat().st_mtime >= SOURCE.stat().st_mtime:
-        return LIBRARY
-    gcc = shutil.which("gcc")
-    if gcc is None:
-        raise RuntimeError("no gcc on PATH; the note-walk kernel cannot be built")
-    subprocess.run([gcc, *CFLAGS, "-o", str(LIBRARY), str(SOURCE)], check=True)
-    return LIBRARY
+    return cbuild.build(SOURCE, LIBRARY, "note-walk", force)
 
 
 _lib = None
@@ -175,7 +170,6 @@ def walk(note_weights, liveness, constant, terms, score_rates, skill_effect_up,
     if (
         cfg.stacking_model.name != "additive"
         or cfg.active_stacking_model.name != "max"
-        or cfg.active_instant_model is not None
         or len(terms) > MAX_TERMS
         or len(score_rates) > MAX_TERMS
     ):

@@ -497,7 +497,7 @@ async function songDetail(c, r, i, det) {
     repaint(c, r, i);
     const bs = det.fig.board_state;
     if (bs && Object.keys(bs).length) {
-      await postJSON("/api/board-doc", isMaxed(S) ? { board_state: bs, cards, basis: "maxed", budget: 453, complete: true }
+      await postJSON("/api/board-doc", isMaxed(S) ? { board_state: bs, cards, basis: "maxed", budget: "max", complete: true }
         : { board_state: bs, cards, basis: "account" })
         .then(x => { if (!stale()) det.doc = x; }).catch(e => { if (!stale()) det.docErr = e.message; });
       // the whole account's plan when the boards are planned (see opt-score.js boardDoc)

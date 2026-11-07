@@ -7,32 +7,9 @@ instead of failing after it). REDESIGN-PLAN Phase A."""
 from __future__ import annotations
 
 import json
-import socket
-import threading
 import urllib.request
 
-import pytest
-
-import server as web_server
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def web_base():
-    port = _free_port()
-    server = web_server.ThreadingServer((web_server.BIND_HOST, port), web_server.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
+from hbweb import config
 
 
 def test_meta_carries_provenance_and_capability(web_base):
@@ -47,10 +24,10 @@ def test_meta_carries_provenance_and_capability(web_base):
 def test_meta_reports_power_up_under_upgraded_cards(web_base):
     """Cards "Upgraded": the sheet shows the Member Power-Up the search scores with
     (every owned card at max level), not only the account's own."""
-    from hbuilder.cli import apply_collection, load_inputs
+    from hbuilder.inputs import apply_collection, load_inputs
 
-    cards, owned, _cfg, _prov = load_inputs(web_server.CARDS_PATH, web_server.OWNED_PATH, False)
-    _c, basis = apply_collection(cards, str(web_server.COLLECTION_PATH), owned_ids=[c.id for c in owned],
+    cards, owned, _cfg, _prov = load_inputs(config.CARDS_PATH, config.OWNED_PATH)
+    _c, basis = apply_collection(cards, str(config.COLLECTION_PATH), owned_ids=[c.id for c in owned],
                                  maxed=False, assume_level="max")
     want = basis.bonuses.power_up_permyriad
     with urllib.request.urlopen(web_base + "/api/meta?level=max&sp_training=4", timeout=120) as response:

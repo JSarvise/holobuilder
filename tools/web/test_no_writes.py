@@ -14,7 +14,8 @@ not:
 
 1. **Taint tracking.** Any expression that mentions `"cards.json"` or
    `"owned.json"` -- as a literal, as a `REPO_ROOT / "data" / "cards.json"`
-   join, or through a module-level name bound to either -- is tainted.
+   join, or through a name bound to either in ANY module of the package
+   (`config.CARDS_PATH` read from another module is tainted too) -- is tainted.
    A tainted expression may only reach a **whitelisted read sink**
    (`load_inputs`, `load_cards`, `load_owned`, `Path`, `str`, ...). Any
    other call receiving it fails. This is an allowlist, not a blocklist:
@@ -39,6 +40,7 @@ solver's correctness suite.
 from __future__ import annotations
 
 import ast
+import functools
 from pathlib import Path
 
 import pytest
@@ -47,7 +49,7 @@ WEB_ROOT = Path(__file__).resolve().parent
 _SELF = Path(__file__).resolve()
 
 # The two protected files, by basename. Basename rather than the joined
-# "data/cards.json" because `server.py` builds them as
+# "data/cards.json" because `hbweb/config.py` builds them as
 # `REPO_ROOT / "data" / "cards.json"` -- the joined string never appears
 # as one constant anywhere, which is exactly how a grep-based guard would
 # have missed it.
@@ -72,12 +74,14 @@ READ_SINKS = frozenset(
         "read_text",
         "read_bytes",
         "is_dir",
-        # `server._read_json` — a JSON file or `None` when absent. Named here
-        # deliberately rather than by widening the rule: it reaches only
-        # `is_file` and `read_text`, both already on this list. The only reason
-        # it had to be added at all is that this is an allowlist, and a read
-        # helper nobody thought about is rejected by default. That is the
-        # design working, not friction to be removed.
+        # `hbweb.config.read_json` and `leaf_inputs._read_json` — a JSON file
+        # or `None` when absent. Named here deliberately rather than by
+        # widening the rule: each reaches only `is_file` and `read_text`, both
+        # already on this list. The only reason they had to be added at all is
+        # that this is an allowlist, and a read helper nobody thought about is
+        # rejected by default. That is the design working, not friction to be
+        # removed.
+        "read_json",
         "_read_json",
     }
 )
@@ -86,7 +90,12 @@ READ_SINKS = frozenset(
 # is the collection editor's output. When a module gains write access to
 # `state/`, this guard is EXTENDED rather than copied: the allowlist gets that
 # one file and the two canonical files keep exactly the sinks they have.
+# The constant is bound in `hbweb/config.py` (WRITE_SINK_HOME), and the one
+# module that writes it (WRITE_SINK_WRITER) reads it as `config.COLLECTION_PATH`.
 WRITE_SINK_NAME = "COLLECTION_PATH"
+WRITE_SINK_MODULE = "config"
+WRITE_SINK_HOME = WEB_ROOT / "hbweb" / "config.py"
+WRITE_SINK_WRITER = WEB_ROOT / "hbweb" / "collection.py"
 
 # Check 4's mutator set, deliberately NARROWER than `MUTATORS`. Bare `write`
 # and `replace` are excluded because in this package they are
@@ -140,8 +149,11 @@ def _web_files() -> list[Path]:
     # the no-writes rule (server must not write protected paths on a request) does
     # not apply to it. Everything else under tools/web/ is in scope.
     # Test modules are not the server either: they build fixtures in pytest's tmp_path.
+    # `kernel/cbuild.py` is the C compiler step: it writes the kernels' libraries next to
+    # their sources (build products, gitignored), never data.
     return sorted(p for p in WEB_ROOT.rglob("*.py")
                   if p.resolve() != _SELF and "wasmdemo" not in p.parts
+                  and p.resolve() != WEB_ROOT / "kernel" / "cbuild.py"
                   and not p.name.startswith("test_"))
 
 
@@ -217,7 +229,8 @@ def _is_tainted(node: ast.AST | None, tainted: set[str], docstring_ids: set[int]
     if isinstance(node, ast.Attribute):
         if node.attr in PATH_ATTRS:
             return _is_tainted(node.value, tainted, docstring_ids)
-        return False
+        # `config.CARDS_PATH`: a protected name read from the module that binds it
+        return node.attr in tainted
     if isinstance(node, ast.Call):
         name = _call_name(node)
         if name not in PATH_PRESERVING:
@@ -238,10 +251,13 @@ def _is_tainted(node: ast.AST | None, tainted: set[str], docstring_ids: set[int]
     return False
 
 
-def _tainted_names(tree: ast.Module, docstring_ids: set[int]) -> set[str]:
+def _tainted_names(tree: ast.Module, docstring_ids: set[int],
+                   seed: frozenset[str] = frozenset()) -> set[str]:
     """Names bound to a protected path, to a fixed point so a chain of
-    rebindings is followed."""
-    tainted: set[str] = set()
+    rebindings is followed. `seed`: the names other modules of the package
+    bind to one (`_package_tainted`), so reading them across modules keeps
+    the taint."""
+    tainted: set[str] = set(seed)
     for _ in range(4):  # far past any real rebinding chain
         before = len(tainted)
         for node in ast.walk(tree):
@@ -262,6 +278,16 @@ def _tainted_names(tree: ast.Module, docstring_ids: set[int]) -> set[str]:
     return tainted
 
 
+@functools.lru_cache(maxsize=1)
+def _package_tainted() -> frozenset[str]:
+    """Every name any module of the package binds to a protected path."""
+    names: set[str] = set()
+    for path in _web_files():
+        tree = _parse(path)
+        names |= _tainted_names(tree, _docstring_ids(tree))
+    return frozenset(names)
+
+
 def _call_name(call: ast.Call) -> str:
     func = call.func
     if isinstance(func, ast.Name):
@@ -277,6 +303,9 @@ def test_web_package_has_source_to_scan() -> None:
     files = _web_files()
     assert files, f"no .py files found under {WEB_ROOT}"
     assert any(p.name == "server.py" for p in files), [p.name for p in files]
+    assert WRITE_SINK_HOME in files and WRITE_SINK_WRITER in files, [p.name for p in files]
+    # the package's protected names are found, or the cross-module taint is empty
+    assert {"CARDS_PATH", "OWNED_PATH"} <= _package_tainted()
 
 
 @pytest.mark.parametrize("path", _web_files(), ids=lambda p: p.name)
@@ -285,7 +314,7 @@ def test_protected_paths_reach_only_read_sinks(path: Path) -> None:
     whitelisted read sink."""
     tree = _parse(path)
     docstring_ids = _docstring_ids(tree)
-    tainted = _tainted_names(tree, docstring_ids)
+    tainted = _tainted_names(tree, docstring_ids, _package_tainted())
     offenders: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -310,7 +339,7 @@ def test_protected_paths_are_never_mutated(path: Path) -> None:
     friends."""
     tree = _parse(path)
     docstring_ids = _docstring_ids(tree)
-    tainted = _tainted_names(tree, docstring_ids)
+    tainted = _tainted_names(tree, docstring_ids, _package_tainted())
     offenders: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
@@ -320,6 +349,30 @@ def test_protected_paths_are_never_mutated(path: Path) -> None:
         if _is_tainted(node.func.value, tainted, docstring_ids):
             offenders.append(f"line {node.lineno}: .{node.func.attr}() on a protected path")
     assert not offenders, f"{path.name}: {offenders}"
+
+
+def _rooted_at_write_sink(node: ast.AST) -> bool:
+    """Whether a path expression is the write sink: walking back through
+    `.parent` and friends (so `COLLECTION_PATH.parent.mkdir(...)` resolves to
+    `COLLECTION_PATH`, not to `parent`), it starts at `COLLECTION_PATH` itself
+    or at `config.COLLECTION_PATH` -- and at nothing else, so
+    `other.COLLECTION_PATH` or `config.OTHER_PATH` are still offenders."""
+    chain: list[str] = []
+    while isinstance(node, ast.Attribute):
+        chain.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return False
+    if node.id == WRITE_SINK_NAME:
+        return True
+    return node.id == WRITE_SINK_MODULE and bool(chain) and chain[-1] == WRITE_SINK_NAME
+
+
+def _write_sink_writes(tree: ast.AST) -> list[int]:
+    """Lines of the filesystem mutations rooted at the write sink."""
+    return [node.lineno for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in FS_MUTATORS and _rooted_at_write_sink(node.func.value)]
 
 
 def _write_offenders(tree: ast.AST) -> list[str]:
@@ -332,13 +385,11 @@ def _write_offenders(tree: ast.AST) -> list[str]:
         func = node.func
         if not isinstance(func, ast.Attribute) or func.attr not in FS_MUTATORS:
             continue
-        # Walk back to the root name so `COLLECTION_PATH.parent.mkdir(...)`
-        # resolves to `COLLECTION_PATH` rather than to `parent`.
+        if _rooted_at_write_sink(func.value):
+            continue
         root = func.value
         while isinstance(root, ast.Attribute):
             root = root.value
-        if isinstance(root, ast.Name) and root.id == WRITE_SINK_NAME:
-            continue
         offenders.append(
             f"line {node.lineno}: {getattr(root, 'id', type(root).__name__)}.{func.attr}(...)"
         )
@@ -361,6 +412,31 @@ def test_every_write_targets_the_one_allowed_path(path: Path) -> None:
         f"{path.name}: {offenders} — the only writable path in tools/web/ "
         f"is {WRITE_SINK_NAME}"
     )
+
+
+def test_the_write_sink_is_one_file_written_from_one_module() -> None:
+    """Check 4's other half: every module-level `COLLECTION_PATH` in the package
+    names the same file (`state/collection.json`; `hbweb/config.py` binds the one
+    the routes read, `leaf_inputs.py` a read-only copy for the search workers),
+    and every filesystem mutation rooted at it lives in exactly one module
+    (`hbweb/collection.py`, the collection editor's save). A binding to another
+    file or a second writer would each be a new write path that check 4 alone
+    accepts."""
+    binders, writers = [], []
+    for path in _web_files():
+        tree = _parse(path)
+        for node in tree.body:
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if any(isinstance(t, ast.Name) and t.id == WRITE_SINK_NAME for t in targets):
+                    binders.append((path, node))
+        if _write_sink_writes(tree):
+            writers.append(path)
+    assert WRITE_SINK_HOME in [p for p, _ in binders], [p.name for p, _ in binders]
+    for path, node in binders:
+        assert ast.unparse(node.value) == "paths.STATE / 'collection.json'", (
+            path.name, ast.unparse(node.value))
+    assert writers == [WRITE_SINK_WRITER], [p.name for p in writers]
 
 
 @pytest.mark.parametrize("path", _web_files(), ids=lambda p: p.name)
@@ -395,11 +471,11 @@ def test_guard_actually_catches_a_write(tmp_path: Path) -> None:
     three checks is run against a synthetic offender and must reject it."""
     docstring_ids: set[int]
 
-    def offenders_for(source: str, which: str) -> list[str]:
+    def offenders_for(source: str, which: str, seed: frozenset[str] = frozenset()) -> list[str]:
         tree = ast.parse(source)
         nonlocal docstring_ids
         docstring_ids = _docstring_ids(tree)
-        tainted = _tainted_names(tree, docstring_ids)
+        tainted = _tainted_names(tree, docstring_ids, seed)
         found: list[str] = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -433,6 +509,13 @@ def test_guard_actually_catches_a_write(tmp_path: Path) -> None:
     assert offenders_for(
         'P = ROOT / "data" / "owned.json"\nP.write_text("{}")\n', "mutator"
     ) == ["write_text"]
+    # Checks 1 and 2 across modules: a protected name another module binds,
+    # read here as an attribute.
+    seed = frozenset({"CARDS_PATH"})
+    assert offenders_for('json.dump(obj, config.CARDS_PATH)\n', "sink", seed) == ["dump"]
+    assert offenders_for('config.CARDS_PATH.write_text("{}")\n', "mutator", seed) == ["write_text"]
+    assert offenders_for('x = config.CARDS_PATH\nx.unlink()\n', "mutator", seed) == ["unlink"]
+    assert offenders_for('load_inputs(config.CARDS_PATH, config.OWNED_PATH)\n', "sink", seed) == []
     # Check 3: any write-mode open anywhere in the package.
     assert offenders_for('open(somewhere, "w")\n', "open") == ["w"]
 
@@ -445,13 +528,18 @@ def test_guard_actually_catches_a_write(tmp_path: Path) -> None:
     assert not _write_offenders(
         ast.parse(f'{WRITE_SINK_NAME}.parent.mkdir(parents=True, exist_ok=True)\n')
     )
+    assert not _write_offenders(ast.parse(f'config.{WRITE_SINK_NAME}.write_text("x")\n'))
+    assert not _write_offenders(ast.parse(f'config.{WRITE_SINK_NAME}.parent.mkdir()\n'))
+    assert _write_offenders(ast.parse('config.OTHER_PATH.write_text("x")\n'))
+    assert _write_offenders(ast.parse(f'other.{WRITE_SINK_NAME}.write_text("x")\n'))
+    assert _write_offenders(ast.parse(f'config.parent.{WRITE_SINK_NAME}.write_text("x")\n'))
     # And the three non-filesystem writes this package genuinely makes must NOT
     # fire, or check 4 gets relaxed the first time it does.
     assert not _write_offenders(ast.parse("self.wfile.write(body)\n"))
     assert not _write_offenders(ast.parse('sys.stderr.write("x")\n'))
     assert not _write_offenders(ast.parse("dataclasses.replace(cfg, board=m)\n"))
     # And the legitimate shape must NOT be flagged by any of the three.
-    ok = 'CARDS_PATH = ROOT / "data" / "cards.json"\nload_inputs(CARDS_PATH, OWNED_PATH, False)\n'
+    ok = 'CARDS_PATH = ROOT / "data" / "cards.json"\nload_inputs(CARDS_PATH, OWNED_PATH)\n'
     assert offenders_for(ok, "sink") == []
     assert offenders_for(ok, "mutator") == []
     assert offenders_for(ok, "open") == []

@@ -20,35 +20,45 @@ value is the account's own read back from `User/Get`, and it backs up once to
 """
 from __future__ import annotations
 
-import re
+import ast
 from pathlib import Path
+
+from hbweb import config
 
 REPO = Path(__file__).resolve().parents[2]
 
 
 def test_the_refresh_route_passes_merge_collection():
-    """A structural check on the source, deliberately: `_refresh` shells out to
+    """A structural check on the source, deliberately: `admin.refresh` shells out to
     a subprocess that spends the account credential, so a test that RAN it would
     hit the live game. What can be checked without the network is that the argv
     the handler builds carries the flag."""
-    source = (REPO / "tools" / "web" / "server.py").read_text(encoding="utf-8")
-    body = source.split("def _refresh(self)", 1)[1].split("\n    def ", 1)[0]
-    assert "refresh_all.py" in body
-    assert "--merge-collection" in body, (
+    source = (REPO / "tools" / "web" / "hbweb" / "admin.py").read_text(encoding="utf-8")
+    refresh = next(node for node in ast.parse(source).body
+                   if isinstance(node, ast.FunctionDef) and node.name == "refresh")
+    calls = [node for node in ast.walk(refresh) if isinstance(node, ast.Call)
+             and ast.unparse(node.func) == "scripts.run_recon_script"]
+    assert len(calls) == 1, "refresh must start refresh_all.py through run_recon_script"
+    assert ast.unparse(calls[0].args[1]) == "config.REFRESH_SCRIPT"
+    assert config.REFRESH_SCRIPT.name == "refresh_all.py"
+    # ...and it must reach the subprocess, not merely appear in a comment: the flag is a
+    # string in the list bound to the argv the call passes.
+    argv_name = ast.unparse(calls[0].args[3])
+    bound = [node.value for node in ast.walk(refresh) if isinstance(node, ast.Assign)
+             and [ast.unparse(t) for t in node.targets] == [argv_name]]
+    assert bound and isinstance(bound[0], ast.List), "could not find the subprocess argv in refresh"
+    flags = [elt.value for elt in bound[0].elts if isinstance(elt, ast.Constant)]
+    assert "--merge-collection" in flags, (
         "the refresh button must merge the account into state/collection.json; "
         "without it the solver keeps scoring stale card levels and says nothing"
     )
-    # ...and it must reach the subprocess, not merely appear in a comment.
-    argv = re.search(r"\[\s*sys\.executable[^\]]*\]", body, re.S)
-    assert argv is not None, "could not find the subprocess argv in _refresh"
-    assert "--merge-collection" in argv.group(0)
 
 
 def test_refresh_all_still_defaults_the_flag_OFF_for_the_command_line():
     """The button runs the merge; the command line does not by default. A bare
     `python refresh_all.py` must NOT write the account's collection, so the
     exception stays one explicit caller rather than becoming the default."""
-    source = (REPO / "tools" / "recon" / "proxy" / "refresh_all.py").read_text(
+    source = (REPO / "tools" / "refresh" / "refresh_all.py").read_text(
         encoding="utf-8"
     )
     marker = 'ap.add_argument(\n        "--merge-collection",'

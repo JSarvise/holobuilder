@@ -1,6 +1,6 @@
 """Ranking teams by what they would actually score, on one chart or across all.
 
-The two-stage design and its cost are in `domain/song_rank.py`'s docstring.
+The ranking drivers are in `tests/support/song_ranking.py`; the per-team scorer in `domain/song_rank.py`.
 These pin the parts that would be wrong silently:
 
 * the ranking must AGREE with `score_song_detailed` — it is a re-ranker, not a
@@ -17,7 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from conftest import FIXTURE_CARDS_PATH, make_scoring_config
+from support.builders import FIXTURE_CARDS_PATH, make_scoring_config
 
 from hbuilder.domain.loader import load_cards
 from hbuilder.domain.song import (
@@ -27,7 +27,7 @@ from hbuilder.domain.song import (
     overall_power_for,
     score_song_detailed,
 )
-from hbuilder.domain.song_rank import (
+from support.song_ranking import (
     TeamSongScore,
     assemble_across_charts,
     rank_across_charts,
@@ -35,12 +35,6 @@ from hbuilder.domain.song_rank import (
     score_teams_on_chart,
 )
 from hbuilder.domain.team import Team
-from hbuilder.output.song_table import (
-    SONGS_TABLE_COLUMNS,
-    SONG_TABLE_COLUMNS,
-    format_song_basis,
-    format_song_rows,
-)
 
 _DUMPS = Path(__file__).resolve().parents[1] / "tools" / "recon" / "proxy" / "dumps"
 
@@ -254,43 +248,7 @@ def test_the_serial_progress_cadence_is_per_evaluation_and_reaches_the_total(
 
 
 # ==========================================================================
-# 3. The renderer
-# ==========================================================================
-
-
-def test_the_renderer_never_reorders_and_uses_the_right_columns(cards, cfg):
-    one = rank_on_chart(_teams(cards), _chart(), cfg)
-    lines = format_song_rows(one)
-    assert lines[0] == " ".join(SONG_TABLE_COLUMNS)
-    assert [line.split()[2] for line in lines[1:]] == [
-        row.leader_id for row in one.teams
-    ]
-
-    across = rank_across_charts(_teams(cards), [_chart("m0001"), _chart("m0002")], cfg)
-    lines = format_song_rows(across)
-    assert lines[0] == " ".join(SONGS_TABLE_COLUMNS)
-    assert [line.split()[3] for line in lines[1:]] == [
-        row.leader_id for row in across.teams
-    ]
-
-
-def test_top_truncates_without_reordering(cards, cfg):
-    ranking = rank_on_chart(_teams(cards), _chart(), cfg)
-    assert len(format_song_rows(ranking, top=2)) == 3  # header + 2
-
-
-def test_the_basis_always_states_the_stage_one_filter(cards, cfg):
-    """A reader who is not told that stage 1 filtered cannot know to widen K
-    and re-check. It is a statement of fact, not a caveat, so it is always
-    printed."""
-    ranking = rank_on_chart(_teams(cards), _chart(), cfg, filtered_from=50)
-    basis = format_song_basis(ranking)
-    assert any("top 50" in line for line in basis)
-    assert any("m0001" in line for line in basis)
-
-
-# ==========================================================================
-# 4. Against the real charts
+# 3. Against the real charts
 # ==========================================================================
 
 
@@ -304,7 +262,6 @@ def test_a_real_chart_ranks_end_to_end(cards, cfg):
     assert len(ranking.teams) == 3
     assert all(row.expected_score > 0 for row in ranking.teams)
     assert all(len(row.member_order) == 5 for row in ranking.teams)
-    assert format_song_rows(ranking)[0] == " ".join(SONG_TABLE_COLUMNS)
 
 
 # ==========================================================================
@@ -327,7 +284,7 @@ def test_score_team_on_chart_is_the_rankers_own_number(cards, cfg):
     got = score_team_on_chart(team, chart, cfg)
     assert got.total_score == ranked.expected_score
     assert got.member_order == ranked.member_order
-    assert got.deck_power == overall_power_for(tuple(team.members), team.leader, cfg)
+    assert got.deck_power == overall_power_for(tuple(team.members), team.leader, cfg).value
 
     modelled_cfg = dataclasses.replace(cfg, song_absolute_deck_power=False)
     bare = score_song_detailed(tuple(team.members), (team.leader,), chart, modelled_cfg)[0]

@@ -10,8 +10,6 @@ asked for the ORIGINAL bytes, no `?w=`)."""
 from __future__ import annotations
 
 import shutil
-import socket
-import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -19,6 +17,7 @@ from pathlib import Path
 import pytest
 
 import server as web_server
+from hbweb import config
 
 _REPO = Path(__file__).resolve().parents[2]
 _REAL_ART = _REPO / "tools" / "explorer" / "cards_explorer_art"
@@ -26,7 +25,7 @@ OLD, NEW = "card-00001-5-uniq-0000-00", "card-04012-5-uniq-0087-00"
 
 
 @pytest.fixture()
-def web(tmp_path, tmp_path_factory, monkeypatch):
+def web(tmp_path, tmp_path_factory, monkeypatch, serve_web):
     sample = next(iter(sorted(_REAL_ART.glob("*.sq.webp"))), None) if _REAL_ART.is_dir() else None
     if sample is None:
         pytest.skip("no card art in this checkout to use as sample bytes")
@@ -35,18 +34,10 @@ def web(tmp_path, tmp_path_factory, monkeypatch):
     shutil.copyfile(sample, images / f"img_card_vert_{OLD[5:]}.webp")       # the cache has the old card
     shutil.copyfile(sample, art / f"{NEW}.webp")                            # the refresh brought the new one
     shutil.copyfile(sample, art / f"{NEW}.sq.webp")
-    monkeypatch.setattr(web_server, "CARD_IMAGES_DIR", images)
+    monkeypatch.setattr(config, "CARD_IMAGES_DIR", images)
     monkeypatch.setattr(web_server.Handler, "art_dir", art, raising=False)
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    httpd = web_server.ThreadingServer((web_server.BIND_HOST, port), web_server.Handler)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}", sample.read_bytes()
-    finally:
-        httpd.shutdown()
-        httpd.server_close()
+    with serve_web() as base:
+        yield base, sample.read_bytes()
 
 
 def _get(url: str) -> tuple[int, bytes]:

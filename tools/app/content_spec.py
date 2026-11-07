@@ -25,7 +25,9 @@ import fnmatch
 import os
 from pathlib import Path
 
-D = "tools/recon/proxy/dumps/"
+from hbuilder import paths
+
+D = paths.DUMPS_REL + "/"
 
 SYNC: list[str] = [
     # solver and pages
@@ -50,13 +52,13 @@ SYNC: list[str] = [
         "Card", "CardLevel", "LangItem_Eng", "LangMarathonRankingGrade_Eng", "LangMusic_Eng",
         "Live", "LiveDeckEvaluationRank", "LiveNote", "LiveScoreEvaluationRank",
         "MarathonRankingGrade", "Music", "Poster", "Setting", "SkillTreeEffectValueLimit",
-        "SkillTreeNode")),
+        "SkillTreeNode", "CharacterLevel")),
     # small art every page draws, and the indexes the pages list
     D + "card_chrome/*", D + "ui_official/*", D + "member_icons/*", D + "item_icons/*",
     D + "song_jackets/*", D + "park_export/*",
     D + "skill_icons/index.json", D + "skill_icons/img_skill_icon_*",
     D + "skill_icons/mdl_map*", D + "skill_icons/img_card_vert_*",
-    # (not the Cubism Core: each PC downloads it from Live2D itself, server._live2d_core)
+    # (not the Cubism Core: each PC downloads it from Live2D itself, hbweb.static.live2d_core)
     D + "live2d/index.json", D + "chibi/index.json",
 ]
 

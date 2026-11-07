@@ -6,7 +6,7 @@ shortcut through them and UNDER-COST every plan: R-061 `[1,-14]` would be reache
 from an already-owned R-055 `[0,-13]` for 4 points instead of the real 8 through
 R-058 `[1,-13]`. The client's `SkillTreeMapController.SetAdjacentNode` walks a
 four-entry `Directions` array; that is the SAME rule `hbuilder.domain.skilltree`
-implements and `test_skilltree_selection.py` pins to the game's degree histogram,
+implements (`test_skilltree_selection.py` checks it excludes diagonals),
 so `tree_optimise.adjacency()` delegates to that one rule.
 
 These tests pin the recon side END-TO-END: the delegation itself (hermetic), the
@@ -24,9 +24,9 @@ from pathlib import Path
 import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
-_PROXY = _REPO / "tools" / "recon" / "proxy"
-_TREE_OPTIMISE = _PROXY / "tree_optimise.py"
-_DUMPS = _PROXY / "dumps"
+_REFRESH = _REPO / "tools" / "refresh"
+_TREE_OPTIMISE = _REFRESH / "tree_optimise.py"
+_DUMPS = _REPO / "tools" / "recon" / "proxy" / "dumps"
 
 
 def _load_tree_optimise():

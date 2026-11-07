@@ -10,7 +10,7 @@ state/app_settings.json (gitignored, this PC only):
   server_url       https://api.holobuilder.dev
   server_token     the bearer token (also written to state/server_api.json, which the content
                    store and the tracker pull read)
-  workers          0 = every logical core (the measured best, SEARCH-STRATEGY.md §4), else N
+  workers          0 = every logical core (the measured best), else N
   cache_mb         the art cache cap (Live2D, chibis, card art); 0 = unlimited (default)
   holomem          chr-xxxxx whose face is the app's icon and start screen (default Nene)
 
@@ -23,8 +23,10 @@ import json
 import os
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-STATE = REPO / "state"
+from hbuilder import paths
+
+REPO = paths.REPO
+STATE = paths.STATE
 SETTINGS = STATE / "app_settings.json"
 SERVER_API = STATE / "server_api.json"
 
@@ -32,8 +34,7 @@ REGION_HOSTS = {"us": "us.game-hololive-dreams.com", "jp": "jp.game-hololive-dre
                 "as": "as.game-hololive-dreams.com"}
 # The game's own folder on this PC. Its account file is the one file there with a 32-character
 # name and a credential's size: 255 bytes, plus a UTF-8 BOM.
-LOCALLOW = (Path(os.environ.get("USERPROFILE", "~")).expanduser() / "AppData" / "LocalLow"
-            / "QualiArts, Inc_" / "hololive-Dreams")
+LOCALLOW = paths.GAME_DATA
 NENE = "chr-00031"
 DEFAULTS = {
     "credential_path": "", "region": "us", "steam_id": "",

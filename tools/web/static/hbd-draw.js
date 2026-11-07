@@ -384,4 +384,3 @@ export function reveal(svg, id) {
   const x = b.x + b.width / 2, y = b.y + b.height / 2;
   if (x < v.x || x > v.x + v.w || y < v.y || y > v.y + v.h) centreOn(x, y);
 }
-export const currentZoom = () => zoomOf();

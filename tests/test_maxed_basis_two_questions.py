@@ -32,7 +32,6 @@ real one, and every maxed run says so rather than inventing a build.
 
 from __future__ import annotations
 
-import pytest
 
 from hbuilder.domain.collection import (
     MEMBER_POWER_UP_CAP_PERMYRIAD,
@@ -125,8 +124,8 @@ def test_a_maxed_run_does_not_down_level_any_skill(tmp_path):
     right ones and nothing is restated."""
     import json
 
-    from conftest import make_card
-    from hbuilder.cli import apply_collection
+    from support.builders import make_card
+    from hbuilder.inputs import apply_collection
     from hbuilder.domain.card import skill_slot_from_record
 
     record = {
@@ -171,8 +170,8 @@ def test_a_maxed_run_says_the_board_is_still_the_real_one(tmp_path):
     maxed too. The board stays real, and the run says so."""
     import json
 
-    from conftest import make_card
-    from hbuilder.cli import apply_collection
+    from support.builders import make_card
+    from hbuilder.inputs import apply_collection
 
     document = tmp_path / "collection.json"
     document.write_text(

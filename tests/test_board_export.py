@@ -1,4 +1,4 @@
-"""The per-character board export (`tools/recon/proxy/board_export.py`) must carry
+"""The per-character board export (`tools/refresh/board_export.py`) must carry
 the fixed-graph costs and states the frontend renders.
 
 Dumps-backed and skips without them, like the other recon-backed tests. The load
@@ -16,13 +16,13 @@ from pathlib import Path
 import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
-_PROXY = _REPO / "tools" / "recon" / "proxy"
-_DUMPS = _PROXY / "dumps"
+_REFRESH = _REPO / "tools" / "refresh"
+_DUMPS = _REPO / "tools" / "recon" / "proxy" / "dumps"
 
 
 def _load_board_export():
     spec = importlib.util.spec_from_file_location(
-        "board_export", _PROXY / "board_export.py"
+        "board_export", _REFRESH / "board_export.py"
     )
     module = importlib.util.module_from_spec(spec)
     sys.modules["board_export"] = module
@@ -72,26 +72,10 @@ def test_r061_is_locked_behind_r058_at_the_real_cost():
     assert r061["unlock_points"] == 8
 
 
-def test_gain_is_present_only_on_pooled_characters_and_never_scores_life_nodes():
-    """`gain` is the marginal pool re-score, so it exists only where a character
-    is in the fixed pool; and it must SKIP life_up nodes (no score model, by
-    design) rather than crash on them."""
-    doc = _build_or_skip(gain=True)
-    assert doc["gain_included"] is True
-    with_gain = [c for c in doc["characters"]
-                 if any(n["gain"] is not None for n in c["nodes"])]
-    assert with_gain, "no character received a gain value"
-    # a gain value only ever attaches to a buyable, non-socket node
-    for character in doc["characters"]:
-        for node in character["nodes"]:
-            if node["gain"] is not None:
-                assert node["state"] == "buyable" and not node["id"].startswith("S-")
-
-
 def test_icon_name_and_chr_are_inverse():
     """The icon<->chr mapping is a pure code-strip; the reverse check is the guard
     that a decoded asset can never be attributed to the wrong character."""
-    spec = importlib.util.spec_from_file_location("member_icons", _PROXY / "member_icons.py")
+    spec = importlib.util.spec_from_file_location("member_icons", _REFRESH / "member_icons.py")
     member_icons = importlib.util.module_from_spec(spec)
     sys.modules["member_icons"] = member_icons
     spec.loader.exec_module(member_icons)

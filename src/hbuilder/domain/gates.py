@@ -159,7 +159,7 @@ class ResolvedSkill:
     # activation_rate_up rider), resolved here the same once-per-6-card-set way
     # `override_gate` is, so scoring's rider fold reads a resolved gate rather
     # than re-deriving one. Defaulted to None so the ungated/rider-less case and
-    # the sole other constructor (`tests/conftest.py`) need not pass it.
+    # the sole other constructor (`tests/support/builders.py`) need not pass it.
     rider_gate: GateResolution | None = None
 
 
@@ -274,13 +274,10 @@ def resolve_card_set_gates(cards: tuple[Card, ...], run_state: RunState) -> Card
     identical no matter which card leads, and resolving all six once is
     strictly cheaper than resolving one six times.
 
-    The `ResolvedSkill` records built here carry exactly the `card_id` /
-    `slot_kind` / `source` / `family` / `skill` / `gate` values
-    `Team.effective_skill_instances()` would have produced for the same
-    skill: `source` is `"normal"` for a normal slot and `"costume"` for a
-    costume slot, and `slot_kind` is the `SKILL_SLOT_KINDS` member for a
-    normal slot and the lowercase `"costume"` string
-    `Team.effective_skill_instances()` emits for a costume slot (not
+    In the `ResolvedSkill` records built here, `source` is `"normal"` for a
+    normal slot and `"costume"` for a costume slot, and `slot_kind` is the
+    `SKILL_SLOT_KINDS` member for a normal slot and the lowercase
+    `"costume"` string for a costume slot (not
     `schema.COSTUME_SLOT_KIND`, which is uppercase). Getting `slot_kind`
     wrong here silently changes `SkillContribution.slot_kind` in every
     downstream breakdown."""
@@ -378,13 +375,11 @@ def resolve_leader_costume_skills(
     SAME members' aggregates as the principal: its gate is the rider's
     OWN condition — e.g. Radiant Summer Heatwave fires sense +80 % on 2+ Cute
     and, separately, Score Support 25 % on 2+ Cute — and, like the outfit's own
-    gate, a Cute leader outside the five does not count towards it. This is
-    the mirror of `Team.effective_skill_instances()`, which emits the same
-    principal-then-rider pair, so `resolve_team_gates` stays in lockstep with
-    it.
+    gate, a Cute leader outside the five does not count towards it. The
+    principal comes first and the rider right after it.
 
     Every consumer that reads "the leader's outfit" (`score_card_set`,
-    `song.score_song_detailed`, `exact_row.RowBound`, `resolve_team_gates`)
+    `song.score_song_detailed`, `resolve_team_gates`)
     iterates this tuple. `resolve_leader_costume` keeps returning the principal
     alone for callers that only ever wanted it."""
     principal = resolve_leader_costume(leader, aggregates, run_state)
@@ -402,13 +397,13 @@ def resolve_leader_costume_skills(
 
 def resolve_team_gates(team: Team, run_state: RunState) -> tuple[ResolvedSkill, ...]:
     """Thin wrapper: delegates to `resolve_card_set_gates` for the
-    member-set resolution, then assembles the leader-specific result in
-    `Team.effective_skill_instances()`'s exact order — the leader's costume
-    entry when present, then each member's normal slots in member order. That
-    reproduces the emission order exactly, so `ScoreBreakdown.contributions`
-    ordering is unaffected. Holds no resolution loop of its own
-    — the only resolution loop in this module lives in
-    `resolve_card_set_gates`.
+    member-set resolution, then assembles the leader-specific result in the
+    team's skill order — the leader's costume entry (and its scored rider)
+    when present, then each member's normal slots in member order,
+    `SKILL_SLOT_KINDS` order within a member. Scoring walks this order, so
+    it is also the order of `ScoreBreakdown.contributions`. Holds no
+    resolution loop of its own — the only resolution loop in this module
+    lives in `resolve_card_set_gates`.
 
     **Gates resolve over the 5 MEMBERS only**: the leader
     contributes nothing to the type/generation counts, and its own outfit gate

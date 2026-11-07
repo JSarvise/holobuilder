@@ -206,6 +206,99 @@ def test_a_gated_leader_is_tried_where_its_gate_would_fire(count, seed):
     assert out["ranking"][0][0] == _truth(cards, exact, legal, range(len(cards)))[0]
 
 
+STATS = ("performance", "technique", "sense")
+STAT_GENERATIONS = ["A", "B", "C", "D", "E", "F"]
+
+
+def _stat_world(count: int, seed: int):
+    """Cards with three stats, each strongest in one; every leader's outfit raises one stat
+    (+m x the set's share of it) behind a gate. Most outfits raise technique behind an easy
+    type gate; leader 0's raises performance by 135 % and needs the two cards of a RARE
+    generation, which are strong in performance too: its best sets are a region the other
+    leaders value less."""
+    rng = random.Random(seed)
+    holomems = max(8, count * 4 // 5)
+    cards = []
+    for i in range(count):
+        lean = rng.choice(STATS)
+        stats = {s: rng.uniform(3000, 5000) + (2500 if s == lean else 0) for s in STATS}
+        cards.append(SimpleNamespace(
+            id=f"card-{i:03d}", member=f"Chr{i % holomems}", type=rng.choice(TYPES + ["Happy"]),
+            generations=frozenset([rng.choice(STAT_GENERATIONS)]), strength=rng.uniform(0.85, 1.15),
+            stats=SimpleNamespace(**stats, total=lambda stats=stats: sum(stats.values())),
+            outfit=("technique", 0.8, ("type", rng.choice(TYPES + ["Happy"]), 2))))
+    for i in (count - 1, count - 2):
+        cards[i].generations = frozenset({"RARE"})
+        cards[i].stats.performance += 2500
+    cards[0].outfit = ("performance", 1.35, ("generation", "RARE", 2))
+    synergy = {p: rng.choice([0.0] * 6 + [0.05]) for p in itertools.combinations(range(count), 2)}
+
+    def fires(gate, s):
+        kind, target, need = gate
+        return sum((cards[i].type == target) if kind == "type" else (target in cards[i].generations)
+                   for i in s) >= need
+
+    def exact(li: int, s) -> float:
+        value = 100_000.0
+        for i in s:
+            value *= cards[i].strength
+        for pair in itertools.combinations(s, 2):
+            value *= 1.0 + synergy[pair]
+        stat, boost, gate = cards[li].outfit
+        if fires(gate, s):
+            total = sum(cards[i].stats.total() for i in s)
+            value *= 1.0 + boost * sum(getattr(cards[i].stats, stat) for i in s) / total
+        return float(math.ceil(value))
+
+    legal = [s for s in itertools.combinations(range(count), 5)
+             if len({cards[i].member for i in s}) == 5]
+    return cards, exact, legal
+
+
+def _stat_tilt(cards):
+    """The outfit tilt `ondemand.outfit_tilt` gives a real pool, on this world's cards."""
+    by_stat: dict = {}
+
+    def tilt_of(leader):
+        stat = leader.outfit[0]
+        if stat not in by_stat:
+            by_stat[stat] = tuple(0.45 * (getattr(c.stats, stat) / c.stats.total() - 1 / 3) for c in cards)
+        return by_stat[stat]
+    return tilt_of
+
+
+@pytest.mark.parametrize("count, seed", [(20, 16), (24, 4), (24, 27), (28, 5)])
+def test_a_leader_whose_region_no_other_leader_shares_is_seeded_and_climbed(count, seed):
+    # leader 0 raises performance and needs a rare generation pair: the model learns her
+    # from sets other leaders chose, the screen never proposes her region and the gate
+    # repair keeps the other leaders' members. Each case fails without `tilt_of` (the
+    # search serves a team 0.3-9 % below the true best); with it the region is seeded
+    # (gate forced, members leaning to performance) and climbed
+    cards, exact, legal = _stat_world(count, seed)
+    truth = max((exact(li, s), li, s) for li in range(len(cards)) for s in legal)
+    assert truth[1] == 0
+    out = joint_search.search(cards, cards, lambda pairs: [exact(li, s) for li, s in pairs],
+                              gate_of=lambda c: c.outfit[2], tilt_of=_stat_tilt(cards), seed=seed,
+                              initial_sets=60, step=40, polish=4, max_rounds=2, gate_samples=0)
+    assert out["ranking"][0][0] == truth[0]
+    assert all(v == exact(li, s) for v, li, s in out["ranking"])
+    assert out["stats"]["region_seeds"] > 0
+
+
+def test_the_screen_predicts_a_set_as_its_scan_ranks_it():
+    # the region seeds are built on `Screen.predict`; it must be the value the scan orders by
+    import surrogate
+
+    cards, exact, _score_pairs, legal, _calls = _world(16, 3)
+    rng = random.Random(3)
+    sets = rng.sample(legal, 300)
+    screen = surrogate.Screen(cards)
+    screen.fit(sets, [math.log(exact(rng.randrange(len(cards)), s)) for s in sets])
+    best, predictions, _legal = screen.best(25)
+    for s, p in zip(best, predictions):
+        assert screen.predict(s) == pytest.approx(p, rel=0, abs=1e-9)
+
+
 def test_paired_swaps_reach_a_team_two_swaps_away_that_no_single_swap_improves():
     # cards 8 and 9 pay only together (each alone costs): a one-swap climb from
     # (0,1,2,3,4) never takes either step. Real teams show it too: swapping two cards at
@@ -231,3 +324,53 @@ def test_paired_swaps_reach_a_team_two_swaps_away_that_no_single_swap_improves()
                                 pair_moves=20)
     best = paired["ranking"][0]
     assert {8, 9} <= set(best[2]) and best[0] == max(value(s) for s in itertools.combinations(range(12), 5))
+
+
+def test_search_song_with_a_many_scorer_gives_the_same_rows_in_one_call_per_round():
+    """`score.many([(leader, sets), ...])`, when the scorer has it, scores every leader's
+    sets of a round in ONE call; the rows are the ones of the per-leader calls."""
+    import two_stage  # noqa: PLC0415
+
+    cards, exact, _score_pairs, _legal, _calls = _world(16, 4)
+    index = {id(c): k for k, c in enumerate(cards)}
+    single: list = []
+    grouped: list = []
+
+    def per_leader(leader, sets):
+        sets = list(sets)
+        single.append(len(sets))
+        return [exact(index[id(leader)], s) for s in sets]
+
+    def plain(leader, sets):
+        return per_leader(leader, sets)
+
+    def with_many(leader, sets):
+        return per_leader(leader, sets)
+
+    def many(groups):
+        groups = [(leader, list(sets)) for leader, sets in groups]
+        grouped.append(len(groups))
+        return [[exact(index[id(leader)], s) for s in sets] for leader, sets in groups]
+
+    with_many.many = many
+    options = dict(gate_of=_gate_of, seed=5, initial_sets=200, step=150, polish=5)
+    a = joint_search.search_song(cards, cards, plain, **options)
+    calls_plain = len(single)
+    single.clear()
+    b = joint_search.search_song(cards, cards, with_many, **options)
+    assert single == [] and grouped, "the many path made every call"
+    assert len(grouped) < calls_plain
+    assert [(r["position"], r["best"], r["members"], r["ranking"]) for r in a["rows"]] == \
+        [(r["position"], r["best"], r["members"], r["ranking"]) for r in b["rows"]]
+    def counts(stats):
+        return {k: v for k, v in stats.items() if "seconds" not in k}
+    assert counts(a["stats"]) == counts(b["stats"])
+    # the event objective's wrapper passes `many` through with the objective applied
+    bonus = [(10 * (k % 3), 5 * (k % 2)) for k in range(len(cards))]
+    for objective in ("score", "event_points"):
+        w_plain = two_stage.objective_scorer(plain, bonus, objective)
+        w_many = two_stage.objective_scorer(with_many, bonus, objective)
+        assert not hasattr(w_plain, "many") and hasattr(w_many, "many")
+        sets = [(0, 1, 2, 3, 4), (1, 2, 3, 4, 5)]
+        assert w_many.many([(cards[0], sets), (cards[1], sets[:1])]) == \
+            [w_plain(cards[0], sets), w_plain(cards[1], sets[:1])]

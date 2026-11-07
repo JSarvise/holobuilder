@@ -1,4 +1,4 @@
-"""The socket optimiser (`tools/recon/proxy/socket_optimise.py`) picks the best
+"""The socket optimiser (`tools/refresh/socket_optimise.py`) picks the best
 card per Connect socket for global account score.
 
 The greedy assignment and the state helpers are pinned hermetically (they carry
@@ -16,11 +16,11 @@ from pathlib import Path
 import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
-_PROXY = _REPO / "tools" / "recon" / "proxy"
+_REFRESH = _REPO / "tools" / "refresh"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("socket_optimise", _PROXY / "socket_optimise.py")
+    spec = importlib.util.spec_from_file_location("socket_optimise", _REFRESH / "socket_optimise.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules["socket_optimise"] = module
     spec.loader.exec_module(module)
@@ -70,7 +70,7 @@ def test_with_slots_places_without_mutating_the_base():
 
 def test_owned_connect_cards_are_a_subset_of_the_catalogue_connect_cards():
     so = _load()
-    skilltree = _PROXY / "dumps" / "skilltree.json"
+    skilltree = _REPO / "tools" / "recon" / "proxy" / "dumps" / "skilltree.json"
     collection = _REPO / "state" / "collection.json"
     if not skilltree.exists() or not collection.exists():
         pytest.skip("dumps/skilltree.json or state/collection.json unavailable")

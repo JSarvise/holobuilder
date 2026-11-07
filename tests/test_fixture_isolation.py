@@ -2,7 +2,7 @@
 
 The shipped 6-card coverage fixture lives in `tests/fixtures/cards.json`/
 `tests/fixtures/owned.json`, and every test module reaches it through the two
-shared constants in `tests/conftest.py` (`FIXTURE_CARDS_PATH`/
+shared constants in `tests/support/builders.py` (`FIXTURE_CARDS_PATH`/
 `FIXTURE_OWNED_PATH`). The point is that `data/cards.json`/`data/owned.json`
 can hold a real collection without breaking a single test — but only as long
 as nothing in `tests/` quietly re-hardcodes a path back to `data/`.
@@ -26,7 +26,7 @@ import ast
 import json
 from pathlib import Path
 
-from conftest import FIXTURE_CARDS_PATH, FIXTURE_OWNED_PATH
+from support.builders import FIXTURE_CARDS_PATH, FIXTURE_OWNED_PATH
 
 TESTS_ROOT = Path(__file__).resolve().parent
 _SELF_PATH = Path(__file__).resolve()
@@ -48,7 +48,11 @@ _PATH_DIR_LITERAL = "data"
 
 
 def _iter_test_files() -> list[Path]:
-    return sorted(p for p in TESTS_ROOT.rglob("*.py") if p.resolve() != _SELF_PATH)
+    # tests/golden/ snapshots the real data/ on purpose (freeze.py): it is the one place
+    # that must read it
+    golden = TESTS_ROOT / "golden"
+    return sorted(p for p in TESTS_ROOT.rglob("*.py")
+                  if p.resolve() != _SELF_PATH and golden not in p.parents)
 
 
 def _parse(path: Path) -> ast.Module:
@@ -122,7 +126,7 @@ def test_no_hardcoded_canonical_data_path_exists_outside_a_docstring():
     assert not offenders, (
         "found a re-hardcoded canonical data/ path outside a docstring — "
         "the SCHM-03 coverage fixture must be reached only through "
-        "conftest.py's FIXTURE_CARDS_PATH/FIXTURE_OWNED_PATH constants: "
+        "support/builders.py's FIXTURE_CARDS_PATH/FIXTURE_OWNED_PATH constants: "
         f"{offenders}"
     )
 

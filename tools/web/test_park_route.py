@@ -13,13 +13,12 @@ plausible-but-wrong implementation would still pass:
 * every `picked` mapping resolves to a pixel, and an unresolvable one is
   REPORTED rather than dropped — a silently missing marker is a treasure the
   user walks past;
-* absent export / absent credential / failed login degrade with a reason and
-  the command that fixes it, never a 500 and never a silent empty list.
+* an absent export or an absent saved pick degrades with a reason and the command
+  that fixes it, never a 500 and never a silent empty list;
+* the route never logs in: the pick is the one the account refresh saved.
 
-⚠ No test here performs a live login: a fresh checkout and a CI box have
-neither credential nor network. The live read is stubbed at the
-`_cached_park_live_state` / `_park_live_state` seam, and the export at the
-`_park_export` seam, so the JOIN is exercised without touching the account or
+The saved pick is stubbed at the `park.park_saved_state` seam and the export at the
+`park.park_export` seam, so the JOIN is exercised without touching the account or
 the disk. The one test that would need real files (serving an actual PNG) skips
 loudly when `dumps/park_export/` is absent.
 
@@ -31,14 +30,13 @@ too. Fixtures are in-memory dicts injected by monkeypatch, never on disk.
 from __future__ import annotations
 
 import json
-import socket
-import threading
+from pathlib import Path
 import urllib.error
 import urllib.request
 
 import pytest
 
-import server as web_server
+from hbweb import config, park
 
 
 # ---------------------------------------------------------------------------
@@ -163,35 +161,12 @@ FIXTURE_STATE = {
 }
 
 
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def web_base():
-    port = _free_port()
-    server = web_server.ThreadingServer(
-        (web_server.BIND_HOST, port), web_server.Handler
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://{web_server.BIND_HOST}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
-
-
 @pytest.fixture
 def stub_park(monkeypatch):
     """Inject the in-memory export and live state at the two seams, so the join
     runs with no disk and no login. Returns nothing; tests fetch the route."""
-    monkeypatch.setattr(web_server, "_park_export", lambda: FIXTURE_EXPORT)
-    monkeypatch.setattr(
-        web_server, "_cached_park_live_state", lambda account="main": FIXTURE_STATE
-    )
+    monkeypatch.setattr(park, "park_export", lambda: FIXTURE_EXPORT)
+    monkeypatch.setattr(park, "park_saved_state", lambda: FIXTURE_STATE)
 
 
 def _park(base: str) -> dict:
@@ -350,7 +325,7 @@ def test_image_urls_and_dimensions_travel_with_each_area(web_base, stub_park):
 def test_absent_export_degrades_with_a_reason(web_base, monkeypatch):
     """No `park_spots.json` is a STATE, not a 500 — and it names the command
     that builds it."""
-    monkeypatch.setattr(web_server, "_park_export", lambda: None)
+    monkeypatch.setattr(park, "park_export", lambda: None)
     payload = _park(web_base)
     assert payload["available"] is False
     assert payload["areas"] == []
@@ -359,98 +334,40 @@ def test_absent_export_degrades_with_a_reason(web_base, monkeypatch):
     )
 
 
-def test_absent_credential_is_reported_before_any_login(monkeypatch, tmp_path):
-    """`_park_live_state` must raise `_ParkUnavailable` — never `sys.exit` /
-    never attempt a login — when the credential file is missing.
-
-    Tested at the function seam rather than over HTTP so it provably touches no
-    network: the guard is that a missing credential is caught BEFORE
-    `park_treasure` is even loaded."""
-    monkeypatch.delenv("HB_CREDENTIAL_FILE", raising=False)
-    monkeypatch.setattr(
-        web_server, "ACCOUNT_CREDENTIAL_PATH", tmp_path / "no-such-credential.json"
-    )
-    # If the guard failed and this fell through to a login, the loader would run;
-    # make that impossible to miss by exploding if it is reached.
-    monkeypatch.setattr(
-        web_server, "_load_park_treasure",
-        lambda: pytest.fail("credential guard did not short-circuit the login"),
-    )
-    with pytest.raises(web_server._ParkUnavailable) as caught:
-        web_server._park_live_state("main")
-    assert "account_snapshot.py --import-from-capture" in caught.value.reason
-
-    # DISCRIMINATION GUARD: prove the path CAN succeed when the file exists, so
-    # the raise above is the missing file and not something incidental. Point at
-    # a file that certainly exists and stub the login to a sentinel.
-    monkeypatch.setattr(web_server, "ACCOUNT_CREDENTIAL_PATH", web_server.PARK_SPOTS_PATH)
-    if not web_server.PARK_SPOTS_PATH.is_file():
-        pytest.skip("no park_spots.json to stand in as an existing credential file")
-    monkeypatch.setattr(
-        web_server, "_load_park_treasure",
-        lambda: type("M", (), {
-            "userdata_live": staticmethod(lambda account: b"ud"),
-            "park_state": staticmethod(lambda ud: {"random": {}}),
-        }),
-    )
-    assert web_server._park_live_state("main") == {"random": {}}
-
-
-def test_failed_login_degrades_to_a_reason_not_a_500(web_base, monkeypatch):
-    """A login that raises must reach the page as `available: false` with a
-    readable reason, never as an HTTP 500."""
-    monkeypatch.setattr(web_server, "_park_export", lambda: FIXTURE_EXPORT)
-
-    def _boom(account="main"):
-        raise web_server._ParkUnavailable("live login failed: ConnectionError: nope")
-
-    monkeypatch.setattr(web_server, "_cached_park_live_state", _boom)
+def test_no_saved_pick_asks_for_a_refresh(web_base, monkeypatch):
+    """Before the first account refresh there is no saved pick: the page says to
+    press Refresh, never a 500 and never an empty park that looks real."""
+    monkeypatch.setattr(park, "park_export", lambda: FIXTURE_EXPORT)
+    monkeypatch.setattr(park, "park_saved_state", lambda: None)
     payload = _park(web_base)
     assert payload["available"] is False
-    assert "live login failed" in payload["reason"]
     assert payload["areas"] == []
+    assert "Refresh" in payload["reason"]
 
 
-def test_park_treasure_import_failure_is_a_state(monkeypatch, tmp_path):
-    """If `park_treasure.py` cannot be loaded the read is unavailable with a
-    reason — not a traceback. The credential must exist first, or the earlier
-    guard fires instead and this proves nothing."""
-    monkeypatch.setattr(web_server, "ACCOUNT_CREDENTIAL_PATH", web_server.PARK_SPOTS_PATH)
-    if not web_server.PARK_SPOTS_PATH.is_file():
-        pytest.skip("no existing file to stand in as the credential")
-    monkeypatch.setattr(web_server, "_load_park_treasure", lambda: None)
-    with pytest.raises(web_server._ParkUnavailable) as caught:
-        web_server._park_live_state("main")
-    assert "park_treasure.py" in caught.value.reason
+def test_the_saved_pick_carries_its_capture_time(web_base, monkeypatch):
+    monkeypatch.setattr(park, "park_export", lambda: FIXTURE_EXPORT)
+    monkeypatch.setattr(park, "park_saved_state",
+                        lambda: {**FIXTURE_STATE, "_captured_at": "2026-11-05T12:00:00+0100"})
+    payload = _park(web_base)
+    assert payload["available"] is True
+    assert payload["captured_at"] == "2026-11-05T12:00:00+0100"
 
 
-# ---------------------------------------------------------------------------
-# The live login is bounded
-# ---------------------------------------------------------------------------
-def test_live_login_is_coalesced_by_the_ttl_cache(monkeypatch):
-    """A stray refresh must not fire a fresh login every time. Two calls within
-    the TTL must invoke the underlying read ONCE; a different account key must
-    invoke it again, so the cache is keyed rather than a global one-shot."""
-    web_server._PARK_CACHE.clear()
-    calls = {"n": 0}
+def test_the_park_route_cannot_log_in():
+    """A login from the app ends the game's session on the account, so the web side
+    holds no path to one: no live read, no `park_treasure` import."""
+    source = Path(park.__file__).read_text("utf8")
+    for word in ("park_treasure", "userdata_live", "login("):
+        assert word not in source, word
 
-    def _counted(account="main"):
-        calls["n"] += 1
-        return {"random": {}, "account": account}
 
-    monkeypatch.setattr(web_server, "_park_live_state", _counted)
-
-    first = web_server._cached_park_live_state("main")
-    second = web_server._cached_park_live_state("main")
-    assert first is second, "second call within TTL must be the cached object"
-    assert calls["n"] == 1, "two calls inside the TTL must coalesce into one login"
-
-    # DISCRIMINATION GUARD: a cache that always returned the first value would
-    # also show n==1 forever. A distinct key must trigger a real second read.
-    web_server._cached_park_live_state("other")
-    assert calls["n"] == 2, "a different account must not be served the cached one"
-
-    web_server._PARK_CACHE.clear()
+def test_park_saved_state_reads_the_refresh_output(monkeypatch, tmp_path):
+    saved = tmp_path / "park_state.json"
+    monkeypatch.setattr(config, "PARK_STATE_PATH", saved)
+    assert park.park_saved_state() is None
+    saved.write_bytes(json.dumps(FIXTURE_STATE).encode())  # noqa: test-only file in tmp_path
+    assert park.park_saved_state() == FIXTURE_STATE
 
 
 # ---------------------------------------------------------------------------
@@ -471,21 +388,21 @@ def test_park_image_name_regex_forbids_traversal():
     reject = ["area-../secret.png", "area-a01/../x.png", "area-a01\\x.png",
               "../park-area-a01.png", "area-a01.png.exe", "area_a01.png"]
     for name in reject:
-        assert not web_server._PARK_IMAGE_NAME_RE.match(name), name
+        assert not park.PARK_IMAGE_NAME_RE.match(name), name
     for name in ["area-a01.png", "area-a02-casino.png", "area-a02-lobby.png"]:
-        assert web_server._PARK_IMAGE_NAME_RE.match(name), name
+        assert park.PARK_IMAGE_NAME_RE.match(name), name
 
 
 def test_missing_park_image_is_404(web_base, monkeypatch, tmp_path):
     """A well-formed name whose file is absent is a 404, not a 500 or a 400 —
-    the same first-class-absence contract `_serve_art` keeps."""
-    monkeypatch.setattr(web_server, "PARK_EXPORT_DIR", tmp_path)
+    the same first-class-absence contract the other image routes keep."""
+    monkeypatch.setattr(config, "PARK_EXPORT_DIR", tmp_path)
     status, _ = _status_and_ctype(f"{web_base}/park/area-a01.png")
     assert status == 404
 
 
 @pytest.mark.skipif(
-    not web_server.PARK_SPOTS_PATH.is_file(),
+    not config.PARK_SPOTS_PATH.is_file(),
     reason="dumps/park_export/ is gitignored",
 )
 def test_real_png_is_served_when_the_export_is_present(web_base):
@@ -494,13 +411,3 @@ def test_real_png_is_served_when_the_export_is_present(web_base):
     status, ctype = _status_and_ctype(f"{web_base}/park/area-a01.png")
     assert status == 200
     assert ctype == "image/png"
-
-
-def test_the_apps_credential_setting_counts_as_the_credential(monkeypatch, tmp_path):
-    """The desktop app names the game's own credential file in HB_CREDENTIAL_FILE and has no
-    state/account_credential.json; the Park page must accept it."""
-    monkeypatch.setattr(web_server, "ACCOUNT_CREDENTIAL_PATH", tmp_path / "no-such-credential.json")
-    monkeypatch.setenv("HB_CREDENTIAL_FILE", str(tmp_path / "missing"))
-    assert not web_server._account_credential_present()
-    monkeypatch.setenv("HB_CREDENTIAL_FILE", __file__)        # any file that exists
-    assert web_server._account_credential_present()

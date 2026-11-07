@@ -5,19 +5,11 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import importlib.util
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-
-
-def _account():
-    spec = importlib.util.spec_from_file_location("_acct_test", REPO / "tools/recon/probes/two_stage_account.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 @pytest.mark.skipif(not (REPO / "data/owned.json").exists() or not (REPO / "state/collection.json").exists(),
@@ -26,7 +18,9 @@ def test_refined_scores_are_never_below_the_plain_ones_and_plain_is_untouched():
     from hbuilder.domain.team import Team
     from hbuilder.solver import parallel_refine as pr
 
-    built = _account().build(argparse.Namespace(song="m0334", budget=453, uptime="finite", platform="mobile"))
+    import leaf_inputs  # noqa: PLC0415
+
+    built = leaf_inputs.build_account(argparse.Namespace(song="m0334", budget=453, uptime="finite", platform="mobile"))
     by_id = built["by_id"]
     # the account's six strongest cards (the plan cache's nominal team), each of three leading
     lead, members = built["ctx"].plan_cache_seed

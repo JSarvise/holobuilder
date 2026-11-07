@@ -11,10 +11,9 @@ place and this pins that they stay together.
 """
 from __future__ import annotations
 
-import dataclasses
 from pathlib import Path
 
-import server as srv
+from hbweb import basis
 from hbuilder.domain.scoring_config import RunState
 
 REPO = Path(__file__).resolve().parents[2]
@@ -27,19 +26,19 @@ class _Cfg:
 
 
 def test_no_auto_flag_leaves_the_premise_alone():
-    assert srv._auto_premise(_Cfg(), {}) == {}
-    assert srv._auto_premise(_Cfg(), {"auto": False}) == {}
+    assert basis.auto_premise(_Cfg(), {}) == {}
+    assert basis.auto_premise(_Cfg(), {"auto": False}) == {}
 
 
 def test_a_non_boolean_truthy_value_is_NOT_taken_as_auto():
     """`is True`, not truthiness: a stray `"auto": "false"` from a form post is
     a string and would otherwise silently switch the premise."""
-    assert srv._auto_premise(_Cfg(), {"auto": "false"}) == {}
-    assert srv._auto_premise(_Cfg(), {"auto": 1}) == {}
+    assert basis.auto_premise(_Cfg(), {"auto": "false"}) == {}
+    assert basis.auto_premise(_Cfg(), {"auto": 1}) == {}
 
 
 def test_auto_sets_both_halves_together():
-    got = srv._auto_premise(_Cfg(), {"auto": True})
+    got = basis.auto_premise(_Cfg(), {"auto": True})
     assert got["song_auto"] is True
     assert got["run_state"].combo == 0, (
         "the combo half is the one that is easy to forget — without it the "
@@ -48,16 +47,7 @@ def test_auto_sets_both_halves_together():
     assert got["run_state"].life == _Cfg.run_state.life, "only combo moves"
 
 
-def test_the_song_pipeline_applies_it():
-    """A structural check on the source: the pipeline builds its cfg in a
-    subprocess-free path this test cannot drive without an account, so what is
-    checked is that the helper is actually called where the cfg is assembled."""
-    body = (REPO / "tools" / "web" / "server.py").read_text(encoding="utf-8")
-    section = body.split("def develop_pipeline", 1)[1].split("\ndef ", 1)[0]
-    assert "_auto_premise(cfg, body)" in section
-
-
 def test_compare_carries_the_flag_through_its_assumptions():
     view = (REPO / "tools" / "web" / "compare_view.py").read_text(encoding="utf-8")
     assert '"auto": body.get("auto") is True' in view
-    assert "srv._auto_premise(cfg" in view
+    assert "basis_mod.auto_premise(cfg" in view

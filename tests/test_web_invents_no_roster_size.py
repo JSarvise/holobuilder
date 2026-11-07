@@ -50,6 +50,6 @@ def test_no_script_hardcodes_a_roster_size_in_its_prose():
 def test_the_server_sends_the_roster_size_beside_the_figure_it_describes():
     """The two must travel together — a page given the percentage but not the
     roster it was summed over has no honest way to write the sentence."""
-    source = (REPO_ROOT / "tools" / "web" / "server.py").read_text(encoding="utf-8")
+    source = (REPO_ROOT / "tools" / "web" / "hbweb" / "collection.py").read_text(encoding="utf-8")
     assert '"power_up_reachable_permyriad"' in source
     assert '"power_up_reachable_roster_size"' in source

@@ -33,6 +33,7 @@ No certificate: "best found", with how much was scored in `stats`.
 """
 from __future__ import annotations
 
+import itertools
 import math
 import random
 import time
@@ -48,6 +49,24 @@ REQUIRE_BIAS = 1_000.0
 # a gated leader whose repaired team comes this close to the best is climbed from too
 REPAIR_MARGIN = 0.03
 REPAIR_CLIMB = 3
+# LEADER REGIONS (when the caller passes `tilt_of`, in place of the gate repair above). A
+# leader's best sets lean towards the members strong in the stat its outfit raises, and hold
+# the cards its gate needs; the set screen is fitted on the values the leaders scored so far
+# give each set, so a region no well-scored leader shares stays where the screen never looks.
+# A region = the outfit's stat tilt and its gate, when the gate is HARD (the round-0 random
+# sets fire it less often than this); a soft gate fires on most strong sets anyway
+REGION_HARD_GATE = 0.25
+# each region's REGION_SEEDS best sets by the screen plus its tilt, its gate forced (a beam
+# REGION_BEAM wide), are exact-scored under the region's leader the model ranks best on them
+REGION_SEEDS = 4
+REGION_BEAM = 8
+# every region whose best team comes this close to the best team is climbed from, with no
+# limit on how many: a seed sits up to ~2.5 % below what its region's climb reaches
+# (measured on a maxed account, every EXPERT chart and levels 25-30)
+REGION_MARGIN = 0.025
+# ... with two-card moves too: the best this many one-swaps of each climbed region's team,
+# paired (two members that pay only together, e.g. Fubuki and Matsuri)
+REGION_PAIR_MOVES = 10
 
 # (leader index, ascending member index 5-tuple)
 Pair = tuple[int, tuple[int, ...]]
@@ -222,6 +241,7 @@ def search(
     seed: int = 20261016,
     deadline: float | None = None,
     on_round: Callable[[dict], None] | None = None,
+    tilt_of: Callable[[object], Sequence[float] | None] | None = None,
 ) -> dict:
     """Best (leader, set) teams. `score_pairs([(leader index, set), ...])` ->
     exact scores, same order. `always`: leader indices of which the model's best
@@ -236,6 +256,10 @@ def search(
     members). Pairs outside the filters may still be scored while learning;
     only allowed ones are reported, ranked and used for the stop rule. To pin
     the leader, pass only the allowed leaders.
+
+    `tilt_of(leader)`: the per-card log weights (pool order) its outfit adds to
+    a set's value, or None. With it every leader REGION is seeded and the ones
+    near the best climbed (see REGION_*), in place of the gate repair.
 
     Returns `{"ranking": [(score, leader index, set)] best first (every scored
     ALLOWED pair), "rounds": [...], "stats": {...}}`."""
@@ -428,7 +452,52 @@ def search(
             out.append(max(mine))
         return out
 
-    polish_seconds += repair_gates(best_sets[:gate_repair])
+    # REGIONS: every leader's (tilt, hard gate) seeded from the screen and exact-scored; the
+    # regions whose best team is within REGION_MARGIN of the best are climbed below
+    region_of: list = []
+    seeded = 0
+    if tilt_of is not None:
+        rate: dict = {}
+        for gate in model.gates:
+            if gate is not None and gate not in rate:
+                rate[gate] = _mean(1.0 if _fires(gate, cards, s) else 0.0 for s in first_sets)
+        regions: dict = {}
+        for li, leader in enumerate(leaders):
+            gate = model.gates[li]
+            tilt = tilt_of(leader)
+            key = (gate if gate is not None and rate[gate] < REGION_HARD_GATE else None,
+                   tuple(tilt) if tilt is not None else None)
+            regions.setdefault(key, []).append(li)
+            region_of.append(key)
+        seeds = []
+        for (gate, tilt), members in regions.items():
+            if gate is None and tilt is None:
+                continue                  # the screen's own region: the search above is its seed
+            for s in _region_seed_sets(screen, cards, holomems, gate, tilt, require,
+                                       REGION_SEEDS, REGION_BEAM):
+                li = max(members, key=lambda m: (model.predict(m, s), -m))
+                if ok(li, s):
+                    seeds.append((li, s))
+        seeded = len(seeds)
+        polish_seconds += take(seeds)
+    else:
+        polish_seconds += repair_gates(best_sets[:gate_repair])
+
+    def region_contenders() -> list:
+        """The best team of each region within REGION_MARGIN of the best team, the regions
+        of the best `neighbours` teams' leaders left out (the climb starts from those)."""
+        if not region_of:
+            return []
+        best = (top(1) or [(0.0,)])[0][0]
+        lead = {region_of[li] for _v, li, _s in top(neighbours)}
+        own: dict = {}
+        for (li, s), v in scored.items():
+            key = region_of[li]
+            if key not in lead and ok(li, s) and (v, -li, s) > own.get(key, (float("-inf"),)):
+                own[key] = (v, -li, s)
+        return sorted(((v, -nli, s) for v, nli, s in own.values() if v >= (1.0 - REGION_MARGIN) * best),
+                      key=lambda r: (-r[0], r[1], r[2]))
+
     # then a hill climb: the one-card swaps of the best teams, again, until the
     # best ones stop changing. A single pass reaches teams ONE swap away; the
     # best team can be two or three swaps from anything the screen proposed.
@@ -444,17 +513,23 @@ def search(
         return take([(li, s) for s in fresh for li in range(len(leaders)) if ok(li, s)])
 
     climbed = 0
+    region_climbs = 0
     if neighbours:
         before = None
         for climbed in range(1, climb_rounds + 1):
-            starts = top(neighbours) + contenders()
+            regional = region_contenders()
+            starts = top(neighbours) + (regional if region_of else contenders())
             now = [(li, s) for _v, li, s in starts]
             if now == before:
                 break
             before = now
+            region_climbs = max(region_climbs, len(regional))
             polish_seconds += _take_neighbours(starts, holomems, take, scored, ok)
+            if regional:
+                polish_seconds += _take_paired_swaps(regional, REGION_PAIR_MOVES, holomems, take, scored, ok)
             polish_seconds += polish_new()
-            polish_seconds += repair_gates(list(dict.fromkeys(s for _v, _li, s in top(polish)))[:gate_repair])
+            if not region_of:
+                polish_seconds += repair_gates(list(dict.fromkeys(s for _v, _li, s in top(polish)))[:gate_repair])
     return {
         "ranking": top(len(scored)),
         "rounds": rounds,
@@ -464,6 +539,8 @@ def search(
             "polish_seconds": polish_seconds, "k": k, "step": step,
             "initial_sets": initial_sets, "polish": polish, "neighbours": neighbours,
             "climb_rounds": climbed,
+            **({"regions": len(set(region_of)), "region_seeds": seeded, "region_climbs": region_climbs}
+               if region_of else {}),
         },
     }
 
@@ -538,6 +615,50 @@ def climb(
         polish_new()
     return {"ranking": top(len(scored)),
             "stats": {"evals": len(scored), "rounds": done, "seconds": time.perf_counter() - started}}
+
+
+def _region_seed_sets(screen, cards, holomems, gate, tilt, require, count: int, beam: int):
+    """The `count` best legal sets of one leader region by the screen's prediction plus the
+    sum of `tilt` over the members: a beam `beam` wide, grown one card at a time from the
+    required cards plus the best ways to fire `gate` (kind, target, need), so every set it
+    returns fires the gate. Deterministic: ties go to the lower set."""
+    n = len(cards)
+    extra = list(tilt) if tilt is not None else [0.0] * n
+
+    def value(s):
+        return screen.predict(s) + sum(extra[i] for i in s)
+
+    base = tuple(sorted(require))
+    starts = [base]
+    if gate is not None:
+        kind, target, need = gate
+        if kind == "type":
+            match = [i for i in range(n) if cards[i].type == target]
+        elif kind == "generation":
+            match = [i for i in range(n) if target in cards[i].generations]
+        else:
+            return []
+        short = need - sum(1 for i in base if i in match)
+        if short > 0:
+            names = {holomems[i] for i in base}
+            pool = [i for i in match if i not in base and holomems[i] not in names]
+            ways = [tuple(sorted(base + c)) for c in itertools.combinations(pool, short)
+                    if len({holomems[i] for i in c}) == short]
+            if not ways or len(base) + short > 5:
+                return []
+            starts = sorted(ways, key=lambda s: (-value(s), s))[:beam]
+    frontier = starts
+    while frontier and len(frontier[0]) < 5:
+        grown: dict = {}
+        for s in frontier:
+            names = {holomems[i] for i in s}
+            for c in range(n):
+                if c not in s and holomems[c] not in names:
+                    t = tuple(sorted(s + (c,)))
+                    if t not in grown:
+                        grown[t] = value(t)
+        frontier = sorted(grown, key=lambda s: (-grown[s], s))[:beam]
+    return frontier[:count]
 
 
 def _repair(s, gate, cards, holomems, weight):
@@ -655,12 +776,22 @@ def search_song(cards: Sequence, leaders: Sequence, score: Callable, *, always: 
     an evaluated pair are left out (`stats["leaders"]` counts the rows)."""
     leaders = list(leaders)
     position = {id(l): k for k, l in enumerate(leaders)}
+    # `score.many([(leader, sets), ...])` -> one value list per group, when the scorer
+    # offers it: every leader's sets of a round in ONE call (one batch for the workers)
+    many = getattr(score, "many", None)
 
     def score_pairs(pairs):
         out = [0.0] * len(pairs)
         by_leader: dict[int, list[int]] = {}
         for k, (li, _s) in enumerate(pairs):
             by_leader.setdefault(li, []).append(k)
+        if many is not None:
+            groups = list(by_leader.items())
+            values_by_group = many([(leaders[li], [pairs[k][1] for k in ks]) for li, ks in groups])
+            for (_li, ks), values in zip(groups, values_by_group):
+                for k, v in zip(ks, values):
+                    out[k] = float(v)
+            return out
         for li, ks in by_leader.items():
             values = score(leaders[li], [pairs[k][1] for k in ks])
             for k, v in zip(ks, values):

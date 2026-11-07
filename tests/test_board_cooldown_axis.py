@@ -9,7 +9,7 @@ Three facts this rests on, none of them assumed here:
   modifier is keyed by HOLOMEM, not by card, and reaches every card of that
   holomem.
 - Branch B of the tree carries exactly three `Act.CD` nodes at 4.0 % each, so
-  0.12 is the ceiling (`tools/recon/proxy/board_active_mods.py`).
+  0.12 is the ceiling (`tools/refresh/board_active_mods.py`).
 - It divides rather than multiplies: a 35 s Active lands on a 31.25 s grid at
   +12 %.
 
@@ -25,7 +25,7 @@ import pytest
 
 from hbuilder.domain.scoring import score_card_set, score_fast
 
-from conftest import make_card, make_scoring_config, make_skill, make_team
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 BASE_STAT_SUM = 1500.0
 

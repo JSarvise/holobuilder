@@ -6,7 +6,7 @@ and the arithmetic identity of the lines."""
 from __future__ import annotations
 
 import pytest
-from conftest import FIXTURE_CARDS_PATH, make_scoring_config
+from support.builders import FIXTURE_CARDS_PATH, make_scoring_config
 
 from hbuilder.domain.deck_panel import deck_panel
 from hbuilder.domain.deck_panel_team import panel_cards_for_team, team_deck_panel

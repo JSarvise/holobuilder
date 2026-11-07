@@ -31,13 +31,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from hbuilder.cli import build_parser
+from hbuilder.inputs import default_paths
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # From the CLI's own default, not a literal — `test_fixture_isolation` forbids a
 # hardcoded `data/` path in `tests/`, and this module is deliberately one of the
 # few that asserts something about the real catalogue.
-CARDS_PATH = REPO_ROOT / build_parser().parse_args(["solve"]).cards
+CARDS_PATH = REPO_ROOT / default_paths().cards
 ENRICHED_PATH = (
     REPO_ROOT / "tools" / "recon" / "proxy" / "dumps" / "cards_enriched.json"
 )

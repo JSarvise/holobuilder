@@ -4,8 +4,8 @@ set of assumptions, with the differences explained.
 READS ONLY (tools/web/test_no_writes.py). Everything here is the same
 machinery the Solve page's routes already use — `load_inputs` /
 `apply_collection` for the cards, `optimize_and_rerank` for a developed board,
-`score_song_detailed` / `deck_screen_unit_score` for the numbers, `certindex`
-for the same-instant-same-basis certificate — glued together for exactly two
+`score_song_detailed` / `deck_screen_unit_score` for the numbers, and a
+same-instant-same-basis certificate (`heuristic_certificate`) — glued together for exactly two
 teams. There is deliberately NO second definition of what a card is worth:
 the only web-side computation is `override_card`, which restates ONE card at
 a chosen level/bloom through the domain's own `resolve_card_state` /
@@ -13,9 +13,9 @@ a chosen level/bloom through the domain's own `resolve_card_state` /
 `apply_collection` has no switch for), and the panel-line derivation
 (`panel_lines`, below).
 
-The server module is imported lazily (`_srv()`): `server.py` imports this
-module at load, so a top-level `import server` here would be circular. By the
-time `build_compare` runs the server is fully loaded.
+The request parsers, the bases and the file paths are the web server's own
+(`hbweb.basis`, `hbweb.config`), so Compare reads every token exactly as the other
+routes do; the card faces and the per-row board section are built here.
 
 Request body::
 
@@ -27,7 +27,6 @@ Request body::
      "board": "captured" | "develop" | "off",  "budget": null (real) | int 0..447,
      "song": "m0334" | "",  "across": bool,       # song > across > Unit Score
      "platform": "mobile" | "pc",  "uptime_model": "finite" | "steady",
-     "objective_leaf": "plan_cache" (default) | "develop",
      "distribution": bool}                      # song mode: the run-score law per team
 
 `board: "state"` scores each team on the board a RANKED ROW was scored on: every
@@ -51,8 +50,7 @@ own seed when this request's inputs_hash + budget/uptime/platform match it,
 else from team A) — is the headline, `score.song_est` / `score.across_mean`
 and `board_state`; the per-team greedy re-develop is the LABELLED what-if
 (`score.song_est_develop` / `score.across_mean_develop`, `develop_whatif`,
-`board_state_develop`, `board_plan_summary_develop`). `objective_leaf:
-"develop"` gives single-number rows (headline = the re-develop).
+`board_state_develop`, `board_plan_summary_develop`).
 Unit-Score mode (no song, no across) has no plan-cache objective and stays on
 the develop leaf, labelled.
 """
@@ -63,7 +61,7 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
-from hbuilder.cli import (
+from hbuilder.inputs import (
     COLLECTION_CAPS_PATH,
     COLLECTION_CURVE_PATH,
     COLLECTION_LADDER_PATH,
@@ -93,20 +91,22 @@ from hbuilder.domain.collection import (
 )
 from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown
 from hbuilder.domain.scoring_config import ACTIVE_UPTIME_MODELS
+from hbuilder.domain.skilltree import TOTAL_BOARD_POINTS
 from hbuilder.domain.schema import COSTUME_SLOT_KIND
 from hbuilder.domain.song import SongError, load_charts, song_overall_power
 from hbuilder.domain.song_rank import score_team_on_chart
 from hbuilder.domain.team import MEMBER_COUNT, Team, TeamError
 
 import certificate as cert_mod
-import certindex
 import row_detail
+
+from hbweb import basis as basis_mod, collection, config, static
 
 TEAM_LABELS = ("A", "B")
 BOARD_MODES = ("captured", "develop", "off", "state")
 LEVEL_RANGE = (1, 80)
 BLOOM_RANGE = (0, 6)
-FULL_TREE = 453
+FULL_TREE = TOTAL_BOARD_POINTS          # what the whole tree costs
 
 # The panel lines, in the order the deck screen lists them. `kind` says how
 # the Δ is read: a POWER line is absolute
@@ -134,12 +134,6 @@ class CompareError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
-
-
-def _srv():
-    import server  # noqa: PLC0415 — see the module docstring (circular at load)
-
-    return server
 
 
 # ---------------------------------------------------------------------------
@@ -202,23 +196,21 @@ def parse_teams(body: Mapping) -> list[dict]:
 
 
 def parse_assumptions(body: Mapping) -> dict:
-    """The SAME tokens the Solve page's routes read, through the server's own
-    parsers where one exists (`_parse_assume`, `_parse_platform`)."""
-    srv = _srv()
-    basis = srv._parse_basis(body.get("basis"))
+    """The SAME tokens the Optimizer's routes read, through the server's own
+    parsers where one exists (`basis.parse_assume`, `basis.parse_platform`)."""
+    basis_name = basis_mod.parse_basis(body.get("basis"))
     board = str(body.get("board") or "develop").lower()
     if board not in BOARD_MODES:
         board = "develop"
-    budget = None
-    if body.get("budget") is not None and str(body.get("budget")).lower() not in ("", "real"):
-        try:
-            budget = max(0, min(FULL_TREE, int(body.get("budget"))))
-        except (TypeError, ValueError):
-            budget = None
-    # The maxed-account basis develops at the full tree by default (a maxed
-    # account has every point; "real" points are the user's own account's).
-    if budget is None and basis == srv.MAXED_ACCOUNT_BASIS:
-        budget = srv.MAXED_ACCOUNT_BUDGET
+    # "max" = what a max-level holomem holds; the maxed-account basis develops at that
+    # by default (a maxed account has every holomem at max level; "real" points are the
+    # user's own account's).
+    try:
+        budget = basis_mod.parse_budget(body.get("budget"))
+        if budget is None and basis_name == basis_mod.MAXED_ACCOUNT_BASIS:
+            budget = basis_mod.maxed_account_budget()
+    except basis_mod.MaxedAccountUnavailable as exc:
+        raise CompareError(503, str(exc)) from None
     uptime = str(body.get("uptime_model") or "").lower() or None
     if uptime not in ACTIVE_UPTIME_MODELS:
         uptime = None
@@ -226,31 +218,27 @@ def parse_assumptions(body: Mapping) -> dict:
     # chart difficulty (absent -> EXPERT); the server's own parser, so an
     # unknown one is the same 400 every other route answers
     try:
-        difficulty = srv._parse_difficulty(body, song)
-    except srv._HttpError as exc:
+        difficulty = basis_mod.parse_difficulty(body, song)
+    except basis_mod.HttpError as exc:
         raise CompareError(exc.code, exc.obj.get("error") if isinstance(exc.obj, dict) else str(exc))
-    objective_leaf = str(body.get("objective_leaf") or "plan_cache").lower()
-    if objective_leaf not in ("plan_cache", "develop"):
-        objective_leaf = "plan_cache"
     return {
-        "basis": basis,
-        "assume_level": srv._parse_assume(body, "assume_level", *LEVEL_RANGE),
-        "assume_bloom": srv._parse_assume(body, "assume_bloom", *BLOOM_RANGE),
+        "basis": basis_name,
+        "assume_level": basis_mod.parse_assume(body, "assume_level", *LEVEL_RANGE),
+        "assume_bloom": basis_mod.parse_assume(body, "assume_bloom", *BLOOM_RANGE),
         "board": board,
         "budget": budget,
         "song": song,
         "difficulty": difficulty,
         "across": bool(body.get("across")) and not song,
-        "platform": srv._parse_platform(body),
+        "platform": basis_mod.parse_platform(body),
         "uptime_model": uptime,
-        # `server` (the default) | `modelled` — see `server.DECK_POWER_BASES`.
+        # `server` (the default) | `modelled` — see `basis.DECK_POWER_BASES`.
         # Comparisons with the community tool holodori.best use `modelled`, and
         # that comparison is one of the few non-circular checks available.
-        "deck_power": srv._deck_power_basis(body),
+        "deck_power": basis_mod.deck_power_basis(body),
         # `auto` is resolved against a cfg later (it needs run_state), so the
-        # raw request flag travels and `_auto_premise` does the work once.
+        # raw request flag travels and `basis.auto_premise` does the work once.
         "auto": body.get("auto") is True,
-        "objective_leaf": objective_leaf,
         "distribution": body.get("distribution") is True,
     }
 
@@ -283,20 +271,19 @@ class OverrideContext:
     the untouched field is the cap — that is what maxed means."""
 
     def __init__(self, *, basis_name: str, assume_level: object, assume_bloom: object) -> None:
-        srv = _srv()
-        root = srv.REPO_ROOT
-        curve_raw = srv._read_json(root / COLLECTION_CURVE_PATH)
-        caps_raw = srv._read_json(root / COLLECTION_CAPS_PATH)
-        ladder_raw = srv._read_json(root / COLLECTION_LADDER_PATH)
+        root = config.REPO_ROOT
+        curve_raw = config.read_json(root / COLLECTION_CURVE_PATH)
+        caps_raw = config.read_json(root / COLLECTION_CAPS_PATH)
+        ladder_raw = config.read_json(root / COLLECTION_LADDER_PATH)
         self.basis = stat_basis_from_mapping(curve_raw) if curve_raw else None
         self.caps = caps_by_rarity_from_mapping(caps_raw) if caps_raw else {}
         self.ladder = skill_ladder_from_mapping(ladder_raw)
-        self.maxed = srv._cards_maxed(basis_name)
+        self.maxed = basis_mod.cards_maxed(basis_name)
         if self.maxed:
             self.entries: dict = {}
             self.default: object = "max"
         else:
-            doc = srv._read_json(srv.COLLECTION_PATH) or {}
+            doc = config.read_json(config.COLLECTION_PATH) or {}
             entries = doc.get("cards") or {}
             self.entries = {cid: _whatif_entry(e, assume_level, assume_bloom)
                             for cid, e in entries.items()} if isinstance(entries, dict) else {}
@@ -435,7 +422,7 @@ def explain_difference(pa: dict, pb: dict, gates_a: list, gates_b: list,
     drivers: list[tuple[float, str]] = []
     pow_a, pow_b = pa.get("overall_power") or 0.0, pb.get("overall_power") or 0.0
     if pow_a > 0 and pow_b > 0:
-        for key, label, kind in PANEL_LINES:
+        for key, _label, kind in PANEL_LINES:
             if kind != "power" or key in ("overall_power", "unit_score"):
                 continue
             va, vb = pa.get(key) or 0.0, pb.get(key) or 0.0
@@ -520,25 +507,202 @@ def _skill_diff(rows_a: list, rows_b: list) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# the develop machinery (the same inputs develop_pipeline feeds optimize_and_rerank)
+# the account's bench boards, the per-row board section, the gates, the card faces
+# ---------------------------------------------------------------------------
+def _bench_characters():
+    """`board.json`'s name-keyed `characters` mapping (the account's CURRENT
+    boards, connect multipliers resolved) for the develop re-score's bench
+    merge, or `None` when the capture is absent — the develop then scores the
+    six team boards alone."""
+    doc = config.read_json(config.REPO_ROOT / config.BOARD_PATH) or {}
+    return doc.get("characters") or None
+
+
+def _bench_sockets():
+    """What the account's off-team sockets hold (`ondemand.bench_sockets_of` over
+    `board_state.json`), so a develop keeps the team from also socketing a card
+    a bench board keeps lifting (`board_plan.held_bench_cards`); None without it."""
+    import ondemand  # noqa: PLC0415
+    state = config.read_json(config.BOARD_STATE_PATH)
+    return ondemand.bench_sockets_of(state) if state else None
+
+
+def _board_plan_summary(bt, board_state: dict, *, budget_kind: str, budget_for,
+                        current_by_chr: dict, node_prices: dict | None,
+                        board_off: int, developed: int, metric: str) -> dict:
+    """The per-row board section: ONE board per row —
+    the one it was scored on (`board_state`) — diffed against the account's
+    CURRENT board from the same board_export the develop budgeted with. `buy`
+    = developed − current, `sell` = current − developed (a respec proposal:
+    only meaningful under REAL points; a flat/full-tree develop is "adds
+    only", so `sell` is empty there and `develop_only` says so), `keep` = both.
+    `points_used` = the plan's own spend, `points_max` = the budget the plan
+    was costed against, named by kind — never "453 / 97". Materials from the
+    node price table for the buys; absent when the master is unreadable."""
+    per_character = []
+    materials: dict[str, int] = {}
+    develop_only = budget_kind != "real"
+    for card in (bt.team.leader, *bt.team.members):
+        chr_id = "chr-" + card.id.split("-")[1]
+        if chr_id in {c["chr"] for c in per_character}:
+            continue
+        cplan = bt.plan.per_character.get(card.id)
+        state = board_state.get(chr_id) or {}
+        planned = set(state.get("nodes") or (sorted(cplan.selected) if cplan else []))
+        cur = current_by_chr.get(chr_id) or {}
+        owned = set(cur.get("owned") or [])
+        buy = sorted(planned - owned)
+        sell = [] if develop_only else sorted(owned - planned)
+        keep = sorted(planned & owned)
+        if node_prices:
+            for nid in buy:
+                for item, qty in (node_prices.get(nid) or {}).items():
+                    if item != "points":
+                        materials[item] = materials.get(item, 0) + int(qty)
+        sockets = [{"slot": slot, "card_id": cid}
+                   for slot, cid in sorted((state.get("slots") or {}).items())]
+        per_character.append({
+            "chr": chr_id, "name": cur.get("name") or card.member,
+            "buy": buy, "sell": sell, "keep": keep, "sockets": sockets,
+            "points_used": int(cplan.spent) if cplan is not None else 0,
+            "points_max": int(budget_for(card)),
+            "current_owned": len(owned),
+        })
+    return {
+        "metric": metric, "board_off": board_off, "developed": developed,
+        "gain_pct": round(100.0 * (developed - board_off) / board_off, 1) if board_off else 0.0,
+        "budget_kind": "full_tree" if budget_kind == "flat" and all(
+            c["points_max"] == FULL_TREE for c in per_character) else budget_kind,
+        "develop_only": develop_only,
+        "per_character": per_character,
+        "materials": materials if node_prices else None,
+    }
+
+
+def _team_gates(team, cfg) -> list:
+    """The per-gate projection a row renders. Same shape as json_output.py's `gates`.
+    Gates resolve against the assembled team, independent of the board, so the base
+    cfg suffices."""
+    bd = score_with_breakdown(team, cfg)
+    return [
+        {"card_id": c.card_id, "slot_kind": c.slot_kind,
+         "dimension": c.gate_dimension, "value": c.gate_value,
+         "threshold": c.gate_threshold, "actual_count": c.gate_actual_count,
+         "fired": c.gate_fired}
+        for c in bd.contributions if c.gate_fired is not None
+    ]
+
+
+def _card_states() -> dict[str, Any]:
+    """The inputs that resolve each card's `(level, bloom, ...)` for its face: the
+    collection's per-card entries, its `card_default`, and the per-rarity level caps.
+
+    ⚠ These drive the DISPLAY only. `card_default: "max"` is a legitimate statement
+    about levels and stats (validated 167/167) and is what the solver already scored
+    against; it is **refuted for Connect**, and that rule lives where it belongs, in
+    `connect_bonus_level` and the board endpoint. Do not reuse this for Connect.
+    """
+    document = config.read_json(config.COLLECTION_PATH) or {}
+    caps_raw = config.read_json(config.CAPS_PATH)
+    caps = caps_by_rarity_from_mapping(caps_raw) if caps_raw else {}
+    return {
+        "entries": document.get("cards") or {},
+        "default": document.get("card_default", "max"),
+        "caps": caps,
+    }
+
+
+def _state_of(inputs: dict[str, Any], card: Any) -> Any:
+    """One card's resolved `(level, bloom, ...)`, or `None` if it cannot be had."""
+    match = re.match(r"(\d+)", str(card.rarity or ""))
+    rarity = match.group(1) if match else None
+    try:
+        return resolve_card_state(
+            card.id,
+            inputs["entries"].get(card.id),
+            inputs["default"],
+            inputs["caps"].get(rarity) if rarity else None,
+        )
+    except Exception:  # a malformed entry must not take the whole response down
+        return None
+
+
+def _skill_view(slot: Any) -> dict[str, Any] | None:
+    """The few fields a skill needs to be described in one line, or `None`.
+
+    Deliberately not `dataclasses.asdict`: a slot field can hold an `Unknown`
+    sentinel, and the point of that sentinel is that it must reach the reader as
+    "unknown" rather than be coerced into a number. Anything not a plain scalar
+    is stringified, so an `Unknown` prints as itself.
+    """
+    if slot is None:
+        return None
+
+    def plain(value: object) -> object:
+        if value is None or isinstance(value, (int, float, str, bool)):
+            return value
+        kind = getattr(value, "kind", None)
+        return str(kind) if kind is not None else str(value)
+
+    return {
+        "family": plain(getattr(slot, "family", None)),
+        "effect_type": plain(getattr(slot, "effect_type", None)),
+        "magnitude": plain(getattr(slot, "magnitude", None)),
+        "target": plain(getattr(slot, "target", None)),
+        "condition": plain(getattr(slot, "condition", None)),
+    }
+
+
+def _card_view(card: Any, art_dir: Path, state: Any = None) -> dict[str, Any]:
+    """Everything the client needs to draw one card face. `generations`
+    is sorted for a stable render order -- it is a frozenset on `Card`.
+
+    `level` and `bloom` are what the face prints in the game's own bottom-left
+    stack. They are `None` when unresolvable, and the client then draws neither
+    badge rather than a made-up number.
+    """
+    return {
+        "id": card.id,
+        "member": card.member,
+        "type": card.type,
+        "rarity": card.rarity,
+        "generations": sorted(card.generations),
+        "costume_name": card.costume_name,
+        "stats": {
+            "performance": card.stats.performance,
+            "technique": card.stats.technique,
+            "sense": card.stats.sense,
+        },
+        "stat_sum": card.stat_sum(),
+        "has_art": static.asset_known(art_dir, art_dir / f"{card.id}.webp"),
+        "level": getattr(state, "level", None),
+        "bloom": getattr(state, "bloom", None),
+        # The OUTFIT's skill, which is the only thing a leader contributes.
+        # Shipped for every card because any card can be the leader.
+        "costume_skill": _skill_view(card.costume_skill),
+        "costume_text": collection.costume_texts().get(card.id),
+    }
+
+
+# ---------------------------------------------------------------------------
+# the develop machinery (the inputs optimize_and_rerank needs)
 # ---------------------------------------------------------------------------
 class _Developer:
     def __init__(self, cfg, cards, basis_name: str, budget: int | None, chart,
                  ma_scenario=None, assume_bloom=None) -> None:
-        srv = _srv()
-        self.skilltree = srv._read_json(srv.SKILLTREE_PATH)
-        self.node_master = srv._read_json(srv.NODE_MASTER_PATH)
+        self.skilltree = config.read_json(config.SKILLTREE_PATH)
+        self.node_master = config.read_json(config.NODE_MASTER_PATH)
         if not self.skilltree or not self.node_master:
             raise CompareError(503, (
                 "board develop needs skilltree.json + master_SkillTreeNode.json "
-                "under the gitignored dumps/; run tools/recon/proxy/skilltree.py"))
-        precompute = srv._load_precompute()
+                "under the gitignored dumps/; run tools/refresh/build_skilltree.py"))
+        precompute = basis_mod.load_precompute()
         if precompute is None or not hasattr(precompute, "board_export"):
             raise CompareError(503, (
                 "could not import board_export via precompute_optimisations "
-                "(needs the proxyenv interpreter this server runs under)."))
+                "(needs the packages of requirements.txt; setup.cmd or setup.sh installs them)."))
         self.effects = node_effect_ids_from_master(self.node_master)
-        scenario = srv._SCENARIO_BY_BASIS.get(basis_name, "account")
+        scenario = basis_mod.SCENARIO_BY_BASIS.get(basis_name, "account")
         export_doc = precompute.board_export.build(gain=False, pool=1, scenario=scenario)
         self.granted = {c["chr"]: (c.get("points") or {}).get("granted")
                         for c in export_doc.get("characters", [])}
@@ -557,18 +721,18 @@ class _Developer:
             self.connect_cards = precompute.connect_cards_for(scenario, assume_bloom=assume_bloom)
         except Exception:  # noqa: BLE001 — sockets stay idealised
             self.connect_cards = None
-        self.bench_characters = srv._bench_characters()
-        self.bench_sockets = srv._bench_sockets()       # what the off-team sockets hold
-        # The maxed-account basis: the scenario's bench (every holomem at the
-        # full tree, level-2 sockets) and its catalogue-wide Connect pool — the
-        # same inputs the server's develop routes feed optimize_and_rerank.
+        self.bench_characters = _bench_characters()
+        self.bench_sockets = _bench_sockets()       # what the off-team sockets hold
+        # The maxed-account basis: the scenario's bench (every holomem at max
+        # level, level-2 sockets) and its catalogue-wide Connect pool — the
+        # same inputs the board planner's routes feed optimize_and_rerank.
         self.name_by_chr = {"chr-" + c.id.split("-")[1]: c.member for c in cards}
         if ma_scenario is not None:
             self.bench_characters = ma_scenario.bench
             self.bench_sockets = None                   # the maxed bench carries its own
             self.connect_cards = ma_scenario.connect_cards
             self.current_by_chr = ma_scenario.current_by_chr(self.name_by_chr)
-            self.granted = {k: srv.MAXED_ACCOUNT_BUDGET for k in self.current_by_chr}
+            self.granted = {k: ma_scenario.points for k in self.current_by_chr}
         self.cfg = cfg
         self.flat_budget = budget
         self._tree_cache: dict[str, object] = {}
@@ -641,7 +805,7 @@ class _Developer:
         return state
 
     def summary(self, bt, board_state: dict, *, board_off: int, developed: int, metric: str) -> dict:
-        return _srv()._board_plan_summary(
+        return _board_plan_summary(
             bt, board_state,
             budget_kind="flat" if self.flat_budget is not None else "real",
             budget_for=self.budget_for, current_by_chr=self.current_by_chr,
@@ -682,9 +846,35 @@ def build_teams(specs: list[dict], by_id: dict, raw_by_id: dict,
     return out
 
 
+def heuristic_certificate(*, model_version: str, inputs_hash: str | None, basis: dict,
+                          generator: str, stages: list[str],
+                          candidates_evaluated: int | None = None,
+                          seed_team: list[str] | None = None,
+                          seed_score: float | None = None,
+                          note: str | None = None, extra: dict | None = None) -> dict:
+    cert = {
+        "status": "HEURISTIC",
+        "model_version": model_version,
+        "inputs_hash": inputs_hash,
+        "inputs_hash_short": (inputs_hash or "")[:12] or None,
+        "basis": dict(basis),
+        "candidate_generator": generator,
+        "stages": list(stages),
+        "candidates_evaluated": candidates_evaluated,
+        "seed_team": seed_team,
+        "seed_score": seed_score,
+        "meaning": ("best of the candidates this pipeline evaluated; no bound over "
+                    "the rosters it did not evaluate"),
+    }
+    if note:
+        cert["certificate_note"] = note
+    if extra:
+        cert.update(extra)
+    return cert
+
+
 def build_compare(body: Mapping, *, art_dir: Path) -> dict:
     """The response document. Raises CompareError for a typed HTTP answer."""
-    srv = _srv()
     specs = parse_teams(body)
     A = parse_assumptions(body)
     basis_name, board_mode = A["basis"], A["board"]
@@ -693,14 +883,14 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
     chart = None
     all_charts: list = []
     difficulty = A.get("difficulty") or "EXPERT"
-    charts_file = srv._charts_path(difficulty)
+    charts_file = basis_mod.charts_path(difficulty)
     if A["song"]:
         library = load_charts(str(charts_file))
         chart = library.get(A["song"], difficulty) if library is not None else None
         if chart is None:
             raise CompareError(400, (
                 f"song {A['song']!r}: no {difficulty} chart in {charts_file.name} "
-                f"(build it with tools/recon/proxy/build_charts.py)"))
+                f"(build it with tools/refresh/build_charts.py)"))
     elif A["across"]:
         library = load_charts(str(charts_file))
         all_charts = [c for c in ((library.get(m, difficulty) for m in library.music_ids)
@@ -709,27 +899,27 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
         if not all_charts:
             raise CompareError(400, (
                 f"across-songs compare needs the chart library ({charts_file.name}) "
-                f"on disk; build it with tools/recon/proxy/build_charts.py"))
+                f"on disk; build it with tools/refresh/build_charts.py"))
     mode = "song" if chart is not None else ("across" if all_charts else "unit_score")
 
     try:
-        raw_cards, owned, cfg, _prov = load_inputs(srv.CARDS_PATH, srv.OWNED_PATH, False)
+        raw_cards, owned, cfg, _prov = load_inputs(config.CARDS_PATH, config.OWNED_PATH)
         if A["uptime_model"] in ACTIVE_UPTIME_MODELS:
             cfg = dataclasses.replace(cfg, active_uptime_model=A["uptime_model"])
         cfg = dataclasses.replace(cfg, platform=A["platform"], **A.get("deck_power", {}))
         if A.get("auto"):
-            cfg = dataclasses.replace(cfg, **srv._auto_premise(cfg, {"auto": True}))
+            cfg = dataclasses.replace(cfg, **basis_mod.auto_premise(cfg, {"auto": True}))
         cfg = dataclasses.replace(cfg, board=None)
         # the basis AFTER uptime/platform (the maxed-account bench is
         # linearised at, and cached by, the resolved config)
-        cards, collection_basis, cfg, ma_scenario = srv._apply_basis(
+        cards, collection_basis, cfg, ma_scenario = basis_mod.apply_basis(
             raw_cards, owned, cfg, basis_name,
             assume_level=A["assume_level"], assume_bloom=A["assume_bloom"])
     except _LoadFailure as exc:
         raise CompareError(503, f"input data error (exit {exc.exit_code})")
     except CollectionError as exc:
         raise CompareError(400, f"CollectionError: {exc}")
-    except srv.MaxedAccountUnavailable as exc:
+    except basis_mod.MaxedAccountUnavailable as exc:
         raise CompareError(503, str(exc))
 
     by_id = {c.id: c for c in cards}
@@ -744,11 +934,11 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
     if board_mode == "captured":
         if ma_scenario is not None:
             # the maxed-account "current" board IS the scenario's bench
-            captured_model = None if srv.BOARD_DISABLED else ma_scenario.board_model
+            captured_model = None if config.BOARD_DISABLED else ma_scenario.board_model
         else:
             try:
                 captured_model = load_board_basis(
-                    None if srv.BOARD_DISABLED else str(srv.REPO_ROOT / srv.BOARD_PATH)).model
+                    None if config.BOARD_DISABLED else str(config.REPO_ROOT / config.BOARD_PATH)).model
             except BoardError as exc:
                 raise CompareError(400, f"BoardError: {exc}")
     elif board_mode == "develop":
@@ -765,7 +955,7 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
                                assume_bloom=A["assume_bloom"])
 
     # certificate meta + basis (the guard tuple; `leaf` added below)
-    meta = srv._certificate_meta(cfg, basis_name, scenario=ma_scenario)
+    meta = basis_mod.certificate_meta(cfg, basis_name, scenario=ma_scenario)
     budget_kind = ("none" if board_mode == "off" else "captured" if board_mode == "captured"
                    else "state" if board_mode == "state"
                    else "flat" if A["budget"] is not None else "real")
@@ -776,25 +966,15 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
         uptime_model=cfg.active_uptime_model, platform=cfg.platform, difficulty=difficulty)
 
     # THE OBJECTIVE (module docstring): under board=develop, song / across
-    # mode, `objective_leaf == "plan_cache"`: one PlanCache for the request,
+    # mode: one PlanCache for the request,
     # seeded from the per-leader table that certifies this song on this
     # hash + budget/uptime/platform (so A's number and the certificate are
     # the same objective), else from team A.
     objective: dict[str, Any] = {"leaf": "develop"}
     plan_cache: PlanCache | None = None
-    if developer is not None and mode in ("song", "across") and A["objective_leaf"] == "plan_cache":
+    if developer is not None and mode in ("song", "across"):
         seed_team: Team = teams[0]["team"]
         seed_source = "team A"
-        if mode == "song":
-            found = certindex.default_index().plan_cache_seed_for(
-                A["song"], meta.get("inputs_hash"), cbasis_guard, ignore=("universe",))
-            if found is not None:
-                try:
-                    seed_team = Team(leader=by_id[found[0]],
-                                     members=tuple(by_id[m] for m in found[1]))
-                    seed_source = f"per-leader table ({found[2]})"
-                except (KeyError, TeamError):
-                    pass
         plan_cache = developer.plan_cache_from(seed_team)
         objective = {
             "leaf": "plan_cache",
@@ -900,7 +1080,7 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
             "slots": entry["slots"],
             "score": score,
             "panel": panel,
-            "gates": srv._team_gates(team, cfg),
+            "gates": _team_gates(team, cfg),
             "contributions": _contribution_rows(bd),
             "board_state": board_state,
             "board_mode": board_mode,
@@ -969,19 +1149,13 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
     if leaf is not None:
         cbasis["leaf"] = leaf
     for row in rows:
-        hc = certindex.heuristic_certificate(
+        row["certificate"] = heuristic_certificate(
             model_version=meta["model_version"], inputs_hash=meta.get("inputs_hash"),
             basis=cbasis, generator="hand-picked roster (Compare view)",
             stages=[f"score: {mode}, board {board_mode}"], candidates_evaluated=1)
-        if mode == "song":
-            row["certificate"] = certindex.attach(
-                hc, song=A["song"], leader=row["leader_id"], member_ids=row["member_ids"],
-                row_score=round(row["score"]["headline"]))
-        else:
-            row["certificate"] = hc
 
     # faces
-    states = srv._card_states()
+    states = _card_states()
     faces: dict[str, Any] = {}
     for row in rows:
         # the roster, plus every Connect-socket card the developed board placed,
@@ -990,7 +1164,7 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
                     for cid in (st.get("slots") or {}).values()]
         for cid in [*row["cards"], *socketed]:
             if cid not in faces and cid in by_id:
-                faces[cid] = srv._card_view(by_id[cid], art_dir, srv._state_of(states, by_id[cid]))
+                faces[cid] = _card_view(by_id[cid], art_dir, _state_of(states, by_id[cid]))
 
     ra, rb = rows
     diff = explain_difference(ra["panel"], rb["panel"], ra["gates"], rb["gates"],
