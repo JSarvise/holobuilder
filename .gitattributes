@@ -2,3 +2,6 @@
 *.cmd text eol=crlf
 # the Linux launchers keep LF (bash reads a CR as part of the line)
 *.sh text eol=lf
+# data/cards.json is CRLF in every checkout: the refresh appends cards with an encoder that
+# reproduces the file byte for byte (tools/refresh/card_append.py) and writes CRLF
+data/cards.json text eol=crlf

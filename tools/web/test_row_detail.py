@@ -39,9 +39,11 @@ def _req(url: str, obj: dict | None = None) -> tuple[int, dict]:
 
 
 def _skip_without_dumps(status: int, doc: dict) -> None:
-    # 503: no dumps; a missing chart; `_LoadFailure`: no account files (data/owned.json)
+    # 503: no dumps; a missing chart; `_LoadFailure`: no account files (data/owned.json);
+    # the maxed basis without the refresh's master export (its max-level board points)
     error = str(doc.get("error", ""))
-    if status == 503 or (status == 400 and "chart" in error) or "_LoadFailure" in error:
+    if (status == 503 or (status == 400 and ("chart" in error or "master export" in error))
+            or "_LoadFailure" in error):
         pytest.skip(f"dumps absent: {doc.get('error')}")
 
 
