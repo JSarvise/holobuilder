@@ -115,6 +115,11 @@ def _fake_engine(n_cards: int = 14, n_charts: int = 9):
                            + (5 if refine_activation else 0))
             return out
 
+        def batch_ceiling(self, teams, chart_indices, refine, planned):
+            # the run if every ACTIVE fires: above the expectation, on the same board
+            calls.append((len(teams), "ceiling"))
+            return [v * 1.05 for v in self.batch_score(teams, chart_indices)]
+
         def batch_score_per_chart(self, teams):
             calls.append((len(teams), "per_chart"))
             return [[sum(m.w for m in t.members) * 1000 * (1 + 0.01 * k) for k in range(n_charts)]
@@ -145,7 +150,9 @@ def test_engine_song_and_general_payloads(monkeypatch):
     eng.basis = "maxed"                                           # a GENERAL_FITTED basis
     song = eng.search("m0002")
     assert song["scope"] == "song" and song["ranking"][0]["refined"] is True
-    assert all(c[1] == (2,) for c in calls)                       # only that chart
+    # every served row of a one-song search carries its ceiling (the page sorts by Max)
+    assert all(r["song_max"] is not None and r["song_max"] > r["best"] - 5 for r in song["ranking"])
+    assert all(c[1] in ((2,), "ceiling") for c in calls)          # only that chart
     calls.clear()
     gen = eng.search(None)
     assert gen["scope"] == "general" and gen["song"] is None and gen["charts"] == 9
@@ -153,6 +160,7 @@ def test_engine_song_and_general_payloads(monkeypatch):
     assert any(c[1] is None for c in calls)                       # the re-score on every chart
     assert any(c[1] not in (None, "per_chart") and len(c[1]) == 5 for c in calls)   # the climb, on the wide sample
     assert tuple(gen_sample := eng._wide)[:3] == eng._sample and len(gen_sample) == 5
+    assert all(r["song_max"] is None for r in gen["ranking"])     # an average over charts: no single run
     values = [r["best"] for r in gen["ranking"]]
     assert values == sorted(values, reverse=True)
     # the served number is the FULL mean (every chart), not the sample's
@@ -388,13 +396,13 @@ def test_a_replanned_team_is_remembered_under_its_own_name(monkeypatch):
                             ((leader_id, members), entry[1:])))
     leaf = SimpleNamespace(cfg=SimpleNamespace(platform="mobile", song_auto=False,
                                                run_state=SimpleNamespace(combo=None)))
+    a = SimpleNamespace(plan_opts=lambda: {}, key=lambda: ())
     engine = SimpleNamespace(
-        assumptions=SimpleNamespace(plan_opts=lambda: {}, key=lambda: ()),
         difficulty="EXPERT", levels=None,
         charts=[SimpleNamespace(singers=("chr-00031",))], index={"m0020": 0},
         pool=SimpleNamespace(_pool=FakeWorkers(), new_generation=lambda: 1,
                              stop_through=lambda _g: None, ctx=leaf))
-    out, failed, optimal = ondemand.Engine._within_materials(engine, ranking, leaders, pool, "m0020",
+    out, failed, optimal, _boards = ondemand.Engine._within_materials(engine, a, ranking, leaders, pool, "m0020",
                                                              (0,), None)
     assert failed == [] and len(out) == 3 and len(optimal) == 3
     assert held and all(team == entry for team, entry in held)
@@ -429,3 +437,27 @@ def test_maxed_memory_bonus_is_the_posters_the_game_has():
     n = po.master_poster_count()
     assert n is not None
     assert ondemand.maxed_bonuses().posters == n
+
+
+def test_the_plan_options_share_one_engine():
+    """Resets, refund, branches, targets and a reset's minimum gain shape only the re-plan
+    within the materials: they are left out of the engine's key (its workers' context is
+    the same) and kept in the full key, which the hints and the plan options carry."""
+    base = ondemand.parse_assumptions({"boards": "plan"})
+    for change in ({"max_resets": 3}, {"no_refund": True}, {"branches": "gy"},
+                   {"targets": [{"chr": "chr-00031", "node": "G-001", "mode": "buy"}]}, {"reset_min_gain": 0.5}):
+        other = ondemand.parse_assumptions({"boards": "plan", **change})
+        assert other.engine_key() == base.engine_key(), change
+        assert other.key() != base.key(), change
+    for change in ({"level": "max"}, {"bloom": 2}, {"infinite": True}, {"max_points": True},
+                   {"all_invited": True}, {"boards": "as_is"}):
+        assert ondemand.parse_assumptions({"boards": "plan", **change}).engine_key() !=             base.engine_key(), change
+
+
+def test_a_search_uses_its_own_plan_options_and_hints():
+    eng, _calls = _fake_engine()
+    eng.assumptions = ondemand.parse_assumptions({"boards": "as_is"})
+    other = ondemand.parse_assumptions({"boards": "plan"})
+    with pytest.raises(ValueError):
+        eng.search("m0001", assumptions=other)
+

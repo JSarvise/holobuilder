@@ -165,3 +165,58 @@ def test_the_manual_combo_is_read_at_each_check():
     always = rank_on_chart([Team(leader=team.leader, members=(always_card,) + team.members[1:])],
                            chart, _cfg()).teams[0].expected_score
     assert never < manual < always
+
+
+# ==========================================================================
+# 2. A SPECIAL's combo-gated activation-rate rider
+# ==========================================================================
+
+
+def _rider_team(condition):
+    """A member whose SPECIAL raises the team's activation rate at each cue while
+    `condition` holds, and a member with an uncertain ACTIVE for it to raise."""
+    from hbuilder.domain.card import SlotRider
+
+    host = make_card("rider-host", special=make_skill(
+        "SPECIAL", family="score_support", effect_type="score", duration=10.0, magnitude=100.0,
+        probability_tier=None,
+        rider=SlotRider(family="activation_rate_up", effect_type="activation_rate", magnitude=50.0,
+                        condition=condition, target=None)))
+    scorer = make_card("scorer", active=make_skill(
+        "ACTIVE", family="conditional_score_up", effect_type="score", duration=10.0, interval=20.0,
+        probability_tier="Medium", magnitude=50.0))
+    members = (host, scorer) + tuple(make_card(f"card-{i}") for i in range(3))
+    return Team(leader=make_card("leader"), members=members)
+
+
+def test_a_combo_gated_rider_does_not_fire_on_auto():
+    """On AUTO the combo never accumulates, so a SPECIAL rider gated on combo >= N
+    never fires -- the same premise the combo-gated ACTIVE override follows
+    (`song._combo_split`). The rider is read per cue against the chart's notes on the
+    manual premise only."""
+    half = {"Low": 0.3, "Medium": 0.5, "High": 0.7}
+    auto = _cfg(probability_tiers=half, song_auto=True, run_state=RunState(life=1000, combo=0))
+    manual = _cfg(probability_tiers=half)
+    chart = _chart()
+    combo40 = GateCondition(kind="run_state", target="combo", count=40, operator="gte")
+    never = GateCondition(kind="run_state", target="combo", count=10_000, operator="gte")
+    score = lambda cond, cfg: rank_on_chart([_rider_team(cond)], chart, cfg).teams[0].expected_score  # noqa: E731
+    # manual: the cues past 40 notes raise the rate, so the rider is worth something
+    assert score(combo40, manual) > score(never, manual)
+    # AUTO: worth nothing, exactly as a rider that can never fire
+    assert score(combo40, auto) == score(never, auto)
+
+
+def test_an_auto_note_carries_no_combo_multiplier():
+    """On AUTO the combo never accumulates, so no note gets the LiveCombo multiplier:
+    every note's weight is its AUTO column alone. Manual play under the full-perfect
+    premise counts the combo note by note (the n-th note carries the tier of combo n)."""
+    from hbuilder.domain.song import _chart_weights
+
+    chart = _chart()
+    auto, _ = _chart_weights(chart, "mobile", True)
+    manual, _ = _chart_weights(chart, "mobile", False)
+    assert auto == tuple(n.auto_permil / 1000.0 for n in chart.notes)
+    assert manual == tuple((n.perfect_permil_for("mobile") / 1000.0) * (1.0 + chart.combo_coefficient(k + 1))
+                           for k, n in enumerate(chart.notes))
+    assert manual[-1] > manual[0]          # the last note carries the highest combo tier

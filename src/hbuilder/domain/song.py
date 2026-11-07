@@ -654,12 +654,15 @@ def _combo_split(resolved: ResolvedSkill, cfg: ScoringConfig, term: _Term,
     return out
 
 
-def _rider_gate_at(resolved: ResolvedSkill, combo: int) -> bool:
+def _rider_gate_at(resolved: ResolvedSkill, combo: int, cfg: ScoringConfig) -> bool:
     """Whether a SPECIAL's rider fires at a cue reached with `combo` notes behind
     it: a COMBO gate against the chart's own count there (full-combo premise), any
-    other gate as resolved for the run (`gates`, the static run state)."""
+    other gate as resolved for the run (`gates`, the static run state). AUTO, or a
+    premise of no combo at all, keeps the static gate for a combo gate too: the combo
+    never accumulates there, as `_combo_split` reads it for an ACTIVE override."""
     condition = resolved.skill.rider.condition
-    if getattr(condition, "kind", None) == "run_state" and condition.target == "combo":
+    if (getattr(condition, "kind", None) == "run_state" and condition.target == "combo"
+            and not cfg.song_auto and cfg.run_state.combo > 0):
         if condition.operator == "lte":
             return combo <= condition.count
         return combo >= condition.count
@@ -697,33 +700,8 @@ def _rider_terms(
     Two riders live on one check would combine as `1 - (1-p)(1-q1)(1-q2)` here, not
     the game's maximum: SPECIAL windows almost never overlap (about 0.64 % of cue
     pairs), so the difference is treated as negligible."""
-    hosts = []
-    for resolved in normal_resolved:
-        rider = resolved.skill.rider
-        if (
-            resolved.skill.kind != "SPECIAL"
-            or not isinstance(rider, SlotRider)
-            or rider.family != "activation_rate_up"
-            or not is_known(rider.magnitude)
-            or not is_known(rider.condition)
-            or not is_known(resolved.skill.duration)
-        ):
-            continue
-        if resolved.gate is not None and not resolved.gate.fired:
-            continue                          # the SPECIAL itself is gated off
-        hosts.append(resolved)
-    if not hosts:
-        return []
     out: list[_Term] = []
-    cues = chart.special_cues
-    for host in hosts:
-        member = member_index_by_id[host.card_id]
-        duration = float(host.skill.duration)
-        rate = _as_rate(float(host.skill.rider.magnitude))
-        spans = [
-            (cue, cue + duration) if _rider_gate_at(host, bisect_left(times, cue)) else None
-            for cue in cues
-        ]
+    for member, rate, spans in _rider_hosts(normal_resolved, member_index_by_id, cfg, chart, times):
         for term in member_terms:
             if term.active_base is None or not term.windows or term.occupancy <= 0.0:
                 continue
@@ -741,6 +719,39 @@ def _rider_terms(
                     term.owner, term.targets,
                     slot_cover=tuple(ws[k] if k < len(ws) else None for ws in per_slot),
                 ))
+    return out
+
+
+def _rider_hosts(normal_resolved, member_index_by_id: Mapping[str, int], cfg: ScoringConfig,
+                 chart: SongChart, times: tuple[float, ...]) -> list[tuple[int, float, list]]:
+    """`(host member index, rider rate, [(start, end) or None per cue])` of every SPECIAL
+    activation-rate rider that can fire: its SPECIAL ungated, its own gate read at each
+    cue (`_rider_gate_at`). The k-th span is live when the host sits in slot k. Shared by
+    the scorer (`_rider_terms`) and the timeline, so both say the same about when a
+    rider raises the chance."""
+    hosts = []
+    for resolved in normal_resolved:
+        rider = resolved.skill.rider
+        if (
+            resolved.skill.kind != "SPECIAL"
+            or not isinstance(rider, SlotRider)
+            or rider.family != "activation_rate_up"
+            or not is_known(rider.magnitude)
+            or not is_known(rider.condition)
+            or not is_known(resolved.skill.duration)
+        ):
+            continue
+        if resolved.gate is not None and not resolved.gate.fired:
+            continue                          # the SPECIAL itself is gated off
+        hosts.append(resolved)
+    out = []
+    for host in hosts:
+        duration = float(host.skill.duration)
+        spans = [
+            (cue, cue + duration) if _rider_gate_at(host, bisect_left(times, cue), cfg) else None
+            for cue in chart.special_cues
+        ]
+        out.append((member_index_by_id[host.card_id], _as_rate(float(host.skill.rider.magnitude)), spans))
     return out
 
 
@@ -1036,6 +1047,34 @@ def timeline(
     by_id = {card.id: card for card in members}
     gates = resolve_card_set_gates(members, cfg.run_state)
     song_seconds = chart.notes[-1].time if chart.notes else 0.0
+    times = _chart_times(chart)
+    # each check's chance as the scorer rolls it: the ACTIVE term's own probability (the
+    # team's and the board's Activation Rate UP folded in) and, inside a SPECIAL rider's
+    # window, the boosted roll -- the same hosts, gates and spans `_rider_terms` scores
+    normal = [r for cid in member_order for r in gates.normal_by_card_id.get(cid, ())]  # type: ignore[union-attr]
+    team_rate_up = _fold_activation_rate_up(tuple(normal), cfg)
+    slot_of = {cid: slot for slot, cid in enumerate(member_order)}
+    riders = _rider_hosts(normal, slot_of, cfg, chart, times)
+
+    def chances(resolved, card_id):
+        _rate, state, _missing = _resolve_skill(resolved, cfg, team_rate_up)
+        term = _term_for(resolved, cfg, team_rate_up, state, song_seconds, slot_of[card_id])
+
+        def at(start: float) -> tuple[float, list[str]]:
+            p = float(term.occupancy)
+            if term.active_base is None or p >= 1.0:
+                return p, []
+            miss, hosts = 1.0 - p, []
+            for slot, rate, spans in riders:
+                span = spans[slot] if slot < len(spans) else None
+                if span is None or not span[0] <= start < span[1]:
+                    continue
+                boosted = cfg.activation_rate_model.apply(term.active_base, term.active_rate + rate)
+                if boosted > p:
+                    miss *= 1.0 - (boosted - p) / (1.0 - p)
+                    hosts.append(by_id[member_order[slot]].member)
+            return 1.0 - miss, hosts
+        return at
 
     lanes = []
     for slot, card_id in enumerate(member_order):
@@ -1048,14 +1087,21 @@ def timeline(
         for resolved in gates.normal_by_card_id.get(card_id, ()):  # type: ignore[union-attr]
             kind = resolved.skill.kind
             if kind == "ACTIVE":
+                chance_at = chances(resolved, card_id)
                 for start, end in _active_windows(resolved, cfg, song_seconds):
+                    probability, rider_from = chance_at(start)
                     active.append({
                         "start": start,
                         "end": end,
                         # The probability is why an ACTIVE window is a CHANCE and
                         # a SPECIAL window is a fact. Drawing them identically
                         # would state something the model does not.
+                        # `probability`: this check's chance as scored (the team's and
+                        # the board's rate-up, and `rider_from`'s SPECIAL riders live at
+                        # its start); `probability_base`: the card's tier alone.
+                        "probability": probability,
                         "probability_base": _activation_probability(resolved, cfg),
+                        "rider_from": rider_from,
                         "magnitude": float(resolved.skill.magnitude or 0.0),
                     })
             elif kind == "SPECIAL" and cue is not None:
@@ -1183,9 +1229,11 @@ def _chart_weights(chart: SongChart, platform: str, auto: bool) -> tuple[tuple[f
     key = (id(chart), platform, auto)
     hit = _chart_weights_cache.get(key)
     if hit is None or hit[0] is not chart:
+        # the n-th note of a full-perfect manual run carries the LiveCombo tier of combo
+        # n; on AUTO the combo never accumulates (a live run's trace), so no note does
         note_weights = tuple(
-            ((note.auto_permil if auto else note.perfect_permil_for(platform)) / 1000.0)
-            * (1.0 + chart.combo_coefficient(index + 1))
+            (note.auto_permil / 1000.0) if auto else
+            (note.perfect_permil_for(platform) / 1000.0) * (1.0 + chart.combo_coefficient(index + 1))
             for index, note in enumerate(chart.notes)
         )
         if len(_chart_weights_cache) > 4096:

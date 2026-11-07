@@ -283,6 +283,12 @@ function applyGoal() {
   byId("planrows").hidden = S.boards !== "develop";
   byId("refundrow").hidden = !(S.boards === "develop" && !S.infmats);
   byId("lvgroup").hidden = !!S.song || S.goal !== "score";
+  // Max = a team's run if every Active skill fires, a figure of ONE chart: "Every song"
+  // averages every chart, so its rows have none and stay ranked by Expected
+  const mx = byId("sort").querySelector('[data-v="max"]');
+  mx.disabled = !S.song;
+  mx.title = S.song ? "Rank by each team's best possible run on this chart: every Active skill fires"
+    : "Every song averages every chart: there is no single best run to rank by";
   byId("lvrow").hidden = S.lvmode !== "range";
   byId("boostx").textContent = `×${AC[S.boosts - 1]} Event Pt`;
   setPressed(byId("goal"), isEvent() ? "event" : "score");

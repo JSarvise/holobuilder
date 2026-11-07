@@ -102,6 +102,9 @@
   animation:gc-glint 4.2s ease-in-out infinite; animation-delay:calc(var(--k,0) * .11s); }
 @keyframes gc-glint { 0%, 62% { transform:translateX(0); } 86%, 100% { transform:translateX(360%); } }
 @media (prefers-reduced-motion: reduce) { .gc .gc-stars i { animation:none !important; opacity:0; } }
+/* an idle page holds the glint (hb-shell.js sets data-idle): two dozen running glints kept
+   the compositor at the display's rate */
+:root[data-idle] .gc .gc-stars i { animation-play-state:paused; }
 
 /* Leader mark: the leader is a ROLE, not a bigger card. It sits OUTSIDE the
    face, above it, so nothing of the game's own face is covered. Ours, not the game's. */

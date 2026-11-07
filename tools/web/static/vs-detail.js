@@ -185,7 +185,7 @@ export function covPeak(t) {
   if (!t.tl) return 0;
   const TL = t.tl.timeline; let peak = 0;
   for (let x = 0; x <= TL.song_seconds; x += .2)
-    peak = Math.max(peak, TL.lanes.reduce((a, ln) => a + ln.active.reduce((b, w) => b + (x >= w.start && x < w.end ? w.probability_base : 0), 0), 0));
+    peak = Math.max(peak, TL.lanes.reduce((a, ln) => a + ln.active.reduce((b, w) => b + (x >= w.start && x < w.end ? (w.probability ?? w.probability_base) : 0), 0), 0));
   return peak;
 }
 export function timelinePanel(t, ctx) {

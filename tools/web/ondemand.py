@@ -37,7 +37,7 @@ import leaf_inputs  # noqa: E402
 from hbuilder.domain.song import load_charts  # noqa: E402
 from hbuilder.solver import members_first  # noqa: E402
 from hbuilder.solver.parallel import default_workers  # noqa: E402
-from hbuilder.solver.parallel_refine import RefinePool  # noqa: E402
+from hbuilder.solver.parallel_refine import RefinePool, SharedPool  # noqa: E402
 
 # the served ranking with the activation refinement is the best REFINE_HEAD teams of the
 # search, every one refined, in refined order (~0.04 s a team): refining only a few teams
@@ -250,10 +250,16 @@ class Assumptions:
                 "reset_min_gain": 0.0 if self.infinite else self.reset_min_gain / 100.0}
 
     def key(self) -> tuple:
+        return (*self.engine_key(), str(self.max_resets), self.no_refund, self.branches,
+                self.targets, self.reset_min_gain)
+
+    def engine_key(self) -> tuple:
+        """The levers the engine's leaf is built from (`build_inputs`). The plan's other
+        options (resets, refund, branches, targets, a reset's minimum gain) only shape the
+        re-plan within the materials, which each search runs with its own: one engine
+        serves them all, its workers' context identical byte for byte."""
         return (str(self.level), str(self.bloom), str(self.sp_training), self.keep_higher,
-                self.boards, self.max_points, self.infinite, self.all_invited,
-                str(self.max_resets), self.no_refund, self.branches, self.targets,
-                self.reset_min_gain)
+                self.boards, self.max_points, self.infinite, self.all_invited)
 
     def notes(self) -> list[str]:
         out = []
@@ -486,7 +492,9 @@ class Engine:
         ctx = dataclasses.replace(with_play(built["ctx"], self.play), charts=tuple(self.charts),
                                   board_per_chart=True)
         self.workers = workers or default_workers()
-        self.pool = RefinePool(ctx, workers=self.workers)
+        # the server's one set of workers (`shared_pool`): an engine adds its context to
+        # them instead of a worker per core of its own
+        self.pool = RefinePool(ctx, workers=self.workers, shared=shared_pool(self.workers))
         self.pool.__enter__()
         self.lock = threading.Lock()
         self.hints: dict[tuple, list[tuple[str, tuple[str, ...]]]] = {}
@@ -495,15 +503,16 @@ class Engine:
         self._sample: tuple[int, ...] | None = None
         self._wide: tuple[int, ...] = ()
 
-    def _within_materials(self, ranking, leaders, pool, song, chart_indices, cancel, progress=None):
+    def _within_materials(self, a, ranking, leaders, pool, song, chart_indices, cancel,
+                          progress=None):
         """The best REPLAN_CANDIDATES distinct teams re-planned within the
         wallet and re-scored on those boards (`materials_plan.plan_and_score`, in
         the engine's workers). Returns `(ranking of the re-planned teams, best
         first, [why a team could not be planned], {(leader index, members): whether
-        that team's plan solved to optimality})`."""
+        that team's plan solved to optimality}, {(leader index, members): (team board
+        state, bench) it is served on})`."""
         import materials_plan  # noqa: PLC0415
 
-        a = self.assumptions
         opts = materials_plan.judged_opts(a.plan_opts(), a, self.difficulty, self.pool.ctx,
                                           self.levels)
         # on a song every team on the planner's first plan, the rows shown get its other
@@ -565,7 +574,41 @@ class Engine:
         if not out:
             raise KeyError("no team could be planned within your materials: "
                            + "; ".join(failed[:3]))
-        return out, failed, optimal
+        boards = {cands[k][1:]: (held_of[k][1][0], held_of[k][1][1]) for k in got
+                  if held_of.get(k) is not None and len(held_of[k]) > 1 and held_of[k][1] is not None}
+        return out, failed, optimal, boards
+
+    def _ceilings(self, served, leaders, pool, chart_indices, on_refined, planned_boards, cancel,
+                  replan: bool):
+        """Each served row's `song_max`: the run score if every ACTIVE fires, at the slot
+        order its expectation plays, on the board its expectation is served on (refined,
+        re-planned within the materials, as they are, or the plain develop) -- the top of
+        the row's run law, what the detail shows as Max and the page sorts by Max. One pass
+        in the workers; a row whose board cannot be rebuilt keeps None."""
+        from hbuilder.domain.team import Team  # noqa: PLC0415
+
+        lpos = {c.id: k for k, c in enumerate(leaders)}
+        position = {c.id: k for k, c in enumerate(pool)}
+        keys, teams, refine, planned = [], [], [], []
+        for row in served:
+            li = lpos.get(row["leader"])
+            if li is None or not all(m in position for m in row["members"]):
+                continue
+            s = tuple(sorted(position[m] for m in row["members"]))
+            if replan:
+                board = planned_boards.get((li, s))
+                if board is None:
+                    continue
+            else:
+                board = None
+            keys.append(row)
+            teams.append(Team(leader=leaders[li], members=tuple(pool[i] for i in s)))
+            refine.append((li, s) in on_refined)
+            planned.append(board)
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+        for row, value in zip(keys, self.pool.batch_ceiling(teams, chart_indices, refine, planned)):
+            row["song_max"] = float(value)
 
     def _screen_for_replan(self, ranking, leaders, pool, chart_indices):
         """The search's best REPLAN_SCREEN teams re-ranked by their score with the
@@ -631,7 +674,15 @@ class Engine:
     def search(self, song: str | None, filters: Filters | None = None, *,
                emit: Callable[[dict], None] | None = None,
                cancel: threading.Event | None = None,
-               top: int = RANKING, seed: int = 20261016) -> dict:
+               top: int = RANKING, seed: int = 20261016,
+               assumptions: Assumptions | None = None) -> dict:
+        """`assumptions`: this search's (default the engine's); they may differ from the
+        engine's only in what `Assumptions.engine_key` leaves out."""
+        a = self.assumptions if assumptions is None else assumptions
+        if (a is None) != (self.assumptions is None) or (
+                a is not None and a.engine_key() != self.assumptions.engine_key()):
+            raise ValueError("these assumptions are scored on another engine")
+        replan = a is not None and a.replan
         filters = filters or Filters()
         general = not song
         if general:
@@ -660,7 +711,9 @@ class Engine:
             def allowed(li, s, leaders=leaders, pool=pool):
                 return all(pool[i].member != leaders[li].member for i in s)
         lpos = {c.id: k for k, c in enumerate(leaders)}
-        hint_key = (song, filters.key())
+        # the plan's options too: a search seeded by another option's teams would not be
+        # the one that option gets on an engine of its own
+        hint_key = (song, filters.key(), a.key() if a is not None else None)
         # the song's singers lead with every proposed set (`joint_search`'s `always`): the
         # screen learns each set under its best leader, so a singer whose teams rank a few
         # % lower would be scored on a handful of sets and her own best sets never proposed
@@ -768,8 +821,7 @@ class Engine:
                 chosen, refined = [], []
             else:
                 # the refinement: the best teams with their activation nodes chosen jointly
-                as_is = self.assumptions is not None and (self.assumptions.boards == "as_is"
-                                                          or self.assumptions.replan)
+                as_is = a is not None and (a.boards == "as_is" or a.replan)
                 # boards as they are (nothing to plan) or re-planned within the materials
                 # below: no activation refinement on a board that is not the one served
                 chosen = [] if as_is else list(ranking[:REFINE_HEAD])
@@ -777,18 +829,22 @@ class Engine:
                          for _v, li, s in chosen]
                 refined = self.pool.batch_score(teams, chart_indices=chart_indices,
                                                 refine_activation=True) if teams else []
-                if self.assumptions is not None and self.assumptions.replan:
+                if replan:
                     ranking = self._screen_for_replan(ranking, leaders, pool, chart_indices)
         t_refine = time.perf_counter() - t0 - search_seconds
         better = {(li, s): max(float(v), plain) for (plain, li, s), v in zip(chosen, refined)}
+        # the rows served on their REFINED board (a refinement that found nothing better
+        # leaves the row on the plain develop's)
+        on_refined = {(li, s) for (plain, li, s), v in zip(chosen, refined) if float(v) >= plain}
         materials_failed: list[str] = []
         plan_optimal: dict | None = None          # set when the boards were re-planned
+        planned_boards: dict = {}                 # (leader index, set) -> its re-planned board
         t_replan = time.perf_counter()
-        if self.assumptions is not None and self.assumptions.replan:
+        if replan:
             if emit:
                 emit({"type": "progress", "stage": "refine", "evaluated": 0, "sub": "materials"})
-            ranking, materials_failed, plan_optimal = self._within_materials(
-                ranking, leaders, pool, None if general else song,
+            ranking, materials_failed, plan_optimal, planned_boards = self._within_materials(
+                a, ranking, leaders, pool, None if general else song,
                 None if general else chart_indices, cancel,
                 progress=(lambda k, n: emit({"type": "progress", "stage": "refine", "sub": "materials",
                                              "done": k, "total": n})) if emit else None)
@@ -817,6 +873,11 @@ class Engine:
         served = [team(v, li, s) for v, li, s in (chosen if better else ranking)]
         served.sort(key=lambda t: -t["best"])
         served = served[:max(top, RANKING)]
+        t_ceiling = time.perf_counter()
+        if not general and served:
+            self._ceilings(served, leaders, pool, chart_indices, on_refined, planned_boards, cancel,
+                          replan)
+        t_ceiling = time.perf_counter() - t_ceiling
         # each leader's best team, with its next sets as alternatives
         rows, by_leader = [], {}
         for t in served:
@@ -845,10 +906,9 @@ class Engine:
             "scope": "general" if general else "song", "song": song or None,
             "certified": False, "state": "fresh",
             "basis_id": self.basis,
-            "basis": (self.assumptions.describe() if self.assumptions is not None
-                      else leaf_inputs.basis_text(self.basis)),
-            "assumptions": dataclasses.asdict(self.assumptions) if self.assumptions else None,
-            "notes": self.assumptions.notes() if self.assumptions else [],
+            "basis": (a.describe() if a is not None else leaf_inputs.basis_text(self.basis)),
+            "assumptions": dataclasses.asdict(a) if a else None,
+            "notes": a.notes() if a else [],
             "difficulty": self.difficulty, "written": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "objective": ((f"mean score over every chart of level {self.levels[0]}-{self.levels[1]} "
                            f"({len(self.charts)} charts, any difficulty), the board rebuilt per song")
@@ -868,7 +928,7 @@ class Engine:
             # `replan`: the exact plans within the materials, most of a search that has
             # them (about two thirds of the time); `refine` stops before them
             "timings": {"search": round(search_seconds, 2), "refine": round(t_refine, 2),
-                        "replan": round(t_replan, 2),
+                        "replan": round(t_replan, 2), "ceiling": round(t_ceiling, 2),
                         "engine_start": round(self.started_seconds, 2)},
             "seeded": len(seeds), "filters": dataclasses.asdict(filters),
             "materials_failed": materials_failed,
@@ -883,6 +943,22 @@ _ENGINES_LOCK = threading.Lock()
 # live engines kept at once (each holds a worker per core); the least recently
 # used one is closed when another is needed
 MAX_ENGINES = 2
+
+_SHARED: dict[int, SharedPool] = {}
+_SHARED_LOCK = threading.Lock()
+
+
+def shared_pool(workers: int | None) -> SharedPool | None:
+    """The server's worker processes for `workers` (None for one: in-process), started on
+    first use and kept: every engine and the event search run their contexts on them
+    (`parallel_refine.SharedPool`), so two engines cost one worker per core, not two."""
+    if workers is None or workers <= 1:
+        return None
+    with _SHARED_LOCK:
+        held = _SHARED.get(workers)
+        if held is None:
+            held = _SHARED[workers] = SharedPool(workers)
+        return held
 
 
 # account files a refresh rewrites that the scoring key (`leaf_inputs.today_keys`) does not hash:
@@ -940,7 +1016,8 @@ def engine(basis: str, difficulty: str, *, workers: int | None = None,
     inputs' key moved (`current_key()` -> today's key, or None when it cannot
     be read: then the engine in hand is kept)."""
     difficulty = leaf_inputs._difficulty(difficulty)
-    slot = (basis, difficulty, assumptions.key() if assumptions is not None else None,
+    # the plan's options that shape only the re-plan share one engine (`engine_key`)
+    slot = (basis, difficulty, assumptions.engine_key() if assumptions is not None else None,
             tuple(levels) if levels else None, tuple(play))
     with _ENGINES_LOCK:
         held = _ENGINES.pop(slot, None)

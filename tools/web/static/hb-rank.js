@@ -48,12 +48,18 @@ export function list(rows, opts = {}) {
         <span class="thumbs">${cards}</span>${spread}</span>
       <span class="sc">${opts.format ? opts.format(r.score) : score(r.score)}<small>${delta}${b != null ? ` · beats #1 in ${pct(b)} of runs` : ""}</small></span></button>`;
   };
-  // optional "one per leader" filter (first row of each leader, ranks kept); off by default
+  return `<div class="rk-list">${shownRows(rows, opts).map(([r, i]) => one(r, i)).join("")}</div>`;
+}
+
+/** The [row, index] pairs `list` draws: the optional "one per leader" filter (first row of each
+ *  leader, ranks kept; off by default), then at most `opts.limit` of them (the "Teams to show"),
+ *  so one per leader picks from every row before the cut. */
+export function shownRows(rows, opts = {}) {
   const seen = new Set();
-  const shown = rows.map((r, i) => [r, i]).filter(([r, i]) => {
+  return (rows || []).map((r, i) => [r, i]).filter(([r, i]) => {
     if (!opts.onePerLeader) return true;
-    const k = (r.leader && r.leader.id) || i; if (seen.has(k)) return false; seen.add(k); return true; });
-  return `<div class="rk-list">${shown.map(([r, i]) => one(r, i)).join("")}</div>`;
+    const k = (r.leader && r.leader.id) || i; if (seen.has(k)) return false; seen.add(k); return true;
+  }).slice(0, opts.limit ?? Infinity);
 }
 
 /** The long-search block: keeps the cached answer in view (the caller renders it below),

@@ -51,11 +51,15 @@ from hbuilder.domain.card import Card
 from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.song import OverallPower, SongChart, overall_power_for, score_song_detailed
+from hbuilder.domain.song_rank import score_team_ceiling
 from hbuilder.domain.team import Team
-from hbuilder.solver.parallel import default_workers
+from hbuilder.solver.parallel import default_workers, one_blas_thread
 
-__all__ = ["RefinePool", "RefineContext", "board_from_state", "develop_team", "evaluate",
-           "new_plan_cache"]
+# the workers this module starts inherit it (`parallel.one_blas_thread`)
+one_blas_thread()
+
+__all__ = ["RefinePool", "RefineContext", "SharedPool", "board_from_state", "develop_team",
+           "evaluate", "new_plan_cache"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -151,8 +155,17 @@ _BY_ID: dict[str, Card] = {}
 _TREES: dict = {}
 _PLAN_CACHE: PlanCache | None = None
 # the pool's shared stop mark (`RefinePool.stop_through`): tasks of a generation at or
-# below it stop early (a cancelled search's exact plans, `materials_plan.dispatch`)
+# below it stop early (a cancelled search's exact plans, `materials_plan.dispatch`). In a
+# `SharedPool` worker it is one mark per context (`_SLOT`, the active context's).
 _STOP = None
+_SLOT: int | None = None
+# A `SharedPool` worker's contexts, least recently used first: `{token: [ctx, by_id,
+# trees, plan cache]}`, the active one (`_TOKEN`) in the globals above. A token is
+# `(file the context is pickled to, stop slot)`.
+_CONTEXTS: dict = {}
+_TOKEN: tuple | None = None
+# the contexts a worker keeps loaded (an engine's each, with its plan cache)
+CONTEXTS_HELD = 3
 
 
 def _init_worker(ctx: RefineContext | str, stop=None) -> None:
@@ -168,9 +181,46 @@ def _init_worker(ctx: RefineContext | str, stop=None) -> None:
     _STOP = stop
 
 
+def _init_shared(stop) -> None:
+    """A `SharedPool` worker: no context yet, each task names its own (`_activate`)."""
+    global _STOP
+    _STOP = stop
+
+
+def _activate(token: tuple) -> None:
+    """Make `token`'s context this worker's (`_CTX`, `_BY_ID`, `_TREES`, `_PLAN_CACHE`),
+    loading it from its file the first time; the one it replaces is kept, with its plan
+    cache and trees, up to `CONTEXTS_HELD` contexts."""
+    global _CTX, _BY_ID, _TREES, _PLAN_CACHE, _TOKEN, _SLOT
+    if token == _TOKEN:
+        return
+    if _TOKEN is not None and _TOKEN in _CONTEXTS:
+        _CONTEXTS[_TOKEN] = [_CTX, _BY_ID, _TREES, _PLAN_CACHE]
+    held = _CONTEXTS.pop(token, None)
+    if held is None:
+        with open(token[0], "rb") as fh:
+            ctx = pickle.load(fh)
+        held = [ctx, {c.id: c for c in ctx.cards}, {}, None]
+    _CONTEXTS[token] = held
+    while len(_CONTEXTS) > CONTEXTS_HELD:
+        _CONTEXTS.pop(next(iter(_CONTEXTS)))
+    _CTX, _BY_ID, _TREES, _PLAN_CACHE = held
+    _TOKEN, _SLOT = token, token[1]
+
+
+def run_in(token: tuple, fn, item):
+    """`fn(item)` in a `SharedPool` worker, on `token`'s context."""
+    _activate(token)
+    return fn(item)
+
+
 def stopped(generation: int) -> bool:
     """In a worker: has the parent stopped this generation of tasks?"""
-    return _STOP is not None and generation is not None and _STOP.value >= generation
+    if _STOP is None or generation is None:
+        return False
+    if _SLOT is not None:
+        return _STOP[_SLOT] >= generation
+    return _STOP.value >= generation
 
 
 def _worker_plan_cache() -> PlanCache | None:
@@ -273,9 +323,21 @@ def evaluate(ctx: RefineContext, by_id: Mapping[str, Card], tree_for, budget_for
     # (`RefinePool.batch_score(chart_indices=)`); absent, it is every chart.
     # A fourth element overrides `ctx.refine_activation` for this evaluation, so
     # one pool can search plain and re-score its short list refined.
+    # A fifth, true, returns the CEILING instead of the expectation: the run score if
+    # every ACTIVE fires, at the slot order the expectation plays
+    # (`song_rank.score_team_ceiling`), on the very board the expectation is scored on --
+    # the top of the row's run law, for a ranking sorted by Max. A sixth, `(team board
+    # state, bench)`, is the board a row re-planned within the materials is served on
+    # (`materials_plan.plan_and_score` scores it the same way).
     leader_id, member_ids, *selection = team_ids
     if len(selection) > 1 and selection[1] is not None:
         ctx = dataclasses.replace(ctx, refine_activation=bool(selection[1]))
+    ceiling = len(selection) > 2 and bool(selection[2])
+    if len(selection) > 3 and selection[3] is not None:
+        team_state, bench = selection[3]
+        ctx = dataclasses.replace(ctx, board_state=team_state, bench_characters=bench,
+                                  socket_bench=True)
+        plan_cache = None
     charts = (ctx.charts if not selection or selection[0] is None
               else tuple(ctx.charts[i] for i in selection[0]))
     team = Team(leader=by_id[leader_id],
@@ -298,6 +360,17 @@ def evaluate(ctx: RefineContext, by_id: Mapping[str, Card], tree_for, budget_for
             power = hit[1]
         s = score_song_detailed(team.members, (team.leader,), chart, cfg, deck_power=power)
         return s[0].total_score if s else 0.0
+
+    def served(chart, cfg) -> float:
+        """The number this evaluation returns for one chart: the expectation, or with
+        `ceiling` the all-fire score at the expectation's slot order."""
+        if not ceiling:
+            return song_score(chart, cfg)
+        power = None
+        if cfg.song_absolute_deck_power:
+            power = overall_power_for(tuple(team.members), team.leader, cfg)
+        s = score_song_detailed(team.members, (team.leader,), chart, cfg, deck_power=power)
+        return score_team_ceiling(team, chart, cfg, s[0].member_order) if s else 0.0
 
     def develop(sings: bool, charts_for=()):
         ctx_d = _with_singer_bench(ctx, by_id, tree_for, budget_for, plan_cache, sings)
@@ -358,7 +431,7 @@ def evaluate(ctx: RefineContext, by_id: Mapping[str, Card], tree_for, budget_for
                              if (k := key(c)) == sings and k.scope == sings.scope)
                 cfg_c = configs[(sings, sings.scope)] = dataclasses.replace(
                     ctx.cfg, board=develop(sings, same))
-            s = song_score(chart, cfg_c)
+            s = served(chart, cfg_c)
             if per_chart:
                 scores.append(s)
             total += s
@@ -376,7 +449,7 @@ def evaluate(ctx: RefineContext, by_id: Mapping[str, Card], tree_for, budget_for
     total = 0.0
     scores = []
     for chart in charts:
-        s = song_score(chart, cfg_x)
+        s = served(chart, cfg_x)
         if per_chart:
             scores.append(s)
         total += s
@@ -447,9 +520,12 @@ def develop_team(ctx: RefineContext, team: Team, tree_for, budget_for, chart, *,
     context from the chart's cast; the plan cache when one is given; the
     activation refinement when `refine` (default `ctx.refine_activation`), on
     the same per-chart score `evaluate` uses. `tests` pin that the board this
-    returns scores to `evaluate`'s float."""
+    returns scores to `evaluate`'s float, the song's off-team singers' boards planned
+    for it as `evaluate` plans them (`_with_singer_bench`)."""
     refine = ctx.refine_activation if refine is None else refine
     sings = song_cast(chart) if chart is not None else False
+    ctx = _with_singer_bench(ctx, {c.id: c for c in ctx.cards}, tree_for, budget_for,
+                             plan_cache, sings)
     if ctx.board_state is not None:
         # boards as they are: nothing developed, the same board `evaluate` scores
         plans: list = []
@@ -540,13 +616,103 @@ def _task_per_chart(item):
                            plan_cache=_worker_plan_cache(), per_chart=True)
 
 
+def _ctx_task(item):
+    """`_task` in a `SharedPool` worker: `(token, index, team ids)`."""
+    token, *rest = item
+    _activate(token)
+    return _task(tuple(rest))
+
+
+def _ctx_task_per_chart(item):
+    """`_task_per_chart` in a `SharedPool` worker: `(token, index, team ids)`."""
+    token, *rest = item
+    _activate(token)
+    return _task_per_chart(tuple(rest))
+
+
 # ---------------------------------------------------------------------------
 # Parent side.
 # ---------------------------------------------------------------------------
+class SharedPool:
+    """ONE set of worker processes for several contexts (`RefinePool(shared=...)`): each
+    pool built on it pickles its own context to a file, and a worker loads a context the
+    first time a task of it arrives, keeping the `CONTEXTS_HELD` last ones (each with its
+    plan cache). Two engines then share the workers and the per-process caches (the board
+    planner's Oracle, the exact plans) instead of holding a worker each per core.
+
+    Each context stops its own tasks (`RefinePool.stop_through`): one stop mark per pool in
+    a shared array, so cancelling one search never stops another's. Generations are counted
+    across the pools, so a mark is never reused for an older batch."""
+
+    SLOTS = 64
+
+    def __init__(self, workers: int | None = None) -> None:
+        import threading  # noqa: PLC0415
+
+        self.workers = default_workers() if workers is None else max(1, workers)
+        self._pool = None
+        self._stop = None
+        self._lock = threading.Lock()
+        self._generation = 0
+        self._free = list(range(self.SLOTS))
+        self.failed: str | None = None
+
+    def pool(self):
+        """The worker processes, started on first use; None when they cannot start."""
+        with self._lock:
+            if self._pool is None and self.failed is None and self.workers > 1:
+                try:
+                    context = multiprocessing.get_context("spawn")
+                    self._stop = context.RawArray("q", self.SLOTS)
+                    self._pool = context.Pool(processes=self.workers, initializer=_init_shared,
+                                              initargs=(self._stop,))
+                except Exception as exc:  # noqa: BLE001 — never a new answer
+                    self._pool = None
+                    self.failed = f"{type(exc).__name__}: {exc}"
+            return self._pool
+
+    def acquire(self) -> int | None:
+        """A stop slot for a new context, marked at the current generation (a slot used
+        before must not let an old batch of it run on); None when all are taken."""
+        with self._lock:
+            if not self._free or self._stop is None:
+                return None
+            slot = self._free.pop(0)
+            self._stop[slot] = self._generation
+            return slot
+
+    def release(self, slot: int | None) -> None:
+        if slot is not None:
+            with self._lock:
+                if self._stop is not None:
+                    self._stop[slot] = self._generation
+                self._free.append(slot)
+
+    def new_generation(self) -> int:
+        with self._lock:
+            self._generation += 1
+            return self._generation
+
+    def stop_through(self, slot: int, generation: int) -> None:
+        with self._lock:
+            if self._stop is not None and self._stop[slot] < generation:
+                self._stop[slot] = generation
+
+    def close(self) -> None:
+        with self._lock:
+            if self._pool is not None:
+                try:
+                    self._pool.terminate()
+                    self._pool.join()
+                finally:
+                    self._pool = None
+
+
 class RefinePool:
     """A process pool that scores developed teams. Use as a context manager;
     `batch_score(teams)` returns one float per team, in order. `workers=1` (or a
-    pool that fails to start) computes the same floats in-process."""
+    pool that fails to start) computes the same floats in-process. `shared`: run on
+    a `SharedPool`'s workers instead of starting its own (closing it leaves them)."""
 
     def __init__(
         self,
@@ -554,8 +720,12 @@ class RefinePool:
         *,
         workers: int | None = None,
         on_fallback: Callable[[str], None] | None = None,
+        shared: SharedPool | None = None,
     ) -> None:
         self.ctx = ctx
+        self.shared = shared
+        if shared is not None:
+            workers = shared.workers
         self.workers = default_workers() if workers is None else max(1, workers)
         self.on_fallback = on_fallback
         self._pool = None
@@ -565,17 +735,39 @@ class RefinePool:
         self._stop = None           # shared with the workers (`_init_worker`)
         self._ctx_file: str | None = None
         self._generation = 0
+        self._token: tuple | None = None    # on a SharedPool: (context file, stop slot)
 
     def new_generation(self) -> int:
         """A number for the next batch of stoppable tasks (`stop_through`)."""
+        if self._token is not None:
+            return self.shared.new_generation()
         self._generation += 1
         return self._generation
 
     def stop_through(self, generation: int) -> None:
         """Tell every worker to stop the tasks of `generation` and earlier: a task polls
         `stopped(its generation)` (no file, no message: one shared integer)."""
+        if self._token is not None:
+            self.shared.stop_through(self._token[1], generation)
+            return
         if self._stop is not None and self._stop.value < generation:
             self._stop.value = generation
+
+    def submit(self, fn, item, *, callback, error_callback) -> None:
+        """`fn(item)` on a worker, asynchronously (`materials_plan.dispatch`): on this
+        pool's context, which a shared worker activates first."""
+        if self._token is not None:
+            self._pool.apply_async(run_in, (self._token, fn, item), callback=callback,
+                                   error_callback=error_callback)
+        else:
+            self._pool.apply_async(fn, (item,), callback=callback, error_callback=error_callback)
+
+    def _items(self, items: list, task, ctx_task) -> tuple:
+        """`(task, task items)` for `imap_unordered`: on a shared pool each item names
+        this pool's context."""
+        if self._token is not None:
+            return ctx_task, [(self._token, k, it) for k, it in enumerate(items)]
+        return task, list(enumerate(items))
 
     # in-process equivalents of the worker's cached helpers
     def _tree_for(self, card: Card):
@@ -594,6 +786,23 @@ class RefinePool:
         return int(g) if g else 0
 
     def __enter__(self) -> "RefinePool":
+        if self.shared is not None:
+            workers = self.shared.pool() if self.workers > 1 else None
+            if workers is not None:
+                try:
+                    with tempfile.NamedTemporaryFile("wb", prefix="hbctx_", suffix=".pickle",
+                                                     delete=False) as fh:
+                        fh.write(ForkingPickler.dumps(self.ctx))
+                        self._ctx_file = fh.name
+                    slot = self.shared.acquire()
+                    if slot is not None:
+                        self._token, self._pool = (self._ctx_file, slot), workers
+                except Exception:  # noqa: BLE001 — never a new answer
+                    self._token = self._pool = None
+            if self._pool is None and self.workers > 1 and self.on_fallback:
+                self.on_fallback("the shared refine pool is not available; refining in a "
+                                 "single process")
+            return self
         if self.workers > 1:
             try:
                 context = multiprocessing.get_context("spawn")
@@ -622,6 +831,13 @@ class RefinePool:
         self.close()
 
     def close(self) -> None:
+        if self._token is not None:
+            # the workers are the shared pool's: only this context's mark and file go
+            self.shared.release(self._token[1])
+            self._token = None
+            self._pool = None
+        if self.shared is not None:
+            self._pool = None
         if self._pool is not None:
             try:
                 self._pool.terminate()
@@ -657,15 +873,29 @@ class RefinePool:
         else:
             chosen = tuple(chart_indices)
             items = [(t.leader.id, tuple(m.id for m in t.members), chosen) for t in teams]
+        return self._run(items)
+
+    def batch_ceiling(self, teams: Sequence[Team], chart_indices: Sequence[int],
+                      refine: Sequence[bool], planned: Sequence[tuple | None]) -> list[float]:
+        """Each team's run score if every ACTIVE fires, at the slot order its expectation
+        plays, on the board its expectation is served on: developed with the activation
+        refinement when `refine[k]`, or `planned[k]` = `(team board state, bench)` for a
+        team re-planned within the materials. One float per team, in order."""
+        chosen = tuple(chart_indices)
+        return self._run([(t.leader.id, tuple(m.id for m in t.members), chosen, bool(r), True, p)
+                          for t, r, p in zip(teams, refine, planned)])
+
+    def _run(self, items: list) -> list[float]:
+        """`evaluate` on each item (`_task`'s shape), in the workers; in order."""
         if not items:
             return []
         if self._pool is None:
             return self._serial(items)
         out: list[float | None] = [None] * len(items)
+        task, tasks = self._items(items, _task, _ctx_task)
         try:
             for index, score in self._pool.imap_unordered(
-                _task, list(enumerate(items)),
-                chunksize=_chunksize(len(items), self.workers)
+                task, tasks, chunksize=_chunksize(len(items), self.workers)
             ):
                 out[index] = score
         except Exception as exc:  # noqa: BLE001 — a dead worker is not an answer
@@ -689,10 +919,10 @@ class RefinePool:
             return []
         if self._pool is not None:
             out: list = [None] * len(items)
+            task, tasks = self._items(items, _task_per_chart, _ctx_task_per_chart)
             try:
                 for index, scores in self._pool.imap_unordered(
-                    _task_per_chart, list(enumerate(items)),
-                    chunksize=_chunksize(len(items), self.workers)
+                    task, tasks, chunksize=_chunksize(len(items), self.workers)
                 ):
                     out[index] = scores
                 if all(v is not None for v in out):

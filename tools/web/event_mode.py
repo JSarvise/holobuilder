@@ -1072,6 +1072,7 @@ def run_account_search(opts: Mapping, *, emit: Callable[[dict], None], cancel: t
           "seconds": round(time.perf_counter() - t_start, 1)})
 
     from hbuilder.solver.parallel_refine import RefinePool  # noqa: PLC0415
+    from hbuilder.solver.parallel import default_workers  # noqa: PLC0415
 
     evaluated = [0]
     best: list[dict | None] = [None]
@@ -1082,7 +1083,8 @@ def run_account_search(opts: Mapping, *, emit: Callable[[dict], None], cancel: t
         current[0] = name
         emit(dict({"type": "stage", "stage": name, "state": state}, **info))
 
-    with RefinePool(built["ctx"], workers=workers,
+    # on the server's workers (`ondemand.shared_pool`), not a pool started per run
+    with RefinePool(built["ctx"], workers=workers, shared=ondemand.shared_pool(workers or default_workers()),
                     on_fallback=lambda line: print(f"  ! {line}", flush=True)) as pool:
         sampled = [hl_sample is not None]
 

@@ -141,10 +141,14 @@ def test_active_windows_are_ordered_and_never_silently_clamped(web_base):
             if previous is not None:
                 assert window["start"] >= previous, "windows must ascend in time"
             previous = window["start"]
-            # A probability is a lower bound or it is absent; it is never
-            # invented, because a made-up chance would look like a measurement.
-            probability = window["probability_base"]
-            assert probability is None or 0.0 <= probability <= 1.0
+            # A chance is the scorer's or it is absent; it is never invented, because a
+            # made-up chance would look like a measurement. `probability` is the check's
+            # chance as scored (rate-ups and live riders), never below the card's tier (it is
+            # composed as 1 - (1 - p) x ..., so equal to the tier within a rounding unit).
+            base, probability = window["probability_base"], window["probability"]
+            assert base is None or 0.0 <= base <= 1.0
+            assert 0.0 <= probability <= 1.0 and (base is None or probability >= base - 1e-12)
+            assert isinstance(window["rider_from"], list)
 
 
 def test_the_timeline_honours_the_level_bloom_what_if(web_base):

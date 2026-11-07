@@ -122,8 +122,17 @@ def _terms(members: tuple[Card, ...], leader: Card, chart: SongChart, cfg: Scori
     return terms, score_rates, board_score_rate, board_skill_effect_up
 
 
-def _summary(dist: dict[int, float], base: int, bins: int, bin_width: int) -> dict:
+def _summary(dist: dict[int, float], base: int, bins: int, bin_width: int,
+             lowest: int | None = None, highest: int | None = None, keep_law: bool = False) -> dict:
     items = sorted((v + base, p) for v, p in dist.items())
+    if bin_width > 1 and lowest is not None and highest is not None:
+        # a binned body can put a grid point up to one bin past an exact extreme:
+        # that mass sits AT the extreme, the only reachable value there
+        clamped: dict[int, float] = {}
+        for v, p in items:
+            v = min(max(v, lowest), highest)
+            clamped[v] = clamped.get(v, 0.0) + p
+        items = sorted(clamped.items())
     mean = sum(v * p for v, p in items)
     var = max(0.0, sum((v - mean) ** 2 * p for v, p in items))
     out: dict = {"min": items[0][0], "max": items[-1][0], "mean": mean, "sd": var ** 0.5,
@@ -158,19 +167,55 @@ def _summary(dist: dict[int, float], base: int, bins: int, bin_width: int) -> di
         pmf[key] = pmf.get(key, 0.0) + p
     out["pmf"] = {"start": lo, "width": width, "below": below,
                   "mass": [pmf.get(lo + k * width, 0.0) for k in range((hi - lo) // width + 1)]}
+    if keep_law:
+        out["law"] = items
+    return out
+
+
+def best_of_n(law: Sequence[tuple[int, float]], n: int, score: float | None = None) -> dict:
+    """The best of `n` independent runs, from one run's law (`[(score, probability)]`,
+    ascending: `run_score_distribution(keep_law=True)["law"]`).
+
+    The best of n is at most x when every run is: `P(best <= x) = F(x) ** n`, `F` the
+    one-run CDF. So `expected = SUM over x of x * (F(x)**n - F(x-)**n)`, and its
+    percentiles are where `F**n` crosses them. With `score`: `run_percentile` = the share
+    of single runs below it (`F(score-)`), `best_percentile` = the share of best-of-n
+    sessions below it (`F(score-)**n`), and `chance_to_reach` = `1 - F(score-)**n`, the
+    chance n runs reach it at least once."""
+    if n < 1:
+        raise ValueError(f"n must be >= 1, got {n}")
+    if not law:
+        raise ValueError("an empty law")
+    total = sum(p for _v, p in law)
+    acc, prev_n, expected = 0.0, 0.0, 0.0
+    cdf_n: list[tuple[int, float]] = []
+    for v, p in law:
+        acc += p / total
+        now = min(1.0, acc) ** n
+        expected += v * (now - prev_n)
+        prev_n = now
+        cdf_n.append((v, now))
+    out: dict = {"n": n, "expected": expected, "max": law[-1][0]}
+    for q in PERCENTILES:
+        out[f"p{round(q * 100)}"] = next((v for v, c in cdf_n if c >= q - 1e-12), law[-1][0])
+    if score is not None:
+        below = sum(p for v, p in law if v < score) / total
+        out.update({"score": score, "run_percentile": below, "best_percentile": below ** n,
+                    "chance_to_reach": 1.0 - below ** n})
     return out
 
 
 def run_score_distribution(
     members: Sequence[Card], leader: Card, chart: SongChart, cfg: ScoringConfig,
     member_order: Sequence[str], deck_power: float, *, bins: int = 60,
-    cap: int = 400_000,
+    cap: int = 400_000, keep_law: bool = False,
 ) -> dict:
     """The law of the run score of (`leader`, `members` in `member_order`) on
     `chart`, at `deck_power`. Returns `mean`, `sd`, `min`, `max`, `p1..p99`,
     `pmf` (`start`, `width`, `mass[]`), `exact` (no value binning was needed),
     `expected_total` (the scorer's own expectation recomputed from the same
-    terms) and the component sizes."""
+    terms) and the component sizes; with `keep_law`, the whole law too (`law`: `[(score,
+    probability)]` ascending, for `best_of_n`)."""
     members = tuple(members)
     by_id = {card.id: card for card in members}
     if sorted(member_order) != sorted(by_id):
@@ -246,7 +291,13 @@ def run_score_distribution(
     # last merged) and a normalised law of what came before. Opening a window
     # splits every state in two (sharing the law, no copy); closing one merges
     # the two states that differ only in it. Exact unless a merged law's
-    # support exceeds `cap`, when it is binned (`exact` false, `bin_width`).
+    # support exceeds `cap`, when it is binned (`exact` false, `bin_width`):
+    # each value's mass is split between its two neighbours on ONE grid of the
+    # absolute score, in proportion to its distance from each, so the mean stays
+    # exact and the error is unbiased (a floor at each merge, on grids that do not
+    # line up, pulled every percentile down, more the more windows merged). Each
+    # state also carries its exact lowest and highest value (relative, as the law),
+    # so the served extremes stay exact when the body is binned.
     first: dict[tuple[int, int], int] = {}
     last: dict[tuple[int, int], int] = {}
     for k, cover in enumerate(windows_at):
@@ -259,45 +310,55 @@ def run_score_distribution(
         opening.setdefault(first[key], []).append(key)
         closing.setdefault(last[key], []).append(key)
     occupancy = {key: terms[key[0]].occupancy for key in first}
-    states: dict[frozenset, list] = {frozenset(): [1.0, 0, {0: 1.0}]}
+    states: dict[frozenset, list] = {frozenset(): [1.0, 0, {0: 1.0}, 0, 0]}
     bin_width = 1
+
+    def put(out: dict[int, float], key: int, mass: float, base: int) -> None:
+        """`mass` at relative `key` (absolute `base + key`), split between the two
+        grid points around it when the law is binned."""
+        if bin_width == 1:
+            out[key] = out.get(key, 0.0) + mass
+            return
+        absolute = base + key
+        grid = (absolute // bin_width) * bin_width
+        upper = (absolute - grid) / bin_width
+        low = grid - base
+        out[low] = out.get(low, 0.0) + mass * (1.0 - upper)
+        if upper:
+            out[low + bin_width] = out.get(low + bin_width, 0.0) + mass * upper
 
     def merged(a: list, b: list) -> list:
         nonlocal bin_width
-        wa, oa, da = a
-        wb, ob, db = b
+        wa, oa, da, la, ha = a
+        wb, ob, db, lb, hb = b
         w = wa + wb
         if da is db and oa == ob:
-            return [w, oa, da]
+            return [w, oa, da, la, ha]
         base_off = min(oa, ob)
         out: dict[int, float] = {}
         for weight, off, law in ((wa, oa, da), (wb, ob, db)):
             share = weight / w if w else 0.0
             shift = off - base_off
             for v, p in law.items():
-                key = v + shift
-                if bin_width > 1:
-                    key = (key // bin_width) * bin_width
-                out[key] = out.get(key, 0.0) + p * share
+                put(out, v + shift, p * share, base_off)
         if len(out) > cap:
             lo, hi = min(out), max(out)
             bin_width = max(bin_width * 2, (hi - lo) // (cap // 2) + 1)
             binned: dict[int, float] = {}
             for v, p in out.items():
-                key = (v // bin_width) * bin_width
-                binned[key] = binned.get(key, 0.0) + p
+                put(binned, v, p, base_off)
             out = binned
-        return [w, base_off, out]
+        return [w, base_off, out, min(la + oa, lb + ob) - base_off, max(ha + oa, hb + ob) - base_off]
 
     for k in range(n):
         for key in opening.get(k, ()):
             q = occupancy[key]
             nxt: dict[frozenset, list] = {}
-            for fired, (w, off, law) in states.items():
+            for fired, (w, off, law, lo, hi) in states.items():
                 if 1.0 - q > 0.0:
-                    nxt[fired] = [w * (1.0 - q), off, law]
+                    nxt[fired] = [w * (1.0 - q), off, law, lo, hi]
                 if q > 0.0:
-                    nxt[fired | {key}] = [w * q, off, law]
+                    nxt[fired | {key}] = [w * q, off, law, lo, hi]
             states = nxt
         for fired, state in states.items():
             mask = fixed[k]
@@ -314,8 +375,8 @@ def run_score_distribution(
     final = None
     for state in states.values():
         final = state if final is None else merged(final, state)
-    _w, base, dist = final
-    out = _summary(dist, base, bins, bin_width)
+    _w, base, dist, lo, hi = final
+    out = _summary(dist, base, bins, bin_width, lo + base, hi + base, keep_law=keep_law)
     out.update({"expected_total": expected_total, "deck_power": float(deck_power),
                 "member_order": list(member_order), "random_windows": len(first),
                 "notes": n})

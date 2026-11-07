@@ -2,6 +2,16 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.1.55 (2026-11-07)
+- Searches use much less memory: the peak over the measured searches drops from about 12 GB to about 4.5 GB, and the number of worker processes now adjusts to the PC's RAM (14 on a 16 GB PC, 6 on 8 GB), so a normal search fits comfortably on a 16 GB PC. The results are the same.
+
+## 0.1.54 (2026-11-07)
+- AUTO: scores are 2.6-5.1 % lower, because they now follow the game's rule: on AUTO the combo never builds up, so no note gets the combo multiplier, and a Special whose Activation Rate UP needs a combo of 100 no longer raises it there. The order of the teams barely changes. Manual play is unchanged: the combo still counts note by note.
+- Sort by Max works: each team of a one-song search carries the score it reaches if every Active skill fires, and the list shows and sorts by it (an every-song search is an average and has no Max, so the option is off there). Teams to show shows that many teams, and One per leader picks from every team before the cut.
+- With Unlimited Cubes and Hexas, a team's details now give the same score as its row: they showed about 3.6 % less, because the boards of the song's singers outside the team were not planned there.
+- The score distribution's percentiles are no longer a little low on long songs (15 to 29 points), and its Max is the team's real ceiling. The Skill uptime chart shows each Active check's chance as the score uses it, with the board's and the team's Activation Rate UP (78 % where it said 55 %) and higher inside a Special that raises it, which it names.
+- Lighter and quicker to change options: resets, refunds, branches, targets and a reset's minimum gain no longer restart the search, going back to an option reuses the boards it planned, and every search shares one set of worker processes, so two kinds of search kept ready use about a third less memory (about 16 GB instead of 24 GB, measured with 16 worker processes). The app window at rest uses almost no CPU instead of one to two cores: the leader's figure is drawn at 30 frames a second and, like the cards' shine, stops after 30 seconds without input.
+
 ## 0.1.53 (2026-11-07)
 - Same results as 0.1.52, faster: the step that places the Connect cards on each team's boards under the song's score-bonus cap now runs compiled, for every team a search scores and every board the refinement tries. With every card maxed, a search on one song takes about 10 s instead of 19 s, on every song about 1 min instead of 2 min 12 s, Highlight about 16 s instead of 40 s; with your account, one song about 22 s instead of 24 s, every song about 49 s instead of 55 s, Highlight about 58 s instead of 67 s (measured on an 8-core PC). Running from source now needs Python 3.12 or newer (3.13 is the tested one): setup names an older one it finds and makes a .venv made with one again.
 

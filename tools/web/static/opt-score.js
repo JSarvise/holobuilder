@@ -3,7 +3,7 @@
 // Scores are the server's.
 import { byId, esc, fmt, sgn, info, thumb, getJSON, postJSON, toast, reveal, outfitText, NOTES, when, stash, unstash, withState, loadStates } from "/opt-util.js";
 import { score } from "/hb-grade.js";
-import { list as rankList } from "/hb-rank.js";
+import { list as rankList, shownRows } from "/hb-rank.js";
 import { progressCard, countLine } from "/opt-progress.js";
 import { unitPanel, runPanel, timelinePanel, wireTimeline, boardPanel, matchLine, deckUnit, leaderColumn, wakeFigure, wirePlan } from "/opt-detail.js";
 
@@ -214,9 +214,12 @@ export async function runScore(ctx) { cache = null; searchNow(ctx, optsKey(ctx.S
 /* ------------------------------------------------------------------ rendering */
 function sorted(ctx, res) {
   const rows = [...res.rows];
-  if (ctx.S.sort === "max" && rows.every(r => typeof r.max === "number")) rows.sort((a, b) => b.max - a.max);
-  return rows.slice(0, res.cached ? Math.max(ctx.S.top, 20) : Math.max(ctx.S.top, 5));
+  if (byMax(ctx, rows)) rows.sort((a, b) => b.max - a.max);
+  return rows;           // every row: "One per leader" picks from all of them; the list shows S.top
 }
+// the rows the setlist draws: "Teams to show" of them, after the optional one per leader
+const listOpts = S => ({ onePerLeader: onePer, limit: S.top });
+const shownLine = (rows, S) => `${shownRows(rows.map(T => ({ leader: { id: T.leader } })), listOpts(S)).length} teams`;
 function render(ctx, res) {
   const rows = sorted(ctx, res);
   const cardOf = id => withState(res.cards.get(id) || ctx.D.cards.get(id) || null);
@@ -235,7 +238,7 @@ function render(ctx, res) {
   if (sel >= rows.length) { sel = 0; open = new Set([0]); }
   ctx.out().innerHTML = `<div class="o-split">
     <aside class="dlg o-setlist" aria-label="Ranked teams">
-      <div class="dlg-h"><h2>${res.cached ? "Setlist of best teams" : "Search results"}</h2><span class="r">${rows.length} teams · ${res.cached ? (res.doc.scope === "general" ? "average over every chart" : "expected score on this chart") : "this search"}</span></div>
+      <div class="dlg-h"><h2>${res.cached ? "Setlist of best teams" : "Search results"}</h2><span class="r"><span data-shown>${shownLine(rows, S)}</span> · ${res.cached ? (res.doc.scope === "general" ? "average over every chart" : byMax(ctx, rows) ? "Max: every Active skill fires" : "expected score on this chart") : "this search"}</span></div>
       <div class="o-listctl" role="group" aria-label="List view">
         <button class="chip" type="button" data-diffmode aria-pressed="${diffMode}" title="Outline the cards that differ from #1">Diff vs #1</button>
         <button class="chip" type="button" data-oneper aria-pressed="${onePer}" title="Show only each leader card's best team">One per leader</button></div>
@@ -254,16 +257,20 @@ function render(ctx, res) {
   wakeFigure(ctx.out());
   after(ctxT, rows[sel], sel);
 }
-function listHTML({ rows, cardOf }) {
+// ranked by Max: asked for, and every row has one (a one-chart search; "Every song" has none)
+const byMax = (ctx, rows) => ctx.S.sort === "max" && rows.every(r => typeof r.max === "number");
+function listHTML({ ctx, rows, cardOf }) {
   return rankList(rows.map(T => {
     const L = cardOf(T.leader) || {}, [nm, of] = String(T.leaderName || "").split(" / ");
-    return { score: T.expected, p10: T.p10 ?? null, p50: T.p50 ?? null, p90: T.p90 ?? null, max: T.max ?? null,
+    // sorted by Max: the row reads its Max (every Active fires), the number it is ranked by
+    return { score: byMax(ctx, rows) ? T.max : T.expected, p10: T.p10 ?? null, p50: T.p50 ?? null, p90: T.p90 ?? null, max: T.max ?? null,
       leader: { id: T.leader, name: L.member || nm || T.leader, outfit: L.costume_name || of || "" },
       cards: [T.leader, ...T.members], sings: T.sings };
-  }), { selected: sel, diff: diffMode, onePerLeader: onePer, thumb: id => thumb(id) });
+  }), { selected: sel, diff: diffMode, ...listOpts(ctx.S), thumb: id => thumb(id) });
 }
 function relist(ctxT) {
   const l = byId("o-list"); if (l) l.innerHTML = listHTML(ctxT);
+  const n = ctxT.ctx.out().querySelector("[data-shown]"); if (n) n.textContent = shownLine(ctxT.rows, ctxT.ctx.S);
   ctxT.ctx.out().querySelectorAll("[data-diffmode]").forEach(b => b.setAttribute("aria-pressed", diffMode));
   ctxT.ctx.out().querySelectorAll("[data-oneper]").forEach(b => b.setAttribute("aria-pressed", onePer));
 }

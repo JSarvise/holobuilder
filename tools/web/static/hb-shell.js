@@ -77,5 +77,37 @@
     host.prepend(el);
   };
   document.querySelectorAll("nav.rail[data-page]").forEach(render);
-  window.HBShell = { SECTIONS };
+  window.HBShell = { SECTIONS, idle: () => idle };
+
+  // Idle: no pointer, key, wheel or touch input for IDLE_MS, or the window in the
+  // background, or the page hidden. The pages' decorative motion stops while idle (the Live2D
+  // leader in hb-live2d.js, the cards' glint in hb-card.css): drawn at the display's refresh
+  // rate, it kept the GPU and renderer processes at about two cores on a page nobody touched.
+  // Work in progress (the search bar, the chibi runner) keeps moving. `<html data-idle>` and
+  // the `hb:idle` / `hb:active` events on `document` carry the state.
+  const IDLE_MS = 30000;
+  let idle = false, timer = 0, last = -Infinity;
+  const set = v => {
+    if (v === idle) return;
+    idle = v;
+    document.documentElement.toggleAttribute("data-idle", v);
+    document.dispatchEvent(new Event(v ? "hb:idle" : "hb:active"));
+  };
+  const rest = () => { clearTimeout(timer); set(true); };
+  const poke = () => {
+    const now = performance.now();
+    if (!idle && now - last < 1000) return;      // a pointer moving fires dozens a second
+    last = now;
+    clearTimeout(timer);
+    set(false);
+    timer = setTimeout(rest, IDLE_MS);
+  };
+  // not `scroll`: the pages scroll themselves (a search's results), and a person scrolling
+  // also sends a wheel, key, pointer or touch event
+  for (const ev of ["pointermove", "pointerdown", "keydown", "wheel", "touchstart"])
+    window.addEventListener(ev, poke, { capture: true, passive: true });
+  window.addEventListener("focus", poke);
+  window.addEventListener("blur", rest);
+  document.addEventListener("visibilitychange", () => (document.hidden ? rest() : poke()));
+  poke();
 })();

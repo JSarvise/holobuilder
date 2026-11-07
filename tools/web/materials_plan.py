@@ -65,8 +65,10 @@ def bench_from_plan(solved: dict, team_chrs: set[str]) -> dict:
 # what `bench_from_plan` reads besides the planner's own inputs (`_plan_stamp`)
 _PLAN_INPUTS = ("board_state.json", "skilltree.json", "master_SkillTreeNode.json", "card_caps.json")
 _PLANS: dict = {}
-# a search holds each re-planned row's first plan and each shown row's final one
-_PLANS_HELD = 64
+# a search holds each re-planned row's first plan and each shown row's final one (~56):
+# enough for eight searches, so going back to an option (A -> B -> A), or to another
+# platform or Auto, finds its plans held (~53 KB a plan, ~27 MB in all)
+_PLANS_HELD = 512
 # `opts["candidates"] = FIRST`: the planner's first candidate alone (`first_opts`)
 FIRST = "first"
 # what a plan holds besides `Assumptions.plan_opts()`, never passed to the planner itself
@@ -493,9 +495,16 @@ def _dispatch_tasks(pool, pending, cancel=None, more=None):
     while pending or in_flight:
         while pending and in_flight < limit:
             task, it = pending.pop(0)
-            workers.apply_async(task, ((*it, generation),),
-                                callback=lambda out, task=task: done.put((task, out)),
-                                error_callback=done.put)
+            # on the pool's own context (a shared pool's worker activates it first)
+            submit = getattr(pool, "submit", None)
+            if submit is not None:
+                submit(task, (*it, generation),
+                       callback=lambda out, task=task: done.put((task, out)),
+                       error_callback=done.put)
+            else:
+                workers.apply_async(task, ((*it, generation),),
+                                    callback=lambda out, task=task: done.put((task, out)),
+                                    error_callback=done.put)
             in_flight += 1
         while True:
             if cancel is not None and cancel.is_set():

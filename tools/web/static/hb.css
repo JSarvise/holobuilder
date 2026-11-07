@@ -214,6 +214,8 @@ main{min-width:0;padding-bottom:96px}
 .tl-ac{position:absolute;top:15px;height:20px;border-radius:999px;border:2px solid var(--lc);overflow:hidden;
   background:color-mix(in srgb,var(--lc) 40%,transparent);display:flex;align-items:center;justify-content:center}
 .tl-ac em{font:800 11px/1 var(--f-num);font-style:normal;color:#fff;-webkit-text-stroke:2.5px rgb(20 19 42 / .8);paint-order:stroke fill}
+/* a check a Special's Activation Rate UP raises: the lane colour at full strength, a white rim */
+.tl-ac.up{background:color-mix(in srgb,var(--lc) 85%,transparent);box-shadow:0 0 0 1px #fff}
 .tl-lead{background:var(--t-leader)}
 .tl-always{position:absolute;inset:8px 6px;border-radius:999px;background:repeating-linear-gradient(135deg,rgb(255 167 80 / .35) 0 8px,rgb(255 167 80 / .2) 8px 16px);
   border:2px solid var(--t-leader);font:800 11px/20px var(--f-ui);color:var(--ink);padding-left:12px}
@@ -253,6 +255,7 @@ main{min-width:0;padding-bottom:96px}
 .tl-key i{display:inline-block;width:28px;height:12px;border-radius:8px}
 .tl-key .k-sp{background:var(--normal);height:7px;box-shadow:0 0 0 1.5px #fff}
 .tl-key .k-ac{border:2px solid var(--normal);background:color-mix(in srgb,var(--normal) 40%,transparent)}
+.tl-key .k-ac.up{background:color-mix(in srgb,var(--normal) 85%,transparent);box-shadow:0 0 0 1px #fff}
 .tl-key .k-nt{background:var(--ink-2);height:8px}
 
 /* ---------- page classes (re-skinned; new pages use the components above) ---------- */

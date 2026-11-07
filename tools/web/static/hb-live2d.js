@@ -14,7 +14,7 @@
 const ENGINE_URL = "https://cdn.jsdelivr.net/npm/untitled-pixi-live2d-engine@1.4.0/dist/cubism.es.js";
 
 let indexP = null, runtimeP = null;
-const S = { app: null, model: null, card: null, host: null, token: 0, observer: null, crop: 0.5 };
+const S = { app: null, model: null, card: null, host: null, token: 0, observer: null, crop: 0.5, PIXI: null };
 
 /** The index of converted figures (cached for the page's life). */
 export function ready() {
@@ -47,23 +47,48 @@ function runtime() {
     const PIXI = await import("pixi.js");
     const L2D = await import(ENGINE_URL);
     PIXI.extensions.add(L2D.Live2DPlugin);
+    S.PIXI = PIXI;
     return { PIXI, L2D };
   })();
   return runtimeP;
 }
 
-async function app() {
-  if (S.app) return S.app;
-  const { PIXI } = await runtime();
-  const a = new PIXI.Application();
-  await a.init({ backgroundAlpha: 0, antialias: true, preference: "webgl",
-    resolution: Math.min(2, window.devicePixelRatio || 1), autoDensity: true, width: 10, height: 10 });
-  a.canvas.className = "l2d-canvas";
-  S.app = a;
-  document.addEventListener("visibilitychange", () => { if (document.hidden) a.ticker.stop(); else if (S.model && !reduced()) a.ticker.start(); });
-  return a;
+// The one Application, made once: the panel is redrawn several times around a search, so mounts
+// overlap, and each one that made its own Application left a ticker drawing an orphan stage at
+// the display's refresh rate for the page's life.
+let appP = null;
+function app() {
+  if (!appP) appP = (async () => {
+    const { PIXI } = await runtime();
+    const a = new PIXI.Application();
+    await a.init({ backgroundAlpha: 0, antialias: true, preference: "webgl",
+      resolution: Math.min(2, window.devicePixelRatio || 1), autoDensity: true, width: 10, height: 10 });
+    a.canvas.className = "l2d-canvas";
+    // the motions are authored at 30 fps; drawing at the display's rate (144-240 Hz) cost
+    // six times the GPU time for frames the motion does not have
+    a.ticker.maxFPS = 30;
+    S.app = a;
+    document.addEventListener("visibilitychange", sync);
+    document.addEventListener("hb:idle", sync);
+    document.addEventListener("hb:active", sync);
+    return a;
+  })().catch(e => { appP = null; throw e; });   // a failed start is tried again on the next mount
+  return appP;
 }
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+const idle = () => document.hidden || !!(window.HBShell && window.HBShell.idle && window.HBShell.idle());
+
+/** Draw while the figure is shown and the page is in use; otherwise hold the current frame.
+ *  PixiJS's shared system ticker (its texture collectors) runs at the display's rate on its
+ *  own, so it stops and starts with the figure. */
+function sync() {
+  const a = S.app;
+  if (!a) return;                                  // S.PIXI is set before any Application
+  const run = !!S.model && !reduced() && !idle();
+  if (run === a.ticker.started) return;
+  if (run) { S.PIXI.Ticker.system.start(); a.ticker.start(); }
+  else { a.ticker.stop(); S.PIXI.Ticker.system.stop(); a.render(); }
+}
 
 function dropModel() {
   if (!S.model) return;
@@ -117,8 +142,8 @@ export async function mount(host, cardId, { crop = 0.45 } = {}) {
     attach(host, crop);
     if (info.expression) { try { model.expression("idle"); } catch (_) { /* the expression is optional */ } }
     fit(model, host, crop);
-    if (reduced()) { a.render(); a.ticker.stop(); }
-    else { a.ticker.start(); try { model.motion("Idle"); } catch (_) { /* no idle: breath + blink only */ } }
+    if (!reduced()) { try { model.motion("Idle"); } catch (_) { /* no idle: breath + blink only */ } }
+    sync();
     host.classList.add("l2d-live");
     return true;
   } catch (e) {
@@ -144,6 +169,6 @@ export function release() {
   S.token++;
   dropModel();
   S.card = null;
-  if (S.app) S.app.ticker.stop();
+  sync();
   if (S.host) S.host.classList.remove("l2d-live");
 }

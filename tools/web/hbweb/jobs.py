@@ -87,8 +87,10 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for=None) -> None:
             eng = engine_for(basis_name, difficulty)
         emit({"type": "stage", "stage": "build", "state": "done"})
         emit({"type": "stage", "stage": "search", "state": "active"})
+        # this request's plan options: one engine serves every option of the re-plan
+        own = {"assumptions": assumptions} if assumptions is not None and engine_for is None else {}
         payload = eng.search(opts["song"], opts["filters"], emit=emit, cancel=job.cancel,
-                             top=opts.get("top") or ondemand.RANKING)
+                             top=opts.get("top") or ondemand.RANKING, **own)
         emit({"type": "result", "payload": payload,
               "elapsed_ms": round((time.monotonic() - t0) * 1000)})
     except ondemand.Cancelled:
