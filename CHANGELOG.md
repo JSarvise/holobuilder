@@ -2,6 +2,10 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.1.56 (2026-11-08)
+- A team's details on a PC or AUTO search now give the same score as its row: they were scored as a manual run on mobile, so an AUTO row's details read about 30 % high (on one song with the account: 2,491,370 against the row's 1,895,080).
+- Export: a new button on every team saves it as a .hbteam file in your Downloads folder, with a .csv of its score note by note beside it, to send to someone who checks a result or a possible bug. The file holds the song and options, the six cards, the numbers shown, and the account data the score uses: your card levels and blooms, Holomem Boards, Cubes/Hexas and Board Points. It holds no login or player ID.
+
 ## 0.1.55 (2026-11-07)
 - Searches use much less memory: the peak over the measured searches drops from about 12 GB to about 4.5 GB, and the number of worker processes now adjusts to the PC's RAM (14 on a 16 GB PC, 6 on 8 GB), so a normal search fits comfortably on a 16 GB PC. The results are the same.
 

@@ -102,68 +102,71 @@ def start_search(h) -> None:
                                                      if k not in ("filters", "assumptions")}})
 
 
-def row_detail_route(h) -> None:
-    """`POST /api/row-detail` — ONE number set for a two-stage / event row,
-    re-developed on the leaf that ranked it (`row_detail.two_stage_detail`):
-    song figures, slot order, deck power, board state, Overall Power lines,
-    the Score Bonus split and, on request, the timeline and the run law.
-
-    Body: `{"song", "difficulty"?, "basis": "account"|"maxed"|"account-max",
-    "cards": [leader, m1..m5], "refine"?: bool (default false: the row was ranked
-    with the activation refinement), "member_order"?, "timeline"?: bool,
-    "distribution"?: bool, "as_is"?: bool (default true: `song_est_as_is` on the
-    account's captured boards + `plan_cost` of the planned boards vs the
-    wallet, `row_detail._as_is`), "reset_price"?: bool (a within-wallet row
-    with resets: the same team re-planned with fewer, `row_detail.reset_price`;
-    a few plans more, so the page asks for it on its own), "pool"?: [music ids] (a
-    Highlight row on the WHOLE pool, `row_detail.pool_detail`: one board and one slot
-    order for every song; `song` is then any of them)}`. Read-only."""
-    body = h.body_or_empty()
+def row_request(body: Mapping) -> dict:
+    """The row a `/api/row-detail` (or `/api/export-team`) body names, checked
+    (`basis.HttpError` on a bad one): `song`, `ids` (leader + 5), `basis`,
+    `difficulty`, `refine`, `order`, `assumptions`, `pool`, `play`."""
     song = str(body.get("song") or "").strip()
     ids = [str(c) for c in (body.get("cards") or []) if c]
     if not song or len(ids) != MEMBER_COUNT + 1:
-        h.reply_json(400, {"error": f"need a song and {MEMBER_COUNT + 1} card ids "
-                                    "(leader + 5 members)"})
-        return
+        raise basis.HttpError(400, {"error": f"need a song and {MEMBER_COUNT + 1} card ids "
+                                             "(leader + 5 members)"})
     basis_name = str(body.get("basis") or "account")
     import leaf_inputs  # noqa: PLC0415
     if basis_name not in leaf_inputs.BASES:
-        h.reply_json(400, {"error": f"basis must be one of {sorted(leaf_inputs.BASES)}"})
-        return
-    try:
-        difficulty = basis.parse_difficulty(body, song)
-    except basis.HttpError as exc:
-        h.reply_json(exc.code, exc.obj)
-        return
-    refine = body.get("refine") is True
+        raise basis.HttpError(400, {"error": f"basis must be one of {sorted(leaf_inputs.BASES)}"})
+    difficulty = basis.parse_difficulty(body, song)
     order = body.get("member_order") if isinstance(body.get("member_order"), list) else None
+    import ondemand  # noqa: PLC0415
     assumptions = None
     if isinstance(body.get("assumptions"), dict):
-        import ondemand  # noqa: PLC0415
         try:
             assumptions = ondemand.parse_assumptions(body["assumptions"])
         except (TypeError, ValueError) as exc:
-            h.reply_json(400, {"error": f"assumptions: {exc}"})
-            return
+            raise basis.HttpError(400, {"error": f"assumptions: {exc}"}) from None
     pool = [str(s) for s in body.get("pool") or [] if s] if isinstance(body.get("pool"), list) else []
+    return {"song": song, "ids": ids, "basis": basis_name, "difficulty": difficulty,
+            "refine": body.get("refine"), "order": [str(c) for c in order] if order else None,
+            "assumptions": assumptions, "pool": pool,
+            # the search's platform and AUTO, or the row is not its own
+            "play": ondemand.parse_play(body)}
+
+
+def row_figures(req: Mapping, body: Mapping, *, keep_law: bool = False) -> dict:
+    """The row's detail (`row_detail.two_stage_detail`, or `pool_detail` for a Highlight row
+    on the whole pool) for a `row_request`. Raises what those raise."""
+    ids = req["ids"]
+    if req["pool"]:
+        # a Highlight row on the WHOLE pool: one board, one slot order
+        # (`row_detail.pool_detail`); `song` is any pool song (the difficulty's)
+        out = row_detail.pool_detail(req["basis"], req["pool"], req["difficulty"], ids[0], ids[1:],
+                                     assumptions=req["assumptions"],
+                                     refine=req["refine"] is not False, play=req["play"])
+        out.update({"available": True, "difficulty": req["difficulty"], "basis": req["basis"],
+                    "leader_id": ids[0], "member_ids": ids[1:]})
+        return out
+    out = row_detail.two_stage_detail(
+        req["basis"], req["song"], req["difficulty"], ids[0], ids[1:], refine=req["refine"] is True,
+        assumptions=req["assumptions"],
+        want_distribution=body.get("distribution") is True,
+        want_timeline=body.get("timeline") is True,
+        member_order=req["order"],
+        as_is=body.get("as_is") is not False,
+        want_reset_price=body.get("reset_price") is True, play=req["play"], keep_law=keep_law,
+        want_notes=body.get("notes") is True)
+    out.update({"available": True, "song": req["song"], "difficulty": req["difficulty"],
+                "basis": req["basis"], "leader_id": ids[0], "member_ids": ids[1:]})
+    return out
+
+
+def _row_reply(h, make) -> None:
+    """Reply `make()` as JSON; the row routes' errors as a 400 with the message (a missing
+    chart or account dump, a bad team, a key not in the basis' pool), never an HTML 500."""
     try:
-        if pool:
-            # a Highlight row on the WHOLE pool: one board, one slot order
-            # (`row_detail.pool_detail`); `song` is any pool song (the difficulty's)
-            out = row_detail.pool_detail(basis_name, pool, difficulty, ids[0], ids[1:],
-                                         assumptions=assumptions,
-                                         refine=body.get("refine") is not False)
-            out.update({"available": True, "difficulty": difficulty, "basis": basis_name,
-                        "leader_id": ids[0], "member_ids": ids[1:]})
-            h.reply_json(200, out)
-            return
-        out = row_detail.two_stage_detail(
-            basis_name, song, difficulty, ids[0], ids[1:], refine=refine, assumptions=assumptions,
-            want_distribution=body.get("distribution") is True,
-            want_timeline=body.get("timeline") is True,
-            member_order=[str(c) for c in order] if order else None,
-            as_is=body.get("as_is") is not False,
-            want_reset_price=body.get("reset_price") is True)
+        out = make()
+    except basis.HttpError as exc:
+        h.reply_json(exc.code, exc.obj)
+        return
     except KeyError as exc:
         h.reply_json(400, {"error": str(exc)})
         return
@@ -176,9 +179,52 @@ def row_detail_route(h) -> None:
     except Exception as exc:  # noqa: BLE001 — report as JSON, never HTML 500
         h.reply_error(exc)
         return
-    out.update({"available": True, "song": song, "difficulty": difficulty, "basis": basis_name,
-                "leader_id": ids[0], "member_ids": ids[1:]})
     h.reply_json(200, out)
+
+
+def row_detail_route(h) -> None:
+    """`POST /api/row-detail` — ONE number set for a two-stage / event row,
+    re-developed on the leaf that ranked it (`row_detail.two_stage_detail`):
+    song figures, slot order, deck power, board state, Overall Power lines,
+    the Score Bonus split and, on request, the timeline and the run law.
+
+    Body: `{"song", "difficulty"?, "basis": "account"|"maxed"|"account-max",
+    "platform"?, "auto"?: bool (how the run is played, as the search was asked),
+    "cards": [leader, m1..m5], "refine"?: bool (default false: the row was ranked
+    with the activation refinement), "member_order"?, "timeline"?: bool,
+    "distribution"?: bool, "as_is"?: bool (default true: `song_est_as_is` on the
+    account's captured boards + `plan_cost` of the planned boards vs the
+    wallet, `row_detail._as_is`), "reset_price"?: bool (a within-wallet row
+    with resets: the same team re-planned with fewer, `row_detail.reset_price`;
+    a few plans more, so the page asks for it on its own), "pool"?: [music ids] (a
+    Highlight row on the WHOLE pool, `row_detail.pool_detail`: one board and one slot
+    order for every song; `song` is then any of them)}`. Read-only."""
+    body = h.body_or_empty()
+    _row_reply(h, lambda: row_figures(row_request(body), body))
+
+
+def export_team_route(h) -> None:
+    """`POST /api/export-team` — the row as a `.hbteam` document (`hbteam.document`): the
+    request, the detail the server computes for it now (with the run law's summary), the
+    numbers the page showed (`shown`), the search that ranked it (`search`) and the account
+    files the score reads, so another install can replay it (`tools/web/hbteam.py replay`).
+    Body: a `/api/row-detail` body plus `shown`?: {...} and `search`?: {...}. Saves the file
+    in the user's Downloads folder (`team_file.save`: the desktop app's window cannot download)
+    and answers `{"path", "name", "bytes"}`; writes nothing else."""
+    body = h.body_or_empty()
+
+    def make() -> dict:
+        import hbteam  # noqa: PLC0415
+        import team_file  # noqa: PLC0415  (tools/refresh: tools/web/ writes no files)
+        req = row_request(body)
+        out = row_figures(req, {**body, "distribution": True, "timeline": False, "notes": True})
+        doc = hbteam.document(hbteam.request_of(body), out,
+                              shown=body.get("shown") if isinstance(body.get("shown"), dict) else None,
+                              search=body.get("search") if isinstance(body.get("search"), dict) else None)
+        path, csv_path = team_file.save(doc)
+        return {"path": str(path), "name": path.name, "bytes": path.stat().st_size,
+                "csv": csv_path.name if csv_path else None}
+    _row_reply(h, make)
 
 
 def _timeline_inputs(body: Mapping, basis_name: str):

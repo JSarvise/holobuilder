@@ -85,12 +85,10 @@ def master_cache_dir() -> Path | None:
     return paths.GAME_DATA if paths.GAME_DATA.is_dir() else None
 
 
-def freeze(source: Path, out: Path, master_repo: Path | None) -> dict:
-    if out.exists() and any(out.iterdir()):
-        raise SystemExit(f"{out} is not empty; freeze into a new directory")
-    inputs = out / "inputs"
+def inputs_plan(source: Path, inputs: Path) -> list[tuple[Path, Path]]:
+    """`(source file, copy)` for every input under `data/`, `state/` and the dumps: what a run
+    reads from the checkout, laid out under `inputs` at the same relative paths."""
     plan: list[tuple[Path, Path]] = []
-
     for path in _walk(source / "data", DATA_SKIP_DIRS):
         plan.append((path, inputs / path.relative_to(source)))
     for name in STATE_FILES:
@@ -99,6 +97,13 @@ def freeze(source: Path, out: Path, master_repo: Path | None) -> dict:
     for path in _walk(dumps, DUMPS_SKIP_DIRS):
         if _dumps_file_wanted(path, dumps):
             plan.append((path, inputs / DUMPS_REL / path.relative_to(dumps)))
+    return plan
+
+
+def freeze(source: Path, out: Path, master_repo: Path | None) -> dict:
+    if out.exists() and any(out.iterdir()):
+        raise SystemExit(f"{out} is not empty; freeze into a new directory")
+    plan = inputs_plan(source, out / "inputs")
 
     cache = master_cache_dir()
     if cache is not None:

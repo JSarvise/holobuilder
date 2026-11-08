@@ -24,6 +24,7 @@ from hbuilder.domain.team import Team
 
 __all__ = [
     "score_team_on_chart",
+    "score_team_notes",
     "score_team_orders",
     "score_team_ceiling",
 ]
@@ -76,6 +77,26 @@ def score_team_on_chart(
     the modelled stat pool. Calling `score_song_detailed` bare instead puts the
     same team on the same board about 1 % below the ranked row."""
     return _score_one(team, chart, cfg)
+
+
+def score_team_notes(
+    team: Team, chart: SongChart, cfg: ScoringConfig
+) -> tuple[SongScore, list]:
+    """`score_team_on_chart` and its note-by-note breakdown at the best slot order
+    (`song.NoteRow`s, `score_song_detailed(note_rows=)`): the same deck power and AUTO
+    premise, so the rows' `expected_value`s add up to the row's `total_score` exactly. It
+    walks the 120 orders in Python: for an export, not a search."""
+    deck_power = (
+        overall_power_for(tuple(team.members), team.leader, cfg)
+        if cfg.song_absolute_deck_power
+        else None
+    )
+    rows: dict = {}
+    (score,) = score_song_detailed(
+        tuple(team.members), (team.leader,), chart, cfg, deck_power=deck_power,
+        auto=cfg.song_auto, note_rows=rows,
+    )
+    return score, rows[team.leader.id]
 
 
 def score_team_orders(

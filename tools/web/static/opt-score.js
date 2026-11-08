@@ -253,6 +253,7 @@ function render(ctx, res) {
     if (e.target.closest("[data-oneper]")) { onePer = !onePer; return relist(ctxT); }
     const tg = e.target.closest("[data-toggle]"); if (tg) return select(ctxT, +tg.dataset.toggle);
     const cp = e.target.closest("[data-copy]"); if (cp) return copy(ctxT, +cp.dataset.copy);
+    const ex = e.target.closest("[data-export]"); if (ex) return exportTeam(ctxT, +ex.dataset.export, ex);
   };
   wakeFigure(ctx.out());
   after(ctxT, rows[sel], sel);
@@ -358,6 +359,7 @@ function block(ctxT, T, i) {
       <div class="o-tact">
         ${T.cert && T.cert.status === "EXACT" ? `<span class="o-tag" style="color:var(--good);border-color:currentColor">EXACT</span>` : ""}
         <button class="btn small" type="button" data-copy="${i}"><svg class="i s"><use href="#i-copy"/></svg>Copy team</button>
+        ${T.source === "cached" && T.kind !== "unit" ? `<button class="btn small" type="button" data-export="${i}" title="Save this team as a .hbteam file: the row, its numbers and the account data its score uses, so it can be replayed and checked"><svg class="i s"><use href="#i-down"/></svg>Export</button>` : ""}
       </div>
     </div>`;
   const tiles = `<div class="o-tiles">
@@ -431,6 +433,9 @@ function fromCompare(d, route, api = "/api/compare") {
     deck_power: s.deck_power ?? null, deck_power_basis: s.deck_power_basis, panel: t.panel, score_bonus: t.score_bonus,
     distribution: t.distribution || null, board_state: t.board_state, unit_off: s.unit_score_board_off };
 }
+/* how the run is played, as the search was asked: a detail scored otherwise is not the row's */
+function playOf(S) { return { platform: S.platform, auto: !!S.auto }; }
+
 /* one detail's figures from /api/row-detail */
 function fromRowDetail(d) {
   return { route: "the team's own board", api: "/api/row-detail", value: d.song_est, song_max: d.song_max, member_order: d.member_order, deck_power: d.deck_power,
@@ -493,8 +498,9 @@ async function perSongDetail(ctxT, T, i, det) {
   try {
     // an on-demand row carries the search's levers, as the song rows do, so an "In general"
     // search's detail does not fall back to boards and cards as they are
-    const body = { song, difficulty: S.difficulty, basis: tsBasis(S) || "account", cards,
+    const body = { song, difficulty: S.difficulty, basis: tsBasis(S) || "account", cards, ...playOf(S),
       ...(T.od ? { refine: !!T.refinedLeaf, ...(assumptionsOf(S) ? { assumptions: assumptionsOf(S) } : {}) } : {}) };
+    det.body = body;
     const d = await postJSON("/api/row-detail", { ...body, timeline: true });
     if (det.song !== song) return;
     det.fig = fromRowDetail(d); det.fig.song = song;
@@ -535,9 +541,10 @@ async function after(ctxT, T, i) {
   } else if (T.source === "cached") {
     jobs.push((async () => {
       try {
-        const body = { song: S.song, difficulty: S.difficulty, basis: tsBasis(S) || "account", cards,
+        const body = { song: S.song, difficulty: S.difficulty, basis: tsBasis(S) || "account", cards, ...playOf(S),
           member_order: T.ordered ? T.members : undefined,
           ...(T.od ? { refine: !!T.refinedLeaf, ...(assumptionsOf(S) ? { assumptions: assumptionsOf(S) } : {}) } : {}) };
+        det.body = body;
         const d = await postJSON("/api/row-detail", { ...body, timeline: true });
         det.fig = fromRowDetail(d);
         // a row planned within the wallet can show what its resets buy (a few plans more: on request)
@@ -553,6 +560,28 @@ async function after(ctxT, T, i) {
     })());
   }
   await Promise.all(jobs);
+}
+
+/* the row as a .hbteam file (/api/export-team, saved in Downloads): the detail's own request,
+   the numbers on screen and the search that ranked it, with the account files its score reads */
+export async function exportFile(body, shown, search, btn) {
+  if (btn) btn.disabled = true;
+  toast("Exporting the team…");
+  try {
+    const r = await postJSON("/api/export-team", { ...body, shown, ...(search ? { search } : {}) });
+    const where = r.path.slice(0, r.path.length - r.name.length - 1);
+    // what the file carries, in one line, every time: it is the user's account data
+    toast(`Saved ${r.name}${r.csv ? " and its note-by-note .csv" : ""} in ${where}. It holds your card levels and blooms, Holomem Boards, materials and Board Points; no login or player ID.`, 9000);
+  } catch (e) { toast("Couldn't export: " + e.message); }
+  finally { if (btn) btn.disabled = false; }
+}
+function exportTeam({ ctx, rows }, i, btn) {
+  const T = rows[i], S = ctx.S, det = details.get(T.source + ":" + T.key), song = ctx.song();
+  if (!det || !det.body) return toast("Wait for the team's details to load, then export");
+  const shown = { song: song ? song.title : (det.song ? `Every song (detail on ${det.song})` : "Every song"),
+    rank: i + 1, label: scoreLabel(T), expected: T.expected, max: T.max ?? null,
+    p10: T.p10 ?? null, p50: T.p50 ?? null, p90: T.p90 ?? null };
+  return exportFile(det.body, shown, T.od ? odBody(S) : null, btn);
 }
 
 function copy({ ctx, rows, cardOf }, i) {

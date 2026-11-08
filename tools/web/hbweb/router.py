@@ -102,6 +102,7 @@ POST_ROUTES: dict[str, Route] = {
     "/api/admin/user": admin.admin_user,
     "/api/refresh": admin.refresh_route,
     "/api/row-detail": search.row_detail_route,
+    "/api/export-team": search.export_team_route,
     "/api/timeline": search.serve_timeline,
     "/api/gacha/sync": gacha.gacha_sync,
     "/api/gacha/export": gacha.gacha_export,

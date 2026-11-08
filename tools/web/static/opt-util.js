@@ -46,9 +46,9 @@ export const postJSON = (url, body, signal) => getJSON(url, {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
 
 let toastTimer;
-export function toast(msg) {
+export function toast(msg, ms = 2600) {
   const t = byId("toast"); t.textContent = msg; t.classList.add("on");
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 2600);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), ms);
 }
 
 /* ---- the explanations that live behind the (i) buttons ---- */

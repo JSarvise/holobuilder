@@ -49,7 +49,8 @@ from hbuilder.domain.deck_panel_team import team_deck_panel  # noqa: E402
 from hbuilder.domain.song import timeline as song_timeline  # noqa: E402
 from hbuilder.domain.song import overall_power_for, song_overall_power  # noqa: E402
 from hbuilder.domain.song_distribution import run_score_distribution  # noqa: E402
-from hbuilder.domain.song_rank import score_team_ceiling, score_team_on_chart  # noqa: E402
+from hbuilder.domain.song_rank import (  # noqa: E402
+    score_team_ceiling, score_team_notes, score_team_on_chart)
 from hbuilder.domain.team import Team  # noqa: E402
 
 SCORE_BONUS_LINES = (
@@ -81,6 +82,42 @@ def figures(team: Team, chart, cfg_board, *, cfg_off=None) -> dict:
     if cfg_off is not None:
         out["song_off"] = score_team_on_chart(team, chart, cfg_off).total_score
     return out
+
+
+# The columns of a row's note-by-note breakdown (`note_breakdown`, the export's CSV).
+NOTE_COLUMNS = ("note", "time_s", "combo", "judgement", "combo_bonus", "base_value",
+                "active", "active_multiplier", "active_chance", "other_actives", "boosts",
+                "skill_rate", "expected_value")
+
+
+def note_breakdown(team: Team, chart, cfg_board) -> dict:
+    """The row's score note by note at its best slot order (`song_rank.score_team_notes`):
+    `columns` (`NOTE_COLUMNS`) and one row per note. `base_value` is the note with no
+    skill, `skill_rate` the expected multiplier at that instant, `expected_value` =
+    ceil(base_value x (1 + skill_rate)); `active` / `active_multiplier` / `active_chance`
+    the strongest ACTIVE score-up live at the note and the chance it fired, the others in
+    `other_actives` ("holomem xmultiplier @chance"), the live SPECIAL boosts in `boosts`.
+    `total` is the sum of `expected_value` and `verified` says it equals the row's Expected
+    (`score_team_on_chart`)."""
+    score, rows = score_team_notes(team, chart, cfg_board)
+    name = {c.id: c.member for c in (team.leader, *team.members)}
+
+    def who(card_id) -> str:
+        return name.get(card_id, card_id or "")
+
+    out = []
+    for r in rows:
+        top = r.actives[0] if r.actives else None
+        out.append([
+            r.index + 1, r.time, r.combo, r.judgement, r.combo_bonus, r.base_value,
+            who(top[0]) if top else "", top[1] if top else 0.0, top[2] if top else 0.0,
+            "; ".join(f"{who(o)} x{m:.4g} @{p:.4g}" for o, m, p in r.actives[1:]),
+            "; ".join(f"{who(o)} +{b:.4g}" for o, b in r.boosts),
+            r.skill_rate, r.expected_value])
+    total = sum(r.expected_value for r in rows)
+    return {"columns": list(NOTE_COLUMNS), "rows": out, "total": total,
+            "member_order": list(score.member_order),
+            "verified": total == score_team_on_chart(team, chart, cfg_board).total_score}
 
 
 # ---------------------------------------------------------------------------
@@ -171,12 +208,13 @@ def unit_score_block(team: Team, cfg_board, cfg_off, member_order: Sequence[str]
 # the run distribution
 # ---------------------------------------------------------------------------
 def distribution(team: Team, chart, cfg_board, member_order: Sequence[str], deck_power: float,
-                 row_score: float | None = None) -> dict:
+                 row_score: float | None = None, keep_law: bool = False) -> dict:
     """The exact law of the run score on the row's basis. `verified` says the
-    law's own expectation reproduced the row's figure exactly."""
+    law's own expectation reproduced the row's figure exactly. `keep_law`: the whole
+    law too (`law`: every score with its chance), for `song_distribution.best_of_n`."""
     try:
         law = run_score_distribution(team.members, team.leader, chart, cfg_board,
-                                     member_order, deck_power)
+                                     member_order, deck_power, keep_law=keep_law)
     except ValueError as exc:
         return {"available": False, "reason": str(exc)}
     law["available"] = True
@@ -203,7 +241,8 @@ def quantile_fields(got: dict) -> dict:
 
 
 def detail(team: Team, chart, cfg_board, cfg_off, *, want_distribution: bool = False,
-           want_timeline: bool = False, member_order: Sequence[str] | None = None) -> dict:
+           want_timeline: bool = False, member_order: Sequence[str] | None = None,
+           keep_law: bool = False) -> dict:
     """Every figure of one row from ONE board (`cfg_board`). `chart=None` is
     the song-agnostic Unit Score row."""
     out: dict[str, Any] = {}
@@ -220,7 +259,7 @@ def detail(team: Team, chart, cfg_board, cfg_off, *, want_distribution: bool = F
         out["timeline"] = song_timeline(tuple(team.members), chart, cfg_board, tuple(order))
     if chart is not None and want_distribution:
         out["distribution"] = distribution(team, chart, cfg_board, order, out["deck_power"],
-                                           row_score=out["song_est"])
+                                           row_score=out["song_est"], keep_law=keep_law)
     return out
 
 
@@ -267,9 +306,19 @@ _LEAF_CACHE: dict[tuple, tuple[float, dict]] = {}
 _LEAF_TTL = 120.0
 
 
-def _leaf_inputs(basis: str, song: str, difficulty: str, assumptions=None) -> dict:
+def _leaf_inputs(basis: str, song: str, difficulty: str, assumptions=None,
+                 play: tuple[str, bool] | None = None) -> dict:
     """The two-stage builder's own leaf inputs for `basis` on `song` (cached a
-    couple of minutes per (basis, song, difficulty): ~0.3 s to build)."""
+    couple of minutes per (basis, song, difficulty): ~0.3 s to build), scored for
+    `play` (`ondemand.parse_play`: platform, AUTO) as the search that ranked the row."""
+    built = _leaf_inputs_cached(basis, song, difficulty, assumptions)
+    if play is None:
+        return built
+    import ondemand  # noqa: PLC0415
+    return dict(built, ctx=ondemand.with_play(built["ctx"], tuple(play)))
+
+
+def _leaf_inputs_cached(basis: str, song: str, difficulty: str, assumptions=None) -> dict:
     import time  # noqa: PLC0415
 
     import leaf_inputs  # noqa: PLC0415
@@ -291,7 +340,8 @@ def _leaf_inputs(basis: str, song: str, difficulty: str, assumptions=None) -> di
 def leaf_detail(built: Mapping, team: Team, *, refine: bool = False,
                 want_distribution: bool = False, want_timeline: bool = False,
                 member_order: Sequence[str] | None = None, panel: bool = True,
-                chart=None, as_is: bool = False) -> dict:
+                chart=None, as_is: bool = False, keep_law: bool = False,
+                want_notes: bool = False) -> dict:
     """`team` re-developed on a two-stage leaf (`built`: a `leaf_inputs` /
     `leaf_inputs.build_account` result) on `chart` (default `built["chart"]`) and
     every figure from that one board (`panel=False`: the song figures only, plus
@@ -311,12 +361,15 @@ def leaf_detail(built: Mapping, team: Team, *, refine: bool = False,
     cfg_off = dataclasses.replace(ctx.cfg, board=None)
     if panel:
         out = detail(team, chart, cfg_board, cfg_off, want_distribution=want_distribution,
-                     want_timeline=want_timeline, member_order=member_order)
+                     want_timeline=want_timeline, member_order=member_order, keep_law=keep_law)
     else:
         out = figures(team, chart, cfg_board)
         if want_distribution:
             out["distribution"] = distribution(team, chart, cfg_board, out["member_order"],
-                                               out["deck_power"], row_score=out["song_est"])
+                                               out["deck_power"], row_score=out["song_est"],
+                                               keep_law=keep_law)
+    if want_notes:
+        out["notes"] = note_breakdown(team, chart, cfg_board)
     if as_is:
         out.update(_as_is(ctx, team, chart, helper_tree_for, bt))
     by_id = {c.id: c for c in (team.leader, *team.members)}
@@ -536,13 +589,16 @@ def two_stage_detail(basis: str, song: str, difficulty: str, leader_id: str,
                      member_ids: Sequence[str], *, refine: bool = False,
                      want_distribution: bool = False, want_timeline: bool = False,
                      member_order: Sequence[str] | None = None, as_is: bool = True,
-                     assumptions=None, want_reset_price: bool = False) -> dict:
+                     assumptions=None, want_reset_price: bool = False,
+                     play: tuple[str, bool] | None = None, keep_law: bool = False,
+                     want_notes: bool = False) -> dict:
     """A searched (or event, `refine=False`) row re-developed on the leaf that
     ranked it, with every figure from that one board. `refine`: the row was ranked
     with the activation refinement.
     `assumptions` (`ondemand.Assumptions`): the on-demand search's account levers
-    instead of a fixed `basis` -- the same leaf that ranked the row."""
-    built = _leaf_inputs(basis, song, difficulty, assumptions)
+    instead of a fixed `basis` -- the same leaf that ranked the row. `play`: how the
+    run is played (platform, AUTO), as the search was asked."""
+    built = _leaf_inputs(basis, song, difficulty, assumptions, play)
     if assumptions is not None and assumptions.replan:
         # the row was ranked on its plan WITHIN THE WALLET (`materials_plan`): the
         # same plan, the same off-team boards, scored by the same leaf
@@ -573,7 +629,8 @@ def two_stage_detail(basis: str, song: str, difficulty: str, leader_id: str,
         raise KeyError(f"not in this basis' pool: {missing}")
     team = Team(leader=by_id[leader_id], members=tuple(by_id[m] for m in member_ids))
     out = leaf_detail(built, team, refine=bool(refine), want_distribution=want_distribution,
-                      want_timeline=want_timeline, member_order=member_order, as_is=as_is)
+                      want_timeline=want_timeline, member_order=member_order, as_is=as_is,
+                      keep_law=keep_law, want_notes=want_notes)
     if whole_plan is not None:
         out["plan_optimal"] = optimal       # False: a MILP stopped on the solver's time limit
     if as_is and whole_plan is not None:
@@ -581,7 +638,7 @@ def two_stage_detail(basis: str, song: str, difficulty: str, leader_id: str,
         out["plan_cost"] = _whole_plan_cost(whole_plan, built["ctx"])
         if want_reset_price and (out["plan_cost"].get("resets") or 0) > 0:
             out["reset_price"] = reset_price(
-                _leaf_inputs(basis, song, difficulty, assumptions), team, song, assumptions,
+                _leaf_inputs(basis, song, difficulty, assumptions, play), team, song, assumptions,
                 refine=bool(refine), current=(out["plan_cost"]["resets"], out["song_est"]))
     return out
 
@@ -628,7 +685,8 @@ def pool_yellow(team: Team, charts: Sequence, cfg_board) -> list[dict]:
 
 
 def pool_detail(basis: str, songs: Sequence[str], difficulty: str, leader_id: str,
-                member_ids: Sequence[str], *, assumptions=None, refine: bool = True) -> dict:
+                member_ids: Sequence[str], *, assumptions=None, refine: bool = True,
+                play: tuple[str, bool] | None = None) -> dict:
     """The Highlight pool's "whole pool" view of a row: the best team order in general
     and boards optimised for the whole pool, rather than per song. The song is drawn
     after the team is set, so ONE board and ONE slot order play every song. Returns the
@@ -657,7 +715,7 @@ def pool_detail(basis: str, songs: Sequence[str], difficulty: str, leader_id: st
     songs = [str(s) for s in songs if s]
     if not songs:
         raise ValueError("no pool songs")
-    built = _leaf_inputs(basis, songs[0], difficulty, assumptions)
+    built = _leaf_inputs(basis, songs[0], difficulty, assumptions, play)
     library = load_charts(str(leaf_inputs.charts_path(difficulty))).at(difficulty)
     by_music = {c.music_id: c for c in library}
     charts = [by_music[m] for m in songs if m in by_music]

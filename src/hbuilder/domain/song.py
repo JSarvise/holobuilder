@@ -1269,6 +1269,7 @@ def score_song_detailed(
     deck_power: OverallPower | Callable[[Card], OverallPower] | None = None,
     auto: bool | None = None,
     order_totals: dict | None = None,
+    note_rows: dict | None = None,
 ) -> tuple[SongScore, ...]:
     """`score_song`, plus the slot order and the deck power each total used.
 
@@ -1284,6 +1285,11 @@ def score_song_detailed(
     and each order's total is recorded as `order_totals[(leader_id, member_order)]`. The
     returned scores are the same; only the per-order totals are new. For a team played
     on many songs with ONE slot order (the event's Highlight), never inside a search.
+
+    `note_rows` (a dict, opt-in): the same reference walk, and for each leader's best
+    slot order the note-by-note breakdown, `note_rows[leader_id]` = one `NoteRow` per
+    note, whose `expected_value`s add up to that leader's `total_score` exactly (they
+    are the walk's own per-note terms). For an export, never inside a search.
 
     **The slot order is a JOINT maximum, not two separate ones.** Slot order
     binds on two independent mechanisms — which chart cue fires each member's
@@ -1683,7 +1689,7 @@ def score_song_detailed(
         # below 2^53 and re-associating the sum is EXACT — the 120 totals are
         # bit-identical to the walk's, so the argmax and the strict-`>`
         # tie-break pick the identical `member_order`.
-        separable_power = order_totals is None
+        separable_power = order_totals is None and note_rows is None
         coupled = False
         if separable_power and special_terms:
             spans = [
@@ -1882,9 +1888,83 @@ def score_song_detailed(
             if best is None or candidate.total_score > best.total_score:
                 best = candidate
         assert best is not None  # 120 permutations is never an empty walk
+        if note_rows is not None:
+            note_rows[leader.id] = _note_rows(
+                best, members, terms, fixed_bits, special_terms, cover_range, times,
+                note_weights, _combined, music_coefficient, perfect_sum, board_score_rate,
+                chart, auto, platform)
         results.append(best)
 
     return tuple(results)
+
+
+@dataclass(frozen=True, slots=True)
+class NoteRow:
+    """One note of a team's run at its best slot order (`score_song_detailed(note_rows=)`).
+
+    `base_value` is the note's score with no skill (`constant x judgement x (1 + combo)`,
+    unrounded); `skill_rate` the expected skill multiplier at that instant (the `E[max]` of
+    the live ACTIVEs times the live boosts, plus the always-on rates); `expected_value` =
+    `ceil(base_value x (1 + skill_rate))`, the term the run's Expected adds up. `actives`:
+    the ACTIVE score-up effects live at the note, strongest first, as `(card id, multiplier,
+    chance it fired)`; `boosts`: the live SPECIAL / support boosts, `(card id, boost)`."""
+
+    index: int
+    time: float
+    combo: int
+    judgement: float
+    combo_bonus: float
+    base_value: float
+    skill_rate: float
+    expected_value: int
+    actives: tuple[tuple[str | None, float, float], ...]
+    boosts: tuple[tuple[str | None, float], ...]
+
+
+def _note_rows(best, members, terms, fixed_bits, special_terms, cover_range, times,
+               note_weights, combined, music_coefficient, perfect_sum, board_score_rate,
+               chart, auto, platform) -> list[NoteRow]:
+    """`best`'s note-by-note terms, rebuilt with the reference walk's own expressions (same
+    liveness, same constant, same `ceil`), so they add up to `best.total_score` exactly."""
+    index_of = {card.id: i for i, card in enumerate(members)}
+    permutation = [index_of[card_id] for card_id in best.member_order]
+    slot_of = [0] * SPECIAL_CUE_COUNT
+    for slot, member in enumerate(permutation):
+        slot_of[member] = slot
+    bits = list(fixed_bits)
+    for bit in special_terms:
+        mask = 1 << bit
+        low, high = cover_range[bit][slot_of[terms[bit].special_member]]
+        for note_index in range(low, high):
+            bits[note_index] |= mask
+    constant = (
+        best.deck_power
+        * SCORE_COEFFICIENT
+        * music_coefficient
+        / perfect_sum
+        * (1.0 + board_score_rate)
+    )
+    rows: list[NoteRow] = []
+    for note_index, note in enumerate(chart.notes):
+        live = bits[note_index]
+        rate = combined(live)
+        base = constant * note_weights[note_index]
+        actives = sorted(
+            ((term.owner, term.magnitude, term.occupancy)
+             for bit, term in enumerate(terms)
+             if live >> bit & 1 and not term.is_boost),
+            key=lambda a: -a[1])
+        boosts = tuple((term.owner, term.magnitude)
+                       for bit, term in enumerate(terms) if live >> bit & 1 and term.is_boost)
+        combo = 0 if auto else note_index + 1
+        rows.append(NoteRow(
+            index=note_index, time=times[note_index], combo=combo,
+            judgement=(note.auto_permil if auto else note.perfect_permil_for(platform)) / 1000.0,
+            combo_bonus=0.0 if auto else chart.combo_coefficient(combo),
+            base_value=base, skill_rate=rate,
+            expected_value=int(math.ceil(base * (1.0 + rate))),
+            actives=tuple(actives), boosts=boosts))
+    return rows
 
 
 def _support_state(

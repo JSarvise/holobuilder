@@ -5,7 +5,7 @@ import { byId, esc, fmt, dec, sgn, pct, info, AC, INK, thumb, getJSON, postJSON,
 import { unitPanel, runPanel, timelinePanel, wireTimeline, boardPanel, matchLine, leaderColumn, wakeFigure, wirePlan } from "/opt-detail.js";
 import { score } from "/hb-grade.js";
 import { list as rankList } from "/hb-rank.js";
-import { assumptionsOf, leaderOpts, withDistribution } from "/opt-score.js";
+import { assumptionsOf, leaderOpts, withDistribution, exportFile } from "/opt-score.js";
 import { progressCard } from "/opt-progress.js";
 
 let live = null, run = null, open = new Set([0]);
@@ -234,6 +234,7 @@ function render(ctx, L) {
     const rr = e.target.closest(".rk-row[data-i]"); if (rr) return select(c, +rr.dataset.i);
     if (e.target.closest("[data-diffmode]")) { diffMode = !diffMode; return relist(c); }
     const cp = e.target.closest("[data-copy]"); if (cp) return copy(c, +cp.dataset.copy);
+    const ex = e.target.closest("[data-export]"); if (ex) return exportTeam(c, +ex.dataset.export, ex);
   };
   ctx.out().oninput = e => {
     const m = e.target.closest("[data-multi]"); if (!m) return;
@@ -286,6 +287,15 @@ function select(c, i) {
   reveal(el);
   after(c, c.rows[i], i);
   if (multiScore) fillMulti(c, c.rows[i], i);
+}
+/* the row as a .hbteam file: the detail's own request (the song open in a Highlight row) */
+function exportTeam({ ctx, S, rows }, i, btn) {
+  const r = rows[i], song = ctx.song ? ctx.song() : null, det = details.get(keyOf(r));
+  if (!det || !det.body) return toast("Wait for the team's details to load, then export");
+  const shown = { song: isHighlight(S.song) ? `Highlight (detail on ${det.song})` : song ? song.title : S.song,
+    mode: isEP(S) ? "Event Pt" : "Event Song Score", rank: i + 1, headline: headline(S, r),
+    score: r.score ?? null, boosts: S.boosts, holopass: !!S.holopass };
+  return exportFile(det.body, shown, null, btn);
 }
 function copy({ ctx, S, rows }, i) {
   const r = rows[i], song = ctx.song ? ctx.song() : null;
@@ -340,7 +350,8 @@ function block({ ctx, S, res, rows }, r, i) {
   const L = { ...(ctx.D.cards.get(r.leader.id) || {}), ...r.leader };
   const head = `<div class="o-thead">
       <div class="o-who"><span class="rk-n">${i + 1}</span><h2>${esc(L.member || r.leader.id)} <small>leads${L.costume_name ? " · " + esc(L.costume_name) : ""}</small></h2></div>
-      <div class="o-tact"><button class="btn small" type="button" data-copy="${i}"><svg class="i s"><use href="#i-copy"/></svg>Copy team</button></div>
+      <div class="o-tact"><button class="btn small" type="button" data-copy="${i}"><svg class="i s"><use href="#i-copy"/></svg>Copy team</button>
+        <button class="btn small" type="button" data-export="${i}" title="Save this team as a .hbteam file: the row, its numbers and the account data its score uses, so it can be replayed and checked"><svg class="i s"><use href="#i-down"/></svg>Export</button></div>
     </div>`;
   const tiles = `<div class="o-tiles">
       <div class="stat-tile prime"><div><span class="lbl">${ep ? `Event Pt per Live · ${S.boosts} Live Boost${S.boosts > 1 ? "s" : ""} (×${AC[S.boosts - 1]})${S.holopass ? " · HoloPass" : ""}` : "Event Song Score"} ${info(ep ? "ev_points" : "ev_song")}</span>${headFmt(S, v)}<small>${delta}</small></div></div>
@@ -480,8 +491,10 @@ async function songDetail(c, r, i, det) {
     // a Highlight row's member_order is the search's, scored over the pool: the song's own is read
     const onPool = hl && song === HL_POOL, poolIds = hl ? (c.res.highlight.pool || []).map(s => s.music_id) : [];
     const body = { song: onPool ? poolIds[0] : song, difficulty: S.difficulty, basis: isMaxed(S) ? "maxed" : "account", cards,
+      platform: S.platform, auto: !!S.auto,   // the search's play, or the detail is not the row's
       refine: !!r.refined, assumptions: eventAssumptions(S) || undefined, member_order: hl ? undefined : r.member_order || undefined };
     // the whole pool: one board and one slot order for every song (`row_detail.pool_detail`)
+    det.body = onPool ? { ...body, refine: undefined, pool: poolIds } : body;
     const d = await postJSON("/api/row-detail", onPool ? { ...body, refine: undefined, pool: poolIds } : { ...body, timeline: true, distribution: false });
     if (stale()) return;
     det.fig = { route: onPool ? "one board and one slot order for the whole pool" : "the team's own board", api: "/api/row-detail", value: d.song_est, song_max: d.song_max, member_order: d.member_order, deck_power: d.deck_power,

@@ -35,6 +35,14 @@ Finds the best teams for a goal. Every option of the Options panel, one by one:
 - **Holomem Board plan**: the nodes to buy and reset, per holomem, and the materials it needs
   against what you hold.
 - The slot order matters (it decides which member each SPECIAL cue fires); the cards are shown in it.
+- **Export** saves the team as a `.hbteam` file in your Downloads folder, to send to someone who
+  wants to check a result or a possible bug. It is plain JSON. It holds the song and options, the
+  six cards, the numbers shown and planned, and the account data the score uses: your card levels
+  and blooms, Holomem Boards, Cubes/Hexas and Board Points. It holds no login, player ID or
+  device data. Beside it goes a `.csv` with the score note by note (time, combo, the note's value
+  with no skill, the strongest Active live and its chance, the expected multiplier and value),
+  whose values add up to the Expected score exactly. `python tools/refresh/team_file.py replay
+  <file>` scores the file again with its data and says whether every number comes out the same.
 
 ## Event
 

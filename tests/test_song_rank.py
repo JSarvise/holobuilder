@@ -314,3 +314,32 @@ def test_score_team_orders_is_every_order_of_the_same_scorer(cards, cfg):
             recorded = score_song_detailed(tuple(team.members), (team.leader,), chart, cfg,
                                            order_totals=seen)[0]
             assert recorded == plain and len(seen) == 120
+
+
+def test_note_rows_add_up_to_the_expected_exactly(cards, cfg):
+    """The note-by-note breakdown (`score_team_notes`, the export's CSV) is the scorer's own
+    terms: its expected values add up to the row's Expected bit for bit, on the ranker's
+    number and slot order, manual and AUTO; and each row is `ceil(base x (1 + rate))`."""
+    import dataclasses
+    import math
+
+    from hbuilder.domain.song_rank import score_team_notes, score_team_on_chart
+
+    charts = [_chart(), _chart("m0002", scale=2)]
+    path = _DUMPS / "charts.json"
+    if path.exists():
+        charts += list(load_charts(path).at()[:2])
+    for auto in (False, True):
+        c = dataclasses.replace(cfg, song_auto=auto)
+        for chart in charts:
+            for team in _teams(cards):
+                got = score_team_on_chart(team, chart, c)
+                score, rows = score_team_notes(team, chart, c)
+                assert score.total_score == got.total_score
+                assert score.member_order == got.member_order
+                assert len(rows) == len(chart.notes)
+                assert sum(r.expected_value for r in rows) == got.total_score
+                for r in rows:
+                    assert r.expected_value == math.ceil(r.base_value * (1.0 + r.skill_rate))
+                    assert r.combo == (0 if auto else r.index + 1)
+                    assert [a[1] for a in r.actives] == sorted((a[1] for a in r.actives), reverse=True)

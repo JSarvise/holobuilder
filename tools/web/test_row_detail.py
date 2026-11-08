@@ -165,3 +165,19 @@ def test_row_detail_route_on_a_searched_row(web_base):
     assert doc["board_state"] and doc["timeline"]["lanes"]
     assert doc["distribution"]["verified"] is True
     assert doc["song_max"] >= doc["song_est"]
+
+
+def test_row_detail_is_scored_for_the_searchs_play(web_base):
+    """The detail of a row ranked for PC or AUTO is scored for PC or AUTO too, or it shows a
+    manual mobile number next to the row's (an AUTO row read about 30 % high)."""
+    body = {"song": SONG, "basis": "maxed", "cards": _TEAM, "as_is": False}
+    status, manual = _req(web_base + "/api/row-detail", body)
+    _skip_without_dumps(status, manual)
+    assert status == 200, manual
+    _status, auto = _req(web_base + "/api/row-detail", {**body, "auto": True})
+    _status, pc = _req(web_base + "/api/row-detail", {**body, "platform": "pc"})
+    assert 0.70 < auto["song_est"] / manual["song_est"] < 0.85    # GREAT weights, no combo
+    assert pc["song_est"] != manual["song_est"]                   # flicks weigh 1000, not 1050
+    built = row_detail._leaf_inputs("maxed", SONG, "EXPERT", None, ("pc", True))
+    cfg = built["ctx"].cfg
+    assert (cfg.platform, cfg.song_auto, cfg.run_state.combo) == ("pc", True, 0)
