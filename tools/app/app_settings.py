@@ -13,6 +13,8 @@ state/app_settings.json (gitignored, this PC only):
   workers          0 = every logical core (the measured best), else N
   cache_mb         the art cache cap (Live2D, chibis, card art); 0 = unlimited (default)
   holomem          chr-xxxxx whose face is the app's icon and start screen (default Nene)
+  park_scan        the Park page's "Scan all areas" button (default off): it logs in, enters
+                   every Park area with Free Chats and goes back (tools/refresh/park_scan.py)
 
 Everything the server and the refresh need is passed as environment variables (`env()`), so
 none of the existing tools learns about this file.
@@ -41,6 +43,7 @@ DEFAULTS = {
     # the holobuilder server (HB_SERVER_URL for a self-hosted one; the installer saves its own)
     "server_url": os.environ.get("HB_SERVER_URL") or "https://api.holobuilder.dev", "server_token": "",
     "workers": 0, "cache_mb": 0, "holomem": NENE,
+    "park_scan": False,
 }
 
 
@@ -94,6 +97,8 @@ def validate(s: dict) -> dict:
             raise ValueError
     except (TypeError, ValueError):
         bad["workers"] = "must be a whole number"
+    if not isinstance(s.get("park_scan", False), bool):
+        bad["park_scan"] = "must be on or off"
     return bad
 
 
@@ -119,6 +124,7 @@ def env(s: dict, base: dict | None = None) -> dict:
         "HB_CREDENTIAL_FILE": s["credential_path"],
         "HB_ACCOUNT_HOST": REGION_HOSTS.get(s["region"], REGION_HOSTS["us"]),
         "HB_CONTENT_CACHE_MB": str(int(s["cache_mb"])),
+        "HB_PARK_SCAN": "1" if s.get("park_scan") is True else "0",
         "PYTHONIOENCODING": "utf-8",
     })
     if int(s["workers"]) > 0:

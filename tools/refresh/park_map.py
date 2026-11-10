@@ -181,21 +181,8 @@ def load_scene(name):
     empty one, area-a02-lobby with a one-entry spawnpoint array -- so the count is parsed
     rather than assumed, and every array is merged. Parsing stops at the first array that
     fails validation, which is how the differently-shaped facility array that follows is
-    left alone."""
-    env = _load_bundle(name)
-    scripts = {o.path_id: o.read().m_Name for o in env.objects if o.type.name == "MonoScript"}
-    target = None
-    for o in env.objects:
-        if o.type.name != "MonoBehaviour":
-            continue
-        d = o.read()
-        pid = getattr(d.m_Script, "m_PathID", getattr(d.m_Script, "path_id", None))
-        if scripts.get(pid) == "AreaSceneData":
-            target = o
-            break
-    if target is None:
-        raise RuntimeError(f"{name}: no AreaSceneData MonoBehaviour")
-    b = target.get_raw_data()
+    left alone (`load_facilities` reads that one)."""
+    b = _scene_bytes(name)
     p = [28]
 
     def i32():
@@ -241,6 +228,148 @@ def load_scene(name):
             break
         out.update(batch)
     return out
+
+
+def _scene_bytes(name):
+    """The raw serialised AreaSceneData MonoBehaviour of a scene's `_data` bundle."""
+    env = _load_bundle(name)
+    scripts = {o.path_id: o.read().m_Name for o in env.objects if o.type.name == "MonoScript"}
+    for o in env.objects:
+        if o.type.name != "MonoBehaviour":
+            continue
+        d = o.read()
+        pid = getattr(d.m_Script, "m_PathID", getattr(d.m_Script, "path_id", None))
+        if scripts.get(pid) == "AreaSceneData":
+            return o.get_raw_data()
+    raise RuntimeError(f"{name}: no AreaSceneData MonoBehaviour")
+
+
+def parse_facilities(b):
+    """{facility id: {"position": (x, z), "spawn": {name: (x, z)}}} from AreaSceneData bytes.
+
+    The class serialises, in declaration order: m_Name, warpPoints, spawnPoints,
+    playerSpawnPoints (each PointData[] = int32 count, count x {string name; Vector3 position;
+    Quaternion rotation}), then _facilityData: FacilityData[] = int32 count, count x
+    {string facilityId; int32 priority; int32 parkActionType; Vector3 position;
+    Vector3 hoverTextPoint; PointData[] spawnPoints; PointData warpPoint}. Strings are int32
+    length + UTF-8, padded to 4 bytes.
+
+    The facility spawn points carry the spots ParkPosition names relative to a facility
+    (`facilityId` + `free_npc_01`): the same short name repeats in every facility, so these
+    cannot be looked up in the flat arrays. The parse must end exactly at the end of the
+    buffer; anything else is a layout this reader does not know, and it raises. A facility id
+    can repeat (gates have one entry per variant); their spawn points are merged."""
+    p = [28]
+
+    def i32():
+        v = struct.unpack_from("<i", b, p[0])[0]
+        p[0] += 4
+        return v
+
+    def f32():
+        v = struct.unpack_from("<f", b, p[0])[0]
+        p[0] += 4
+        return v
+
+    def text():
+        n = i32()
+        if not 0 <= n <= 200 or p[0] + n > len(b):
+            raise ValueError(f"implausible string length {n} at byte {p[0] - 4}")
+        v = b[p[0]:p[0] + n].decode("utf-8")
+        p[0] = (p[0] + n + 3) & ~3
+        return v
+
+    def point():
+        nm = text()
+        x, _y, z = f32(), f32(), f32()
+        for _q in range(4):
+            f32()
+        return nm, (x, z)
+
+    def points():
+        n = i32()
+        if not 0 <= n <= 5000:
+            raise ValueError(f"implausible point count {n}")
+        return [point() for _ in range(n)]
+
+    text()                                   # m_Name
+    for _ in range(3):                       # warpPoints, spawnPoints, playerSpawnPoints
+        points()
+    n = i32()
+    if not 0 <= n <= 1000:
+        raise ValueError(f"implausible facility count {n}")
+    out = {}
+    for _ in range(n):
+        fid = text()
+        i32()                                # priority
+        i32()                                # parkActionType
+        x, _y, z = f32(), f32(), f32()
+        f32(), f32(), f32()                  # hoverTextPoint
+        spawn = points()
+        point()                              # warpPoint
+        entry = out.setdefault(fid, {"position": (x, z), "spawn": {}})
+        entry["spawn"].update(spawn)
+    if p[0] != len(b):
+        raise ValueError(f"AreaSceneData parse ended at byte {p[0]} of {len(b)}")
+    return out
+
+
+def load_facilities(name):
+    """`parse_facilities` of a scene's `_data` bundle."""
+    return parse_facilities(_scene_bytes(name))
+
+
+def facility_piece(name):
+    """(PIL RGBA picture, (offset_x, offset_y, width, height) in map root units) of a
+    `mdl_map_facility_*` prefab, or None when it holds no map picture.
+
+    The prefab (ParkMapAreaFacilityView) is hung under the map's ViewParent at the facility's
+    PositionToAnchoredPosition; its FacilityImageScale -> FacilityImage chain places the
+    building's silhouette relative to that point. The offset is the picture's centre."""
+    env = _load_bundle(name)
+    textures = {o.path_id: o.read() for o in env.objects if o.type.name == "Texture2D"}
+    for o in env.objects:
+        if o.type.name != "MonoBehaviour":
+            continue
+        raw = o.get_raw_data()
+        tex = next((textures[pid] for off in range(0, len(raw) - 12, 4)
+                    for fid, pid in [struct.unpack_from("<iq", raw, off)]
+                    if fid == 0 and pid in textures), None)
+        if tex is None or "_map_facility" not in tex.m_Name:
+            continue
+        go = o.read().m_GameObject.read()
+        rt = next(c for c in ((c.component if hasattr(c, "component") else c).read()
+                              for c in go.m_Component)
+                  if type(c).__name__ == "RectTransform")
+        x = y = 0.0
+        sx = sy = 1.0
+        for r in reversed(_rect_chain(rt)):          # root down: position, then that node's scale
+            x += r.m_AnchoredPosition.x * sx
+            y += r.m_AnchoredPosition.y * sy
+            sx *= r.m_LocalScale.x
+            sy *= r.m_LocalScale.y
+        w, h = rt.m_SizeDelta.x * sx, rt.m_SizeDelta.y * sy
+        # anchoredPosition places the pivot; the picture's centre is half a size away from it
+        x += (0.5 - rt.m_Pivot.x) * w
+        y += (0.5 - rt.m_Pivot.y) * h
+        return tex.image.convert("RGBA"), (x, y, w, h)
+    return None
+
+
+def composite_facility(image, cal, world_xz, piece):
+    """Draw one `facility_piece` onto an area map at the facility's world position."""
+    picture, (ox, oy, w, h) = piece
+    kx, ky = cal[3], cal[4]
+    px, py = project(world_xz[0], world_xz[1], image.size, cal)
+    pw, ph = max(1, round(w * kx)), max(1, round(h * ky))
+    cx, cy = px + ox * kx, py - oy * ky
+    left, top = round(cx - pw / 2), round(cy - ph / 2)
+    im = picture.resize((pw, ph))
+    # alpha_composite takes no negative destination: clip the piece to the map first
+    cl, ct = max(0, -left), max(0, -top)
+    cr, cb = min(pw, image.width - left), min(ph, image.height - top)
+    if cr > cl and cb > ct:
+        image.alpha_composite(im.crop((cl, ct, cr, cb)), (left + cl, top + ct))
 
 
 def project(x, z, size, cal):

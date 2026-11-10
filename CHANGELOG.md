@@ -2,6 +2,27 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.1.62 (2026-11-10)
+- Every-song searches with boards the app plans (a maxed account, or yours with unlimited materials) now choose each team's activation-frequency nodes song by song, as the one-song search does: until now every board bought all of them on every song. The 50 teams served are scored that way on every chart, so their averages rise 0.1-1.9 % (the plain average stays beside each) and the order changes: on a maxed account over every EXPERT chart another team is #1 (3,969,840; the old #1 is now 4th at 3,968,517). A team's details on a song use the same choice. Searches on your boards as they are, or planned within your materials, give the same results as before.
+- Faster searches with the same results: a team's boards for the different songs now share the work that does not depend on the song. An every-song search with your account and planned boards takes about 29 s instead of 31 s, and on a maxed account about 53 s instead of 55 s even with the new step (measured on an 8-core PC, 16 workers, with the game open).
+- A team's score no longer depends on which of the app's processes computed it: with planned boards the same team could score a few points differently from one run to the next (1-7 points on a song, on about one team in a hundred), because a board's nodes were added up in an order that changed between processes. They are now added in the game's own order.
+
+## 0.1.61 (2026-11-10)
+- Same results as 0.1.60, faster with your account and planned boards: the search kept rebuilding the off-team boards for each song's singers, team after team. An every-song search takes about 28 s instead of 48-54 s and Highlight about 15 s instead of 56 s (measured on an 8-core PC, 16 workers); one-song searches and the maxed account are unchanged. The boards planned within your Cubes and Hexas are now most of an every-song search's time.
+- Every song on a maxed account runs two searches and merges them; the progress line now says which one is running ("search 2 of 2") instead of looking like the search started over.
+
+## 0.1.60 (2026-11-09)
+- Faster searches, and the one-song search now weighs each team's activation-frequency nodes while it searches, so it finds teams it used to miss (a higher #1 on some songs).
+
+## 0.1.59 (2026-11-09)
+- Fixes Settings showing the previous version after an update (the Park section was missing).
+
+## 0.1.58 (2026-11-09)
+- Park: Scan all areas (turn it on in Settings) reads every area's Free Chats; a plainer Park page.
+
+## 0.1.57 (2026-11-08)
+- Song scores now match the game on charts with curved slides: the game also counts each slide's invisible points (hidden relay and curve points) when it shares a team's score among the notes, although they are never scored, so every real note is worth a little less. Scores drop on almost every chart, by 0.7 % on a typical one and up to 12.5 % on charts full of curved slides; a run's first note now matches the game exactly (e.g. 1,301 on Multiverse EXPERT instead of 1,336). The best team on one song is the same; "every song" and Highlight can recommend another, because charts with many curved slides count less in the average.
+
 ## 0.1.56 (2026-11-08)
 - A team's details on a PC or AUTO search now give the same score as its row: they were scored as a manual run on mobile, so an AUTO row's details read about 30 % high (on one song with the account: 2,491,370 against the row's 1,895,080).
 - Export: a new button on every team saves it as a .hbteam file in your Downloads folder, with a .csv of its score note by note beside it, to send to someone who checks a result or a possible bug. The file holds the song and options, the six cards, the numbers shown, and the account data the score uses: your card levels and blooms, Holomem Boards, Cubes/Hexas and Board Points. It holds no login or player ID.

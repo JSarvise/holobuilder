@@ -3,11 +3,12 @@
 `domain/song.py` scores a team on a concrete chart; this module builds those
 charts from two caches (rebuilt here with `--rebuild-caches`):
 
-* `dumps/lattice_charts.json` — `{t, w, cues, f}` per chart, parsed from the
+* `dumps/lattice_charts.json` — `{t, w, cues, f, h}` per chart, parsed from the
   `.sus` files in `dumps/charts_cdn/` (`build_chart_cache`). Times and cues are
   **seconds** (the beat→second conversion is `sus_parse._set_times`). `f` lists
   the indices of the FLICK notes — the one kind whose PERFECT weight depends on
-  the client (1050 mobile / 1000 PC).
+  the client (1050 mobile / 1000 PC). `h` counts the slides' invisible points
+  (`sus_parse.hidden_points`), which weigh in the divisor and score nothing.
 * `dumps/music_coef.json` — `{chart_name: (difficulty_level, permil)}` from
   master `MusicDifficulty` field 3 and `Music` field 17 (`load_music_coefficients`).
 
@@ -87,7 +88,7 @@ PERFECT_PERMIL = {
 
 def build_chart_cache() -> dict:
     """{name: {"t": [note times], "w": [note weights], "cues": [5 cue times], "f": [flick
-    indices]}} parsed from `dumps/charts_cdn/*.sus`.
+    indices], "h": invisible slide points}} parsed from `dumps/charts_cdn/*.sus`.
 
     Only the charts carrying five ascending `#mmm0B` cues; the four tutorial `m9999`
     difficulties carry two and are skipped, exactly as `SongChart.__post_init__` demands."""
@@ -123,7 +124,8 @@ def build_chart_cache() -> dict:
             weights.append(permil * (1.0 + combo_coefficient(combo)))
         if not times or sum(weights) <= 0:
             continue
-        out[name[:-4]] = {"t": times, "w": weights, "cues": cues, "f": flicks}
+        out[name[:-4]] = {"t": times, "w": weights, "cues": cues, "f": flicks,
+                          "h": sp.hidden_points(chart)}
         if (i + 1) % 50 == 0:
             print(f"  parsed {i + 1}/{len(names)} ...", file=sys.stderr)
     return out
@@ -280,6 +282,13 @@ def build(difficulty: str = "EXPERT") -> dict:
                 f"{CHART_CACHE} predates the per-note flick flag ({name} has no 'f'); "
                 f"re-run `python build_charts.py --rebuild-caches`."
             )
+        if "h" not in raw:
+            # a lattice cache from before the invisible-point count: refused, like "f"
+            # (`rebuild_caches_if_stale` treats such a cache as stale and rebuilds it)
+            raise SystemExit(
+                f"{CHART_CACHE} predates the invisible slide-point count ({name} has no 'h'); "
+                f"re-run `python build_charts.py --rebuild-caches`."
+            )
         flick_at = set(int(i) for i in raw["f"])
         notes = [
             [float(time), int(round(weight / (1.0 + combo_coefficient(index + 1)))),
@@ -296,6 +305,8 @@ def build(difficulty: str = "EXPERT") -> dict:
             "live_score_coefficient_permil": int(permil),
             "notes": notes,
             "special_cues": [float(cue) for cue in raw.get("cues", ())],
+            # the slides' invisible points: in the divisor, never scored
+            "hidden_points": int(raw["h"]),
         }
         cast = casts.get(music_id)
         if cast is not None:
@@ -334,6 +345,9 @@ def rebuild_caches_if_stale() -> bool:
             parsed = len(cached)
             if any("f" not in rec for rec in cached.values()):
                 print("  lattice cache STALE: records lack the per-note flick list 'f'")
+                parsed = -1
+            elif any("h" not in rec for rec in cached.values()):
+                print("  lattice cache STALE: records lack the invisible slide-point count 'h'")
                 parsed = -1
         except Exception:  # noqa: BLE001 -- unreadable counts as stale
             parsed = -1

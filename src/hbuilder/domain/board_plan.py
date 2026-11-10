@@ -24,6 +24,7 @@ no dump paths):
 
 from __future__ import annotations
 
+import itertools
 import math
 import os
 import sys
@@ -675,6 +676,44 @@ _TEAM_BOARDS_MAX = 20_000
 _ASSEMBLED_MAX = 50_000
 # The first item of `selected_plan_key`'s keys (a `plan_key` starts with a chr id)
 SELECTED_PLAN = "selected-nodes"
+# How many bench mappings the caches keyed by one are held for at once (`PlanCache`'s parsed
+# benches, `_SINGER_BENCH`, `_bench_bought`, `held_bench_cards`), the least recently used
+# dropped first. With every board planned a search asks for one bench per singer context
+# (`singer_bench_characters`) and comes back to each of them team after team -- about 50 of
+# them over one In general search of an account -- so a cache of one entry rebuilt the bench
+# (its ~54 parsed boards, their digests and per-card memos) on about half of the teams.
+# A bound on memory only: an entry is a pure function of the objects it is keyed by.
+_BENCHES_HELD = 128
+# `PlanCache._bench_rows` holds at most this many parsed boards (one per rows list)
+_BENCH_ROWS_MAX = 4096
+
+
+def _held(cache: dict, key):
+    """`cache[key]` moved to the most recently used end, or None."""
+    hit = cache.pop(key, None)
+    if hit is not None:
+        cache[key] = hit
+    return hit
+
+
+def _hold(cache: dict, key, entry):
+    """`entry` stored as the most recently used, the least recently used dropped beyond
+    `_BENCHES_HELD`; returns `entry`."""
+    cache.pop(key, None)
+    while len(cache) >= _BENCHES_HELD:
+        del cache[next(iter(cache))]
+    cache[key] = entry
+    return entry
+
+
+def plan_node_order(selected) -> list[str]:
+    """A plan's nodes in the order its board lists them: by node id, the order of the
+    account's own boards as the game reports them. A board's stat rates, uptime and song
+    bonus are float sums over its nodes in list order, and a plan holds its nodes in a
+    set, whose own order differs from one process to the next: a board assembled in that
+    order summed to another last bit in each process, a point or two of Overall Power
+    after the ceiling."""
+    return sorted(selected)
 
 
 def selected_plan_key(chr_id: str, selected) -> tuple:
@@ -719,9 +758,15 @@ class PlanCache:
     _assembled_src: tuple = ()
     _recipes: dict = None  # type: ignore[assignment]   # own_chr -> recipes
     _connect_groups: tuple = ()  # (shape offsets, permil, sorted card ids) per group
-    _bench: tuple = ()  # (bench mapping object, parsed {name: CharacterBoard})
-    _bench_digests: tuple = ()  # (the parsed dict above, {name: BoardDigest})
-    _bench_base: tuple = ()  # (the digests dict above, BoardBase over it)
+    # id(bench mapping) -> [the mapping, parsed {name: CharacterBoard}, {name: BoardDigest},
+    # BoardBase over them or None until asked]: one entry per bench mapping OBJECT, the
+    # mapping kept alive in it so its id cannot be recycled; `_BENCHES_HELD` of them
+    _benches: dict = None  # type: ignore[assignment]
+    # (holomem, id(rows)) -> (rows, CharacterBoard, BoardDigest): one board parsed once per
+    # rows LIST, whichever mappings carry it. Two benches that differ in a few boards (a
+    # song's singers planned, `singer_bench_characters`) share every other list, so they
+    # share those boards, their digests and the per-card memos the digests hold
+    _bench_rows: dict = None  # type: ignore[assignment]
     # (plan key, holomem, per-node connect multipliers) -> (CharacterBoard,
     # BoardDigest): a developed board as `_board_model_from_cache` assembles
     # it. Emptied with `assembled`, whose nodes it is built from.
@@ -729,6 +774,13 @@ class PlanCache:
     # plan key -> that character's recipes cut down to `AssembledPlan.needed`.
     # Emptied with `assembled` and `_recipes`, which it is a function of.
     _needed_recipes: dict = None  # type: ignore[assignment]
+    # A store SHARED with other caches of the same nominal context (`get(key)` -> plan or
+    # None, `put(key, plan)`), injected by the caller: a plan is a pure function of its key
+    # and of that context, so a plan another process already solved is the one this cache
+    # would solve. A search's worker processes each hold a cache; without a store each one
+    # solves the same plans again (16 workers: a third of a first search's work).
+    store: object = None
+    store_hits: int = 0
 
     def __post_init__(self) -> None:
         self.nominal_members = tuple(self.nominal_members)
@@ -742,6 +794,10 @@ class PlanCache:
             self._team_boards = {}
         if self._needed_recipes is None:
             self._needed_recipes = {}
+        if self._benches is None:
+            self._benches = {}
+        if self._bench_rows is None:
+            self._bench_rows = {}
 
     @classmethod
     def from_team(cls, team: Team, cfg: ScoringConfig, *,
@@ -783,6 +839,12 @@ class PlanCache:
             self.hits += 1
             return plan
         self.misses += 1
+        if self.store is not None:
+            plan = self.store.get(key)
+            if plan is not None:
+                self.store_hits += 1
+                self.plans[key] = plan
+                return plan
         chr_id = _chr_of(card)
         model_id = (model_for_character(skilltree, chr_id) or "") if skilltree else ""
         reached = self._reached_for(card, role)
@@ -811,6 +873,8 @@ class PlanCache:
             values = {n: (NO_GROUPING_VALUE if n in GROUPING_GREEN_NODES else v) for n, v in values.items()}
         plan = optimize_board(tree, budget, values, player_level=self.player_level)
         self.plans[key] = plan
+        if self.store is not None:
+            self.store.put(key, plan)
         return plan
 
     # -- the assembled cache ------------------------------------------------
@@ -856,28 +920,46 @@ class PlanCache:
         self._needed_recipes[key] = (asm, recipes)
         return recipes
 
+    def _bench_entry(self, bench_characters) -> list:
+        """`[mapping, boards, digests, base or None]` for one bench mapping object, parsed
+        on first sight: each board from its rows list as `board_from_mapping` parses it,
+        once per LIST (`_bench_rows`), in the mapping's order."""
+        key = id(bench_characters)
+        entry = _held(self._benches, key)
+        if entry is not None and entry[0] is bench_characters:
+            return entry
+        rows_held = self._bench_rows
+        boards: dict[str, CharacterBoard] = {}
+        digests: dict[str, BoardDigest] = {}
+        for name, rows in bench_characters.items():
+            hit = rows_held.get((name, id(rows)))
+            if hit is None or hit[0] is not rows:
+                parsed = board_from_mapping({"characters": {name: list(rows)}})
+                board = parsed.characters[name]
+                # the digest the parse's own model built for this very board
+                digest = parsed._digests.get(name)
+                if digest is None or digest.board is not board:
+                    digest = BoardDigest(board)
+                while len(rows_held) >= _BENCH_ROWS_MAX:
+                    del rows_held[next(iter(rows_held))]
+                hit = rows_held[(name, id(rows))] = (rows, board, digest)
+            boards[name], digests[name] = hit[1], hit[2]
+        return _hold(self._benches, key, [bench_characters, boards, digests, None])
+
     def bench_boards(self, bench_characters) -> dict[str, CharacterBoard]:
         """The account's bench boards parsed ONCE per mapping object — the same
         `board_from_mapping` parse, its `CharacterBoard`s reused (frozen)."""
         if bench_characters is None:
             return {}
-        if self._bench and self._bench[0] is bench_characters:
-            return self._bench[1]
-        parsed = board_from_mapping(
-            {"characters": {k: list(v) for k, v in bench_characters.items()}}).characters
-        self._bench = (bench_characters, dict(parsed))
-        return self._bench[1]
+        return self._bench_entry(bench_characters)[1]
 
     def bench_digests(self, bench_characters) -> dict[str, BoardDigest]:
         """`bench_boards`' `BoardDigest`s, built ONCE per parse and handed to
         every `BoardModel` assembled over them — the bench is ~50 of a model's
         ~54 boards and identical for every team."""
-        boards = self.bench_boards(bench_characters)
-        if self._bench_digests and self._bench_digests[0] is boards:
-            return self._bench_digests[1]
-        digests = {name: BoardDigest(board) for name, board in boards.items()}
-        self._bench_digests = (boards, digests)
-        return digests
+        if bench_characters is None:
+            return {}
+        return self._bench_entry(bench_characters)[2]
 
     def bench_base(self, bench_characters) -> BoardBase | None:
         """The bench as a `BoardBase` — its per-card stat terms summed once
@@ -885,12 +967,10 @@ class PlanCache:
         bench."""
         if bench_characters is None:
             return None
-        digests = self.bench_digests(bench_characters)
-        if self._bench_base and self._bench_base[0] is digests:
-            return self._bench_base[1]
-        base = BoardBase(digests)
-        self._bench_base = (digests, base)
-        return base
+        entry = self._bench_entry(bench_characters)
+        if entry[3] is None:
+            entry[3] = BoardBase(entry[2])
+        return entry[3]
 
     def team_board(self, key: tuple, holomem: str, asm: "AssembledPlan",
                    cmult: Mapping[str, float]) -> tuple[CharacterBoard, BoardDigest]:
@@ -923,15 +1003,15 @@ class PlanCache:
     def assembled_for(self, key: tuple, cplan: BoardPlan, chr_id: str, *,
                       skilltree: Mapping, node_effect_ids, connect_cards) -> "AssembledPlan":
         """The team-invariant half of `board_model_from_plan` for one plan:
-        its node list with parsed effects (in `cplan.selected` order), and the
-        socket entries the team-wide Connect assignment scores — computed once
+        its node list with parsed effects (in node id order, `plan_node_order`), and
+        the socket entries the team-wide Connect assignment scores — computed once
         per plan key and reused for every team."""
         self._sync_sources(node_effect_ids, skilltree, connect_cards)
         asm = self.assembled.get(key)
         if asm is not None:
             return asm
         nodes: list[tuple[str, object]] = []
-        for node_id in cplan.selected:
+        for node_id in plan_node_order(cplan.selected):
             if node_id == ROOT_NODE:
                 continue
             effstr = _effect_string_for(skilltree, node_id, chr_id, node_effect_ids)
@@ -1087,7 +1167,7 @@ def singer_bench_characters(
         return bench_characters
     scope = song_scope_of(cast)
     key = (id(bench_characters), id(cache), tuple(sorted(cast)), scope)
-    hit = _SINGER_BENCH.get(key)
+    hit = _held(_SINGER_BENCH, key)
     if hit is not None and hit[0] is bench_characters and hit[1] is cache:
         return hit[2]
     out = dict(bench_characters)
@@ -1107,10 +1187,15 @@ def singer_bench_characters(
                 rows.append({"node": node, "effects": [effect],
                              "connect_multiplier": kept.get(node, 1.0)})
         out[name] = rows
-    if len(_SINGER_BENCH) > 16:
-        _SINGER_BENCH.clear()
-    _SINGER_BENCH[key] = (bench_characters, cache, out)
+    _hold(_SINGER_BENCH, key, (bench_characters, cache, out))
     return out
+
+
+def forget_plan_cache(cache: PlanCache) -> None:
+    """Drop the singer benches made on `cache` (each `_SINGER_BENCH` entry holds its cache):
+    for a caller that discards a plan cache, so the memo does not keep it alive."""
+    for key in [k for k, hit in _SINGER_BENCH.items() if hit[1] is cache]:
+        del _SINGER_BENCH[key]
 
 
 def _grouping_cap() -> int:
@@ -1535,20 +1620,22 @@ def bench_sockets_from_state(state: Mapping | None) -> dict[str, dict[str, str |
     return out
 
 
-_BENCH_BOUGHT: list = [None, None, None]
+_BENCH_BOUGHT: dict = {}
 
 
 def _bench_bought(bench_characters, name_by_chr) -> dict[str, frozenset] | None:
     """`chr -> its bought nodes` from the name-keyed `bench_characters`, or None when
-    the names cannot be mapped; the last pair is remembered (the leaf asks per team)."""
+    the names cannot be mapped; remembered per pair of objects (the leaf asks per team,
+    and `held_bench_cards` remembers its walk by the dict returned here)."""
     if not bench_characters or not name_by_chr:
         return None
-    hit = _BENCH_BOUGHT
-    if hit[0] is not bench_characters or hit[1] is not name_by_chr:
+    key = (id(bench_characters), id(name_by_chr))
+    hit = _held(_BENCH_BOUGHT, key)
+    if hit is None or hit[0] is not bench_characters or hit[1] is not name_by_chr:
         by_name = {name: chr_id for chr_id, name in name_by_chr.items()}
-        hit[2] = {by_name[name]: frozenset(e.get("node") for e in rows if e.get("node"))
-                  for name, rows in bench_characters.items() if name in by_name}
-        hit[0], hit[1] = bench_characters, name_by_chr
+        hit = _hold(_BENCH_BOUGHT, key, (bench_characters, name_by_chr, {
+            by_name[name]: frozenset(e.get("node") for e in rows if e.get("node"))
+            for name, rows in bench_characters.items() if name in by_name}))
     return hit[2]
 
 
@@ -1568,7 +1655,7 @@ def held_bench_cards(bench_sockets: Mapping[str, Mapping[str, str | None]] | Non
     if not bench_sockets or not connect_cards:
         return frozenset()
     key = (id(bench_sockets), id(connect_cards), id(bought))
-    hit = _GREEN_HOLDERS.get(key)
+    hit = _held(_GREEN_HOLDERS, key)
     if hit is None or hit[0] is not bench_sockets or hit[1] is not connect_cards \
             or hit[2] is not bought:
         holders = []
@@ -1589,9 +1676,7 @@ def held_bench_cards(bench_sockets: Mapping[str, Mapping[str, str | None]] | Non
                 scopes = frozenset(s for n in lifted if (s := yellow_scope(skilltree, n, chr_id)))
                 if green or scopes:
                     holders.append((chr_id, card, green, scopes))
-        if len(_GREEN_HOLDERS) > 8:
-            _GREEN_HOLDERS.clear()
-        hit = _GREEN_HOLDERS[key] = (bench_sockets, connect_cards, bought, tuple(holders))
+        hit = _hold(_GREEN_HOLDERS, key, (bench_sockets, connect_cards, bought, tuple(holders)))
     return frozenset(card for chr_id, card, green, scopes in hit[3]
                      if chr_id not in team_chrs
                      and (green or any(bench_yellow_pays(s, chr_id, cast) for s in scopes)))
@@ -1690,7 +1775,7 @@ def _song_bonus_over_cap(team_rows, bench_characters, names: Mapping[str, str], 
         team.add(chr_id)
         if cast and chr_id not in cast:
             continue
-        for node in selected:
+        for node in plan_node_order(selected):
             p = _yellow_permil_memo(skilltree, node, chr_id, cast, node_effect_ids)
             if p:
                 total += p * mults.get(node, 1.0)
@@ -2234,7 +2319,7 @@ def board_model_from_plan(
             break
         cmult = mults_by_chr.get(chr_id, {})
         nodes = []
-        for node_id in cplan.selected:
+        for node_id in plan_node_order(cplan.selected):
             if node_id == ROOT_NODE:
                 continue
             effstr = _effect_string_for(skilltree, node_id, chr_id, node_effect_ids)
@@ -2366,7 +2451,7 @@ def _paying_yellows(selected: frozenset, chr_id: str, cast, skilltree: Mapping,
     hit = _PAYING_YELLOWS.get(key)
     if hit is not None and hit[0] is selected and hit[1] is skilltree and hit[2] is node_effect_ids:
         return hit[3]
-    rows = tuple((n, p) for n in selected
+    rows = tuple((n, p) for n in plan_node_order(selected)
                  if (p := _yellow_permil(skilltree, n, chr_id, cast, node_effect_ids)))
     value = (rows, sum(p for _n, p in rows))
     if len(_PAYING_YELLOWS) > 50_000:
@@ -2608,6 +2693,203 @@ def activation_node_ids(skilltree: Mapping) -> frozenset[str]:
     )
 
 
+def cooldown_node_ids(skilltree: Mapping) -> frozenset[str]:
+    """Node ids whose effect is the ACTIVE's activation frequency (`Act.CD`, the cooldown
+    shortening), read from the skill-tree dump's `nodes[*].e.t`."""
+    return frozenset(
+        node_id for node_id, meta in (skilltree.get("nodes") or {}).items()
+        if ((meta or {}).get("e") or {}).get("t") == "Act.CD"
+    )
+
+
+def _with_cooldown_subset(tree: SkillTree, selected: frozenset[str], family: frozenset[str],
+                          want: frozenset[str], available) -> frozenset[str] | None:
+    """`selected` with its `family` nodes replaced by `want`: the family nodes not wanted are
+    dropped, each wanted node is bought with its cheapest path. `None` when the drop leaves
+    bought nodes cut off from the root (the board would come apart), or a wanted node
+    cannot be reached."""
+    # dropped together, so a node and the one hanging from it can both go
+    rest = frozenset(selected - ((selected & family) - want))
+    if tree.reachable(rest) != rest:
+        return None
+    sel = set(rest)
+    costs = {nid: tree.nodes[nid].cost for nid in tree.nodes}
+    for node in sorted(want - frozenset(sel)):
+        bundles = _cheapest_bundles(tree, frozenset(sel), available, costs)
+        if node not in bundles:
+            return None
+        sel |= set(bundles[node][1]) | {node}
+    return frozenset(sel)
+
+
+def cooldown_count_axes(
+    plan: TeamBoardPlan,
+    cards_by_id: Mapping[str, Card],
+    *,
+    tree_for: Callable[[Card], SkillTree | None],
+    budget_for: Callable[[Card], int],
+    cooldown_nodes: frozenset[str],
+    member_ids: frozenset[str],
+    player_level: int | None = None,
+    drops_only: bool = False,
+    memo: dict | None = None,
+) -> list[tuple[str, list[tuple[int, frozenset[str]]], int]]:
+    """The activation-frequency counts each MEMBER's board can take around `plan`:
+    `[(member card id, [(count, the board's nodes at that count)], its count now)]`, the
+    counts ascending, for every member with at least two of them.
+
+    Per member, each count is the variant closest to the member's current board (fewest
+    nodes changed, then the cheapest): a dropped node must not have bought nodes hanging
+    from it, an added node comes with its cheapest path, and the board stays within the
+    member's points (`refine_cooldown_counts`). `drops_only`: only the counts reached by
+    dropping frequency nodes the board holds, none bought. `memo` (a dict the caller
+    keeps): a member's counts are a function of its own board, so the plans of one team
+    for several songs, which mostly share their boards, work them out once."""
+    available_cache: dict[int, object] = {}
+    axes: list[tuple[str, list[tuple[int, frozenset[str]]], int]] = []
+    for card_id in plan.per_character:
+        if card_id not in member_ids:
+            continue
+        card = cards_by_id.get(card_id)
+        tree = tree_for(card) if card is not None else None
+        if tree is None:
+            continue
+        family = frozenset(cooldown_nodes & set(tree.nodes))
+        if not family:
+            continue
+        selected = frozenset(plan.per_character[card_id].selected)
+        here = len(selected & family)
+        key_m = (card_id, selected, drops_only)
+        states = memo.get(key_m) if memo is not None else None
+        if states is None:
+            budget = budget_for(card)
+            available = available_cache.setdefault(id(tree), _available(tree, player_level))
+            best_by_count: dict[int, tuple[tuple, frozenset[str]]] = {}
+            nodes = sorted(family)
+            for mask in range(1 << len(nodes)):
+                want = frozenset(n for i, n in enumerate(nodes) if mask >> i & 1)
+                if drops_only and not want <= selected:
+                    continue
+                sel = _with_cooldown_subset(tree, selected, family, want, available)
+                if sel is None:
+                    continue
+                cost = tree.cost_of(sel - {ROOT_NODE})
+                if cost > budget:
+                    continue
+                key = (len(sel ^ selected), cost, tuple(sorted(sel)))
+                count = len(sel & family)
+                if count not in best_by_count or key < best_by_count[count][0]:
+                    best_by_count[count] = (key, sel)
+            # no axis for a member with one count, or whose own board is not among them
+            states = ([(count, best_by_count[count][1]) for count in sorted(best_by_count)]
+                      if len(best_by_count) >= 2 and here in best_by_count else [])
+            if memo is not None:
+                memo[key_m] = states
+        if states:
+            axes.append((card_id, states, here))
+    return axes
+
+
+def plan_with_counts(plan: TeamBoardPlan, axes: Sequence[tuple], combo: Sequence[int],
+                     cards_by_id: Mapping[str, Card],
+                     tree_for: Callable[[Card], SkillTree | None]) -> TeamBoardPlan:
+    """`plan` with each axis of `cooldown_count_axes` at the state `combo` names (an index
+    into that member's counts). It carries no `plan_keys`: it is assembled by its nodes."""
+    per = dict(plan.per_character)
+    for (card_id, states, _here), k in zip(axes, combo):
+        sel = states[k][1]
+        old = plan.per_character[card_id]
+        if sel != old.selected:
+            tree = tree_for(cards_by_id[card_id])
+            per[card_id] = BoardPlan(selected=sel, spent=tree.cost_of(sel - {ROOT_NODE}),
+                                     value=old.value, steps=old.steps)
+    return replace(plan, per_character=per, plan_keys={})
+
+
+def refine_cooldown_counts(
+    plan: TeamBoardPlan,
+    cards_by_id: Mapping[str, Card],
+    *,
+    tree_for: Callable[[Card], SkillTree | None],
+    budget_for: Callable[[Card], int],
+    cooldown_nodes: frozenset[str],
+    member_ids: frozenset[str],
+    score: Callable[[TeamBoardPlan], float],
+    start_value: float | None = None,
+    player_level: int | None = None,
+    cooldown_of: Callable[[TeamBoardPlan], Mapping[str, float]] | None = None,
+    screen: Callable[[Sequence[Mapping[str, float]]], Sequence[float]] | None = None,
+    verify: int = 4,
+) -> tuple[TeamBoardPlan, float, list[str]]:
+    """Choose how many activation-frequency (`Act.CD`) nodes each MEMBER keeps, all
+    members jointly, by trying every combination on the real score.
+
+    With `cooldown_of` (a plan -> each member card's cooldown shortening on that plan's
+    board) and `screen` (a list of {member card: cooldown shortening} -> the score of the
+    START board with each, in order), the combinations are first scored by `screen`, which
+    re-assembles nothing, and only the best `verify` of them are scored by `score` on
+    their own assembled board; the answer is always one `score` measured. Without them
+    every combination is scored by `score`.
+
+    A member's frequency nodes all carry the same value, so what moves the score is how
+    many of them the member keeps (0 to 3), not which. And the counts act together: a
+    shorter cooldown moves every later window of that member, and the score at each
+    instant is the strongest live ACTIVE, so dropping one node on each of two strong
+    members can gain while either drop alone loses. A move-by-move search
+    (`refine_activation_nodes`) stops before such a combination; trying every combination
+    of counts (at most 4^5 = 1024 for five members) does not.
+
+    Per member, each count is the variant closest to the member's current board (fewest
+    nodes changed, then the cheapest): a dropped node must not have bought nodes hanging
+    from it, an added node comes with its cheapest path, and the board stays within the
+    member's points. Only the members' boards are tried: a frequency node shortens its
+    own holomem's ACTIVE, and the leader slot's own ACTIVE is not in the pool. A
+    combination is kept only when the score is strictly higher, so ties keep the start
+    and the result is never worse. Returns `(plan, its score, the changes made)`."""
+    current = start_value if start_value is not None else score(plan)
+    axes = cooldown_count_axes(plan, cards_by_id, tree_for=tree_for, budget_for=budget_for,
+                               cooldown_nodes=cooldown_nodes, member_ids=member_ids,
+                               player_level=player_level)
+    if not axes:
+        return plan, current, []
+    start = tuple(next(i for i, (c, _s) in enumerate(states) if c == here)
+                  for _cid, states, here in axes)
+    best, best_value = start, current
+    ranges = [range(len(states)) for _cid, states, _here in axes]
+
+    def plan_for(combo: tuple[int, ...]) -> TeamBoardPlan:
+        return plan_with_counts(plan, axes, combo, cards_by_id, tree_for)
+
+    combos = [combo for combo in itertools.product(*ranges) if combo != start]
+    if cooldown_of is not None and screen is not None:
+        # each member state's own cooldown, read off a board where only that member moved
+        start_cd = cooldown_of(plan)
+        state_cd: list[list[float]] = []
+        for a, (card_id, states, _here) in enumerate(axes):
+            row = []
+            for k in range(len(states)):
+                if k == start[a]:
+                    row.append(start_cd[card_id])
+                else:
+                    one = tuple(k if b == a else start[b] for b in range(len(axes)))
+                    row.append(cooldown_of(plan_for(one))[card_id])
+            state_cd.append(row)
+        values = screen([{card_id: state_cd[a][k] for a, ((card_id, _s, _h), k)
+                          in enumerate(zip(axes, combo))} for combo in combos])
+        # best first, ties in enumeration order; only these are scored on their own board
+        screened = sorted(zip(values, combos), key=lambda vc: -vc[0])
+        combos = [combo for _v, combo in screened[:verify]]
+    for combo in combos:
+        value = score(plan_for(combo))
+        if value > best_value:
+            best, best_value = combo, value
+    if best == start:
+        return plan, current, []
+    changes = [f"{card_id} Act.CD {states[s][0]}->{states[b][0]}"
+               for (card_id, states, _here), s, b in zip(axes, start, best) if s != b]
+    return plan_for(best), best_value, changes
+
+
 def refine_activation_nodes(
     plan: TeamBoardPlan,
     cards_by_id: Mapping[str, Card],
@@ -2698,11 +2980,19 @@ def develop_refined_team(
     sings: bool = False,
     player_level: int | None = None,
     bench_sockets: Mapping[str, Mapping[str, str | None]] | None = None,
+    cooldown_counts: bool = False,
+    charts_score_variants: Callable[[BoardModel, Sequence[Mapping[str, float]]],
+                                    Sequence[float]] | None = None,
 ) -> tuple[BoardOptimisedTeam, float, list[str]]:
     """`optimize_and_rerank`'s develop for ONE team, then
     `refine_activation_nodes` on `charts_score(board)` — the caller's real
-    objective, e.g. the song score on one chart or the sum over a few. The board
-    is re-assembled exactly as `optimize_and_rerank` assembles it (same
+    objective, e.g. the song score on one chart or the sum over a few — and, with
+    `cooldown_counts`, `refine_cooldown_counts` after it (every combination of the
+    members' activation-frequency node counts; ~1,000 scorings, so for a few finalists).
+    `charts_score_variants(board, [{holomem: cooldown shortening}, ...])`, when given, is
+    `charts_score(board.with_cooldowns(v))` for every `v` at once
+    (`song.score_song_cooldown_variants`); it only makes that screen cheaper.
+    The board is re-assembled exactly as `optimize_and_rerank` assembles it (same
     linearisation point, Connect cards, bench, singer context), never from the
     plan cache once the plan has been refined. Returns the same
     `BoardOptimisedTeam` `optimize_and_rerank` would (its Unit Score and real
@@ -2739,6 +3029,32 @@ def develop_refined_team(
         start.plan, cards, tree_for=tree_for, budget_for=budget_for,
         activation_nodes=activation_node_ids(skilltree),
         score=lambda p: charts_score(assemble(p)), player_level=player_level)
+    if cooldown_counts:
+        members_by_id = {c.id: c for c in team.members}
+        # the board `value` was measured on: the start's own when nothing moved
+        base = start.board if not moves else assemble(plan)
+
+        def cooldown_of(p: TeamBoardPlan) -> dict[str, float]:
+            board = base if p is plan else assemble(p)
+            return {cid: board.uptime_for(c.member)[1] if board is not None else 0.0
+                    for cid, c in members_by_id.items()}
+
+        def screen(variants: Sequence[Mapping[str, float]]) -> list[float]:
+            by_holomem = [{members_by_id[cid].member: cd for cid, cd in v.items()}
+                          for v in variants]
+            if charts_score_variants is not None:
+                return list(charts_score_variants(base, by_holomem))
+            return [charts_score(base.with_cooldowns(v)) for v in by_holomem]
+
+        plan, value, changes = refine_cooldown_counts(
+            plan, cards, tree_for=tree_for, budget_for=budget_for,
+            cooldown_nodes=cooldown_node_ids(skilltree),
+            member_ids=frozenset(members_by_id),
+            score=lambda p: charts_score(assemble(p)), start_value=value,
+            player_level=player_level,
+            cooldown_of=cooldown_of if base is not None else None,
+            screen=screen if base is not None else None)
+        moves = moves + changes
     if not moves:              # unchanged: keep the start exactly (its plan-cache board)
         return start, value, moves
     placements: list[SocketPlacement] = []

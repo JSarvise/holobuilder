@@ -34,6 +34,11 @@ def build(source: Path, target: Path, what: str, force: bool = False) -> Path:
         return target
     gcc = shutil.which("gcc")
     if gcc is None:
+        # no compiler (the desktop app on a user's PC): the library shipped with these sources
+        # is theirs, whatever the order an update wrote the files in (an extraction stamps each
+        # file as it goes, so a source can come out a few ms newer than its library)
+        if target.exists():
+            return target
         raise RuntimeError(f"no gcc on PATH; the {what} kernel cannot be built")
     tmp = target.with_name(f"{target.stem}.{os.getpid()}.tmp{target.suffix}")
     try:

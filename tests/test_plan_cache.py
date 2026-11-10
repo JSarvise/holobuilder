@@ -245,3 +245,41 @@ def test_a_cast_values_every_singing_board_and_a_flag_only_the_leader():
     assert singer_weight_for(True, "chr-00027", False) == 0.0      # the bool flag: leader only
     assert singer_weight_for(True, "chr-00036", True) == 1.0
     assert singer_weight_for(frozenset(), "chr-00027", True) == 0.0
+
+
+# --- a store shared by the caches of one context (`parallel_refine.PlanStore`) ----
+
+def test_caches_sharing_a_store_serve_each_other_the_same_plans(tmp_path, monkeypatch):
+    """A worker's cache takes a plan another cache of the same nominal context already
+    solved from the shared store instead of solving it again, and scores the same float."""
+    from hbuilder.domain import board_plan
+    from hbuilder.solver.parallel_refine import PlanStore
+
+    t = _team(1, [2, 3, 4, 5, 6])
+    first = _fresh_cache()
+    first.store = PlanStore(str(tmp_path))
+    solo = _rerank([t], cache=first)[0]
+    assert first.store_hits == 0 and len(list(tmp_path.glob("*.pkl"))) == 6
+
+    solved = []
+    real = board_plan.optimize_board
+    monkeypatch.setattr(board_plan, "optimize_board",
+                        lambda *a, **k: solved.append(1) or real(*a, **k))
+    second = _fresh_cache()
+    second.store = PlanStore(str(tmp_path))
+    shared = _rerank([t], cache=second)[0]
+    assert solved == [] and second.store_hits == 6 and second.misses == 6
+    assert shared.optimised_us == solo.optimised_us
+    for cid, plan in solo.plan.per_character.items():
+        assert shared.plan.per_character[cid] == plan
+
+
+def test_a_store_that_cannot_be_read_is_a_miss_and_the_plan_is_solved(tmp_path):
+    from hbuilder.solver.parallel_refine import PlanStore
+
+    store = PlanStore(str(tmp_path / "missing" / "folder"))
+    cache = _fresh_cache()
+    cache.store = store
+    plain = _rerank([_team(1, [2, 3, 4, 5, 6])], cache=_fresh_cache())[0]
+    got = _rerank([_team(1, [2, 3, 4, 5, 6])], cache=cache)[0]
+    assert cache.store_hits == 0 and got.optimised_us == plain.optimised_us

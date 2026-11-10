@@ -97,7 +97,7 @@ first time that takes about an hour; afterwards only what is new. Their progress
 started meanwhile leaves them to that run. Pictures the game has already shown on this PC are
 copied from its own cache instead of downloaded.
 
-**Open the game once a day before refreshing.** When the in-game day has changed (04:00 JST) and
+**Open the game once a day before refreshing.** When the in-game day has changed (05:00 JST, the game's own `resetTimingHour`) and
 the game has not been opened since, the server refuses part of the account read with
 `DATE_CHANGED` until the game runs its daily reset. The refresh says so, keeps what it could read,
 and the next refresh after opening the game completes it.
@@ -122,6 +122,11 @@ holobuilder. The server listens on `127.0.0.1` only: nothing outside this PC can
   other program keeps its port and the next free one is used. `start.cmd --port 8740` picks one.
 - `start.cmd --no-browser` does not open the browser.
 - The pages' **Refresh** button runs the same refresh as `refresh.cmd`, with the same account.
+- `start.cmd --park-scan` turns on the Park page's **Scan all areas** (off otherwise). It logs into
+  your account the way the game does, enters each Park area that has Free Chats (buildings too)
+  and goes back to yours, so the page knows every chat you have heard. Your own area's chat sites
+  are drawn again, as when you walk into it in the game; symbols, chests and quests are not
+  touched. Close the game first; once per game day.
 
 How to use the pages: [Using holobuilder](guide.md).
 

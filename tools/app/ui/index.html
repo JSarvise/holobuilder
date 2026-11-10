@@ -90,6 +90,14 @@
         <div class="hint">Live2D figures, chibis and card art come from the server the first time they are shown and stay on this PC. Card art is fetched in the background at start, so Collection never waits.</div>
       </div>
     </section>
+    <section class="panel">
+      <h2>Park</h2>
+      <div class="form">
+        <label>Scan all areas</label>
+        <div class="seg" id="parkscan"><button data-v="off">Off</button><button data-v="on">On</button></div>
+        <div class="hint">Adds a “Scan all areas” button to the Park page. It logs into your account the way the game does, enters each Park area that has Free Chats (buildings too) and goes back to yours, so the page knows every chat you have heard. <b>Your own area’s chat sites are drawn again, just as when you walk into it in the game.</b> Symbols, chests and quests are not touched. Close the game before you press it, since a login ends its session. Once per game day.</div>
+      </div>
+    </section>
     <details class="panel adv" id="adv">
       <summary><h2>Advanced</h2></summary>
       <div class="form">
@@ -231,6 +239,7 @@ async function fillSettings() {
   $("#url").value = s.server_url;
   $("#token").value = s.server_token;
   $("#cache").value = s.cache_mb;
+  pressed($("#parkscan"), s.park_scan ? "on" : "off");
   const wk = $("#wk"); wk.max = threads; wk.value = s.workers || 0;
   const wkl = () => $("#wkv").textContent = +wk.value === 0 ? `All (${threads})` : wk.value;
   wk.oninput = wkl; wkl();
@@ -265,6 +274,7 @@ async function save() {
     server_url: $("#url").value.trim(), server_token: $("#token").value.trim(),
     workers: +$("#wk").value, cache_mb: +$("#cache").value || 0,
     holomem: sel ? sel.dataset.chr : settings.holomem,
+    park_scan: $("#parkscan button[aria-pressed=true]")?.dataset.v === "on",
   });
   if (!r.ok) { showProblems(r.problems); $("#saved").textContent = ""; return; }
   $("#saved").textContent = "Saved";
@@ -283,6 +293,7 @@ async function leave() {
   location.hash = ""; document.body.classList.remove("settings"); $("#saved").textContent = ""; run();
 }
 $("#region").onclick = e => { if (e.target.dataset.v) pressed($("#region"), e.target.dataset.v); };
+$("#parkscan").onclick = e => { if (e.target.dataset.v) pressed($("#parkscan"), e.target.dataset.v); };
 // a path chosen or typed is judged again on Save: the start's "missing" must not linger
 const credSet = p => { $("#cred").value = p; showProblems({}); };
 $("#cred").oninput = () => showProblems({});

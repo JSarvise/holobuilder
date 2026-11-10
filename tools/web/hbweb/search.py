@@ -145,8 +145,12 @@ def row_figures(req: Mapping, body: Mapping, *, keep_law: bool = False) -> dict:
         out.update({"available": True, "difficulty": req["difficulty"], "basis": req["basis"],
                     "leader_id": ids[0], "member_ids": ids[1:]})
         return out
+    # the row's refinement level (`refined`: True = 1, 2 when every frequency count was
+    # tried, "counts" for an In general row, its frequency counts chosen song by song);
+    # anything else is the plain develop
+    refine = req["refine"] if req["refine"] is True or req["refine"] in (2, "counts") else False
     out = row_detail.two_stage_detail(
-        req["basis"], req["song"], req["difficulty"], ids[0], ids[1:], refine=req["refine"] is True,
+        req["basis"], req["song"], req["difficulty"], ids[0], ids[1:], refine=refine,
         assumptions=req["assumptions"],
         want_distribution=body.get("distribution") is True,
         want_timeline=body.get("timeline") is True,
@@ -190,8 +194,10 @@ def row_detail_route(h) -> None:
 
     Body: `{"song", "difficulty"?, "basis": "account"|"maxed"|"account-max",
     "platform"?, "auto"?: bool (how the run is played, as the search was asked),
-    "cards": [leader, m1..m5], "refine"?: bool (default false: the row was ranked
-    with the activation refinement), "member_order"?, "timeline"?: bool,
+    "cards": [leader, m1..m5], "refine"?: the row's `refined` (true: it was ranked with
+    the activation refinement; 2: every frequency count tried too; "counts": an In
+    general row, its frequency counts chosen on this song; default false),
+    "member_order"?, "timeline"?: bool,
     "distribution"?: bool, "as_is"?: bool (default true: `song_est_as_is` on the
     account's captured boards + `plan_cost` of the planned boards vs the
     wallet, `row_detail._as_is`), "reset_price"?: bool (a within-wallet row

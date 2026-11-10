@@ -162,3 +162,53 @@ def test_active_all_fire_is_a_ceiling_above_the_probabilistic_estimate():
                              cfg(active_all_fire=True), deck_power=OverallPower.fixed(2000))[0]
     assert certain_all.total_score == certain.total_score, (
         "an active that already fires with probability 1 is unchanged by all-fire")
+
+
+def test_a_with_cooldowns_copy_scores_as_the_board_built_with_that_cooldown():
+    """`BoardModel.with_cooldowns` replaces only the cooldown term: the copy scores
+    exactly what a board built with that cooldown scores, and shares its source's
+    power identity (the Overall Power never reads a cooldown)."""
+    members, leaders = _team()
+    chart = _chart_with_note_in_the_gap()
+    built_slow = _board("Member A", _cooldown(100.0))
+    built_fast = _board("Member A", _cooldown(500.0))
+    copy_fast = built_slow.with_cooldowns({"Member A": 0.5})
+
+    def total(board):
+        return score_song(members, leaders, chart, cfg(board=board),
+                          deck_power=OverallPower.fixed(2000))[0].total_score
+
+    assert copy_fast.uptime_for("Member A") == built_fast.uptime_for("Member A")
+    assert total(copy_fast) == total(built_fast) != total(built_slow)
+    assert copy_fast.power_identity is built_slow
+    assert copy_fast.with_cooldowns({"Member A": 0.1}).power_identity is built_slow
+    assert built_slow.power_identity is built_slow
+    assert built_slow.uptime_for("Member A")[1] == 0.1      # the source is untouched
+
+
+def test_cooldown_variants_score_exactly_as_each_board_scored_whole():
+    """`score_song_cooldown_variants` builds the cooldown-free part once and rebuilds only
+    the ACTIVE terms per variant; every variant must equal `score_song_detailed` on the
+    board with that cooldown, total and slot order."""
+    from hbuilder.domain.song import score_song_cooldown_variants, score_song_detailed
+
+    members, leaders = _team()
+    chart = SongChart(
+        music_id="m0001", difficulty="easy", difficulty_level=5,
+        live_score_coefficient_permil=4,
+        notes=tuple(ChartNote(time=float(t), perfect_permil=1000) for t in range(5, 120, 3)),
+        special_cues=(10.0, 30.0, 50.0, 70.0, 90.0),
+    )
+    board = _board("Member A", _cooldown(100.0))
+    config = cfg_uncertain(board=board)
+    variants = [{"Member A": cd} for cd in (0.0, 0.1, 0.2, 0.35, 0.5, 1.0)]
+    power = OverallPower.fixed(2000)
+    got = score_song_cooldown_variants(members, leaders[0], chart, config, variants,
+                                       deck_power=power)
+    for variant, score in zip(variants, got):
+        whole = score_song_detailed(
+            members, leaders, chart,
+            dataclasses.replace(config, board=board.with_cooldowns(variant)),
+            deck_power=power)[0]
+        assert (score.total_score, score.member_order) == (whole.total_score, whole.member_order)
+    assert len({s.total_score for s in got}) > 1          # the cooldown does move the score

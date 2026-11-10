@@ -26,6 +26,7 @@ The chain, in dependency order:
    (7b. item_icons   item/resource thumbs from the LOCAL Octo cache -> dumps/item_icons/; soft)
    (12b. member_icons, skill_icons  holomem faces + board node glyphs, LOCAL Octo cache; soft)
    (14. park_export  Parkview maps + spot positions -> dumps/park_export/; soft)
+   (11b. park_moves  the Park scan's quest data -> dumps/park_export/park_moves.json; soft)
 
 The whole point of this tool is the *diff*: it loads six JSON artefacts, takes set
 differences over card ids and table names, and counts nodes and slots. It runs the
@@ -780,6 +781,10 @@ def cmd_song_meta(args: argparse.Namespace) -> tuple[list[str], dict[str, str], 
     return [_pyexe(args), str(HERE / "master_json.py"), *SONG_META_TABLES], {}, HERE
 
 
+def cmd_park_moves(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
+    return [_pyexe(args), str(HERE / "park_scan.py"), "--write-moves"], {}, HERE
+
+
 def cmd_chart_lib(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
     return [_pyexe(args), str(HERE / "build_charts.py"), "--rebuild-caches",
             "--all-out", str(DUMPS / "charts_all.json"), "--verify"], {}, HERE
@@ -1090,6 +1095,17 @@ STEPS: list[Step] = [
         network=True,
         probes=["song_casts", "song_titles"],
         build=cmd_song_meta,
+    ),
+    # The Park scan's quest data (park_scan.py --write-moves): the master's AREA_MOVE quest steps
+    # and its areas, with the hashes of the tables they come from; the scan stops when the live
+    # master no longer carries them. In park_export/, so the app gets it with the maps. Soft.
+    Step(
+        "park_moves",
+        "dumps/park_export/park_moves.json -- the Park scan's quest data, from our master",
+        network=True,
+        probes=[],
+        build=cmd_park_moves,
+        soft=True,
     ),
     Step(
         "chart_lib",

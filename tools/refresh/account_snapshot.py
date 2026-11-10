@@ -807,9 +807,22 @@ def write_park_state(blob: bytes, account: str) -> None:
         return
     state = park_treasure.park_state(got)
     state["_captured_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
-    name = "park_state.json" if account == "main" else f"park_state_{account}.json"
+    # Free Chat read marks are permanent but each login shows only a slice (the picked sites
+    # of the current area), so they are folded into a log that only ever grows; park_state
+    # keeps the picks of this response, not its 2,000+ detail rows.
+    free_chat = state.pop("free_chat", None) or {"picks": [], "details": []}
+    state["free_chat_picks"] = free_chat["picks"]
+    suffix = "" if account == "main" else f"_{account}"
+    name = f"park_state{suffix}.json"
     atomic_io.write_text(DUMPS / name, json.dumps(state, indent=1, ensure_ascii=False), "utf8")
     print(f"park      : {len(state['random'])} areas -> {name}")
+    import park_free_chat  # noqa: PLC0415
+    keep = park_free_chat.catalogue_ids(DUMPS / "park_export" / "park_spots.json")
+    log = park_free_chat.update_log(DUMPS / f"park_free_chat_log{suffix}.json", free_chat,
+                                    state["_captured_at"], keep)
+    print(f"free chat : {len(free_chat['picks'])} sites picked, "
+          f"{sum(1 for c in log['chats'].values() if c['read'])} chats known read "
+          f"-> park_free_chat_log{suffix}.json")
 
 
 def load_userdata_schema() -> dict[int, str]:
@@ -1418,7 +1431,7 @@ def main() -> None:
 
     # `User/Get` succeeds while `Event/ListEventInfo` and `Card/GetParameters` are
     # refused `grpc-status 3 DATE_CHANGED` once the in-game day has rolled over
-    # (04:00 JST) and the CLIENT has not processed the reset yet. Not rate limiting,
+    # (`hbuilder.game_day`: the master's Setting.resetTimingHour, JST) and the CLIENT has not processed the reset yet. Not rate limiting,
     # not a stale credential: it clears as soon as the game itself is opened once.
     # Diagnosed rather than raised, because a traceback here reads as "the account
     # broke"; each call is still tried, so one that is answered is not lost.
@@ -1434,11 +1447,13 @@ def main() -> None:
                 raise
             refused.append(rpc)
     if refused:
+        from hbuilder import game_day  # noqa: PLC0415
+
         sys.stdout.flush()      # the report above first: a reader of the merged output sees this last
         for line in (
             "",
             f"! {' and '.join(refused)} refused: DATE_CHANGED.",
-            "  The in-game day rolled over (04:00 JST) and this account has not",
+            f"  The in-game day rolled over ({game_day.reset_hour():02d}:00 JST) and this account has not",
             "  opened the game since. Nothing is wrong with the credential -- the",
             "  server wants the CLIENT to run its daily reset first.",
             "  FIX: open the game once, then re-run.",

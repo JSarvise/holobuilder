@@ -10,6 +10,17 @@ body.pv{ --out:var(--warn); --got:var(--ink-3); --chest:var(--blk); --cand:var(-
 .pv-pgmain{min-width:0}
 .pg-stats .n.out{color:var(--out)}
 .pv-act{display:grid;justify-items:end;gap:8px;flex:none}
+.pv-btns{display:flex;gap:10px}
+.pv-scan[disabled]{cursor:not-allowed}
+.pv-scan.busy[disabled]{cursor:progress}
+.pv-scanmeta{margin:0;max-width:420px;text-align:right;font:700 12px/1.4 var(--f-ui);color:var(--ink-2)}
+.pv-scanmeta.bad{color:var(--warn)}
+dialog.pv-scandlg:not([open]){display:none !important}
+.pv-scandlg{padding:0;color:var(--ink);width:min(560px,94vw);border:1px solid var(--line-2)}
+.pv-scandlg::backdrop{background:rgb(8 7 20 / .72)}
+.pv-scanwhat{margin:0 0 12px;font:700 14px/1.5 var(--f-ui)}
+.pv-scanlist{margin:0 0 20px;padding-left:18px;font:700 12px/1.6 var(--f-ui);color:var(--ink-2)}
+.pv-scanbtns{display:flex;gap:10px}
 .pv-reread.armed{background:var(--out);color:var(--ink-on-white)}
 .pv-reread[disabled]{cursor:progress}
 .pv-quiet{margin:14px 0 0;font:700 12px/1.4 var(--f-ui);color:var(--ink-2)}
@@ -28,11 +39,11 @@ body.pv{ --out:var(--warn); --got:var(--ink-3); --chest:var(--blk); --cand:var(-
 
 /* areas */
 /* auto-fit: the areas with symbols share the full row; flat blocks under a 1 px rule (no panels) */
-.pv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,480px),1fr));gap:28px 40px;margin-top:22px;align-items:start}
+.pv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,620px),1fr));gap:36px 40px;margin-top:22px;align-items:start}
 .pv-area{padding-top:16px;border-top:1px solid var(--line);display:grid;gap:12px;min-width:0}
 .pv-area.has-out{border-top:3px solid var(--out);padding-top:14px}
 .pv-area header{display:flex;align-items:center;gap:10px;justify-content:space-between}
-.pv-area h2{font:800 20px/1.15 var(--f-ui);margin:0}
+.pv-area h2{font:800 20px/1.15 var(--f-ui);margin:0;white-space:nowrap}
 .pv-pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 12px;border-radius:999px;font:800 12px/1 var(--f-ui);white-space:nowrap}
 .pv-pill.out{background:var(--out);color:var(--ink-on-white)}
 .pv-pill.out b{font-size:13.5px}
@@ -58,19 +69,31 @@ body.pv{ --out:var(--warn); --got:var(--ink-3); --chest:var(--blk); --cand:var(-
 .pv-mk.chest{width:8px;height:8px;border-radius:2px;background:var(--chest);opacity:.7;z-index:1}
 .pv-mk.chest.open-no{background:var(--ink);opacity:1;box-shadow:0 0 0 2px rgb(20 19 42 / .7)}
 .pv-mk.cand{width:6px;height:6px;background:var(--cand);opacity:.6;z-index:1}
-.pv-map.big .pv-mk.out{width:30px;height:30px}
-.pv-map.big .pv-mk b{font-size:13.5px}
-.pv-map.big .pv-mk.got{width:22px;height:22px}
-.pv-map.big .pv-mk.got b{font-size:11px}
-.pv-map.big .pv-mk.chest{width:11px;height:11px}
-.pv-map.big .pv-mk.cand{width:8px;height:8px}
+.pv-map.pv-big .pv-mk.out{width:30px;height:30px}
+.pv-map.pv-big .pv-mk b{font-size:13.5px}
+.pv-map.pv-big .pv-mk.got{width:22px;height:22px}
+.pv-map.pv-big .pv-mk.got b{font-size:11px}
+.pv-map.pv-big .pv-mk.chest{width:11px;height:11px}
+.pv-map.pv-big .pv-mk.cand{width:8px;height:8px}
 .pv-list{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:4px 18px}
-.pv-list li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line);
+.pv-list li{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line);
   font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
-.pv-list li i{font:800 11px/20px var(--f-num);font-style:normal;text-align:center;border-radius:50%;width:20px;height:20px;background:var(--sheet-3);color:var(--ink-2)}
-.pv-list li.out i{background:var(--out);color:var(--ink-on-white)}
-.pv-list li span{color:var(--ink-3)}
-.pv-list li.out span{color:var(--out);font-weight:800}
+.pv-list li > span:last-child{color:var(--ink-3)}
+.pv-list li.out > span:last-child{color:var(--out);font-weight:800}
+
+/* a random symbol: the game's star orb, its number on a white tab (squared, so it never reads as
+   the round Free Chat badge); collected = greyed */
+.pv-sym{position:absolute;transform:translate(-50%,-50%);width:34px;height:34px;z-index:3}
+.pv-sym img,.pv-sym-i img{width:100%;height:100%;display:block;filter:drop-shadow(0 2px 0 rgb(14 13 32 / .6))}
+.pv-sym b,.pv-sym-i b{position:absolute;right:-7px;bottom:-5px;min-width:17px;height:17px;padding:0 4px;border-radius:5px;
+  font:800 11px/17px var(--f-num);text-align:center;background:#fff;color:var(--ink-on-white);box-shadow:0 0 0 1.5px var(--deep)}
+.pv-sym.got{width:24px;height:24px;z-index:2}
+.pv-sym.got img,.pv-list li.got .pv-sym-i img,.pv-li-sym.got{filter:grayscale(1) brightness(.75);opacity:.6}
+.pv-sym.got b,.pv-list li.got .pv-sym-i b{background:var(--sheet-3);color:var(--ink-2)}
+.pv-sym-i{position:relative;width:24px;height:24px}
+.pv-li-sym{width:18px;height:18px}
+.pv-pill.sym{background:rgb(40 195 255 / .14);color:var(--sky)}
+.pv-pill.sym img{width:18px;height:18px;margin-left:-4px}
 .pv-warn{display:flex;gap:8px;align-items:center;margin:0;font:700 12px/1.4 var(--f-ui);color:var(--warn)}
 .pv-error{margin-top:22px;padding:16px 18px;border-radius:var(--r-row);border:1px solid rgb(255 107 139 / .45);background:rgb(255 107 139 / .08)}
 .pv-error pre{margin:10px 0 0;font:700 12px/1.5 var(--f-ui);color:var(--ink-2);white-space:pre-wrap}
@@ -80,14 +103,14 @@ body.pv{ --out:var(--warn); --got:var(--ink-3); --chest:var(--blk); --cand:var(-
 .pv-chest{position:absolute;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;display:grid;place-items:center;
   background:rgb(20 19 42 / .78);box-shadow:0 0 0 2px var(--warn);z-index:2}
 .pv-chest img{width:22px;height:22px}
-.pv-chest b{position:absolute;right:-9px;top:-9px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;display:grid;place-items:center;
+.pv-chest b{position:absolute;right:-9px;top:-9px;min-width:18px;height:18px;padding:0 4px;border-radius:5px;display:grid;place-items:center;
   font:800 10.5px/1 var(--f-num);background:var(--warn);color:var(--ink-on-white)}
 .pv-chest.opened{width:16px;height:16px;background:rgb(20 19 42 / .55);box-shadow:inset 0 0 0 1px var(--line-2);z-index:1}
 .pv-chest.opened img{width:13px;height:13px;filter:grayscale(1);opacity:.55}
-.pv-map.big .pv-chest{width:34px;height:34px}
-.pv-map.big .pv-chest img{width:28px;height:28px}
-.pv-map.big .pv-chest.opened{width:20px;height:20px}
-.pv-map.big .pv-chest.opened img{width:16px;height:16px}
+.pv-map.pv-big .pv-chest{width:34px;height:34px}
+.pv-map.pv-big .pv-chest img{width:28px;height:28px}
+.pv-map.pv-big .pv-chest.opened{width:20px;height:20px}
+.pv-map.pv-big .pv-chest.opened img{width:16px;height:16px}
 .pv-pills{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .pv-pill.chest{background:rgb(255 187 84 / .14);color:var(--warn)}
 .pv-pill.chest img{width:18px;height:18px;margin-left:-4px}
@@ -108,3 +131,134 @@ dialog.pv-zoom:not([open]){display:none !important}
 .pv-x:hover{background:rgb(255 255 255 / .12);color:var(--ink)}
 .pv-zbody{padding:18px;overflow:auto;min-height:0;display:grid;justify-items:center}
 .pv-zbody .pv-map{height:calc(100dvh - 150px);width:auto;max-width:100%}
+
+/* ------------------------------------------------------------------ Free Chat
+   Status colours: read = --good (done), not read = --warn (go and find it, the page's "still
+   out" colour), not seen yet = hatched --blk (unknown: no refresh has shown the site). Site
+   markers are the game's own facility icons (img_park_facility_icon_normal_*), the photo in the
+   site dialog is the game's facility thumbnail, the bubble the game's Free Chat icon. */
+body.pv{ --fc-read:var(--good); --fc-pending:var(--warn);
+  --fc-unseen:repeating-linear-gradient(135deg,var(--blk) 0 4px,var(--blk-dark) 4px 8px); }
+.pv-fc{margin-top:22px;display:grid;gap:22px}
+.pv-fc:empty{display:none}
+.pv-fc-foot{margin-top:40px;padding-top:22px;border-top:1px solid var(--line)}
+.pv-pill.chat{background:rgb(255 187 84 / .14);color:var(--warn)}
+.pv-pill.chat img{width:18px;height:18px;margin-left:-4px}
+.pv-li-talk{width:16px;height:16px}
+.pv-fc-sub img{width:24px;height:24px;margin-right:8px}
+.pv-fc-h{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px 40px;align-items:start}
+.pv-fc-title{display:flex;align-items:center;gap:10px;margin:0;font:800 28px/1.1 var(--f-ui)}
+.pv-fc-title img{width:34px;height:34px}
+.pv-fc-lede{margin:8px 0 0;max-width:62ch;font:700 13.5px/1.5 var(--f-ui);color:var(--ink-2)}
+.pv-fc-ctl{display:grid;gap:14px;justify-items:end;min-width:min(100%,460px)}
+.pv-fc-score{display:grid;gap:8px;width:100%}
+.pv-fc-big{display:flex;align-items:baseline;gap:8px;justify-content:flex-end}
+.pv-fc-big .n{font-size:40px;line-height:1;color:var(--ink)}
+.pv-fc-big span{font:800 15px/1 var(--f-ui);color:var(--ink-2)}
+.pv-fc-bar{display:flex;height:10px;border-radius:999px;overflow:hidden;background:var(--sheet-3)}
+.pv-fc-bar i{display:block;height:100%}
+.pv-fc-bar .read{background:var(--fc-read)}
+.pv-fc-bar .pending{background:var(--fc-pending)}
+.pv-fc-bar .unseen{background:var(--fc-unseen)}
+.pv-fc-bar.thin{height:5px}
+.pv-fc-legend{display:flex;gap:16px;justify-content:flex-end;margin:0;padding:0;list-style:none;font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
+.pv-fc-legend li{display:inline-flex;align-items:center;gap:6px}
+.pv-fc-legend i{width:12px;height:12px;border-radius:3px}
+.pv-fc-legend i.read{background:var(--fc-read)}
+.pv-fc-legend i.pending{background:var(--fc-pending)}
+.pv-fc-legend i.unseen{background:var(--fc-unseen)}
+.pv-fc-legend .n{color:var(--ink)}
+.pv-fc-game{font:700 12px/1.4 var(--f-ui);color:var(--ink-2);text-align:right}
+.pv-fc-game .n{color:var(--ink)}
+.pv-fc-who{display:flex;align-items:center;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+.pv-fc-who .lbl{background:none;padding:0;color:var(--ink-3);font-size:12px}
+.pv-fc-who select{min-width:220px}
+.pv-face{width:36px;height:36px;border-radius:50%;background:var(--sheet-3);object-fit:cover;flex:none}
+.pv-face.s{width:20px;height:20px;margin-left:-6px}
+
+/* an area's map: full column width up to a height cap, its own aspect, markers may overhang */
+.pv-canvas{margin:0 auto;overflow:visible;justify-self:center}
+.pv-canvas > img{filter:brightness(.85);border-radius:var(--r-art)}
+
+/* a site: the game's facility icon, a badge of what is left, "Inside" for a building's interior */
+.pv-site{position:absolute;transform:translate(-50%,-50%);width:54px;height:54px;padding:0;border:0;background:none;cursor:pointer;z-index:3;
+  transition:transform .15s ease}
+.pv-site:hover,.pv-site:focus-visible{transform:translate(-50%,-50%) scale(1.12);z-index:5}
+.pv-site-ico{width:100%;height:100%;display:block;filter:drop-shadow(0 3px 0 rgb(14 13 32 / .65))}
+/* the Free Chat bubble is pale cyan: on the map's light ground it needs the dark tile the
+   facility icons have as their own fill, with the same white rim */
+.pv-site-ico.bubble{box-sizing:border-box;padding:9px 10px 7px;object-fit:contain;border-radius:26%;background:var(--sheet-2);
+  box-shadow:inset 0 0 0 3px #fff;filter:drop-shadow(0 3px 0 rgb(14 13 32 / .65))}
+.pv-site-n{position:absolute;right:-10px;top:-10px;min-width:26px;height:26px;padding:0 7px;border-radius:13px;display:grid;place-items:center;
+  font:800 13.5px/1 var(--f-num);background:var(--fc-pending);color:var(--ink-on-white);box-shadow:0 0 0 2px #fff}
+.pv-site.maybe .pv-site-n{background:var(--sheet);color:var(--ink);box-shadow:0 0 0 2px var(--ink-3)}
+.pv-site.done .pv-site-n{background:var(--fc-read);color:var(--ink-on-white)}
+.pv-site.done .pv-site-ico{filter:grayscale(.6) brightness(.8) drop-shadow(0 3px 0 rgb(14 13 32 / .65))}
+.pv-site-in{position:absolute;left:50%;bottom:-18px;transform:translateX(-50%);padding:2px 8px;border-radius:999px;white-space:nowrap;
+  font:800 11px/1.2 var(--f-ui);background:var(--deep);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line-2)}
+
+/* hover card */
+.pv-hover{position:absolute;z-index:6;width:280px;padding:12px 14px;border-radius:16px;background:var(--deep);border:1px solid var(--line-2);
+  display:grid;gap:8px;pointer-events:none;box-shadow:0 10px 30px rgb(0 0 0 / .45)}
+.pv-hover[hidden]{display:none}
+.pv-hv-t{font:800 15px/1.2 var(--f-ui)}
+.pv-hv-s{font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
+.pv-hover .lbl{justify-self:start;background:none;padding:0;color:var(--ink-3);font-size:11px}
+.pv-hv-faces{display:flex;flex-wrap:wrap;gap:6px}
+.pv-hv-p{position:relative}
+.pv-hv-p .pv-face{width:32px;height:32px}
+.pv-hv-p i{position:absolute;right:-4px;bottom:-4px;min-width:16px;height:16px;padding:0 3px;border-radius:8px;font:800 11px/16px var(--f-num);font-style:normal;
+  text-align:center;background:var(--fc-pending);color:var(--ink-on-white)}
+.pv-hv-more{align-self:center;font:800 12px/1 var(--f-num);color:var(--ink-2)}
+.pv-hv-go{font:700 11px/1 var(--f-ui);color:var(--ink-3)}
+
+/* the site dialog: the game's photo of the place over the list */
+dialog.pv-sitedlg:not([open]){display:none !important}
+.pv-sitedlg{padding:0;color:var(--ink);width:min(820px,94vw);max-height:calc(100dvh - 40px);display:flex;flex-direction:column;border:1px solid var(--line-2)}
+.pv-sitedlg::backdrop{background:rgb(8 7 20 / .72)}
+.pv-photo{flex:none;aspect-ratio:4 / 1;overflow:hidden;background:var(--sheet-2)}
+.pv-photo[hidden]{display:none}
+.pv-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.pv-sitedlg .dlg-h h3{display:flex;align-items:center;gap:10px;margin:0;font:800 20px/1.1 var(--f-ui)}
+.pv-sitedlg .dlg-h h3 img{width:32px;height:32px}
+.pv-sitebody{padding:14px 22px 22px;overflow:auto;min-height:0;display:grid;gap:14px}
+.pv-fc-inside{display:flex;gap:10px;align-items:center;margin:0;padding:10px 14px;border-radius:16px;background:var(--sheet-2);font:700 12px/1.45 var(--f-ui);color:var(--ink-2)}
+.pv-fc-inside img{width:24px;height:24px;flex:none}
+.pv-fc-dsum{display:grid;gap:8px;font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
+.pv-fc-dsum .n{color:var(--ink)}
+.pv-fc-needs{color:var(--ink-3)}
+.pv-chats{margin:0;padding:0;list-style:none;display:grid}
+.pv-chat{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.pv-chat-faces{display:flex}
+.pv-chat-faces .pv-face{width:40px;height:40px;box-shadow:0 0 0 2px var(--sheet)}
+.pv-chat-faces .pv-face + .pv-face{margin-left:-10px}
+.pv-chat-who{display:grid;gap:3px;font:800 13.5px/1.3 var(--f-ui)}
+.pv-chat-who small{font:700 11px/1.35 var(--f-ui);color:var(--ink-3)}
+.pv-chat-st{display:grid;grid-template-columns:22px auto;column-gap:6px;align-items:center;justify-items:start;font:800 12px/1.2 var(--f-ui);white-space:nowrap}
+.pv-chat-st img{width:22px;height:22px;grid-row:span 2}
+.pv-chat-st small{font:700 11px/1.2 var(--f-ui);color:var(--ink-3)}
+.pv-chat.pending .pv-chat-st{color:var(--fc-pending)}
+.pv-chat.unseen .pv-chat-st{color:var(--ink-2)}
+.pv-chat.read .pv-chat-st{color:var(--fc-read)}
+.pv-chat.read .pv-chat-faces{opacity:.55}
+.pv-chat.read .pv-chat-who{color:var(--ink-2)}
+
+/* the holomems */
+.pv-fc-sub{display:flex;align-items:center;margin:6px 0 0;font:800 20px/1.15 var(--f-ui)}
+.pv-fc-sub span{margin-left:10px;font:700 12px/1 var(--f-ui);color:var(--ink-3)}
+.pv-fc-mems{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:2px 20px}
+.pv-mem{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"f t n" "b b b";gap:6px 10px;align-items:center;padding:9px 10px;
+  border:0;border-bottom:1px solid var(--line);border-radius:12px 12px 0 0;background:none;color:var(--ink);text-align:left;cursor:pointer}
+.pv-mem:hover{background:rgb(255 255 255 / .04)}
+.pv-mem.on{background:var(--sheet-2);box-shadow:inset 0 0 0 2px #fff;border-radius:12px}
+.pv-mem .pv-face{grid-area:f}
+.pv-mem-t{grid-area:t;display:grid;gap:2px;min-width:0}
+.pv-mem-t b{font:800 13.5px/1.2 var(--f-ui);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-mem-t small{font:700 11px/1.2 var(--f-ui);color:var(--ink-3)}
+.pv-mem-t small .n{color:var(--ink-2)}
+.pv-mem-n{grid-area:n;display:grid;justify-items:end;gap:2px}
+.pv-mem-n .n{font-size:20px;line-height:1;color:var(--fc-pending)}
+.pv-mem-n small{font:700 11px/1 var(--f-ui);color:var(--ink-3)}
+.pv-mem .pv-fc-bar{grid-area:b}
+.pv-fc-note{margin:0;max-width:110ch;font:700 12px/1.5 var(--f-ui);color:var(--ink-3)}
+@media (prefers-reduced-motion: reduce){ .pv-site{transition:none} }

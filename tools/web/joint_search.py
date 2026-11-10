@@ -33,11 +33,14 @@ No certificate: "best found", with how much was scored in `stats`.
 """
 from __future__ import annotations
 
+import heapq
 import itertools
 import math
 import random
 import time
 from typing import Callable, Sequence
+
+import numpy as np
 
 import two_stage
 from two_stage import _fires
@@ -77,7 +80,14 @@ class LeaderModel:
     """Per-leader `a_L + b_L * fired + c_L * holds` with a per-set effect,
     fitted by alternating least squares. `b`, `c` are shrunk towards the mean
     of the leaders that share their gate kind, so a leader with few gate-firing
-    samples borrows from the others instead of guessing."""
+    samples borrows from the others instead of guessing.
+
+    The fit and the ranking run on numpy arrays with the arithmetic of the plain
+    loops they replace, in the same order, so every coefficient is the same float:
+    per-leader sums are `bincount`s (an in-order left fold, as a loop's `+=`), and a
+    set's mean is CPython's own `sum()` over its rows (`_grouped_pysum`). The leader
+    choice steers which teams the search scores, so a last-bit difference here would
+    change the answer."""
 
     def __init__(self, cards, leaders, gate_of) -> None:
         self.cards = list(cards)
@@ -87,6 +97,22 @@ class LeaderModel:
         self.b = [0.0] * len(self.leaders)
         self.c = [0.0] * len(self.leaders)
         self._fired: dict[tuple[int, tuple[int, ...]], float] = {}
+        # the distinct gates, and each leader's (-1: none): a set's gates fire once each
+        self._gate_list = list(dict.fromkeys(g for g in self.gates if g is not None))
+        index = {g: k for k, g in enumerate(self._gate_list)}
+        self._gate_of = np.array([index[g] if g is not None else -1 for g in self.gates],
+                                 dtype=np.intp)
+        names = {m: k for k, m in enumerate(dict.fromkeys(
+            [c.member for c in self.cards] + [l.member for l in self.leaders]))}
+        self._card_name = [names[c.member] for c in self.cards]
+        self._leader_name = np.array([names[l.member] for l in self.leaders], dtype=np.intp)
+        self._names = len(names)
+        self._arrays()
+
+    def _arrays(self) -> None:
+        self._an = np.array(self.a, dtype=float)
+        self._bn = np.array(self.b, dtype=float)
+        self._cn = np.array(self.c, dtype=float)
 
     def features(self, li: int, s: tuple[int, ...]) -> tuple[float, float]:
         key = (li, s)
@@ -111,46 +137,101 @@ class LeaderModel:
         by_set = {s: rows for s, rows in by_set.items() if len(rows) >= 2}
         if not by_set:
             return
-        theta = {s: sum(y for _l, y in rows) / len(rows) for s, rows in by_set.items()}
+        rows_li, rows_y, rows_f, rows_h, lens = [], [], [], [], []
+        for s, rows in by_set.items():
+            lens.append(len(rows))
+            for li, y in rows:
+                f, h = self.features(li, s)
+                rows_li.append(li)
+                rows_y.append(y)
+                rows_f.append(f)
+                rows_h.append(h)
+        li_ = np.array(rows_li, dtype=np.intp)
+        y = np.array(rows_y, dtype=float)
+        f = np.array(rows_f, dtype=float)
+        h = np.array(rows_h, dtype=float)
+        lens_ = np.array(lens, dtype=np.intp)
+        starts = np.concatenate(([0], np.cumsum(lens_)[:-1])).astype(np.intp)
+        group = np.repeat(np.arange(len(lens_)), lens_)
+        theta = _grouped_pysum(y, starts, lens_) / lens_
         n = len(self.leaders)
+        # the normal equations' left sides count rows, the same every sweep (x is 0 or 1)
+        cnt = np.bincount(li_, minlength=n).astype(float)
+        sf = np.bincount(li_, weights=f, minlength=n)
+        sh = np.bincount(li_, weights=h, minlength=n)
+        sfh = np.bincount(li_, weights=f * h, minlength=n)
+        gated = [g is not None for g in self.gates]
         for _ in range(sweeps):
             # leader parameters given theta: 3x3 normal equations per leader, ridge on b, c
-            acc = [[0.0] * 9 for _ in range(n)]
-            rhs = [[0.0] * 3 for _ in range(n)]
-            for s, rows in by_set.items():
-                for li, y in rows:
-                    f, h = self.features(li, s)
-                    x = (1.0, f, h)
-                    r = y - theta[s]
-                    A, B = acc[li], rhs[li]
-                    for i in range(3):
-                        B[i] += x[i] * r
-                        for j in range(3):
-                            A[3 * i + j] += x[i] * x[j]
-            prior_b = _mean([self.b[li] for li in range(n) if self.gates[li] is not None])
+            r = y - theta[group]
+            b0 = np.bincount(li_, weights=r, minlength=n)
+            b1 = np.bincount(li_, weights=f * r, minlength=n)
+            b2 = np.bincount(li_, weights=h * r, minlength=n)
+            prior_b = _mean([self.b[li] for li in range(n) if gated[li]])
             prior_c = _mean(self.c)
             for li in range(n):
-                A, B = acc[li], rhs[li]
-                if A[0] == 0:
+                if cnt[li] == 0:
                     continue
-                A = A[:]
-                B = B[:]
+                n0, n1, n2, n12 = float(cnt[li]), float(sf[li]), float(sh[li]), float(sfh[li])
+                A = [n0, n1, n2, n1, n1, n12, n2, n12, n2]
+                B = [float(b0[li]), float(b1[li]), float(b2[li])]
                 A[4] += lam
-                B[1] += lam * (prior_b if self.gates[li] is not None else 0.0)
+                B[1] += lam * (prior_b if gated[li] else 0.0)
                 A[8] += lam
                 B[2] += lam * prior_c
                 sol = _solve3(A, B)
                 if sol is not None:
                     self.a[li], self.b[li], self.c[li] = sol
             # theta given the leaders
-            for s, rows in by_set.items():
-                theta[s] = sum(y - self.predict(li, s) for li, y in rows) / len(rows)
+            self._arrays()
+            pred = self._an[li_] + self._bn[li_] * f + self._cn[li_] * h
+            theta = _grouped_pysum(y - pred, starts, lens_) / lens_
         # identifiability: centre a on its mean (only differences matter)
         mean_a = _mean(self.a)
         self.a = [v - mean_a for v in self.a]
+        self._arrays()
 
     def ranked(self, s: tuple[int, ...]) -> list[int]:
-        return sorted(range(len(self.leaders)), key=lambda li: -self.predict(li, s))
+        # one entry per distinct gate, then a 0.0 that a leader with no gate (-1) reads
+        fires = np.array([1.0 if _fires(g, self.cards, s) else 0.0 for g in self._gate_list]
+                         + [0.0])
+        f = fires[self._gate_of]
+        present = np.zeros(self._names, dtype=float)
+        present[[self._card_name[i] for i in s]] = 1.0
+        h = present[self._leader_name]
+        pred = self._an + self._bn * f + self._cn * h
+        return np.argsort(-pred, kind="stable").tolist()
+
+
+def _grouped_pysum(values, starts, lens):
+    """CPython's `sum()` of each group of `values` (group k = `values[starts[k]:starts[k] +
+    lens[k]]`, every group non-empty), vectorised across the groups: the start `0 + x0`,
+    then Neumaier's compensated steps in order, the compensation added at the end when it
+    is finite and non-zero (bltinmodule.c, 3.12+). The same float as `sum(group)`."""
+    total = values[starts] + 0.0
+    comp = np.zeros_like(total)
+    for k in range(1, int(lens.max()) if len(lens) else 0):
+        live = np.nonzero(lens > k)[0]
+        x = values[starts[live] + k]
+        t0 = total[live]
+        t = t0 + x
+        comp[live] += np.where(np.abs(t0) >= np.abs(x), (t0 - t) + x, (x - t) + t0)
+        total[live] = t
+    return np.where((comp != 0) & np.isfinite(comp), total + comp, total)
+
+
+def _rank_key(row):
+    return (-row[0], row[1], row[2])
+
+
+def _best(scored: dict, ok, n: int) -> list[tuple[float, int, tuple[int, ...]]]:
+    """The best `n` allowed pairs of `scored` as (value, leader index, set), best first, ties
+    by leader then set: `sorted(...)[:n]`, which `heapq.nsmallest` is documented to equal,
+    without sorting everything a search scored each time it asks for its best few."""
+    rows = ((v, li, s) for (li, s), v in scored.items() if ok(li, s))
+    if n >= len(scored):
+        return sorted(rows, key=_rank_key)
+    return heapq.nsmallest(n, rows, key=_rank_key)
 
 
 def _mean(xs) -> float:
@@ -303,8 +384,7 @@ def search(
         return time.perf_counter() - t0
 
     def top(n: int) -> list[tuple[float, int, tuple[int, ...]]]:
-        return sorted(((v, li, s) for (li, s), v in scored.items() if ok(li, s)),
-                      key=lambda r: (-r[0], r[1], r[2]))[:n]
+        return _best(scored, ok, n)
 
     def leaders_for(s: tuple[int, ...]) -> list[int]:
         ranked = model.ranked(s)
@@ -590,8 +670,7 @@ def climb(
         return time.perf_counter() - t0
 
     def top(n: int):
-        return sorted(((v, li, s) for (li, s), v in scored.items() if ok(li, s)),
-                      key=lambda r: (-r[0], r[1], r[2]))[:n]
+        return _best(scored, ok, n)
 
     started = time.perf_counter()
     take([p for p in start if ok(*p)])

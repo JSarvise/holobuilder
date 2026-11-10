@@ -152,8 +152,12 @@ def userdata_live(account="main"):
 
 
 def park_state(userdata_fields):
-    """UserData fields -> {random: {area: {...}}, opened_treasures: [...], fixed: [...]}."""
-    state = {"random": {}, "opened_treasures": [], "fixed_collected": []}
+    """UserData fields -> {random: {area: {...}}, opened_treasures: [...], fixed: [...],
+    free_chat: {picks: [...], details: [...]}} (park_free_chat.parse_userdata)."""
+    import park_free_chat  # noqa: PLC0415
+    userdata_fields = list(userdata_fields)
+    state = {"random": {}, "opened_treasures": [], "fixed_collected": [],
+             "free_chat": park_free_chat.parse_userdata(userdata_fields, fields)}
     for fn, wt, v in userdata_fields:
         if wt != 2:
             continue
@@ -191,7 +195,7 @@ def report(state, spot, treasures, pool):
     print("RANDOM SYMBOLS -- server-picked spawn positions, live from UserData")
     print("=" * 78)
     # The roll is per-area and lazy: an area you have not
-    # entered since the 05:00 JST reset still shows YESTERDAY's row. Flag it rather than
+    # entered since the day's reset (hbuilder.game_day) still shows YESTERDAY's row. Flag it rather than
     # letting the caller mistake a stale pick for the current one.
     stamps = [s["last_refreshed_time"] for s in state["random"].values()
               if s["last_refreshed_time"]]

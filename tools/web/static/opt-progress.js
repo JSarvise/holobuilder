@@ -67,9 +67,13 @@ export function progressCard(kind, steps, { best: withBest = true } = {}) {
   return card;
 }
 
-// "12,345 teams scored · round 3"
+// "12,345 teams scored · round 3"; an answer merged from several searches (every song on a
+// maxed account runs two, each from its own seed) says which one is running first -- "search
+// 2 of 2 · ..." -- since each numbers its rounds from 1 again
 export const countLine = ev => {
   const e = ev || {};
   const n = e.done ?? e.evaluated ?? e.scored;
-  return [n ? `${fmt(n)}${e.total ? ` / ${fmt(e.total)}` : ""} teams scored` : "", e.round ? `round ${e.round}` : ""].filter(Boolean).join(" · ");
+  return [e.starts > 1 && e.start ? `search ${e.start} of ${e.starts}` : "",
+    n ? `${fmt(n)}${e.total ? ` / ${fmt(e.total)}` : ""} teams scored` : "",
+    e.round ? `round ${e.round}` : ""].filter(Boolean).join(" · ");
 };

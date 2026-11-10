@@ -121,6 +121,14 @@ PARK_EXPORT_DIR = DUMPS / "park_export"
 PARK_SPOTS_PATH = PARK_EXPORT_DIR / "park_spots.json"
 # today's pick, written by the account refresh (account_snapshot.write_park_state)
 PARK_STATE_PATH = DUMPS / "park_state.json"
+# every Free Chat read mark the refreshes have seen (park_free_chat.update_log)
+PARK_FREE_CHAT_LOG_PATH = DUMPS / "park_free_chat_log.json"
+# "Scan all areas" (park_scan.py): what the last scan did; the once-per-game-day rule reads it
+PARK_SCAN_SCRIPT = REFRESH_DIR / "park_scan.py"
+PARK_SCAN_LAST_PATH = DUMPS / "park_scan_last.json"
+# The scan is off unless this is "1" (the desktop app's Settings set it; `start` reads it
+# from the environment)
+PARK_SCAN_ENV = "HB_PARK_SCAN"
 
 # ---------------------------------------------------------------------------
 # Pages and assets.

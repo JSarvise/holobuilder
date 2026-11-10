@@ -37,7 +37,8 @@ import leaf_inputs  # noqa: E402
 from hbuilder.domain.song import load_charts  # noqa: E402
 from hbuilder.solver import members_first  # noqa: E402
 from hbuilder.solver.parallel import default_workers  # noqa: E402
-from hbuilder.solver.parallel_refine import RefinePool, SharedPool  # noqa: E402
+from hbuilder.solver.parallel_refine import (  # noqa: E402
+    COUNTS, COUNTS_BOTH, RefinePool, SharedPool)
 
 # the served ranking with the activation refinement is the best REFINE_HEAD teams of the
 # search, every one refined, in refined order (~0.04 s a team): refining only a few teams
@@ -45,7 +46,27 @@ from hbuilder.solver.parallel_refine import RefinePool, SharedPool  # noqa: E402
 # sit at #22 and the same team score differently with and without a leader filter
 # (refinement gains 0-3.3 %, mean about 0.5 %; plain teams ranked in the 50s-70s can be
 # refined top 10)
+# ... chosen from the search's best COUNTS_FUNNEL (30 a worker) by a cheap estimate of
+# their frequency node counts chosen, not by the plain value (`_count_funnel`)
+COUNTS_FUNNEL = 480
 REFINE_HEAD = 100
+# ... and the refined teams within COUNTS_MARGIN of the best refined one (at most
+# COUNTS_HEAD, two per worker) are refined once more trying every combination of the
+# members' activation-frequency node counts (refine level 2,
+# `board_plan.refine_cooldown_counts`, ~0.5 s a team): a pair of members each dropping a
+# frequency node can gain while either drop alone loses, which the move-by-move
+# refinement never reaches. The gain measured on 16 top teams of four songs was
+# 0-1.26 %, so a team further than the margin below the best cannot take #1 by it.
+COUNTS_HEAD = 32
+COUNTS_MARGIN = 0.015
+# On one song with planned boards the search itself ranks every team by the LENS
+# (`parallel_refine.lens_value`): the plain develop and its best single-member frequency count
+# drop. The plain value buys every frequency node and ranks some teams up to ~5 % low, so the
+# set screen and the leader model never propose them: holodori.best's #1 on m0001 sits 1,754th
+# by the plain value and is never scored; ranked by the lens the same search finds it on 3 of
+# 3 seeds (0 of 3 plain), and the best known team on m0342, m0552 and m0155 as before. The lens
+# values only order: each served row is the refinement's, or its exact plain value
+LENS_SEARCH = True
 RANKING = 50          # teams served, best first (a true top N)
 ROWS = 8              # per-leader rows (each leader's best), the secondary view
 HINTS = 20            # pairs kept per (song, filters) as the next request's seeds
@@ -88,6 +109,20 @@ SETTLE_PAIR_MOVES = 20
 SAMPLE_TRAIN = 300
 SAMPLE_SEED = 20261022
 GENERAL_RESCORE = 200
+# In general with boards the leaf plans: the best this many re-scored teams are scored once
+# more on every chart with the members' activation-frequency node counts chosen FOR EACH
+# CHART (`parallel_refine.ChartCounts`), and they are the ranking served, on that one basis.
+# The plain develop buys every frequency node on every song; choosing them per song adds
+# 0.1-1.9 % to a top team's mean (median 0.6 %) and reorders the head: the plain #4 becomes
+# #1 over every EXPERT chart, the plain #7 over the charts of levels 25-30. As many as a
+# search serves (`RANKING`): "One per leader" picks from every row served
+GENERAL_COUNTS_HEAD = 50
+# ... picked from the best this many by the plain mean, by what the counts add on a
+# note-spread sample of GENERAL_COUNTS_SAMPLE charts (`Engine._counts_funnel`): of the 20
+# best teams with their counts chosen, some sit as deep as #34 (EXPERT) and #96 (levels
+# 25-30) by the plain mean, and all within the funnel's best 26
+GENERAL_COUNTS_FUNNEL = 200
+GENERAL_COUNTS_SAMPLE = 24
 # In general the joint search seeds every leader region (`joint_search.search`'s `tilt_of`):
 # an outfit that raises one stat leans its leader's best sets towards the members strong in
 # that stat. A card's tilt is its share of the stat around the even third, at the log gain
@@ -115,9 +150,11 @@ REPLAN_SCREEN = 96
 # are re-planned again with its other candidates (`materials_plan.refine_rows`): the rows the
 # Optimizer page lists (at least 20; Versus takes the best 20). A row below them keeps its
 # first plan, so it could have risen into them by what a candidate adds (on the golden: up to
-# 0.18 % on a song, 1.9 % off a song). Off a song every re-planned team gets them, in its own
-# plan: there that lift is the largest, and 20 of 24 in a second pass would cost more than
-# all of them in the first
+# 0.18 % on a song, 1.9 % off a song). Off a song every re-planned team gets them: there that
+# lift is the largest (a row planned 23rd on its first plan is served 20th), each candidate a
+# task of its own behind the first plans, as on a song -- the same plans as one task per team
+# solving them all, and the workers stay busy to the end (the last of 24 long tasks ran on a
+# half-idle pool)
 SHOWN_ROWS = 20
 
 
@@ -167,6 +204,39 @@ def candidates(reps, filters: "Filters") -> tuple[list, list]:
 
 class Cancelled(Exception):
     pass
+
+
+class SearchRounds:
+    """`joint_search.search`'s `on_round` for an answer made of `starts` searches run one after
+    another (`GENERAL_STARTS`): each round becomes one `progress` event. With more than one
+    start the event says which search it belongs to (`start` of `starts`) and its `evaluated`
+    counts the teams of the searches before it too: each search numbers its rounds and its
+    teams from zero, which on the page read as the same search running again."""
+
+    def __init__(self, emit: Callable[[dict], None] | None, starts: int = 1) -> None:
+        self.emit = emit
+        self.starts = max(1, int(starts))
+        self.start = 1
+        self._before = 0          # teams scored by the searches already finished
+        self._pairs = 0           # teams scored so far by the one running
+
+    def next_start(self) -> None:
+        """The search running has finished and another one begins."""
+        self.start += 1
+        self._before += self._pairs
+        self._pairs = 0
+
+    def __call__(self, record: Mapping) -> None:
+        self._pairs = int(record["pairs"])
+        if not self.emit:
+            return
+        event = {"type": "progress", "stage": "search", "round": record["round"],
+                 "evaluated": self._before + self._pairs,
+                 "best_so_far": None if record["best"] is None
+                 else {"value": record["best"], "metric": "song_est"}}
+        if self.starts > 1:
+            event["start"], event["starts"] = self.start, self.starts
+        self.emit(event)
 
 
 @dataclasses.dataclass
@@ -502,6 +572,7 @@ class Engine:
         self.closed = False
         self._sample: tuple[int, ...] | None = None
         self._wide: tuple[int, ...] = ()
+        self._counts_charts: tuple[int, ...] | None = None   # `_counts_funnel`'s sample
 
     def _within_materials(self, a, ranking, leaders, pool, song, chart_indices, cancel,
                           progress=None):
@@ -515,9 +586,9 @@ class Engine:
 
         opts = materials_plan.judged_opts(a.plan_opts(), a, self.difficulty, self.pool.ctx,
                                           self.levels)
-        # on a song every team on the planner's first plan, the rows shown get its other
-        # candidates below; off a song every team gets them in its own plan (`SHOWN_ROWS`)
-        first = materials_plan.first_opts(opts) if song else opts
+        # every team on the planner's first plan; its other candidates below, for the rows
+        # shown on a song and for every row off a song (`SHOWN_ROWS`)
+        first = materials_plan.first_opts(opts)
         singers = set(self.charts[self.index[song]].singers or ()) if song in self.index else set()
         cands = [ranking[k] for k in replan_pick(
             ranking, lambda r: "chr-" + leaders[r[1]].id.split("-")[1] in singers)]
@@ -547,19 +618,13 @@ class Engine:
                 held_of[index] = held
                 optimal[cands[index][1:]] = None if held is None else held[2] is False
                 materials_plan.remember(*item_of[index][1:4], item_of[index][5], held)
-        if song:
-            # the rows shown (the best SHOWN_ROWS) re-planned with the planner's other
-            # candidates (only ever higher), each row's as soon as it is sure to be shown
-            refined = materials_plan.plan_and_refine(
-                self.pool, items, opts=opts, shown=SHOWN_ROWS,
-                rank=lambda k, value: (-value, cands[k][1], cands[k][2]), cancel=cancel,
-                progress=progress, on_plan=on_plan)  # a real count: the page's ETA is a rate
-        else:
-            for done, out in enumerate(materials_plan.dispatch(self.pool, items, cancel), 1):
-                if progress:
-                    progress(done, len(items))
-                on_plan(out)
-            refined = {}
+        # the rows shown (the best SHOWN_ROWS on a song, all of them off a song) re-planned
+        # with the planner's other candidates (only ever higher), each row's as soon as it
+        # is sure to be shown
+        refined = materials_plan.plan_and_refine(
+            self.pool, items, opts=opts, shown=SHOWN_ROWS if song else len(items),
+            rank=lambda k, value: (-value, cands[k][1], cands[k][2]), cancel=cancel,
+            progress=progress, on_plan=on_plan)  # a real count: the page's ETA is a rate
         if cancel is not None and cancel.is_set():
             raise Cancelled()
         for index in got:
@@ -579,12 +644,13 @@ class Engine:
         return out, failed, optimal, boards
 
     def _ceilings(self, served, leaders, pool, chart_indices, on_refined, planned_boards, cancel,
-                  replan: bool):
+                  replan: bool, known: Mapping | None = None):
         """Each served row's `song_max`: the run score if every ACTIVE fires, at the slot
         order its expectation plays, on the board its expectation is served on (refined,
         re-planned within the materials, as they are, or the plain develop) -- the top of
         the row's run law, what the detail shows as Max and the page sorts by Max. One pass
-        in the workers; a row whose board cannot be rebuilt keeps None."""
+        in the workers; a row whose board cannot be rebuilt keeps None. `known`: the ceilings
+        already measured on the board a row is served on (its level-2 refinement), kept."""
         from hbuilder.domain.team import Team  # noqa: PLC0415
 
         lpos = {c.id: k for k, c in enumerate(leaders)}
@@ -595,6 +661,9 @@ class Engine:
             if li is None or not all(m in position for m in row["members"]):
                 continue
             s = tuple(sorted(position[m] for m in row["members"]))
+            if known and (li, s) in known:
+                row["song_max"] = float(known[(li, s)])
+                continue
             if replan:
                 board = planned_boards.get((li, s))
                 if board is None:
@@ -603,12 +672,83 @@ class Engine:
                 board = None
             keys.append(row)
             teams.append(Team(leader=leaders[li], members=tuple(pool[i] for i in s)))
-            refine.append((li, s) in on_refined)
+            refine.append(on_refined.get((li, s), 0))
             planned.append(board)
         if cancel is not None and cancel.is_set():
             raise Cancelled()
         for row, value in zip(keys, self.pool.batch_ceiling(teams, chart_indices, refine, planned)):
             row["song_max"] = float(value)
+
+    def _count_funnel(self, ranking, leaders, pool, chart_indices, lens: bool = False):
+        """The REFINE_HEAD teams to refine, chosen from the search's best COUNTS_FUNNEL by a
+        cheap estimate of their frequency node counts chosen (`parallel_refine.
+        count_screen_value`, ~5 ms a team) rather than by the plain value, which buys every
+        frequency node and so ranks some teams up to ~5 % low. Each keeps its plain value.
+        `lens`: the ranking's values are the search's lens (`LENS_SEARCH`), so each team's
+        plain value is scored here too, with its count screen, in one develop."""
+        from hbuilder.domain.team import Team  # noqa: PLC0415
+
+        funnel = list(ranking[:COUNTS_FUNNEL])
+        if lens:
+            teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in funnel]
+            both = self.pool.batch_score(teams, chart_indices=chart_indices,
+                                         refine_activation="screen_both")
+            order = sorted(range(len(funnel)),
+                           key=lambda k: (-max(float(both[k][1]), float(both[k][0])), k))
+            return [(float(both[k][0]), funnel[k][1], funnel[k][2]) for k in order[:REFINE_HEAD]]
+        if len(funnel) <= REFINE_HEAD:
+            return funnel
+        teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in funnel]
+        screened = self.pool.batch_score(teams, chart_indices=chart_indices,
+                                         refine_activation="screen")
+        order = sorted(range(len(funnel)),
+                       key=lambda k: (-max(float(screened[k]), float(funnel[k][0])), k))
+        return [funnel[k] for k in order[:REFINE_HEAD]]
+
+    def _counts_funnel(self, ranking, leaders, pool):
+        """The GENERAL_COUNTS_HEAD re-scored teams (In general) that get their frequency
+        node counts chosen on every chart, in `ranking`'s order: from its best
+        GENERAL_COUNTS_FUNNEL, the ones whose full plain mean times what the counts add on
+        GENERAL_COUNTS_SAMPLE note-spread charts is highest. The plain mean alone orders
+        them badly (a team's gain runs from 0.1 to 1.9 %). Each keeps its plain value."""
+        from hbuilder.domain.team import Team  # noqa: PLC0415
+
+        funnel = list(ranking[:GENERAL_COUNTS_FUNNEL])
+        if len(funnel) <= GENERAL_COUNTS_HEAD or len(self.charts) <= GENERAL_COUNTS_SAMPLE:
+            return funnel[:GENERAL_COUNTS_HEAD]
+        if self._counts_charts is None:
+            by_obj = {id(c): k for k, c in enumerate(self.charts)}
+            self._counts_charts = tuple(
+                by_obj[id(c)] for c in two_stage.chart_sample(self.charts, GENERAL_COUNTS_SAMPLE))
+        teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in funnel]
+        both = self.pool.batch_score(teams, chart_indices=self._counts_charts,
+                                     refine_activation=COUNTS_BOTH)
+        estimate = [float(v) * (float(c) / float(p) if p else 1.0)
+                    for (v, _li, _s), (p, c) in zip(funnel, both)]
+        best = sorted(range(len(funnel)), key=lambda k: (-estimate[k], k))[:GENERAL_COUNTS_HEAD]
+        return [funnel[k] for k in sorted(best)]
+
+    def _count_cooldowns(self, chosen, teams, refined, chart_indices):
+        """The refined teams within COUNTS_MARGIN of the best (at most COUNTS_HEAD) refined
+        once more at level 2 (every combination of the members' frequency node counts).
+        Returns the values, the level-2 ones where they are higher, each team's level, and
+        `{chosen index: ceiling}` for the teams served at level 2 (measured on that board)."""
+        refined = list(refined)
+        levels = [1] * len(refined)
+        ceilings: dict[int, float] = {}
+        if not refined or not COUNTS_HEAD:
+            return refined, levels, ceilings
+        values = [max(float(v), float(plain)) for (plain, _li, _s), v in zip(chosen, refined)]
+        floor = max(values) * (1.0 - COUNTS_MARGIN)
+        near = sorted((k for k, v in enumerate(values) if v >= floor),
+                      key=lambda k: (-values[k], k))[:COUNTS_HEAD]
+        counted = self.pool.batch_score_and_ceiling([teams[k] for k in near], chart_indices, 2)
+        for k, (v, top) in zip(near, counted):
+            if float(v) > float(refined[k]):
+                refined[k] = v
+                levels[k] = 2
+                ceilings[k] = top
+        return refined, levels, ceilings
 
     def _screen_for_replan(self, ranking, leaders, pool, chart_indices):
         """The search's best REPLAN_SCREEN teams re-ranked by their score with the
@@ -726,21 +866,26 @@ class Engine:
 
         from hbuilder.domain.team import Team  # noqa: PLC0415
 
+        # boards as they are (nothing to plan) or re-planned within the materials after the
+        # search: no frequency count to choose on the board the search develops
+        as_is = a is not None and (a.boards == "as_is" or a.replan)
+        lens = LENS_SEARCH and not general and not as_is
+
         def score_pairs(pairs):
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
             teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for li, s in pairs]
-            return self.pool.batch_score(teams, chart_indices=chart_indices)
+            return self.pool.batch_score(teams, chart_indices=chart_indices,
+                                         refine_activation="lens" if lens else None)
 
-        def on_round(record):
-            if emit:
-                emit({"type": "progress", "stage": "search", "round": record["round"],
-                      "evaluated": record["pairs"], "best_so_far": None if record["best"] is None
-                      else {"value": record["best"], "metric": "song_est"}})
+        # In general on the two-tier (fitted) sample the answer merges GENERAL_STARTS searches
+        starts = GENERAL_STARTS if general and len(self._wide) > len(chart_indices) else 1
+        on_round = SearchRounds(emit, starts)
 
-        # In general every leader region is seeded (`outfit_tilt`); a song search keeps the
-        # gate repair
-        tilt_of = outfit_tilt(pool) if general else None
+        # every leader region is seeded (`outfit_tilt`), In general and on one song alike: on
+        # one song the gate repair also missed whole regions (Lui / Ocean Elegance's holoX set
+        # on m0155, +1.0 %; Okayu / Salty Breeze Runway's GAMERS set on m0342)
+        tilt_of = outfit_tilt(pool)
         t0 = time.perf_counter()
         with self.lock:
             found = joint_search.search(pool, leaders, score_pairs, gate_of=self.mf.gate_of,
@@ -748,13 +893,14 @@ class Engine:
                                         always=always, seed=seed, on_round=on_round,
                                         tilt_of=tilt_of)
             ranking = found["ranking"]
-            if general and len(self._wide) > len(chart_indices):
+            if starts > 1:
                 # In general on the two-tier (fitted) sample: further independent starts, merged. One search settles in
                 # one region of teams; the best can sit four members away and never be
                 # proposed: separate seeds can settle on different sets even where the
                 # sample ranks them the same way as every chart does, so it is the reach
                 merged = {(li, s): v for v, li, s in ranking}
-                for extra in range(1, GENERAL_STARTS):
+                for extra in range(1, starts):
+                    on_round.next_start()
                     more = joint_search.search(pool, leaders, score_pairs, gate_of=self.mf.gate_of,
                                                require=require, allowed=allowed,
                                                seed=seed + 104729 * extra, on_round=on_round,
@@ -818,24 +964,37 @@ class Engine:
                             sample_rank[(li, s)] = k
                             ranking.append((float(v), li, s))
                         ranking.sort(key=lambda r: (-r[0], r[1], r[2]))
-                chosen, refined = [], []
+                chosen, refined, levels, counted_ceilings = [], [], [], {}
+                if not as_is and GENERAL_COUNTS_HEAD:
+                    # the best teams again on every chart, each chart with the members'
+                    # frequency node counts chosen for it (`parallel_refine.ChartCounts`)
+                    if cancel is not None and cancel.is_set():
+                        raise Cancelled()
+                    chosen = self._counts_funnel(ranking, leaders, pool)
+                    refined = self.pool.batch_score(
+                        [Team(leader=leaders[li], members=tuple(pool[i] for i in s))
+                         for _v, li, s in chosen], chart_indices=None, refine_activation=COUNTS)
+                    levels = [COUNTS] * len(chosen)
             else:
-                # the refinement: the best teams with their activation nodes chosen jointly
-                as_is = a is not None and (a.boards == "as_is" or a.replan)
-                # boards as they are (nothing to plan) or re-planned within the materials
-                # below: no activation refinement on a board that is not the one served
-                chosen = [] if as_is else list(ranking[:REFINE_HEAD])
+                # the refinement: the best teams with their activation nodes chosen jointly; no
+                # activation refinement on a board that is not the one served (`as_is` above)
+                chosen = [] if as_is else self._count_funnel(ranking, leaders, pool, chart_indices,
+                                                             lens=lens)
                 teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s))
                          for _v, li, s in chosen]
                 refined = self.pool.batch_score(teams, chart_indices=chart_indices,
                                                 refine_activation=True) if teams else []
+                refined, levels, counted_ceilings = self._count_cooldowns(
+                    chosen, teams, refined, chart_indices)
                 if replan:
                     ranking = self._screen_for_replan(ranking, leaders, pool, chart_indices)
         t_refine = time.perf_counter() - t0 - search_seconds
         better = {(li, s): max(float(v), plain) for (plain, li, s), v in zip(chosen, refined)}
-        # the rows served on their REFINED board (a refinement that found nothing better
-        # leaves the row on the plain develop's)
-        on_refined = {(li, s) for (plain, li, s), v in zip(chosen, refined) if float(v) >= plain}
+        # the rows served on their REFINED board, with the refinement level the value was
+        # served at (a refinement that found nothing better leaves the row on the plain
+        # develop's)
+        on_refined = {(li, s): levels[k] for k, ((plain, li, s), v) in enumerate(zip(chosen, refined))
+                      if float(v) >= plain}
         materials_failed: list[str] = []
         plan_optimal: dict | None = None          # set when the boards were re-planned
         planned_boards: dict = {}                 # (leader index, set) -> its re-planned board
@@ -861,7 +1020,12 @@ class Engine:
                    "best": ref if ref is not None else value,
                    "best_plain": value if ref is not None else None,
                    "members": [c.id for c in members], "member_names": [c.member for c in members],
-                   "member_order": None, "refined": ref is not None,
+                   "member_order": None,
+                   # the refinement level the value was served at: True (1) moves the
+                   # activation nodes one at a time, 2 also tried every frequency count;
+                   # In general, COUNTS: the frequency counts chosen chart by chart
+                   "refined": ((True if on_refined.get((li, s), 1) == 1 else on_refined[(li, s)])
+                               if ref is not None else False),
                    "p10": None, "p50": None, "p90": None, "song_max": None,
                    "dist_mean": None, "dist_verified": None}
             if plan_optimal is not None:
@@ -875,8 +1039,11 @@ class Engine:
         served = served[:max(top, RANKING)]
         t_ceiling = time.perf_counter()
         if not general and served:
+            # the level-2 rows' ceilings were measured with their expectation (one develop)
+            known = {(li, s): counted_ceilings[k] for k, (_plain, li, s) in enumerate(chosen)
+                     if k in counted_ceilings and on_refined.get((li, s)) == 2}
             self._ceilings(served, leaders, pool, chart_indices, on_refined, planned_boards, cancel,
-                          replan)
+                          replan, known)
         t_ceiling = time.perf_counter() - t_ceiling
         # each leader's best team, with its next sets as alternatives
         rows, by_leader = [], {}
@@ -894,13 +1061,19 @@ class Engine:
                                 for _v, li, s in ranking[:HINTS]]
         stats = found["stats"]
         extra = {}
+        # In general with the frequency counts chosen per chart for the rows served
+        counted = general and bool(better)
         if general:
+            first = (lpos[served[0]["leader"]],
+                     tuple(sorted(position[m] for m in served[0]["members"])))
             extra = {"charts": len(self.charts), "levels": list(self.levels) if self.levels else None,
                      "sample": [f"{c.music_id}/{c.difficulty}" if self.levels else c.music_id
                                 for c in sample],
                      "rescored": len(ranking),
                      # where the served #1 stood in the sample's order (1 = the sample agreed)
-                     "best_sample_rank": sample_rank.get((ranking[0][1], ranking[0][2]))}
+                     "best_sample_rank": sample_rank.get(first)}
+        per_song = ("the board rebuilt per song"
+                    + (" and its activation-frequency nodes chosen per song" if counted else ""))
         return {
             **extra,
             "scope": "general" if general else "song", "song": song or None,
@@ -911,12 +1084,14 @@ class Engine:
             "notes": a.notes() if a else [],
             "difficulty": self.difficulty, "written": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "objective": ((f"mean score over every chart of level {self.levels[0]}-{self.levels[1]} "
-                           f"({len(self.charts)} charts, any difficulty), the board rebuilt per song")
+                           f"({len(self.charts)} charts, any difficulty), {per_song}")
                           if general and self.levels else
-                          f"mean score over every {self.difficulty} chart, the board rebuilt per song"
+                          f"mean score over every {self.difficulty} chart, {per_song}"
                           if general else f"expected score on this song's {self.difficulty} chart"),
             "method": ("joint leader + members search on a chart sample, run for this request "
-                       "(no cache); the best teams re-scored on every chart" if general else
+                       "(no cache); the best teams re-scored on every chart"
+                       + (f", the best {GENERAL_COUNTS_HEAD} of them with each song's "
+                          "activation-frequency nodes chosen" if counted else "") if general else
                        "joint leader + members search, run for this request "
                        "(no cache); the best teams re-scored with the activation refinement"),
             "on_demand": True,

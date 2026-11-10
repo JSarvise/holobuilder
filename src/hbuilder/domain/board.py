@@ -117,6 +117,7 @@ the acceptance test. See `tests/test_board.py`, which pins them.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -675,6 +676,10 @@ class BoardModel:
     _base_special: Mapping[str, int] = field(
         default_factory=dict, compare=False, repr=False
     )
+    # The model a `with_cooldowns` copy was made from (the root of a chain of copies), or
+    # `None`. A copy differs from it only in the cooldown terms, so anything that is not a
+    # function of the cooldowns (the Overall Power) can be computed once for both.
+    _cooldown_source: "BoardModel | None" = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         # Both derived here rather than at every construction site so no caller
@@ -1074,6 +1079,27 @@ class BoardModel:
         a future node at another scope is a loud failure rather than a term
         quietly paid to the wrong cards."""
         return self._uptime.get(holomem, (0.0, 0.0))
+
+    def with_cooldowns(self, cooldowns: Mapping[str, float]) -> "BoardModel":
+        """This model with some holomems' activation-frequency term (`uptime_for`'s
+        `cooldown_shorten`, a fraction) replaced: `{holomem: cooldown_shorten}`. Everything
+        else, derived terms and caches included, is shared, so the copy scores what this
+        board would score with those cooldowns. Built for screening activation-frequency
+        choices without re-assembling a board (`board_plan.refine_cooldown_counts`)."""
+        new = copy.copy(self)
+        uptime = dict(self._uptime)
+        for holomem, shorten in cooldowns.items():
+            rate, _old = uptime.get(holomem, (0.0, 0.0))
+            uptime[holomem] = (rate, float(shorten))
+        object.__setattr__(new, "_uptime", uptime)
+        object.__setattr__(new, "_cooldown_source", self.power_identity)
+        return new
+
+    @property
+    def power_identity(self) -> "BoardModel":
+        """The model whose Overall Power this one shares: the one a `with_cooldowns` copy
+        was made from, else itself. The cooldowns never enter the Overall Power."""
+        return self._cooldown_source if self._cooldown_source is not None else self
 
     def skill_effect_up_for(
         self, members: tuple[Card, ...], leader_holomem: str | None

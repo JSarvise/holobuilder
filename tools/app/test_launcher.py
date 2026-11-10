@@ -44,6 +44,34 @@ def test_env_carries_the_settings_and_never_reads_the_game():
     assert "HBUILDER_WORKERS" not in st.env(dict(st.DEFAULTS), base={})   # 0 = every thread
 
 
+def test_park_scan_is_off_unless_turned_on(tmp_path, monkeypatch):
+    monkeypatch.setattr(st, "SERVER_API", tmp_path / "server_api.json")   # save() writes it too
+    assert st.DEFAULTS["park_scan"] is False
+    assert st.env(dict(st.DEFAULTS), base={})["HB_PARK_SCAN"] == "0"
+    assert st.env(dict(st.DEFAULTS, park_scan=True), base={})["HB_PARK_SCAN"] == "1"
+    cred = tmp_path / "C0FFEE"
+    cred.write_bytes(b"x" * 255)
+    good = dict(st.DEFAULTS, credential_path=str(cred), server_token="t" * 64)
+    assert "park_scan" in st.validate(dict(good, park_scan="yes"))
+    saved = st.save(dict(good, park_scan=True), tmp_path / "s.json")
+    assert saved["park_scan"] is True and st.load(tmp_path / "s.json")["park_scan"] is True
+
+
+def test_webview_cache_is_emptied_once_per_new_version(tmp_path):
+    prof = tmp_path / "webview"
+    cache = prof / "EBWebView" / "Default" / "Cache"
+    keep = prof / "EBWebView" / "Default" / "Local Storage"
+    for d in (cache, keep):
+        d.mkdir(parents=True)
+        (d / "f").write_text("x", "utf8")
+    assert launcher.clear_webview_cache_after_update(prof, "0.1.59") is True
+    assert not cache.exists() and (keep / "f").exists()        # localStorage stays
+    cache.mkdir(parents=True)
+    assert launcher.clear_webview_cache_after_update(prof, "0.1.59") is False
+    assert cache.exists()                                      # same version: untouched
+    assert launcher.clear_webview_cache_after_update(prof, "0.1.60") is True
+
+
 def test_workers_setting_reaches_the_solver(monkeypatch):
     from hbuilder.solver import parallel
     monkeypatch.setenv("HBUILDER_WORKERS", "3")

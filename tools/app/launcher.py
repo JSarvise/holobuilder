@@ -201,7 +201,8 @@ def diagnostics(s: dict, *, engine: str, log: Path = LOG) -> str:
         f"Windows {platform.version()} · Python {platform.python_version()}",
         f"{hw['cores']} cores / {hw['threads']} threads · {hw['ram_gb']} GB · {hw['gpu'] or 'GPU ?'}",
         f"region {s.get('region')} · workers {s.get('workers') or 'all'} · art cache "
-        f"{s.get('cache_mb') or 'unlimited'} MB · server {s.get('server_url')}",
+        f"{s.get('cache_mb') or 'unlimited'} MB · server {s.get('server_url')}"
+        f" · park scan {'on' if s.get('park_scan') else 'off'}",
         f"account file {'set, exists' if cred and Path(cred).is_file() else 'set, MISSING' if cred else 'not set'}"
         f" · Steam ID {'typed' if s.get('steam_id') else 'from Steam'}"
         f" · access key {'set' if s.get('server_token') else 'NOT SET'}",
@@ -280,6 +281,30 @@ def icon_file(chr_id: str) -> Path | None:
         return out
     except Exception:  # noqa: BLE001 -- no icon is a default icon, never a failed start
         return None
+
+
+WEBVIEW_CACHES = ("Cache", "Code Cache", "GPUCache")
+
+
+def clear_webview_cache_after_update(storage: Path, version: str) -> bool:
+    """Empty the window's HTTP and script caches the first time a new app version starts.
+
+    The window keeps a persistent profile (`state/webview`, so localStorage survives restarts);
+    its cache then serves the previous version's Settings page and scripts after an update, and
+    the window has no reload key. Only the caches go: localStorage, cookies and settings stay.
+    True when it cleared them."""
+    import shutil  # noqa: PLC0415
+    marker = storage / "app_version.txt"
+    try:
+        if marker.read_text("utf8").strip() == version:
+            return False
+    except OSError:
+        pass
+    for name in WEBVIEW_CACHES:
+        shutil.rmtree(storage / "EBWebView" / "Default" / name, ignore_errors=True)
+    storage.mkdir(parents=True, exist_ok=True)
+    marker.write_text(version, "utf8")
+    return True
 
 
 def set_window_icon(window, path: Path | None) -> None:
@@ -617,7 +642,9 @@ def main() -> int:
         if api.home is None:
             api.home = window.get_current_url()
     window.events.loaded += loaded
-    webview.start(private_mode=False, storage_path=str(paths.STATE / "webview"))
+    storage = paths.STATE / "webview"
+    clear_webview_cache_after_update(storage, app_version())
+    webview.start(private_mode=False, storage_path=str(storage))
     api.stop()
     return 0
 

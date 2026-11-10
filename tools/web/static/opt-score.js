@@ -30,6 +30,9 @@ function optsKey(S) {
     S.allinvited, S.norefund, S.branches, JSON.stringify(S.targets), S.lvmode === "range" ? [S.lvlo, S.lvhi] : 0, S.lmember, S.loutfit, S.nooverlap, S.require, S.exclude]);
 }
 const teamKey = (leader, members) => leader + "|" + [...members].sort().join(",");
+// a row's refinement level as its detail asks for it: 2 (every frequency count tried) and
+// "counts" (In general: the frequency counts chosen song by song) as they are, else a boolean
+const refineOf = level => (level === 2 || level === "counts" ? level : !!level);
 export const leaderOpts = S => {
   const o = {};
   if (S.lmember) o.leader_member = S.lmember;
@@ -499,7 +502,7 @@ async function perSongDetail(ctxT, T, i, det) {
     // an on-demand row carries the search's levers, as the song rows do, so an "In general"
     // search's detail does not fall back to boards and cards as they are
     const body = { song, difficulty: S.difficulty, basis: tsBasis(S) || "account", cards, ...playOf(S),
-      ...(T.od ? { refine: !!T.refinedLeaf, ...(assumptionsOf(S) ? { assumptions: assumptionsOf(S) } : {}) } : {}) };
+      ...(T.od ? { refine: refineOf(T.refinedLeaf), ...(assumptionsOf(S) ? { assumptions: assumptionsOf(S) } : {}) } : {}) };
     det.body = body;
     const d = await postJSON("/api/row-detail", { ...body, timeline: true });
     if (det.song !== song) return;
@@ -543,7 +546,7 @@ async function after(ctxT, T, i) {
       try {
         const body = { song: S.song, difficulty: S.difficulty, basis: tsBasis(S) || "account", cards, ...playOf(S),
           member_order: T.ordered ? T.members : undefined,
-          ...(T.od ? { refine: !!T.refinedLeaf, ...(assumptionsOf(S) ? { assumptions: assumptionsOf(S) } : {}) } : {}) };
+          ...(T.od ? { refine: refineOf(T.refinedLeaf), ...(assumptionsOf(S) ? { assumptions: assumptionsOf(S) } : {}) } : {}) };
         det.body = body;
         const d = await postJSON("/api/row-detail", { ...body, timeline: true });
         det.fig = fromRowDetail(d);

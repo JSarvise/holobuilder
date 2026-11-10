@@ -85,9 +85,11 @@ def env(sandbox: Path, frozen: Path, *, audit_log: Path, workers: int | None,
             del e[key]
     local = frozen / "localappdata" / "AppData" / "Local"
     local.mkdir(parents=True, exist_ok=True)
+    # No PYTHONHASHSEED here: every process of a run hashes strings its own way, as the
+    # app's do, so an answer that follows a set's order differs between runs and shows.
+    e.pop("PYTHONHASHSEED", None)
     e.update({
         "PYTHONPATH": str(sandbox / "tests" / "golden" / "site"),
-        "PYTHONHASHSEED": "0",
         "PYTHONUTF8": "1",
         "HB_GOLDEN_CLOCK": str(clock_of(frozen) if clock is None else clock),
         "HB_GOLDEN_AUDIT": str(audit_log),

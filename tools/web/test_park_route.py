@@ -341,8 +341,10 @@ def test_no_saved_pick_asks_for_a_refresh(web_base, monkeypatch):
     monkeypatch.setattr(park, "park_saved_state", lambda: None)
     payload = _park(web_base)
     assert payload["available"] is False
-    assert payload["areas"] == []
     assert "Refresh" in payload["reason"]
+    # the maps still travel (the Free Chat section draws on them), with nothing picked on them
+    assert {a["id"] for a in payload["areas"]} == set(FIXTURE_EXPORT["areas"])
+    assert all(not a["picked"] and a["rolled_at"] is None for a in payload["areas"])
 
 
 def test_the_saved_pick_carries_its_capture_time(web_base, monkeypatch):
@@ -411,3 +413,103 @@ def test_real_png_is_served_when_the_export_is_present(web_base):
     status, ctype = _status_and_ctype(f"{web_base}/park/area-a01.png")
     assert status == 200
     assert ctype == "image/png"
+
+
+# ---------------------------------------------------------------------------
+# Free Chat: the export's catalogue joined to the refreshes' read log
+# ---------------------------------------------------------------------------
+FC_EXPORT = {
+    "chats": {
+        "chat-read": {"site": "facility-a01-house", "x": 1, "y": 2,
+                      "cast": ["chr-00001", "chr-00013"], "conditions": ["cd-q"]},
+        "chat-pending": {"site": "facility-a01-house", "x": 1, "y": 2,
+                         "cast": ["chr-00013", "chr-00002"], "conditions": ["cd-q"]},
+        "chat-unseen": {"site": "facility-a01-multiplay", "x": 5, "y": 6,
+                        "cast": ["chr-00024", "chr-00001"], "conditions": []},
+    },
+    "sites": {
+        "facility-a01-house": {"name": "holo Home", "map": "area-a01", "x": 1, "y": 2,
+                               "inside": None, "photo": "park-site-area-a01-house-00.jpg",
+                               "icon_image": "park-icon-house.png"},
+        "facility-a01-multiplay": {"name": "Fortune Network", "map": "area-a01", "x": 5, "y": 6,
+                                   "inside": "area-a01-multiplay", "photo": None,
+                                   "icon_image": None},
+    },
+    "conditions": {"cd-q": "Main quest 1-2 cleared"},
+    "characters": {"chr-00001": {"name": "Tokino Sora", "short": "Sora"},
+                   "chr-00002": {"name": "Roboco", "short": "Roboco"},
+                   "chr-00013": {"name": "AZKi", "short": "AZKi"},
+                   "chr-00024": {"name": "Amane Kanata", "short": "Kanata"}},
+}
+FC_LOG = {"chats": {
+    "chat-read": {"read": ["chr-00001", "chr-00013"], "seen": "2026-10-26T02:37:44+01:00",
+                  "read_seen": "2026-08-30T02:29:44+02:00"},
+    "chat-pending": {"read": [], "seen": "2026-10-26T02:37:44+01:00", "read_seen": None},
+    # a row the catalogue no longer has must not invent a chat
+    "gone": {"read": ["chr-00001"], "seen": "2026-08-08T00:54:02+02:00", "read_seen": None}},
+    "observations": [{"at": "2026-08-08T00:54:02+02:00", "areas": ["area-a01"]},
+                     {"at": "2026-10-26T02:37:44+01:00", "areas": ["area-a01"]}]}
+
+
+def test_free_chat_status_is_read_pending_or_unseen():
+    out = park.join_free_chat(FC_EXPORT, FC_LOG, {"chr-00001": 6, "chr-00013": 10})
+    status = {c["id"]: c["status"] for c in out["chats"]}
+    assert status == {"chat-read": "read", "chat-pending": "pending", "chat-unseen": "unseen"}
+    assert (out["total"], out["read"], out["pending"], out["unseen"]) == (3, 1, 1, 1)
+    assert [c for c in out["chats"] if c["id"] == "chat-read"][0]["conditions"] == ["Main quest 1-2 cleared"]
+    assert out["first_seen"] == "2026-08-08T00:54:02+02:00" and out["observations"] == 2
+
+
+def test_free_chat_sites_and_holomems_tally_their_own_chats():
+    out = park.join_free_chat(FC_EXPORT, FC_LOG, {"chr-00001": 6, "chr-00013": 10})
+    sites = {s["id"]: s for s in out["sites"]}
+    house = sites["facility-a01-house"]
+    assert (house["total"], house["read"], house["pending"], house["unseen"]) == (2, 1, 1, 0)
+    assert house["photo"] == "/park/site-area-a01-house-00.jpg"
+    assert house["icon"] == "/park/icon-house.png"
+    assert sites["facility-a01-multiplay"]["inside"] is True
+    who = {c["id"]: c for c in out["characters"]}
+    assert (who["chr-00013"]["total"], who["chr-00013"]["read"]) == (2, 1)
+    assert who["chr-00013"]["game_read"] == 10 and who["chr-00013"]["game_capped"] is True
+    assert who["chr-00001"]["game_capped"] is False
+    # a holomem the game gives no Free Chat achievement
+    assert who["chr-00024"]["game_read"] is None
+
+
+def test_free_chat_without_a_log_is_all_unseen_and_without_an_export_says_why():
+    out = park.join_free_chat(FC_EXPORT, None, {})
+    assert out["unseen"] == 3 and out["observations"] == 0 and out["first_seen"] is None
+    absent = park.join_free_chat(None, FC_LOG, {})
+    assert absent["available"] is False and "park_export.py" in absent["reason"]
+
+
+def test_free_chat_counters_come_from_the_games_achievement():
+    snapshot = {"missions": [
+        {"mission_id": "mission-achievement-chr-00001-absolute_park_talk_free_unique_count",
+         "progress": 6},
+        {"mission_id": "mission-achievement-chr-00001-increment_live_play_count-m0032",
+         "progress": 32}]}
+    assert park.free_chat_counters(snapshot) == {"chr-00001": 6}
+    assert park.free_chat_counters(None) == {}
+
+
+def test_the_park_route_carries_free_chat(web_base, stub_park, monkeypatch):
+    monkeypatch.setattr(park, "park_free_chat", lambda: {"available": True, "total": 3})
+    assert _park(web_base)["free_chat"] == {"available": True, "total": 3}
+
+
+def test_site_photos_and_icons_are_servable_names_only():
+    for name in ["site-area-a01-house-00.jpg", "icon-house.png", "icon-fishing.png", "symbol.png"]:
+        assert park.PARK_IMAGE_NAME_RE.match(name), name
+    for name in ["site-area-a01-house-00.png", "icon-house.jpg", "site-../x.jpg",
+                 "icon-../x.png", "site-area-a01/../x.jpg", "icon-House.png"]:
+        assert not park.PARK_IMAGE_NAME_RE.match(name), name
+
+
+@pytest.mark.skipif(
+    not (config.PARK_EXPORT_DIR / "park-site-area-a01-house-00.jpg").is_file(),
+    reason="dumps/park_export/ is gitignored",
+)
+def test_real_site_photo_is_served_as_jpeg(web_base):
+    status, ctype = _status_and_ctype(f"{web_base}/park/site-area-a01-house-00.jpg")
+    assert status == 200 and ctype == "image/jpeg"

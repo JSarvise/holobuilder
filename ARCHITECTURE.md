@@ -28,10 +28,10 @@ changed. Each step is one script and can be run alone. The main groups:
 | Steps | What they make |
 |---|---|
 | `master_index`, `level_tables`, `node_master` | the game's master tables, decoded (`dumps/holodori/main_*.json` and friends) |
-| `account`, `inventory`, `board` | your account: cards with level, bloom and limit break, board nodes bought, items |
+| `account`, `inventory`, `board` | your account: cards with level, bloom and limit break, board nodes bought, items, the Park's day (`dumps/park_state.json`) and every Free Chat read so far (`dumps/park_free_chat_log.json`, merged on each run) |
 | `cards`, `import`, `add_cards` | the card catalogue; new cards are **appended** to `data/cards.json`, never edited |
 | `charts`, `songs`, `chart_lib` | every song's notes and timing (`dumps/charts.json`) |
-| `card_art`, `jackets`, `live2d`, `chibi`, `*_icons`, `park_export` | pictures the pages draw |
+| `card_art`, `jackets`, `live2d`, `chibi`, `*_icons`, `park_export` | pictures the pages draw (`park_export` also writes the Free Chat catalogue: where each conversation stands and who is in it) |
 | `event_*` | open events, bonuses, borders and history |
 
 Reading the game's API needs the client's payload seed, which is not in this repository: the

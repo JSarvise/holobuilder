@@ -75,6 +75,34 @@ def test_job_reports_cancel_and_a_filter_error_as_events():
     assert events[4]["message"] == "no card matches"
 
 
+def test_one_search_reports_its_rounds_with_no_start_count():
+    events = []
+    rounds = ondemand.SearchRounds(events.append)
+    rounds({"round": 0, "pairs": 500, "best": None})
+    rounds({"round": 1, "pairs": 1700, "best": 2_100_000.0})
+    assert events == [
+        {"type": "progress", "stage": "search", "round": 0, "evaluated": 500, "best_so_far": None},
+        {"type": "progress", "stage": "search", "round": 1, "evaluated": 1700,
+         "best_so_far": {"value": 2_100_000.0, "metric": "song_est"}}]
+    ondemand.SearchRounds(None)({"round": 0, "pairs": 1, "best": None})     # no listener: nothing
+
+
+def test_merged_searches_say_which_one_runs_and_keep_counting_teams():
+    """In general on a maxed account the answer merges two searches; each numbers its rounds
+    and its teams from zero. The events name the search (`start` of `starts`) and count the
+    teams of both, so the page does not show the same search starting over."""
+    events = []
+    rounds = ondemand.SearchRounds(events.append, starts=2)
+    rounds({"round": 0, "pairs": 400, "best": 3.0})
+    rounds({"round": 2, "pairs": 9000, "best": 5.0})
+    rounds.next_start()
+    rounds({"round": 0, "pairs": 300, "best": 4.0})
+    rounds({"round": 1, "pairs": 2500, "best": 4.5})
+    assert [(e["start"], e["starts"], e["round"], e["evaluated"]) for e in events] == [
+        (1, 2, 0, 400), (1, 2, 2, 9000), (2, 2, 0, 9300), (2, 2, 1, 11500)]
+    assert [e["best_so_far"]["value"] for e in events] == [3.0, 5.0, 4.0, 4.5]
+
+
 def test_parse_filters_reads_lists_and_comma_strings():
     f = ondemand.parse_filters({"leader_member": "Takane Lui", "require": "a,b", "exclude": ["c"],
                                 "no_leader_overlap": 1})
@@ -111,9 +139,22 @@ def _fake_engine(n_cards: int = 14, n_charts: int = 9):
             out = []
             for t in teams:
                 base = sum(m.w for m in t.members) * (1.1 if t.leader.type == "Cute" else 1.0)
-                out.append(sum(base * 1000 * (1 + 0.01 * k) for k in idx) / len(idx)
-                           + (5 if refine_activation else 0))
+                plain = sum(base * 1000 * (1 + 0.01 * k) for k in idx) / len(idx)
+                if refine_activation == "screen_both":
+                    out.append((plain, plain + 4))      # (plain, its count screen)
+                    continue
+                if refine_activation == "counts_both":
+                    out.append((plain, plain + 6))      # (plain, the counts chosen per chart)
+                    continue
+                # the search's lens adds 3, the refinement 5, its level 2 (every frequency
+                # count) 8, the counts chosen per chart (In general) 6
+                out.append(plain + (8 if refine_activation == 2 else 3 if refine_activation == "lens"
+                                    else 6 if refine_activation == "counts"
+                                    else 5 if refine_activation else 0))
             return out
+
+        def batch_score_and_ceiling(self, teams, chart_indices, refine_activation):
+            return [(v, v * 1.05) for v in self.batch_score(teams, chart_indices, refine_activation)]
 
         def batch_ceiling(self, teams, chart_indices, refine, planned):
             # the run if every ACTIVE fires: above the expectation, on the same board
@@ -132,7 +173,7 @@ def _fake_engine(n_cards: int = 14, n_charts: int = 9):
     eng.reps, eng.by_id = reps, {c.id: c for c in reps}
     eng.pool, eng.lock, eng.hints = Pool(), threading.Lock(), {}
     eng.started_seconds, eng.closed, eng.key = 0.0, False, "k"
-    eng._sample, eng._wide = None, ()
+    eng._sample, eng._wide, eng._counts_charts = None, (), None
     return eng, calls
 
 
@@ -149,7 +190,9 @@ def test_engine_song_and_general_payloads(monkeypatch):
     eng, calls = _fake_engine()
     eng.basis = "maxed"                                           # a GENERAL_FITTED basis
     song = eng.search("m0002")
-    assert song["scope"] == "song" and song["ranking"][0]["refined"] is True
+    # the best refined teams are refined once more at level 2 (every frequency count)
+    assert song["scope"] == "song" and song["ranking"][0]["refined"] == 2
+    assert any(r["refined"] is True for r in song["ranking"])
     # every served row of a one-song search carries its ceiling (the page sorts by Max)
     assert all(r["song_max"] is not None and r["song_max"] > r["best"] - 5 for r in song["ranking"])
     assert all(c[1] in ((2,), "ceiling") for c in calls)          # only that chart
@@ -163,11 +206,15 @@ def test_engine_song_and_general_payloads(monkeypatch):
     assert all(r["song_max"] is None for r in gen["ranking"])     # an average over charts: no single run
     values = [r["best"] for r in gen["ranking"]]
     assert values == sorted(values, reverse=True)
-    # the served number is the FULL mean (every chart), not the sample's
+    # the served number is the FULL mean (every chart), not the sample's, with the
+    # frequency counts chosen per chart for every row served (the plain mean beside it)
     by_id = eng.by_id
     top = gen["ranking"][0]
     team = SimpleNamespace(leader=by_id[top["leader"]], members=[by_id[m] for m in top["members"]])
-    assert top["best"] == pytest.approx(eng.pool.batch_score([team])[0])
+    assert top["best_plain"] == pytest.approx(eng.pool.batch_score([team])[0])
+    assert top["best"] == pytest.approx(top["best_plain"] + 6)
+    assert all(r["refined"] == "counts" for r in gen["ranking"])
+    assert "activation-frequency nodes chosen per song" in gen["objective"]
     # the sample was fitted on random teams scored on every chart, once: a second
     # search on the same engine fits nothing; a new engine fits the same sample
     assert any(c[1] == "per_chart" for c in calls)
@@ -461,3 +508,35 @@ def test_a_search_uses_its_own_plan_options_and_hints():
     with pytest.raises(ValueError):
         eng.search("m0001", assumptions=other)
 
+
+
+def test_the_counts_funnel_takes_the_teams_the_counts_lift_most(monkeypatch):
+    """In general: the teams whose frequency counts are chosen on every chart are the best of
+    the funnel by the plain mean times what the counts add on the funnel's chart sample, not
+    the best by the plain mean alone; each keeps its plain value, in the ranking's order."""
+    from hbuilder.domain import team as team_mod
+
+    monkeypatch.setattr(ondemand, "GENERAL_COUNTS_HEAD", 3)
+    monkeypatch.setattr(ondemand, "GENERAL_COUNTS_FUNNEL", 8)
+    monkeypatch.setattr(ondemand, "GENERAL_COUNTS_SAMPLE", 4)
+    monkeypatch.setattr(team_mod, "Team", lambda leader, members: SimpleNamespace(leader=leader, members=members))
+    eng, _calls = _fake_engine()
+    asked = []
+
+    class Pool:
+        def batch_score(self, teams, chart_indices=None, refine_activation=None):
+            asked.append((len(teams), tuple(chart_indices), refine_activation))
+            # the 6th team gains 5 % from its counts, the others nothing
+            return [(1000.0, 1050.0 if k == 5 else 1000.0) for k in range(len(teams))]
+    eng.pool = Pool()
+    leaders, pool = eng.reps, eng.reps
+    ranking = [(1000.0 - k, k, (k + 1,)) for k in range(12)]
+    chosen = ondemand.Engine._counts_funnel(eng, ranking, leaders, pool)
+    assert chosen == [ranking[0], ranking[1], ranking[5]]
+    # one estimate of the funnel's 8 teams, on the 4 sampled charts
+    assert asked == [(8, eng._counts_charts, "counts_both")] and len(eng._counts_charts) == 4
+    # no more teams than the head, or no more charts than the sample: the head as it is
+    assert ondemand.Engine._counts_funnel(eng, ranking[:3], leaders, pool) == ranking[:3]
+    monkeypatch.setattr(ondemand, "GENERAL_COUNTS_SAMPLE", 9)
+    assert ondemand.Engine._counts_funnel(eng, ranking, leaders, pool) == ranking[:3]
+    assert len(asked) == 1

@@ -1,5 +1,5 @@
-"""The account refresh (`POST /api/refresh`) and the Users console (`GET /api/admin/me`,
-`GET /api/admin/users`, `POST /api/admin/user`).
+"""The account refresh (`POST /api/refresh`), the Park scan (`POST /api/park/scan`) and the
+Users console (`GET /api/admin/me`, `GET /api/admin/users`, `POST /api/admin/user`).
 
 ⚠ The refresh is the one route that WRITES, and it writes in a SEPARATE PROCESS:
 `refresh_all.py` owns the data-authority contract (it hashes `data/owned.json` before and
@@ -82,6 +82,36 @@ def refresh(h) -> None:
         "stderr": "",
         "gacha": gacha_block,
     })
+
+
+def park_scan_route(h) -> None:
+    """`POST /api/park/scan`, the Park page's "Scan all areas": `park_scan.py` in its own
+    process, which owns every guard (game closed, quest gate, master check, a repeat login only,
+    once per game day, always back to the starting area). Off unless `HB_PARK_SCAN=1`. It logs
+    in, so it shares the refresh's lock: never two logins at once."""
+    if os.environ.get(config.PARK_SCAN_ENV) != "1":
+        h.reply_json(403, {"error": "Scan all areas is off: turn it on in Settings"})
+        return
+    if not REFRESH_LOCK.acquire(blocking=False):
+        h.reply_json(409, {"error": "a refresh or a scan is already running; wait for it to "
+                                    "finish"})
+        return
+    try:
+        ran = scripts.run_recon_script(h, config.PARK_SCAN_SCRIPT, "park-scan")
+        if ran is None:
+            return
+        code, stdout = ran
+        h.reply_json(200, {"returncode": code, "stdout": stdout[-8000:],
+                           "last": config.read_json(config.PARK_SCAN_LAST_PATH)})
+    except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+        raise
+    except Exception as exc:  # noqa: BLE001
+        import traceback  # noqa: PLC0415
+
+        print(traceback.format_exc(), flush=True)
+        h.reply_json(500, {"returncode": -1, "error": f"{type(exc).__name__}: {exc}"})
+    finally:
+        REFRESH_LOCK.release()
 
 
 def admin_proxy(h, method: str, route: str) -> None:

@@ -59,7 +59,7 @@ DEFAULT_PORT = 8731
 REGIONS = ("us", "as", "jp")             # the order a region is looked for: worldwide ones first
 PACKAGES = (("Crypto", "pycryptodome"), ("UnityPy", "UnityPy"), ("h2", "h2"),
             ("highspy", "highspy"), ("PIL", "pillow"), ("requests", "requests"))
-KERNELS = ("notewalk", "connect", "surrogate")
+KERNELS = ("notewalk", "connect", "surrogate", "cdvar")
 WINLIBS = "winget install BrechtSanders.WinLibs.POSIX.UCRT"
 WINDOWS = sys.platform == "win32"
 # The oldest Python holobuilder runs on (pyproject.toml's requires-python): the compiled board
@@ -261,7 +261,10 @@ def refresh(args: argparse.Namespace, extra: list[str]) -> int:
     if code == 0:
         print(f"Done. Start holobuilder with {launcher('start')} (or press Refresh in its pages next time).")
     elif "DATE_CHANGED" in seen:
-        print("The game's day has changed since this account last opened the game (04:00 JST):")
+        from hbuilder import game_day  # noqa: PLC0415
+
+        print("The game's day has changed since this account last opened the game "
+              f"({game_day.reset_hour():02d}:00 JST):")
         print(f"open the game once, then run {launcher('refresh')} again. Everything else above is current.")
     else:
         print(f"The refresh ended with exit code {code}: see the lines above, and "
@@ -375,8 +378,11 @@ def start(args: argparse.Namespace) -> int:
     if port is None:
         return 1
     url = f"http://127.0.0.1:{port}/optimizer"
+    env = child_env(credential, region_host(args.region))
+    if args.park_scan:
+        env["HB_PARK_SCAN"] = "1"           # the Park page's "Scan all areas" (park_scan.py)
     proc = subprocess.Popen([sys.executable, "-u", str(SERVER), "--port", str(port)], cwd=str(REPO),
-                            env=child_env(credential, region_host(args.region)))
+                            env=env)
     try:
         if wait_until_up(url, proc):
             print(f"\n  holobuilder is at {url}   (close this window or press Ctrl+C to stop it)\n")
@@ -548,6 +554,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--port", type=int, default=DEFAULT_PORT)
     s.add_argument("--no-browser", action="store_true", help="do not open the browser")
     s.add_argument("--region", choices=sorted(REGION_HOSTS), help="as for refresh")
+    s.add_argument("--park-scan", action="store_true",
+                   help="turn on the Park page's 'Scan all areas': it logs into your account, "
+                        "enters every Park area with Free Chats and goes back to yours")
     args, extra = ap.parse_known_args(argv)
     if extra and args.cmd != "refresh":
         ap.error("unrecognized arguments: " + " ".join(extra))

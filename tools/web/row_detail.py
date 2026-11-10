@@ -337,7 +337,7 @@ def _leaf_inputs_cached(basis: str, song: str, difficulty: str, assumptions=None
     return built
 
 
-def leaf_detail(built: Mapping, team: Team, *, refine: bool = False,
+def leaf_detail(built: Mapping, team: Team, *, refine: bool | int = False,
                 want_distribution: bool = False, want_timeline: bool = False,
                 member_order: Sequence[str] | None = None, panel: bool = True,
                 chart=None, as_is: bool = False, keep_law: bool = False,
@@ -375,8 +375,11 @@ def leaf_detail(built: Mapping, team: Team, *, refine: bool = False,
     by_id = {c.id: c for c in (team.leader, *team.members)}
     out.update({
         "leaf": "two-stage leaf: plan cache seeded from the basis' nominal team"
-                + (", activation nodes refined on this chart" if refine else ""),
-        "refined": bool(refine),
+                + (", activation-frequency nodes chosen on this chart" if refine == "counts"
+                   else ", activation nodes refined on this chart" if refine else ""),
+        # the refinement level, as a searched row carries it (True = 1, 2, "counts" for an
+        # In general row, or False)
+        "refined": refine if refine in (2, "counts") else bool(refine),
         "board_state": board_state_of(bt),
         # the bench's root sockets the plan chose with the team's (`RefineContext.socket_bench`)
         "bench_sockets": [{"chr": p.chr, "holomem": (ctx.name_by_chr or {}).get(p.chr),
@@ -586,15 +589,15 @@ def _whole_plan_cost(whole_plan: Mapping, ctx) -> dict:
 
 
 def two_stage_detail(basis: str, song: str, difficulty: str, leader_id: str,
-                     member_ids: Sequence[str], *, refine: bool = False,
+                     member_ids: Sequence[str], *, refine: bool | int = False,
                      want_distribution: bool = False, want_timeline: bool = False,
                      member_order: Sequence[str] | None = None, as_is: bool = True,
                      assumptions=None, want_reset_price: bool = False,
                      play: tuple[str, bool] | None = None, keep_law: bool = False,
                      want_notes: bool = False) -> dict:
     """A searched (or event, `refine=False`) row re-developed on the leaf that
-    ranked it, with every figure from that one board. `refine`: the row was ranked
-    with the activation refinement.
+    ranked it, with every figure from that one board. `refine`: the refinement level the
+    row was ranked at (`parallel_refine.refine_level`: True or 1, or 2).
     `assumptions` (`ondemand.Assumptions`): the on-demand search's account levers
     instead of a fixed `basis` -- the same leaf that ranked the row. `play`: how the
     run is played (platform, AUTO), as the search was asked."""
@@ -628,7 +631,7 @@ def two_stage_detail(basis: str, song: str, difficulty: str, leader_id: str,
     if missing:
         raise KeyError(f"not in this basis' pool: {missing}")
     team = Team(leader=by_id[leader_id], members=tuple(by_id[m] for m in member_ids))
-    out = leaf_detail(built, team, refine=bool(refine), want_distribution=want_distribution,
+    out = leaf_detail(built, team, refine=refine, want_distribution=want_distribution,
                       want_timeline=want_timeline, member_order=member_order, as_is=as_is,
                       keep_law=keep_law, want_notes=want_notes)
     if whole_plan is not None:
@@ -639,7 +642,7 @@ def two_stage_detail(basis: str, song: str, difficulty: str, leader_id: str,
         if want_reset_price and (out["plan_cost"].get("resets") or 0) > 0:
             out["reset_price"] = reset_price(
                 _leaf_inputs(basis, song, difficulty, assumptions, play), team, song, assumptions,
-                refine=bool(refine), current=(out["plan_cost"]["resets"], out["song_est"]))
+                refine=refine, current=(out["plan_cost"]["resets"], out["song_est"]))
     return out
 
 

@@ -30,6 +30,7 @@ HERE = str(paths.REFRESH_DIR)
 sys.path.insert(0, HERE)
 
 import park_map  # noqa: E402  -- owns the transform and the asset plumbing; never re-derive
+import park_free_chat  # noqa: E402  -- the Free Chat catalogue (master)
 
 OUT = os.path.join(park_map.DUMPS, "park_export")
 JSON_PATH = os.path.join(OUT, "park_spots.json")
@@ -41,21 +42,51 @@ def area_names():
     return {r["id"]: lang.get((r["data"].get(4) or [""])[0], "") for r in rows("Area")}
 
 
+def _have(bundle):
+    return os.path.exists(os.path.join(park_map.FETCHED, f"{bundle}.bundle"))
+
+
+def _texture(bundle):
+    """The first Texture2D of a bundle as a PIL image, or None."""
+    for o in park_map._load_bundle(bundle).objects:
+        if o.type.name == "Texture2D":
+            return o.read().image
+    return None
+
+
 def export():
-    """Write the raw map PNGs and park_spots.json. Everything comes from park_map."""
+    """Write the map PNGs and park_spots.json. Everything positional comes from park_map."""
     spot, treasures, cands = park_map.master_join()
     names = area_names()
+    master = park_free_chat._render(park_free_chat.TABLES)
+    catalogue = park_free_chat.build_catalogue(master)
+    built = park_free_chat.built_appearance(master["FacilityAppearance"])
     os.makedirs(OUT, exist_ok=True)
     areas = {}
+    facilities = {}            # area -> park_map.load_facilities(scene)
     for area, cfg in park_map.AREAS.items():
         park_map.ensure([cfg["map"], cfg["scene"]])
         base, cal = park_map.load_map(cfg["map"])
         world = park_map.load_scene(cfg["scene"])
+        facs = park_map.load_facilities(cfg["scene"])
+        facilities[area] = (facs, base.size, cal)
+        # the buildings, drawn the way the game's map draws them: each facility's own map
+        # piece (mdl_map_facility_<map image>) at its world position, under every marker
+        pieces = {fid: f"mdl_map_facility_{built[fid]['mapImageAssetId']}"
+                  for fid in facs if fid in built}
+        park_map.ensure(sorted(set(pieces.values())))
+        drawn = 0
+        for fid, bundle in sorted(pieces.items()):
+            piece = park_map.facility_piece(bundle) if _have(bundle) else None
+            if piece is not None:
+                park_map.composite_facility(base, cal, facs[fid]["position"], piece)
+                drawn += 1
         w, h = base.size
         image = f"park-{area}.png"
-        # RAW texture, no markers -- RGBA kept so the containment check (and the browser's
-        # transparent corners) still have the alpha channel park_map.verify() relies on.
+        # RGBA kept so the containment check (and the browser's transparent corners) still
+        # have the alpha channel park_map.verify() relies on.
         base.save(os.path.join(OUT, image))
+        print(f"  {area:16s} {drawn} building pieces drawn")
         spots = {}
         for name, (x, z) in sorted(world.items()):
             px, py = park_map.project(x, z, (w, h), cal)
@@ -80,11 +111,21 @@ def export():
     for o in park_map._load_bundle("img_park_map_icon_treasure").objects:
         if o.type.name == "Texture2D":
             o.read().image.save(os.path.join(OUT, "park-chest.png"))
+    # the game's own picture of a random symbol (its appeal thumbnail, the blue star orb): the
+    # in-game map draws no symbols, so this is the page's symbol marker, kept apart from the
+    # round Free Chat badges
+    symbol = "img_appeal_thumb_park-random-symbol"
+    park_map.ensure([symbol])
+    orb = _texture(symbol) if _have(symbol) else None
+    if orb is not None:
+        orb.resize((128, 128)).save(os.path.join(OUT, "park-symbol.png"))
     # two areas share the game's name 'Play Area' (the day game floor and the night casino)
     taken = [a["name"] for a in areas.values()]
     for area, a in areas.items():
         if taken.count(a["name"]) > 1:
             a["name"] = f"{a['name']} · {park_map.AREAS[area]['label']}"
+
+    free_chat = free_chat_section(catalogue, facilities)
 
     doc = {
         "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -103,12 +144,69 @@ def export():
         "treasures": {tid: {"area": a, "spot": name}
                       for a, lst in sorted(treasures.items())
                       for tid, name in sorted(lst)},
+        # the Free Chats: every conversation the player can read, its site and map pixel
+        "free_chat": free_chat,
     }
     # bytes, not text: Path.write_text would re-translate newlines on Windows
     with open(JSON_PATH, "wb") as f:
         f.write(json.dumps(doc, ensure_ascii=False, indent=1).encode("utf-8"))
     print(f"  wrote {os.path.relpath(JSON_PATH, paths.REPO)}"
           f"  ({os.path.getsize(JSON_PATH)} bytes)")
+
+
+def free_chat_section(catalogue, facilities):
+    """park_free_chat.build_catalogue with map pixels, site photos and site icons.
+
+    A chat stands at a spawn point of its facility (`facility` + `free_npc_01`, read from the
+    scene's _facilityData; the short name repeats in every facility, so the flat spot list
+    cannot place it). A chat inside a building (an interior area with no map) is drawn on the
+    building, at the facility's own position on the parent area's map. A site's marker is the
+    mean of its chats' pixels; the photo is the game's `img_park_facility_map_thumb_*`, the
+    icon its `img_park_facility_icon_normal_*`."""
+    chats, sites = {}, {}
+    unplaced = list(catalogue["unplaced"])
+    for cid, c in catalogue["chats"].items():
+        site = catalogue["sites"][c["site"]]
+        area = site["area"]
+        facs, size, cal = facilities.get(area, ({}, None, None))
+        fac = facs.get(c["site"])
+        xz = None
+        if fac is not None:
+            xz = fac["position"] if site["inside"] else fac["spawn"].get(c["spot"])
+        if xz is None:
+            unplaced.append(cid)
+            continue
+        px, py = park_map.project(xz[0], xz[1], size, cal)
+        chats[cid] = {**c, "map": area, "x": round(px), "y": round(py)}
+    for fid, s in catalogue["sites"].items():
+        mine = [c for c in chats.values() if c["site"] == fid]
+        if not mine:
+            continue
+        sites[fid] = {**s, "map": mine[0]["map"],
+                      "x": round(sum(c["x"] for c in mine) / len(mine)),
+                      "y": round(sum(c["y"] for c in mine) / len(mine)),
+                      "photo": None, "icon_image": None}
+    photos = {fid: f"img_park_facility_map_thumb_{s['map_image']}"
+              for fid, s in sites.items() if s.get("map_image")}
+    icons = {fid: f"img_park_facility_icon_normal_{s['icon']}"
+             for fid, s in sites.items() if s.get("icon")}
+    park_map.ensure(sorted(set(photos.values()) | set(icons.values())))
+    for fid, bundle in photos.items():
+        img = _texture(bundle) if _have(bundle) else None
+        if img is not None:
+            name = f"park-site-{sites[fid]['map_image']}.jpg"
+            img.convert("RGB").save(os.path.join(OUT, name), quality=86)
+            sites[fid]["photo"] = name
+    for fid, bundle in icons.items():
+        img = _texture(bundle) if _have(bundle) else None
+        if img is not None:
+            name = f"park-icon-{sites[fid]['icon']}.png"
+            img.save(os.path.join(OUT, name))
+            sites[fid]["icon_image"] = name
+    print(f"  free chat        {len(chats)} chats at {len(sites)} sites"
+          f"{f', {len(unplaced)} unplaced' if unplaced else ''}")
+    return {"chats": chats, "sites": sites, "conditions": catalogue["conditions"],
+            "characters": catalogue["characters"], "unplaced": unplaced}
 
 
 def check():

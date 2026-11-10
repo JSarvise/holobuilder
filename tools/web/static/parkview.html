@@ -14,6 +14,7 @@
   <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4.5M12 17.3v.2"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M3.5 6.5l5-2 7 2.5 5-2v13l-5 2-7-2.5-5 2z"/><path d="M8.5 4.5v13M15.5 7v13"/></symbol>
 </svg>
 
 <div class="app">
@@ -24,43 +25,59 @@
       <div class="wrap pv-head">
         <div class="pv-pgmain">
           <h1 id="pvtitle">Park</h1>
-          <p class="pg-meta"><span>Today’s symbols and the chests still closed</span><span id="readat">Reading your account…</span></p>
-          <p class="pg-lede" id="pvlede">Logging into your account to read today’s park state.</p>
+          <p class="pg-meta"><span id="readat">Reading…</span></p>
           <div class="pg-stats" id="pvsum"></div>
         </div>
         <div class="pv-act">
-          <button class="btn pv-reread" id="reread" type="button"><svg class="i s"><use href="#i-refresh"/></svg><span id="rereadlabel">Read again</span></button>
+          <div class="pv-btns">
+            <button class="btn pv-scan" id="scan" type="button" hidden><svg class="i s"><use href="#i-scan"/></svg><span id="scanlabel">Scan all areas</span></button>
+            <button class="btn pv-reread" id="reread" type="button"><svg class="i s"><use href="#i-refresh"/></svg><span id="rereadlabel">Read again</span></button>
+          </div>
+          <p class="pv-scanmeta" id="scanmeta" hidden></p>
         </div>
       </div>
     </header>
 
     <div class="wrap">
       <div class="pv-bar" role="group" aria-label="Map layers">
-        <ul class="pv-legend" id="legend">
-          <li><i class="pv-dot out"></i>Still out</li>
-          <li><i class="pv-dot got"></i>Collected</li>
-          <li><img class="pv-li-chest" src="/park/chest.png" alt="">Chest to open</li>
-          <li class="lay" data-layer="opened"><img class="pv-li-chest opened" src="/park/chest.png" alt="">Opened chest</li>
-          <li class="lay" data-layer="cands"><i class="pv-dot cand"></i>Possible spot</li>
-        </ul>
-        <div class="pv-layers" role="group" aria-label="Optional layers">
-          <button class="chip" id="opened" type="button" aria-pressed="false">Opened chests</button>
-          <button class="chip" id="cands" type="button" aria-pressed="false">Every possible spot</button>
+        <div class="pv-layers" role="group" aria-label="What the maps show">
+          <button class="chip" id="lay-chats" data-lay="chats" type="button" aria-pressed="true"><img class="pv-li-talk" src="/ui/park/ui_200_ico_free_talk.png" alt="">Free Chats</button>
+          <button class="chip" id="lay-symbols" data-lay="symbols" type="button" aria-pressed="true"><img class="pv-li-sym" src="/park/symbol.png" alt="">Today’s symbols</button>
+          <button class="chip" id="lay-chests" data-lay="chests" type="button" aria-pressed="true"><img class="pv-li-chest" src="/park/chest.png" alt="">Chests to open</button>
+          <button class="chip" id="lay-opened" data-lay="opened" type="button" aria-pressed="false"><img class="pv-li-chest opened" src="/park/chest.png" alt="">Opened chests</button>
+          <button class="chip" id="lay-cands" data-lay="cands" type="button" aria-pressed="false"><i class="pv-dot cand"></i>Every possible spot</button>
         </div>
       </div>
+      <section class="pv-fc" id="fcstrip" aria-label="Free Chat"></section>
       <p class="pv-quiet" id="quiet" hidden></p>
       <div id="out" aria-live="polite"></div>
+      <section class="pv-fc pv-fc-foot" id="fcmems" aria-label="Free Chats by holomem"></section>
     </div>
   </main>
 </div>
 
-<dialog class="dlg pv-zoom" id="zoom" aria-labelledby="zoomtitle">
-  <div class="dlg-h"><h3 id="zoomtitle"></h3><span class="pv-zsub" id="zoomsub"></span>
+<dialog class="dlg pv-sitedlg" id="fcsite" aria-labelledby="fcsitetitle">
+  <div class="pv-photo" id="fcphoto"></div>
+  <div class="dlg-h"><h3 id="fcsitetitle"></h3><span class="pv-zsub" id="fcsitesub"></span>
     <button class="pv-x" type="button" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
-  <div class="pv-zbody" id="zoombody"></div>
+  <div class="pv-sitebody" id="fcsitebody"></div>
+</dialog>
+<dialog class="dlg pv-scandlg" id="scandlg" aria-labelledby="scantitle">
+  <div class="dlg-h"><svg class="i"><use href="#i-scan"/></svg><h3 id="scantitle">Scan all areas</h3>
+    <button class="pv-x" type="button" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+  <div class="dlg-b">
+    <p class="pv-scanwhat">Logs into your account the way the game does, enters each Park area that has Free Chats, buildings included, reads which ones you have heard, and goes back to the area you were in.</p>
+    <ul class="pv-scanlist">
+      <li>Your own area’s chat sites are drawn again, just as when you walk into it in the game.</li>
+      <li>Symbols, chests and quests are not touched. An area a quest step wants you to walk into is skipped.</li>
+      <li>Close the game first: a login ends its session. It takes about a minute, once per game day.</li>
+    </ul>
+    <div class="pv-scanbtns"><button class="btn primary" id="scango" type="button">Scan now</button><button class="btn" type="button" data-close>Cancel</button></div>
+  </div>
 </dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="/hb-format.js"></script>
+<script src="/hb-gens.js"></script>
 <script src="/hb-shell.js"></script>
 <script src="/hb-combo.js"></script>
 <script type="module" src="/pk-app.js"></script>

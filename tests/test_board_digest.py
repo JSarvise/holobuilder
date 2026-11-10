@@ -361,6 +361,106 @@ def test_the_plan_cache_hands_every_model_the_same_bench_base():
     assert seen[0] is seen[1]
 
 
+def _rows(rng: random.Random) -> list:
+    """A bench board's rows as `board.json` holds them (the fast-leaf fixture's effects)."""
+    from test_fast_leaf import EFFECTS  # noqa: PLC0415
+
+    nodes = sorted(n for n in EFFECTS if n[0] != "Y")     # (its yellow is not a bench row's id)
+    return [{"node": node, "effects": list(EFFECTS[node]),
+             "connect_multiplier": rng.choice([1.0, 1.5, 1.2])}
+            for node in rng.sample(nodes, rng.randrange(1, 5))]
+
+
+def test_the_plan_cache_keeps_several_benches_and_shares_the_boards_they_share():
+    """A search with every board planned goes back and forth between benches that differ
+    in a few boards (a song's singers planned for it). Each bench is parsed once and found
+    again -- the same boards, digests and base objects -- a rows list two benches share is
+    ONE board with one digest, and every bench parses to what `board_from_mapping` makes of
+    it whole."""
+    from hbuilder.domain.board import board_from_mapping  # noqa: PLC0415
+
+    rng = random.Random(31)
+    root = {f"Chr{n}": _rows(rng) for n in range(20, 32)}
+    benches = [root]
+    for changed in (["Chr21"], ["Chr21", "Chr25"], ["Chr30"], ["Chr40"]):
+        bench = dict(root)                      # as `singer_bench_characters` derives one
+        for name in changed:
+            bench[name] = _rows(rng)
+        benches.append(bench)
+    cache = PlanCache.from_team(_team(1, [2, 3, 4, 5, 6]), make_scoring_config())
+    first = [(cache.bench_boards(b), cache.bench_digests(b), cache.bench_base(b)) for b in benches]
+    for _ in range(3):
+        for k in rng.sample(range(len(benches)), len(benches)):
+            again = (cache.bench_boards(benches[k]), cache.bench_digests(benches[k]),
+                     cache.bench_base(benches[k]))
+            assert all(a is b for a, b in zip(again, first[k]))
+    for bench, (boards, digests, base) in zip(benches, first):
+        whole = board_from_mapping({"characters": {k: list(v) for k, v in bench.items()}})
+        assert list(boards) == list(whole.characters) and boards == whole.characters
+        assert list(digests) == list(boards)
+        assert all(digests[name].board is boards[name] for name in boards)
+        assert base.names == tuple(boards) and base.digests == digests
+        for name, rows in bench.items():
+            # shared with the root wherever the rows list is the root's own
+            assert (boards[name] is first[0][0].get(name)) == (rows is root.get(name))
+            assert (digests[name] is first[0][1].get(name)) == (rows is root.get(name))
+    # an equal bench in ANOTHER object is another entry: identity, not content, is the key
+    twin = {name: list(rows) for name, rows in root.items()}
+    assert cache.bench_boards(twin) is not first[0][0]
+    assert cache.bench_boards(twin) == first[0][0]
+    assert cache.bench_boards(None) == {} and cache.bench_base(None) is None
+
+
+def test_benches_beyond_the_bound_are_dropped_oldest_first_and_parse_the_same_again(monkeypatch):
+    from hbuilder.domain import board_plan  # noqa: PLC0415
+
+    monkeypatch.setattr(board_plan, "_BENCHES_HELD", 3)
+    rng = random.Random(8)
+    root = {f"Chr{n}": _rows(rng) for n in range(20, 26)}
+    benches = [dict(root, Chr20=_rows(rng)) for _ in range(5)]
+    cache = PlanCache.from_team(_team(1, [2, 3, 4, 5, 6]), make_scoring_config())
+    seen = [cache.bench_boards(b) for b in benches]
+    assert len(cache._benches) == 3
+    assert cache.bench_boards(benches[4]) is seen[4]            # still held
+    again = cache.bench_boards(benches[0])                      # dropped: parsed again
+    assert again is not seen[0] and again == seen[0]
+    # the boards the benches share were never dropped (their rows lists are still parsed)
+    assert all(again[name] is seen[4][name] for name in root if name != "Chr20")
+    base = cache.bench_base(benches[0])
+    assert cache.bench_base(benches[0]) is base and base.digests == cache.bench_digests(benches[0])
+
+
+def test_models_over_alternating_benches_equal_the_plain_assembly():
+    """The fast assembly over several live benches, visited in turn: every model is the
+    plain path's (no cache), and its per-card terms are the nested walk's -- nothing a
+    shared board's digest remembered for one bench leaks into another's model."""
+    rng = random.Random(64)
+    benches = [dict(BENCH)]
+    for n in range(4):
+        bench = dict(BENCH)
+        bench[f"Chr{90 + n}"] = _rows(rng)                       # a board appended
+        if n % 2:
+            bench["Chr99"] = _rows(rng)                          # and the shared one replaced
+        benches.append(bench)
+    cache = PlanCache.from_team(_team(1, [2, 3, 4, 5, 6]), make_scoring_config())
+    teams = [_team(1, [2, 3, 4, 5, 6]), _team(7, [2, 3, 8, 9, 10]), _team(1, [2, 3, 4, 5, 7])]
+    bases = {}
+    for _ in range(3):
+        for k in rng.sample(range(len(benches)), len(benches)):
+            team = rng.choice(teams)
+            (plain, _pp), (fast, _pf) = _both_boards(
+                team, cache, budget=453, sings=False, connect=CONNECT, bench=benches[k])
+            assert fast == plain
+            assert fast._base is not None and bases.setdefault(k, fast._base) is fast._base
+            for leader_holomem in (team.leader.member, None):
+                for card in team.members:
+                    assert fast._terms(card, leader_holomem) == \
+                        _reference_terms(plain, card, leader_holomem)
+                assert fast.power_bonus_for(team.members, leader_holomem) == \
+                    plain.power_bonus_for(team.members, leader_holomem)
+    assert len(bases) == len(benches) and len({id(b) for b in bases.values()}) == len(benches)
+
+
 def test_grouping_greens_a_card_receives_are_capped_at_900():
     """Four Gen-3 boards each giving 300 grouping all-stats: a Gen-3 card receives
     900 per stat, not 1,200 (`GROUPING_ALL_CAP`, the type-20 limit row). An

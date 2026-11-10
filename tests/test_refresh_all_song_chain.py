@@ -152,11 +152,19 @@ def test_item_icons_is_a_soft_local_step_after_the_catalogue() -> None:
     assert order.index("catalog") < order.index("item_icons")
     step = {s.name: s for s in refresh_all.STEPS}["item_icons"]
     assert step.network is False and step.soft is True
-    # soft = never fails the refresh: the icons, the event cutoffs + history, and the
-    # web's pictures
+    # soft = never fails the refresh: the icons, the event cutoffs + history, the web's
+    # pictures, and the Park scan's quest data (without it the scan only refuses to start)
     assert sorted(s.name for s in refresh_all.STEPS if s.soft) == [
         "event_cutoffs", "event_emblems", "event_history", "item_icons", "member_icons", "park_export",
-        "skill_icons", "ui_assets"]
+        "park_moves", "skill_icons", "ui_assets"]
+
+
+def test_park_moves_runs_after_the_master_tables_and_is_not_an_account_step() -> None:
+    """park_moves.json is built from the master (after master_index) and reaches the app with the
+    content sync; the app's own refresh (--account-only) never builds it."""
+    order = [s.name for s in refresh_all.STEPS]
+    assert order.index("master_index") < order.index("park_moves")
+    assert "park_moves" not in refresh_all.ACCOUNT_STEPS
 
 
 def test_web_pictures_come_with_the_refresh() -> None:

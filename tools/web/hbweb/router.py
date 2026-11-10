@@ -101,6 +101,7 @@ POST_ROUTES: dict[str, Route] = {
     "/api/collection": collection.save_collection,
     "/api/admin/user": admin.admin_user,
     "/api/refresh": admin.refresh_route,
+    "/api/park/scan": admin.park_scan_route,
     "/api/row-detail": search.row_detail_route,
     "/api/export-team": search.export_team_route,
     "/api/timeline": search.serve_timeline,
@@ -280,6 +281,11 @@ def _enable_kernels() -> None:
     import connect  # noqa: PLC0415
 
     connect.enable()
+    # ...and the cooldown screen (an estimate of a team's frequency-count variants, for
+    # ordering them: the search's count-aware value and the refinement's screens)
+    import cdvar  # noqa: PLC0415
+
+    cdvar.enable()
 
 
 def _start_cutoffs_poller() -> None:

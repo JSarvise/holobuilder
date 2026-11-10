@@ -305,6 +305,15 @@ def classify(chart):
     return out
 
 
+def hidden_points(chart):
+    """The slides' invisible points: channel-3 types 4 and 5 (the game's `LongBezierPoint` and
+    `LongRelayDeActive`). `classify` drops them because they are never judged (no score, no
+    combo: the header counts and `FULL_COMBO_NOTE_COUNT` leave them out), but the client
+    builds a note for each and weighs it as a LONG_RELAY in the divisor
+    (`GetNotesPerfectCoefficientSum`), so the chart library records how many there are."""
+    return sum(1 for n in chart.notes if n.chan == LONG and n.kind in ("4", "5"))
+
+
 def tally(chart):
     """Scored notes per header category."""
     return collections.Counter(kind for kind, _ in classify(chart))
