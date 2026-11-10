@@ -11,6 +11,7 @@ module is imported. The hook covers that process (the in-process web server incl
 subprocesses a test starts. `HB_TEST_ALLOW_REAL_WRITES=1` turns it off for one run, for a
 deliberate re-record.
 """
+
 from __future__ import annotations
 
 import os
@@ -20,10 +21,13 @@ from hbuilder import paths
 
 # each folder as written AND as resolved: a worktree links the real dumps/ with a junction,
 # and a write through the link must be refused as surely as one into its target
-GUARDED = tuple(dict.fromkeys(
-    os.path.normcase(form) + os.sep
-    for p in (paths.STATE, paths.DUMPS)
-    for form in (str(p.resolve()), os.path.abspath(p))))
+GUARDED = tuple(
+    dict.fromkeys(
+        os.path.normcase(form) + os.sep
+        for p in (paths.STATE, paths.DUMPS)
+        for form in (str(p.resolve()), os.path.abspath(p))
+    )
+)
 WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
 
 
@@ -39,15 +43,18 @@ def guarded(path) -> str | None:
 
 
 def _refuse(what: str, path: str) -> None:
-    raise PermissionError(f"test wrote into the real {what}: {path} -- use tmp_path and "
-                          "monkeypatch the constant that names the file (tests/support/write_guard.py)")
+    raise PermissionError(
+        f"test wrote into the real {what}: {path} -- use tmp_path and "
+        "monkeypatch the constant that names the file (tests/support/write_guard.py)"
+    )
 
 
 def _hook(event: str, args: tuple) -> None:
     if event == "open":
         path, mode, flags = (tuple(args) + (None, None, None))[:3]
         writing = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (
-            mode is None and isinstance(flags, int) and flags & WRITE_FLAGS)
+            mode is None and isinstance(flags, int) and flags & WRITE_FLAGS
+        )
         if writing and (hit := guarded(path)):
             _refuse("data (open for writing)", hit)
     elif event == "os.rename":

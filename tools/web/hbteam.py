@@ -22,6 +22,7 @@ values. `--search` also re-runs the search that ranked the row and says where th
 `--runs N --score S` places a score among the best of N runs on the row's exact run law
 (`song_distribution.best_of_n`). Nothing is encrypted or signed: the check is the replay.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,8 +32,9 @@ import math
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1] / "src"))  # this checkout's hbuilder first
@@ -41,7 +43,7 @@ from hbuilder import paths  # noqa: E402
 FORMAT = "holobuilder-team"
 FORMAT_VERSION = 1
 SUFFIX = ".hbteam"
-FORBIDDEN = set('\\/:*?"<>|')         # characters a file name may not hold (Windows)
+FORBIDDEN = set('\\/:*?"<>|')  # characters a file name may not hold (Windows)
 
 # The account files a row's score reads (measured: every file a search, a row detail, its run
 # law and timeline open on the account basis), relative to the checkout.
@@ -57,8 +59,18 @@ ACCOUNT_FILES = (
 # unspent board points. Decks, missions, emblems and the rest stay out.
 SNAPSHOT_KEEP = ("board_points",)
 # The row detail's request, as the page sends it.
-REQUEST_KEYS = ("song", "difficulty", "basis", "cards", "member_order", "refine", "assumptions",
-                "platform", "auto", "pool")
+REQUEST_KEYS = (
+    "song",
+    "difficulty",
+    "basis",
+    "cards",
+    "member_order",
+    "refine",
+    "assumptions",
+    "platform",
+    "auto",
+    "pool",
+)
 # Detail fields a file does not carry: the timeline is drawn from the rest and is large.
 DETAIL_SKIP = ("timeline",)
 # Fields compared loosely on replay: the planner's own report of how it went.
@@ -90,13 +102,21 @@ def app_info(repo: Path = paths.REPO) -> dict:
     """The app's version (the desktop build's `VERSION`, else "dev" and the git commit when
     there is one) and the scoring model's."""
     from hbuilder.domain.model_version import MODEL_VERSION  # noqa: PLC0415
+
     version_file = repo / "tools" / "app" / "VERSION"
     version = version_file.read_text("utf-8").strip() if version_file.is_file() else "dev"
     commit = None
     if version == "dev":
         try:
-            commit = subprocess.run(["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
-                                    capture_output=True, text=True, timeout=10).stdout.strip() or None
+            commit = (
+                subprocess.run(
+                    ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                ).stdout.strip()
+                or None
+            )
         except (OSError, subprocess.SubprocessError):
             commit = None
     return {"version": version, "commit": commit, "model": MODEL_VERSION}
@@ -106,6 +126,7 @@ def game_info(request: Mapping) -> dict:
     """The game client version this install read, and the digest of every chart the row plays
     (a different chart file scores differently)."""
     import leaf_inputs  # noqa: PLC0415
+
     client = paths.DUMPS / "client_version.json"
     version = json.loads(client.read_text("utf-8")).get("version") if client.is_file() else None
     difficulty = leaf_inputs._difficulty(request.get("difficulty") or "EXPERT")
@@ -114,8 +135,7 @@ def game_info(request: Mapping) -> dict:
         digests = leaf_inputs.chart_digests(leaf_inputs.charts_path(difficulty), difficulty)
     except (OSError, ValueError, KeyError):
         digests = {}
-    return {"client_version": version, "difficulty": difficulty,
-            "charts": {s: digests.get(s) for s in songs}}
+    return {"client_version": version, "difficulty": difficulty, "charts": {s: digests.get(s) for s in songs}}
 
 
 def team_of(request: Mapping, files: Mapping) -> list[dict]:
@@ -124,18 +144,25 @@ def team_of(request: Mapping, files: Mapping) -> list[dict]:
     catalogue = json.loads((paths.REPO / "data" / "cards.json").read_text("utf-8"))
     rows = catalogue.get("cards", catalogue) if isinstance(catalogue, dict) else catalogue
     by_id = {c.get("id"): c for c in rows if isinstance(c, dict)} if isinstance(rows, list) else rows
-    states = ((files.get("state/collection.json") or {}).get("cards") or {})
+    states = (files.get("state/collection.json") or {}).get("cards") or {}
     out = []
     for k, cid in enumerate(request.get("cards") or []):
         card = by_id.get(cid) or {}
-        out.append({"slot": "leader" if k == 0 else f"member {k}", "id": cid,
-                    "holomem": card.get("member"), "outfit": card.get("costume_name"),
-                    "account": states.get(cid)})
+        out.append(
+            {
+                "slot": "leader" if k == 0 else f"member {k}",
+                "id": cid,
+                "holomem": card.get("member"),
+                "outfit": card.get("costume_name"),
+                "account": states.get(cid),
+            }
+        )
     return out
 
 
-def document(request: Mapping, detail: Mapping, *, shown: Mapping | None = None,
-             search: Mapping | None = None) -> dict:
+def document(
+    request: Mapping, detail: Mapping, *, shown: Mapping | None = None, search: Mapping | None = None
+) -> dict:
     """The `.hbteam` document of a row: `request` (`request_of`), `detail` (the server's row
     detail for it, with the run law's summary), `shown` (the page's numbers), `search` (the
     search that ranked it)."""
@@ -148,8 +175,8 @@ def document(request: Mapping, detail: Mapping, *, shown: Mapping | None = None,
         "format": FORMAT,
         "format_version": FORMAT_VERSION,
         "about": "A holobuilder team row and the account files its score reads. Replay it with "
-                 "tools/web/hbteam.py replay <file>.",
-        "created_at": _dt.datetime.fromtimestamp(now, _dt.timezone.utc).isoformat(timespec="seconds"),
+        "tools/web/hbteam.py replay <file>.",
+        "created_at": _dt.datetime.fromtimestamp(now, _dt.UTC).isoformat(timespec="seconds"),
         "created_unix": int(now),
         "app": app_info(),
         "game": game_info(request),
@@ -158,9 +185,11 @@ def document(request: Mapping, detail: Mapping, *, shown: Mapping | None = None,
         "search": dict(search) if search else None,
         "shown": dict(shown) if shown else None,
         "detail": json.loads(json.dumps(detail, default=str)),
-        "account": {"files": files,
-                    "note": "the exporter's card states, boards, materials and board points; "
-                            "no login, player id or client profile"},
+        "account": {
+            "files": files,
+            "note": "the exporter's card states, boards, materials and board points; "
+            "no login, player id or client profile",
+        },
     }
 
 
@@ -188,8 +217,10 @@ def load(path: Path) -> dict:
     if not isinstance(doc, dict) or doc.get("format") != FORMAT:
         raise ValueError(f"{path}: not a holobuilder team file")
     if int(doc.get("format_version") or 0) > FORMAT_VERSION:
-        raise ValueError(f"{path}: format {doc.get('format_version')} is newer than this tool's "
-                         f"{FORMAT_VERSION}; update holobuilder")
+        raise ValueError(
+            f"{path}: format {doc.get('format_version')} is newer than this tool's "
+            f"{FORMAT_VERSION}; update holobuilder"
+        )
     for key in ("request", "detail", "account"):
         if not isinstance(doc.get(key), dict):
             raise ValueError(f"{path}: missing {key!r}")
@@ -219,23 +250,34 @@ def summary(doc: Mapping) -> str:
     for c in doc.get("team") or []:
         st = c.get("account") or {}
         state = ", ".join(f"{k} {v}" for k, v in st.items() if k in ("level", "bloom", "limit_break"))
-        lines.append(f"  {c['slot']:<9} {c.get('holomem') or '?'} / {c.get('outfit') or '?'}"
-                     f"  [{c['id']}]" + (f"  {state}" if state else ""))
+        lines.append(
+            f"  {c['slot']:<9} {c.get('holomem') or '?'} / {c.get('outfit') or '?'}"
+            f"  [{c['id']}]" + (f"  {state}" if state else "")
+        )
     if det.get("member_order"):
         lines.append("slot order: " + " > ".join(det["member_order"]))
     dist = det.get("distribution") or {}
-    lines.append(f"served: Expected {_n(det.get('song_est'))} | Max {_n(det.get('song_max'))}"
-                 + (f" | p10 {_n(dist.get('p10'))} | p50 {_n(dist.get('p50'))} | "
-                    f"p90 {_n(dist.get('p90'))}" if dist.get("available") else ""))
+    lines.append(
+        f"served: Expected {_n(det.get('song_est'))} | Max {_n(det.get('song_max'))}"
+        + (
+            f" | p10 {_n(dist.get('p10'))} | p50 {_n(dist.get('p50'))} | p90 {_n(dist.get('p90'))}"
+            if dist.get("available")
+            else ""
+        )
+    )
     notes = det.get("notes") or {}
     if notes:
-        lines.append(f"note by note: {len(notes.get('rows') or [])} notes adding up to "
-                     f"{_n(notes.get('total'))}" + (" (= Expected)" if notes.get("verified") else
-                                                    " (NOT the Expected)"))
+        lines.append(
+            f"note by note: {len(notes.get('rows') or [])} notes adding up to "
+            f"{_n(notes.get('total'))}"
+            + (" (= Expected)" if notes.get("verified") else " (NOT the Expected)")
+        )
     shown = doc.get("shown") or {}
     if shown:
-        lines.append("shown on the page: " + ", ".join(
-            f"{k} {_n(v) if isinstance(v, (int, float)) else v}" for k, v in shown.items()))
+        lines.append(
+            "shown on the page: "
+            + ", ".join(f"{k} {_n(v) if isinstance(v, (int, float)) else v}" for k, v in shown.items())
+        )
     files = (doc.get("account") or {}).get("files") or {}
     lines.append(f"account files: {', '.join(Path(f).name for f in files) or 'none'}")
     return "\n".join(lines)
@@ -248,8 +290,15 @@ def summary(doc: Mapping) -> str:
 REL_ROUNDING = 1e-9
 
 
-def differences(want: Any, got: Any, path: str = "", *, out: list | None = None,
-                limit: int = 60, rounding: list | None = None) -> list[str]:
+def differences(
+    want: Any,
+    got: Any,
+    path: str = "",
+    *,
+    out: list | None = None,
+    limit: int = 60,
+    rounding: list | None = None,
+) -> list[str]:
     """Every place `got` differs from `want` (`path: want -> got`), over `want`'s fields,
     lists and dicts field by field; `REPLAY_SKIP` fields at the top level are not compared.
     Integers and strings exactly; two floats within `REL_ROUNDING` of each other go to
@@ -279,8 +328,12 @@ def differences(want: Any, got: Any, path: str = "", *, out: list | None = None,
     if isinstance(want, float) and isinstance(got, (int, float)) and math.isnan(want) and math.isnan(got):
         return out
     if want != got:
-        if (isinstance(want, float) and isinstance(got, float) and not isinstance(got, bool)
-                and math.isclose(want, got, rel_tol=REL_ROUNDING, abs_tol=0.0)):
+        if (
+            isinstance(want, float)
+            and isinstance(got, float)
+            and not isinstance(got, bool)
+            and math.isclose(want, got, rel_tol=REL_ROUNDING, abs_tol=0.0)
+        ):
             if rounding is not None:
                 rounding.append(path)
             return out
@@ -300,6 +353,7 @@ def replay_inside(doc_path: Path, *, search: bool, runs: int | None, score: floa
     sys.path.insert(0, str(HERE))
     import ondemand  # noqa: PLC0415
     from hbweb import search as search_routes  # noqa: PLC0415
+
     from hbuilder.domain.song_distribution import best_of_n  # noqa: PLC0415
 
     doc = load(doc_path)
@@ -307,29 +361,52 @@ def replay_inside(doc_path: Path, *, search: bool, runs: int | None, score: floa
     req = search_routes.row_request(body)
     detail = search_routes.row_figures(req, body, keep_law=bool(runs))
     law = (detail.get("distribution") or {}).pop("law", None)
-    result: dict[str, Any] = {"detail": json.loads(json.dumps(
-        {k: v for k, v in detail.items() if k not in DETAIL_SKIP}, default=str))}
+    result: dict[str, Any] = {
+        "detail": json.loads(
+            json.dumps({k: v for k, v in detail.items() if k not in DETAIL_SKIP}, default=str)
+        )
+    }
     if runs:
         result["best_of"] = best_of_n(law, runs, score) if law else None
     if search and doc.get("search"):
         sb = doc["search"]
         a = ondemand.parse_assumptions(sb["assumptions"]) if isinstance(sb.get("assumptions"), dict) else None
         levels = tuple(sb["levels"]) if sb.get("levels") else None
-        eng = ondemand.Engine("account" if a is not None else str(sb.get("basis") or "account"),
-                              req["difficulty"], assumptions=a, levels=levels,
-                              play=ondemand.parse_play(sb))
+        eng = ondemand.Engine(
+            "account" if a is not None else str(sb.get("basis") or "account"),
+            req["difficulty"],
+            assumptions=a,
+            levels=levels,
+            play=ondemand.parse_play(sb),
+        )
         try:
-            payload = eng.search(sb.get("song") or None, ondemand.parse_filters(sb),
-                                 top=int(sb.get("top") or ondemand.RANKING))
+            payload = eng.search(
+                sb.get("song") or None, ondemand.parse_filters(sb), top=int(sb.get("top") or ondemand.RANKING)
+            )
         finally:
             eng.close()
         team = sorted(req["ids"][1:])
         rows = payload.get("ranking") or []
-        rank = next((i + 1 for i, r in enumerate(rows)
-                     if r.get("leader") == req["ids"][0] and sorted(r.get("members") or []) == team), None)
-        result["search"] = {"rank": rank, "top": [
-            {"leader": r.get("leader"), "members": r.get("members"), "best": r.get("best"),
-             "song_max": r.get("song_max")} for r in rows[:10]]}
+        rank = next(
+            (
+                i + 1
+                for i, r in enumerate(rows)
+                if r.get("leader") == req["ids"][0] and sorted(r.get("members") or []) == team
+            ),
+            None,
+        )
+        result["search"] = {
+            "rank": rank,
+            "top": [
+                {
+                    "leader": r.get("leader"),
+                    "members": r.get("members"),
+                    "best": r.get("best"),
+                    "song_max": r.get("song_max"),
+                }
+                for r in rows[:10]
+            ],
+        }
     return result
 
 

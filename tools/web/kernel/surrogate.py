@@ -9,6 +9,7 @@ and the exact leaf scores whatever it proposes (`tools/web/two_stage.py`).
 
     python tools/web/kernel/surrogate.py --build      # compile the shared library
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -19,7 +20,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "surrogate.c"
-if str(HERE) not in sys.path:          # loaded by file path in a worker too
+if str(HERE) not in sys.path:  # loaded by file path in a worker too
     sys.path.insert(0, str(HERE))
 import cbuild  # noqa: E402
 
@@ -31,18 +32,23 @@ THRESHOLDS = 4
 
 
 class Pool(ctypes.Structure):
-    _fields_ = [("n_cards", ctypes.c_int32), ("n_types", ctypes.c_int32),
-                ("n_kinds", ctypes.c_int32),
-                ("holomem", ctypes.POINTER(ctypes.c_int32)),
-                ("type_of", ctypes.POINTER(ctypes.c_int32)),
-                ("gens", ctypes.POINTER(ctypes.c_int32))]
+    _fields_ = [
+        ("n_cards", ctypes.c_int32),
+        ("n_types", ctypes.c_int32),
+        ("n_kinds", ctypes.c_int32),
+        ("holomem", ctypes.POINTER(ctypes.c_int32)),
+        ("type_of", ctypes.POINTER(ctypes.c_int32)),
+        ("gens", ctypes.POINTER(ctypes.c_int32)),
+    ]
 
 
 class Model(ctypes.Structure):
-    _fields_ = [("bias", ctypes.c_double),
-                ("card", ctypes.POINTER(ctypes.c_double)),
-                ("gate", ctypes.POINTER(ctypes.c_double)),
-                ("pair", ctypes.POINTER(ctypes.c_double))]
+    _fields_ = [
+        ("bias", ctypes.c_double),
+        ("card", ctypes.POINTER(ctypes.c_double)),
+        ("gate", ctypes.POINTER(ctypes.c_double)),
+        ("pair", ctypes.POINTER(ctypes.c_double)),
+    ]
 
 
 def build(force: bool = False) -> Path:
@@ -60,22 +66,38 @@ def load():
         lib = ctypes.CDLL(str(build()))
         lib.hd_sur_fit.restype = ctypes.c_double
         lib.hd_sur_fit.argtypes = [
-            ctypes.POINTER(Pool), ctypes.POINTER(Model), ctypes.c_int,
-            ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_double), ctypes.c_int,
-            ctypes.c_double, ctypes.c_double, ctypes.c_double,
+            ctypes.POINTER(Pool),
+            ctypes.POINTER(Model),
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.c_int,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
         ]
         lib.hd_sur_scan.restype = ctypes.c_int
         lib.hd_sur_scan.argtypes = [
-            ctypes.POINTER(Pool), ctypes.POINTER(Model), ctypes.c_int,
-            ctypes.POINTER(ctypes.c_uint64), ctypes.c_int,
-            ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(Pool),
+            ctypes.POINTER(Model),
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.POINTER(ctypes.c_double),
             ctypes.POINTER(ctypes.c_int64),
         ]
         lib.hd_sur_scan_part.restype = ctypes.c_int
         lib.hd_sur_scan_part.argtypes = [
-            ctypes.POINTER(Pool), ctypes.POINTER(Model), ctypes.c_int,
-            ctypes.POINTER(ctypes.c_uint64), ctypes.c_int, ctypes.c_int, ctypes.c_int,
-            ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(Pool),
+            ctypes.POINTER(Model),
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.POINTER(ctypes.c_double),
             ctypes.POINTER(ctypes.c_int64),
         ]
         _lib = lib
@@ -97,8 +119,7 @@ def scan_threads(count: int) -> int:
 def _executor(threads: int) -> ThreadPoolExecutor:
     """One pool of scan threads for the process, made on first use."""
     if not _EXECUTOR or _EXECUTOR[0][0] != threads:
-        _EXECUTOR[:] = [(threads, ThreadPoolExecutor(max_workers=threads,
-                                                     thread_name_prefix="screen-scan"))]
+        _EXECUTOR[:] = [(threads, ThreadPoolExecutor(max_workers=threads, thread_name_prefix="screen-scan"))]
     return _EXECUTOR[0][1]
 
 
@@ -129,7 +150,7 @@ class Screen:
         kind.update({g: len(types) + i for i, g in enumerate(generations)})
         gens: list[int] = []
         for card in cards:
-            own = sorted({kind[g] for g in card.generations})   # a repeat would count twice
+            own = sorted({kind[g] for g in card.generations})  # a repeat would count twice
             gens.extend(own + [-1] * (MAX_GENS_PER_CARD - len(own)))
         self.count = count
         self.kinds = len(kind)
@@ -143,16 +164,33 @@ class Screen:
         self._model = Model(0.0, self._card, self._gate, self._pair)
         self.fitted = False
 
-    def fit(self, sets, log_scores, *, sweeps: int = 12, lam_card: float = 1.0,
-            lam_gate: float = 3.0, lam_pair: float = 4.0) -> float:
+    def fit(
+        self,
+        sets,
+        log_scores,
+        *,
+        sweeps: int = 12,
+        lam_card: float = 1.0,
+        lam_gate: float = 3.0,
+        lam_pair: float = 4.0,
+    ) -> float:
         """Fit to `sets` (ascending index 5-tuples) and their log exact scores
         — ridge regression by coordinate descent, `sweeps` passes. Returns the
         mean absolute residual in log units."""
         n = len(sets)
         flat = (ctypes.c_uint8 * (5 * n))(*(i for s in sets for i in s))
         target = (ctypes.c_double * n)(*log_scores)
-        mae = load().hd_sur_fit(ctypes.byref(self._pool), ctypes.byref(self._model), n, flat,
-                                target, sweeps, lam_card, lam_gate, lam_pair)
+        mae = load().hd_sur_fit(
+            ctypes.byref(self._pool),
+            ctypes.byref(self._model),
+            n,
+            flat,
+            target,
+            sweeps,
+            lam_card,
+            lam_gate,
+            lam_pair,
+        )
         if mae < 0:
             raise RuntimeError("the screen could not be fitted")
         self.fitted = True
@@ -194,14 +232,22 @@ class Screen:
             out_sets = (ctypes.c_uint8 * (5 * want))()
             out_pred = (ctypes.c_double * want)()
             legal = ctypes.c_int64(0)
-            got = load().hd_sur_scan(ctypes.byref(self._pool), ctypes.byref(self._model),
-                                     len(keys), seen_array, want, out_sets, out_pred,
-                                     ctypes.byref(legal))
+            got = load().hd_sur_scan(
+                ctypes.byref(self._pool),
+                ctypes.byref(self._model),
+                len(keys),
+                seen_array,
+                want,
+                out_sets,
+                out_pred,
+                ctypes.byref(legal),
+            )
             if got < 0:
                 raise RuntimeError("the screen scan failed")
             raw = bytes(out_sets)[: 5 * got]
-            sets = [tuple(raw[5 * i: 5 * i + 5]) for i in range(got)]
+            sets = [tuple(raw[5 * i : 5 * i + 5]) for i in range(got)]
             return sets, list(out_pred[:got]), legal.value
+
         # The scan split by first card over `parts` threads (the C call releases the GIL),
         # each keeping its own best `want`; the best `want` of their union under the scan's
         # total order (prediction, then the earlier set) are the whole scan's, in its order.
@@ -209,14 +255,22 @@ class Screen:
             out_sets = (ctypes.c_uint8 * (5 * want))()
             out_pred = (ctypes.c_double * want)()
             legal = ctypes.c_int64(0)
-            got = load().hd_sur_scan_part(ctypes.byref(self._pool), ctypes.byref(self._model),
-                                          len(keys), seen_array, want, a0, parts, out_sets,
-                                          out_pred, ctypes.byref(legal))
+            got = load().hd_sur_scan_part(
+                ctypes.byref(self._pool),
+                ctypes.byref(self._model),
+                len(keys),
+                seen_array,
+                want,
+                a0,
+                parts,
+                out_sets,
+                out_pred,
+                ctypes.byref(legal),
+            )
             if got < 0:
                 raise RuntimeError("the screen scan failed")
             raw = bytes(out_sets)[: 5 * got]
-            return ([(out_pred[i], tuple(raw[5 * i: 5 * i + 5])) for i in range(got)],
-                    legal.value)
+            return ([(out_pred[i], tuple(raw[5 * i : 5 * i + 5])) for i in range(got)], legal.value)
 
         load()
         results = list(_executor(parts).map(part, range(parts)))

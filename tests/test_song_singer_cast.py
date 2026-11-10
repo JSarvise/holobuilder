@@ -46,6 +46,8 @@ unchanged.
 from __future__ import annotations
 
 import pytest
+from support.builders import certain_config as cfg
+from support.builders import make_card, make_skill
 
 from hbuilder.domain.board import (
     BoardEffect,
@@ -54,8 +56,6 @@ from hbuilder.domain.board import (
     CharacterBoard,
 )
 from hbuilder.domain.song import ChartNote, OverallPower, SongChart, SongError, score_song
-
-from support.builders import certain_config as cfg, make_card, make_skill
 
 AKI_CONDITIONAL_PERMIL = 100.0  # R-002's stated rate; 41 permil is what it BUYS
 
@@ -87,9 +87,7 @@ def _board(*by_holomem) -> BoardModel:
     """`_board(("Aki", effect), ("Ina", effect))` -> one node each."""
     return BoardModel(
         characters={
-            holomem: CharacterBoard(
-                holomem=holomem, nodes=(BoardNode(f"R-{i:03d}", (effect,)),)
-            )
+            holomem: CharacterBoard(holomem=holomem, nodes=(BoardNode(f"R-{i:03d}", (effect,)),))
             for i, (holomem, effect) in enumerate(by_holomem)
         }
     )
@@ -153,9 +151,7 @@ def test_a_chart_defaults_to_no_cast_and_that_changes_nothing():
         ({"singers": ("Aki", "Ina", "Miko"), "singer_type": "solo"}, "distinct singers"),
     ],
 )
-def test_an_incoherent_cast_raises_rather_than_scoring_a_plausible_number(
-    kwargs, fragment
-):
+def test_an_incoherent_cast_raises_rather_than_scoring_a_plausible_number(kwargs, fragment):
     """A `solo` scope with THREE+ singers would silently pool their boards and cap
     at a number that looks reasonable — which is exactly the failure that made 120
     permil look like a cap violation. It raises instead. A genuine DUO (two
@@ -187,16 +183,15 @@ def test_a_conditional_fires_when_its_own_holomem_sings():
     """
     members = _members()
     leader = make_card("leader", member="Aki")
-    board = _board(
-        ("Aki", _effect(AKI_CONDITIONAL_PERMIL, "skill_effect_up", "leader",
-                        conditional=True))
-    )
+    board = _board(("Aki", _effect(AKI_CONDITIONAL_PERMIL, "skill_effect_up", "leader", conditional=True)))
 
-    songless = score_song(members, (leader,), _chart(), cfg(board=board),
-                          deck_power=OverallPower.fixed(2000))
+    songless = score_song(members, (leader,), _chart(), cfg(board=board), deck_power=OverallPower.fixed(2000))
     sung = score_song(
-        members, (leader,), _chart(singers=("Aki",), singer_type="solo"),
-        cfg(board=board), deck_power=OverallPower.fixed(2000),
+        members,
+        (leader,),
+        _chart(singers=("Aki",), singer_type="solo"),
+        cfg(board=board),
+        deck_power=OverallPower.fixed(2000),
     )
 
     assert songless[0].total_score == 6900
@@ -208,14 +203,10 @@ def test_a_conditional_stays_silent_when_someone_else_sings():
     exactly zero until its own holomem was the credited Singer."""
     members = _members()
     leader = make_card("leader", member="Aki")
-    board = _board(
-        ("Aki", _effect(AKI_CONDITIONAL_PERMIL, "skill_effect_up", "leader",
-                        conditional=True))
-    )
+    board = _board(("Aki", _effect(AKI_CONDITIONAL_PERMIL, "skill_effect_up", "leader", conditional=True)))
     chart = _chart(singers=("Ina",), singer_type="solo")
 
-    result = score_song(members, (leader,), chart, cfg(board=board),
-                        deck_power=OverallPower.fixed(2000))
+    result = score_song(members, (leader,), chart, cfg(board=board), deck_power=OverallPower.fixed(2000))
     assert result[0].total_score == 6900
 
 
@@ -224,15 +215,15 @@ def test_a_conditional_still_needs_its_ordinary_scope_to_reach_the_team():
     Aki's node is leader-scoped, so under a different leader it pays nothing
     even on Aki's own song."""
     members = _members()
-    board = _board(
-        ("Aki", _effect(AKI_CONDITIONAL_PERMIL, "skill_effect_up", "leader",
-                        conditional=True))
-    )
+    board = _board(("Aki", _effect(AKI_CONDITIONAL_PERMIL, "skill_effect_up", "leader", conditional=True)))
     chart = _chart(singers=("Aki",), singer_type="solo")
 
     result = score_song(
-        members, (make_card("leader", member="Nene"),), chart,
-        cfg(board=board), deck_power=OverallPower.fixed(2000),
+        members,
+        (make_card("leader", member="Nene"),),
+        chart,
+        cfg(board=board),
+        deck_power=OverallPower.fixed(2000),
     )
     assert result[0].total_score == 6900
 
@@ -244,11 +235,15 @@ def test_the_unconditional_term_is_unaffected_by_the_cast():
     leader = make_card("leader", member="Ina")
     board = _board(("Ina", _effect(173.0, "skill_effect_up", "leader")))
 
-    without_cast = score_song(members, (leader,), _chart(), cfg(board=board),
-                              deck_power=OverallPower.fixed(2000))
+    without_cast = score_song(
+        members, (leader,), _chart(), cfg(board=board), deck_power=OverallPower.fixed(2000)
+    )
     with_cast = score_song(
-        members, (leader,), _chart(singers=("Nene",), singer_type="solo"),
-        cfg(board=board), deck_power=OverallPower.fixed(2000),
+        members,
+        (leader,),
+        _chart(singers=("Nene",), singer_type="solo"),
+        cfg(board=board),
+        deck_power=OverallPower.fixed(2000),
     )
     assert without_cast[0].total_score == with_cast[0].total_score == 7298
 
@@ -274,14 +269,15 @@ def test_a_solo_song_takes_only_its_own_singers_board():
     )
     chart = _chart(singers=("Aki",), singer_type="solo")
 
-    result = score_song(plain, (make_card("leader"),), chart, cfg(board=board),
-                        deck_power=OverallPower.fixed(2000))
+    result = score_song(
+        plain, (make_card("leader"),), chart, cfg(board=board), deck_power=OverallPower.fixed(2000)
+    )
     assert result[0].total_score == 4784
 
 
 def test_a_group_song_sums_its_units_boards():
     """`group` takes the song's unit. Two singers, 40 permil each:
-        per note = ceil(2300.0 x 1.080) = 2484      -> 4968"""
+    per note = ceil(2300.0 x 1.080) = 2484      -> 4968"""
     plain = tuple(make_card(f"card-{i}", member=f"Member {i}") for i in range(5))
     board = _board(
         ("Aki", _effect(40.0, "song_score_bonus", "account", song_scope="group")),
@@ -289,8 +285,9 @@ def test_a_group_song_sums_its_units_boards():
     )
     chart = _chart(singers=("Aki", "Ina"), singer_type="group")
 
-    result = score_song(plain, (make_card("leader"),), chart, cfg(board=board),
-                        deck_power=OverallPower.fixed(2000))
+    result = score_song(
+        plain, (make_card("leader"),), chart, cfg(board=board), deck_power=OverallPower.fixed(2000)
+    )
     assert result[0].total_score == 4968
 
 
@@ -302,7 +299,8 @@ def test_a_chart_with_no_cast_falls_back_to_the_pooled_all_scope():
         ("Aki", _effect(40.0, "song_score_bonus", "account", song_scope="all")),
     )
 
-    result = score_song(plain, (make_card("leader"),), _chart(), cfg(board=board),
-                        deck_power=OverallPower.fixed(2000))
+    result = score_song(
+        plain, (make_card("leader"),), _chart(), cfg(board=board), deck_power=OverallPower.fixed(2000)
+    )
     # constant 2300.0 x 1.040 -> 2392 per note
     assert result[0].total_score == 4784

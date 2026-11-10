@@ -13,6 +13,7 @@ HTTP surface (/api/compare and /api/timeline 400, /api/meta listing).
 
     python -m pytest tools/web/test_difficulty.py
 """
+
 from __future__ import annotations
 
 import json
@@ -21,26 +22,27 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import pytest
-
 import certificate as cert_mod
+import pytest
 from hbweb import basis, config
+
 from hbuilder.domain.card import Stats
 from hbuilder.domain.song import charts_from_mapping, load_charts, score_song_detailed
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tests"))
 sys.path.insert(0, str(REPO / "tools" / "refresh"))
-from support.builders import make_card, make_scoring_config, make_skill  # noqa: E402
-
 import leaf_inputs  # noqa: E402
+from support.builders import make_card, make_scoring_config, make_skill  # noqa: E402
 
 MUSIC_ID = "m9991"
 
 
 def _entry(difficulty: str, n_notes: int, level: int) -> dict:
     return {
-        "music_id": MUSIC_ID, "difficulty": difficulty, "difficulty_level": level,
+        "music_id": MUSIC_ID,
+        "difficulty": difficulty,
+        "difficulty_level": level,
         "live_score_coefficient_permil": 4,
         "notes": [[float(t), 1000, 0] for t in range(1, n_notes + 1)],
         "special_cues": [5.0, 10.0, 15.0, 20.0, 25.0],
@@ -48,20 +50,27 @@ def _entry(difficulty: str, n_notes: int, level: int) -> dict:
 
 
 def _two_difficulty_library():
-    return charts_from_mapping({"schema_version": "charts-2", "charts": {
-        f"{MUSIC_ID}/EXPERT": _entry("EXPERT", 40, 26),
-        f"{MUSIC_ID}/HARD": _entry("HARD", 28, 18),
-    }}, source="test_difficulty")
+    return charts_from_mapping(
+        {
+            "schema_version": "charts-2",
+            "charts": {
+                f"{MUSIC_ID}/EXPERT": _entry("EXPERT", 40, 26),
+                f"{MUSIC_ID}/HARD": _entry("HARD", 28, 18),
+            },
+        },
+        source="test_difficulty",
+    )
 
 
 def _pool(size: int = 8):
     return tuple(
         make_card(
-            f"card_{index}", member=f"Holomem{index}",
-            stats=Stats(performance=100 + 13 * index, technique=90 + 7 * index,
-                        sense=80 + 3 * index),
-            costume_skill=make_skill("COSTUME", family="stat_up", effect_type="all_stats",
-                                     magnitude=5.0 + 3.0 * index),
+            f"card_{index}",
+            member=f"Holomem{index}",
+            stats=Stats(performance=100 + 13 * index, technique=90 + 7 * index, sense=80 + 3 * index),
+            costume_skill=make_skill(
+                "COSTUME", family="stat_up", effect_type="all_stats", magnitude=5.0 + 3.0 * index
+            ),
         )
         for index in range(size)
     )
@@ -91,7 +100,7 @@ def test_the_same_team_scores_differently_on_another_difficulty():
     library = _two_difficulty_library()
     pool = _pool()
     cfg = make_scoring_config()
-    expert = library.get(MUSIC_ID)                 # the default is EXPERT
+    expert = library.get(MUSIC_ID)  # the default is EXPERT
     hard = library.get(MUSIC_ID, "HARD")
     assert expert.difficulty == "EXPERT" and len(expert.notes) != len(hard.notes)
     on_expert = score_song_detailed(pool[1:6], (pool[0],), expert, cfg)[0].total_score
@@ -108,12 +117,13 @@ def test_real_charts_differ_by_difficulty_in_notes_and_score():
     assert len(expert.notes) != len(hard.notes)
     pool = _pool()
     cfg = make_scoring_config()
-    assert (score_song_detailed(pool[1:6], (pool[0],), expert, cfg)[0].total_score
-            != score_song_detailed(pool[1:6], (pool[0],), hard, cfg)[0].total_score)
+    assert (
+        score_song_detailed(pool[1:6], (pool[0],), expert, cfg)[0].total_score
+        != score_song_detailed(pool[1:6], (pool[0],), hard, cfg)[0].total_score
+    )
     # charts.json's EXPERT entry is charts_all.json's, byte for byte, so the
     # EXPERT default reads the same chart from either file
-    assert (cert_mod.chart_digest(song) ==
-            cert_mod.chart_digest(song, charts_path=cert_mod.CHARTS_ALL_PATH))
+    assert cert_mod.chart_digest(song) == cert_mod.chart_digest(song, charts_path=cert_mod.CHARTS_ALL_PATH)
 
 
 # -- the two-stage cache --------------------------------------------------------
@@ -139,8 +149,12 @@ def test_an_unknown_difficulty_is_refused():
 
 # -- the HTTP surface -----------------------------------------------------------
 def _post(url: str, payload: dict) -> tuple[int, dict]:
-    request = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
-                                     headers={"Content-Type": "application/json"}, method="POST")
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             return response.status, json.loads(response.read())
@@ -150,8 +164,12 @@ def _post(url: str, payload: dict) -> tuple[int, dict]:
 
 @pytest.mark.parametrize("route", ["/api/compare", "/api/timeline"])
 def test_an_unknown_difficulty_is_rejected_with_400(web_base, route):
-    body = {"song": "m0334", "difficulty": "insane",
-            "teams": [list("abcdef"), list("ghijkl")], "cards": list("abcdef")}
+    body = {
+        "song": "m0334",
+        "difficulty": "insane",
+        "teams": [list("abcdef"), list("ghijkl")],
+        "cards": list("abcdef"),
+    }
     status, doc = _post(web_base + route, body)
     assert status == 400, (route, status, doc)
     assert "difficulty" in doc["error"]

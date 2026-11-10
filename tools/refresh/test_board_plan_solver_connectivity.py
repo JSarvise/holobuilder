@@ -5,6 +5,7 @@ vertex separators instead of a single-commodity flow. It must admit EXACTLY the 
 admits -- the rooted connected ones -- or the plan's optimum moves. Checked exhaustively on a small graph with cycles
 and bridges, and on random node sets of a real board graph.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -58,11 +59,27 @@ def test_every_subset_of_a_graph_with_cycles_and_bridges():
     r = to.ROOT
     # a 4-cycle at the root, a bridge to a triangle, a bridge to a 5-cycle with a chord, a
     # pendant chain, and one node unreachable from the root
-    g = _undirected([(r, "a"), ("a", "b"), ("b", "c"), ("c", r),
-                     ("b", "t1"), ("t1", "t2"), ("t2", "t3"), ("t3", "t1"),
-                     ("t2", "p1"), ("p1", "p2"), ("p2", "p3"), ("p3", "p4"), ("p4", "p5"),
-                     ("p5", "p1"), ("p2", "p4"),
-                     ("c", "d1"), ("d1", "d2")])
+    g = _undirected(
+        [
+            (r, "a"),
+            ("a", "b"),
+            ("b", "c"),
+            ("c", r),
+            ("b", "t1"),
+            ("t1", "t2"),
+            ("t2", "t3"),
+            ("t3", "t1"),
+            ("t2", "p1"),
+            ("p1", "p2"),
+            ("p2", "p3"),
+            ("p3", "p4"),
+            ("p4", "p5"),
+            ("p5", "p1"),
+            ("p2", "p4"),
+            ("c", "d1"),
+            ("d1", "d2"),
+        ]
+    )
     g["z"] = []
     nodes = sorted(g)
     others = [n for n in nodes if n != r]
@@ -99,4 +116,4 @@ def test_random_node_sets_of_a_real_board():
         assert _admitted(g, nodes, chosen) == ok, (cid, sorted(chosen))
         checked += 1
         connected += ok
-    assert checked == 3000 and 0 < connected < checked      # both kinds of sets were tested
+    assert checked == 3000 and 0 < connected < checked  # both kinds of sets were tested

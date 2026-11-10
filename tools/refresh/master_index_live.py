@@ -21,22 +21,25 @@ Usage:
     python master_index_live.py
     python master_index_live.py --dry-run
 """
+
 from __future__ import annotations
 
 import argparse
 import json
-import atomic_io
 import sys
 import zlib
 from pathlib import Path
 
+import atomic_io
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import run_cli  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
 import account_snapshot as snap  # noqa: E402
-from master_db import decode_record, _varint  # noqa: E402
+from master_db import _varint, decode_record  # noqa: E402
 
 INDEX = paths.DUMPS / "master_index.json"
 
@@ -68,7 +71,7 @@ def parse(pt: bytes) -> dict:
     while p < len(pt):
         tag, p = _varint(pt, p)
         ln, p = _varint(pt, p)
-        blob, p = pt[p:p + ln], p + ln
+        blob, p = pt[p : p + ln], p + ln
         if (tag >> 3) != 2:
             continue
         r = decode_record(blob)
@@ -88,14 +91,10 @@ def fetch() -> dict:
     """The master manifest, live and unauthenticated."""
     host, _credential = snap.load_credential("main")
     ident = snap.client_headers("main")
-    response_headers, trailers, data = snap.call(
-        host, "/rpc.api.Master/Get", snap.frame(b""), ident=ident
-    )
+    response_headers, trailers, data = snap.call(host, "/rpc.api.Master/Get", snap.frame(b""), ident=ident)
     status = trailers.get("grpc-status", response_headers.get("grpc-status"))
     if status not in (None, "0"):
-        raise RuntimeError(
-            f"Master/Get rejected: grpc-status {status} {trailers.get('grpc-message', '')}"
-        )
+        raise RuntimeError(f"Master/Get rejected: grpc-status {status} {trailers.get('grpc-message', '')}")
     for message in snap.unframe(data):
         if not message:
             continue
@@ -113,8 +112,7 @@ def fetch() -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--dry-run", action="store_true",
-                        help="print what would change and write nothing")
+    parser.add_argument("--dry-run", action="store_true", help="print what would change and write nothing")
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -126,9 +124,9 @@ def main() -> int:
     old = json.loads(INDEX.read_text("utf8")) if INDEX.exists() else {}
     added = sorted(set(fresh) - set(old))
     changed = sorted(
-        t for t in set(fresh) & set(old)
-        if fresh[t].get("seed_hex") != old[t].get("seed_hex")
-        or fresh[t].get("hash") != old[t].get("hash")
+        t
+        for t in set(fresh) & set(old)
+        if fresh[t].get("seed_hex") != old[t].get("seed_hex") or fresh[t].get("hash") != old[t].get("hash")
     )
     dropped = sorted(set(old) - set(fresh))
     print(f"vs on-disk: {len(added)} new, {len(changed)} changed, {len(dropped)} gone")

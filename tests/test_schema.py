@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import dataclasses
 
+from support.builders import FIXTURE_CARDS_PATH
+
 from hbuilder.domain.card import skill_slot_from_record
 from hbuilder.domain.gates import RunState
 from hbuilder.domain.schema import (
@@ -28,8 +30,6 @@ from hbuilder.domain.schema import (
     STAT_NAMES,
     validate_skill_slot,
 )
-
-from support.builders import FIXTURE_CARDS_PATH
 
 
 def _valid_run_state_slot(**overrides: object) -> dict:
@@ -157,9 +157,7 @@ def test_not_applicable_fields_by_slot_kind_matches_the_contract():
 def test_family_outside_six_accepted_values_is_rejected():
     slot = _valid_active_slot(family="score_bonus_extreme")
     errors = validate_skill_slot(slot, "card_family_01", "ACTIVE")
-    assert any(
-        "card_family_01" in e and "ACTIVE" in e and "family" in e for e in errors
-    )
+    assert any("card_family_01" in e and "ACTIVE" in e and "family" in e for e in errors)
 
 
 def test_stat_up_effect_type_score_is_rejected_and_lists_stat_names():
@@ -184,28 +182,19 @@ def test_stat_up_effect_type_technique_is_accepted_and_reads_back():
 def test_activation_rate_up_family_on_a_passive_slot_is_rejected_naming_the_required_active_slot_kind():
     slot = _valid_passive_slot(family="activation_rate_up", effect_type="activation_rate")
     errors = validate_skill_slot(slot, "card_rateup_01", "PASSIVE")
-    assert any(
-        e.startswith("family") and "activation_rate_up" in e and "ACTIVE" in e
-        for e in errors
-    )
+    assert any(e.startswith("family") and "activation_rate_up" in e and "ACTIVE" in e for e in errors)
 
 
 def test_activation_rate_up_family_on_a_special_slot_is_rejected_naming_the_required_active_slot_kind():
     slot = _valid_special_slot(family="activation_rate_up", effect_type="activation_rate")
     errors = validate_skill_slot(slot, "card_rateup_02", "SPECIAL")
-    assert any(
-        e.startswith("family") and "activation_rate_up" in e and "ACTIVE" in e
-        for e in errors
-    )
+    assert any(e.startswith("family") and "activation_rate_up" in e and "ACTIVE" in e for e in errors)
 
 
 def test_activation_rate_up_family_on_a_costume_slot_is_rejected_naming_the_required_active_slot_kind():
     slot = _valid_passive_slot(family="activation_rate_up", effect_type="activation_rate")
     errors = validate_skill_slot(slot, "card_rateup_03", COSTUME_SLOT_KIND)
-    assert any(
-        e.startswith("family") and "activation_rate_up" in e and "ACTIVE" in e
-        for e in errors
-    )
+    assert any(e.startswith("family") and "activation_rate_up" in e and "ACTIVE" in e for e in errors)
 
 
 def test_activation_rate_up_family_on_an_active_slot_validates_clean():
@@ -246,10 +235,7 @@ def test_duration_equals_interval_is_accepted_and_round_trips_exactly():
 def test_special_slot_probability_tier_medium_is_rejected():
     slot = _valid_special_slot(probability_tier="Medium")
     errors = validate_skill_slot(slot, "card_special_01", "SPECIAL")
-    assert any(
-        "SPECIAL" in e and "probability_tier" in e and "card_special_01" in e
-        for e in errors
-    )
+    assert any("SPECIAL" in e and "probability_tier" in e and "card_special_01" in e for e in errors)
 
 
 def test_special_slot_non_null_interval_is_rejected():
@@ -261,9 +247,7 @@ def test_special_slot_non_null_interval_is_rejected():
 def test_passive_slot_duration_5_is_rejected():
     slot = _valid_passive_slot(duration=5.0)
     errors = validate_skill_slot(slot, "card_passive_01", "PASSIVE")
-    assert any(
-        "PASSIVE" in e and "duration" in e and "card_passive_01" in e for e in errors
-    )
+    assert any("PASSIVE" in e and "duration" in e and "card_passive_01" in e for e in errors)
 
 
 # --- probability_tier behavior --------------------------------------------
@@ -280,17 +264,13 @@ def test_probability_tier_outside_enum_is_rejected():
 
 
 def test_condition_count_zero_is_rejected_naming_condition_count():
-    slot = _valid_active_slot(
-        condition={"kind": "type", "target": "Cute", "count": 0}
-    )
+    slot = _valid_active_slot(condition={"kind": "type", "target": "Cute", "count": 0})
     errors = validate_skill_slot(slot, "card_condition_01", "ACTIVE")
     assert any("condition.count" in e for e in errors)
 
 
 def test_condition_count_one_is_accepted():
-    slot = _valid_active_slot(
-        condition={"kind": "type", "target": "Cute", "count": 1}
-    )
+    slot = _valid_active_slot(condition={"kind": "type", "target": "Cute", "count": 1})
     assert validate_skill_slot(slot, "card_condition_02", "ACTIVE") == []
     assert "Cute" in CARD_TYPES
     assert "5期生" in GENERATIONS
@@ -300,19 +280,13 @@ def test_condition_count_one_is_accepted():
 
 
 def test_run_state_condition_with_misspelled_target_is_rejected_naming_condition_target():
-    slot = _valid_run_state_slot(
-        condition={"kind": "run_state", "target": "life_at_or_above_60", "count": 1}
-    )
+    slot = _valid_run_state_slot(condition={"kind": "run_state", "target": "life_at_or_above_60", "count": 1})
     errors = validate_skill_slot(slot, "card_run_state_01", "PASSIVE")
-    assert any(
-        "condition.target" in e and "card_run_state_01" in e for e in errors
-    )
+    assert any("condition.target" in e and "card_run_state_01" in e for e in errors)
 
 
 def test_run_state_condition_with_valid_target_is_accepted():
-    slot = _valid_run_state_slot(
-        condition={"kind": "run_state", "target": "combo", "count": 100}
-    )
+    slot = _valid_run_state_slot(condition={"kind": "run_state", "target": "combo", "count": 100})
     assert validate_skill_slot(slot, "card_run_state_02", "PASSIVE") == []
 
 
@@ -324,25 +298,16 @@ def test_run_state_condition_count_is_a_threshold_not_pinned_to_one():
 
     See `tests/test_run_state_thresholds.py`.
     """
-    slot = _valid_run_state_slot(
-        condition={"kind": "run_state", "target": "life", "count": 600}
-    )
+    slot = _valid_run_state_slot(condition={"kind": "run_state", "target": "life", "count": 600})
     errors = validate_skill_slot(slot, "card_run_state_03", "PASSIVE")
     count_errors = [e for e in errors if "condition.count" in e]
-    assert count_errors == [], (
-        "a run_state threshold above 1 must now validate; got "
-        f"{count_errors}"
-    )
+    assert count_errors == [], f"a run_state threshold above 1 must now validate; got {count_errors}"
 
 
 def test_condition_kind_outside_enum_is_rejected_naming_condition_kind_and_listing_all_three():
-    slot = _valid_run_state_slot(
-        condition={"kind": "generatoin", "target": "1期生", "count": 1}
-    )
+    slot = _valid_run_state_slot(condition={"kind": "generatoin", "target": "1期生", "count": 1})
     errors = validate_skill_slot(slot, "card_condition_kind_01", "PASSIVE")
-    matching = [
-        e for e in errors if "condition.kind" in e and "card_condition_kind_01" in e
-    ]
+    matching = [e for e in errors if "condition.kind" in e and "card_condition_kind_01" in e]
     assert matching
     assert all(kind in matching[0] for kind in CONDITION_KINDS)
 
@@ -375,9 +340,7 @@ def test_missing_magnitude_names_card_slot_and_field():
     slot = _valid_active_slot()
     del slot["magnitude"]
     errors = validate_skill_slot(slot, "card_missing_01", "ACTIVE")
-    assert any(
-        "card_missing_01" in e and "ACTIVE" in e and "magnitude" in e for e in errors
-    )
+    assert any("card_missing_01" in e and "ACTIVE" in e and "magnitude" in e for e in errors)
 
 
 def test_null_slot_is_valid_and_means_slot_absent():
@@ -445,9 +408,7 @@ def test_every_stat_pool_effect_type_declares_the_stats_it_raises():
     from hbuilder.domain.scoring import POOL_BY_EFFECT_TYPE, STAT_NAMES_BY_EFFECT_TYPE
 
     stat_pool_effect_types = {
-        effect_type
-        for effect_type, pool in POOL_BY_EFFECT_TYPE.items()
-        if pool == "stat"
+        effect_type for effect_type, pool in POOL_BY_EFFECT_TYPE.items() if pool == "stat"
     }
     assert set(STAT_NAMES_BY_EFFECT_TYPE) == stat_pool_effect_types
     for stat_names in STAT_NAMES_BY_EFFECT_TYPE.values():
@@ -478,8 +439,7 @@ def test_every_populated_slot_in_the_shipped_cards_json_carries_an_explicit_targ
         costume = card["costume_skill"]
         if costume is not None:
             assert "target" in costume, (
-                f"card {card['id']!r} costume_skill is missing an explicit "
-                f"'target' key"
+                f"card {card['id']!r} costume_skill is missing an explicit 'target' key"
             )
 
 
@@ -560,9 +520,7 @@ def test_an_override_with_null_condition_is_rejected_naming_override_condition()
 def test_an_override_with_ungated_condition_is_rejected_naming_override_condition():
     # An override with no gate at all is not an override, it is simply a
     # different base magnitude.
-    slot = _valid_active_slot(
-        override=_populated_override(condition={"kind": "ungated"})
-    )
+    slot = _valid_active_slot(override=_populated_override(condition={"kind": "ungated"}))
     errors = validate_skill_slot(slot, "card_override_08", "ACTIVE")
     assert any("override.condition" in e and "card_override_08" in e for e in errors)
 
@@ -588,24 +546,13 @@ def test_a_slots_override_carries_no_family_or_effect_type_of_its_own():
     """A populated override carrying either `family` or `effect_type` is
     rejected -- by definition it overrides the principal's magnitude, and
     a second copy of the family could only ever disagree with the first."""
-    slot_with_family = _valid_active_slot(
-        override=_populated_override(family="stat_up")
-    )
+    slot_with_family = _valid_active_slot(override=_populated_override(family="stat_up"))
     errors_family = validate_skill_slot(slot_with_family, "card_override_11", "ACTIVE")
-    assert any(
-        "override.family" in e and "card_override_11" in e for e in errors_family
-    )
+    assert any("override.family" in e and "card_override_11" in e for e in errors_family)
 
-    slot_with_effect_type = _valid_active_slot(
-        override=_populated_override(effect_type="performance")
-    )
-    errors_effect_type = validate_skill_slot(
-        slot_with_effect_type, "card_override_12", "ACTIVE"
-    )
-    assert any(
-        "override.effect_type" in e and "card_override_12" in e
-        for e in errors_effect_type
-    )
+    slot_with_effect_type = _valid_active_slot(override=_populated_override(effect_type="performance"))
+    errors_effect_type = validate_skill_slot(slot_with_effect_type, "card_override_12", "ACTIVE")
+    assert any("override.effect_type" in e and "card_override_12" in e for e in errors_effect_type)
 
 
 def test_a_null_override_taints_the_card_naming_the_dotted_path():
@@ -664,39 +611,27 @@ def test_a_second_familys_effect_type_outside_its_familys_accepted_set_is_reject
         rider=_populated_second_family_rider(family="life_recovery", effect_type="score")
     )
     errors = validate_skill_slot(slot, "card_second_family_02", "SPECIAL")
-    assert any(
-        "rider.effect_type" in e and "card_second_family_02" in e for e in errors
-    )
+    assert any("rider.effect_type" in e and "card_second_family_02" in e for e in errors)
 
 
 def test_a_second_familys_family_outside_skill_families_is_rejected_naming_rider_family():
-    slot = _valid_special_slot(
-        rider=_populated_second_family_rider(family="score_bonus_extreme")
-    )
+    slot = _valid_special_slot(rider=_populated_second_family_rider(family="score_bonus_extreme"))
     errors = validate_skill_slot(slot, "card_second_family_03", "SPECIAL")
     assert any("rider.family" in e and "card_second_family_03" in e for e in errors)
 
 
 def test_a_second_familys_malformed_condition_is_rejected_naming_the_nested_rider_condition_path():
     slot = _valid_special_slot(
-        rider=_populated_second_family_rider(
-            condition={"kind": "type", "target": "Cute", "count": 0}
-        )
+        rider=_populated_second_family_rider(condition={"kind": "type", "target": "Cute", "count": 0})
     )
     errors = validate_skill_slot(slot, "card_second_family_04", "SPECIAL")
-    assert any(
-        "rider.condition.count" in e and "card_second_family_04" in e for e in errors
-    )
+    assert any("rider.condition.count" in e and "card_second_family_04" in e for e in errors)
 
 
 def test_a_second_familys_malformed_target_is_rejected_naming_the_nested_rider_target_path():
-    slot = _valid_special_slot(
-        rider=_populated_second_family_rider(target={"kind": "all", "value": "Cute"})
-    )
+    slot = _valid_special_slot(rider=_populated_second_family_rider(target={"kind": "all", "value": "Cute"}))
     errors = validate_skill_slot(slot, "card_second_family_05", "SPECIAL")
-    assert any(
-        "rider.target.value" in e and "card_second_family_05" in e for e in errors
-    )
+    assert any("rider.target.value" in e and "card_second_family_05" in e for e in errors)
 
 
 def test_a_none_kind_second_family_rider_with_a_payload_field_present_is_rejected_naming_that_field():
@@ -741,10 +676,7 @@ def test_a_second_familys_principal_on_a_special_slot_is_still_rejected_naming_t
     principal may be."""
     slot = _valid_special_slot(family="activation_rate_up", effect_type="activation_rate")
     errors = validate_skill_slot(slot, "card_second_family_07", "SPECIAL")
-    assert any(
-        e.startswith("family") and "activation_rate_up" in e and "ACTIVE" in e
-        for e in errors
-    )
+    assert any(e.startswith("family") and "activation_rate_up" in e and "ACTIVE" in e for e in errors)
 
 
 def test_a_second_family_rider_naming_activation_rate_up_on_a_special_slot_validates_clean():
@@ -753,9 +685,7 @@ def test_a_second_family_rider_naming_activation_rate_up_on_a_special_slot_valid
     never consulted against a rider's family -- only the slot's own
     (principal) family."""
     slot = _valid_special_slot(
-        rider=_populated_second_family_rider(
-            family="activation_rate_up", effect_type="activation_rate"
-        )
+        rider=_populated_second_family_rider(family="activation_rate_up", effect_type="activation_rate")
     )
     assert validate_skill_slot(slot, "card_second_family_08", "SPECIAL") == []
     built = skill_slot_from_record(slot, "SPECIAL")
@@ -766,9 +696,7 @@ def test_a_second_family_rider_naming_activation_rate_up_on_a_passive_slot_valid
     """The same holds for PASSIVE: FAMILY_REQUIRES_SLOT_KIND scopes to the
     principal family regardless of which slot kind carries the rider."""
     slot = _valid_passive_slot(
-        rider=_populated_second_family_rider(
-            family="activation_rate_up", effect_type="activation_rate"
-        )
+        rider=_populated_second_family_rider(family="activation_rate_up", effect_type="activation_rate")
     )
     assert validate_skill_slot(slot, "card_second_family_09", "PASSIVE") == []
     built = skill_slot_from_record(slot, "PASSIVE")
@@ -779,9 +707,7 @@ def test_a_second_family_rider_naming_activation_rate_up_on_a_costume_slot_valid
     """And for COSTUME: a costume slot's rider is unchecked against
     FAMILY_REQUIRES_SLOT_KIND exactly like any other slot kind's rider."""
     slot = _valid_passive_slot(
-        rider=_populated_second_family_rider(
-            family="activation_rate_up", effect_type="activation_rate"
-        )
+        rider=_populated_second_family_rider(family="activation_rate_up", effect_type="activation_rate")
     )
     assert validate_skill_slot(slot, "card_second_family_10", COSTUME_SLOT_KIND) == []
     built = skill_slot_from_record(slot, COSTUME_SLOT_KIND)

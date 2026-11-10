@@ -19,13 +19,17 @@
 #      monotone string-literal index table, which is a whole-file check.
 #
 # Usage: python decrypt_metadata.py [global-metadata.dat] [out.dat] [--keyout key.bin]
-import sys, struct, collections, re
+import collections
+import re
+import struct
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
+import game_keys  # noqa: E402
+
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import run_cli  # noqa: E402
-import game_keys  # noqa: E402
 
 MAGIC = 0xFAB11BAF
 L = 128
@@ -34,10 +38,11 @@ KNOWN_KEY = game_keys.metadata_key() or b""  # game_keys.py; empty = re-derive
 
 CRIB = b"k__BackingField"
 
+
 def recover_key(d):
-    kmagic = bytes(a ^ b for a, b in zip(d[:4], struct.pack('<I', MAGIC)))
+    kmagic = bytes(a ^ b for a, b in zip(d[:4], struct.pack("<I", MAGIC)))
     # 1) base: mode over zero-anchored blocks
-    blocks = [d[i:i+L] for i in range(0, len(d)-L, L) if d[i:i+4] == kmagic]
+    blocks = [d[i : i + L] for i in range(0, len(d) - L, L) if d[i : i + 4] == kmagic]
     key = bytearray(L)
     for j in range(L):
         key[j] = collections.Counter(b[j] for b in blocks).most_common(1)[0][0]
@@ -45,9 +50,24 @@ def recover_key(d):
     # 2+3) crib-drag AND surgical-fix, looped together to convergence: the surgical
     # step corrects the exact phase pinned by a corrupt "k__Backing??eld", which
     # then lets more cribs match on the next crib-drag pass (bootstrap).
-    cribs = [CRIB, b".ctor", b".cctor", b"get_", b"set_", b"add_", b"remove_",
-             b"System.", b"UnityEngine.", b"Async", b"Encrypt", b"Decrypt",
-             b"Exception", b"Attribute", b"<Module>", b"IEnumerator"]
+    cribs = [
+        CRIB,
+        b".ctor",
+        b".cctor",
+        b"get_",
+        b"set_",
+        b"add_",
+        b"remove_",
+        b"System.",
+        b"UnityEngine.",
+        b"Async",
+        b"Encrypt",
+        b"Decrypt",
+        b"Exception",
+        b"Attribute",
+        b"<Module>",
+        b"IEnumerator",
+    ]
     for _ in range(20):
         dec = bytes(d[i] ^ key[i % L] for i in range(len(d)))
         votes = [collections.Counter() for _ in range(L)]
@@ -55,26 +75,29 @@ def recover_key(d):
             s = 0
             while True:
                 p = dec.find(crib, s)
-                if p < 0: break
+                if p < 0:
+                    break
                 for j in range(len(crib)):
-                    votes[(p+j) % L][d[p+j] ^ crib[j]] += 1
-                s = p+1
+                    votes[(p + j) % L][d[p + j] ^ crib[j]] += 1
+                s = p + 1
         # surgical: corrupt "k__Backing??eld" pinpoints exact bad phases
-        for m in re.finditer(rb'k__Backing(..)eld', dec):
+        for m in re.finditer(rb"k__Backing(..)eld", dec):
             p = m.start()
             for j in range(15):
-                if dec[p+j] != CRIB[j]:
-                    votes[(p+j) % L][d[p+j] ^ CRIB[j]] += 5   # strong known-plaintext vote
+                if dec[p + j] != CRIB[j]:
+                    votes[(p + j) % L][d[p + j] ^ CRIB[j]] += 5  # strong known-plaintext vote
         changed = 0
         for ph in range(4, L):
             if sum(votes[ph].values()) >= 4:
                 v = votes[ph].most_common(1)[0][0]
                 if v != key[ph]:
-                    key[ph] = v; changed += 1
+                    key[ph] = v
+                    changed += 1
         key[0:4] = kmagic
         if changed == 0:
             break
     return bytes(key)
+
 
 # --- Header de-obfuscation -------------------------------------------------
 # On top of the XOR, the game restructures the metadata header: instead of stock
@@ -89,35 +112,64 @@ def recover_key(d):
 # table is the fingerprint.)
 STOCK_FIELD_ORDER = 31  # sections from stringLiteral .. exportedTypeDefinitions
 
+
 def deobfuscate_header(dec, version=29):
     """Given decrypted metadata with the triple-header, return a copy whose first
     256 bytes are a stock (offset,size)-pair header. Data sections are untouched."""
-    H = list(struct.unpack_from('<128I', dec, 0))
-    pairs = [(H[2+3*k], H[3+3*k]) for k in range(STOCK_FIELD_ORDER)]  # drop the count
+    H = list(struct.unpack_from("<128I", dec, 0))
+    pairs = [(H[2 + 3 * k], H[3 + 3 * k]) for k in range(STOCK_FIELD_ORDER)]  # drop the count
     ints = [MAGIC, version]
     for off, sz in pairs:
         ints += [off, sz]
     out = bytearray(dec)
-    out[0:256] = struct.pack('<64I', *ints)
-    for i in range(256, pairs[0][0]):   # zero the leftover header padding
+    out[0:256] = struct.pack("<64I", *ints)
+    for i in range(256, pairs[0][0]):  # zero the leftover header padding
         out[i] = 0
     return bytes(out)
 
+
 def section_table(dec):
     """Return [(name, offset, size, count, elem_size)] from the triple-header."""
-    H = list(struct.unpack_from('<128I', dec, 0))
-    names = ["stringLiteral","stringLiteralData","string","events","properties","methods",
-        "parameterDefaultValues","fieldDefaultValues","fieldAndParamDefaultData","fieldMarshaledSizes",
-        "parameters","fields","genericParameters","genericParameterConstraints","genericContainers",
-        "nestedTypes","interfaces","vtableMethods","interfaceOffsets","typeDefinitions","images",
-        "assemblies","fieldRefs","referencedAssemblies","attributeData","attributeDataRange",
-        "unresolvedVCallParamTypes","unresolvedVCallParamRanges","windowsRTTypeNames","windowsRTStrings",
-        "exportedTypeDefinitions"]
+    H = list(struct.unpack_from("<128I", dec, 0))
+    names = [
+        "stringLiteral",
+        "stringLiteralData",
+        "string",
+        "events",
+        "properties",
+        "methods",
+        "parameterDefaultValues",
+        "fieldDefaultValues",
+        "fieldAndParamDefaultData",
+        "fieldMarshaledSizes",
+        "parameters",
+        "fields",
+        "genericParameters",
+        "genericParameterConstraints",
+        "genericContainers",
+        "nestedTypes",
+        "interfaces",
+        "vtableMethods",
+        "interfaceOffsets",
+        "typeDefinitions",
+        "images",
+        "assemblies",
+        "fieldRefs",
+        "referencedAssemblies",
+        "attributeData",
+        "attributeDataRange",
+        "unresolvedVCallParamTypes",
+        "unresolvedVCallParamRanges",
+        "windowsRTTypeNames",
+        "windowsRTStrings",
+        "exportedTypeDefinitions",
+    ]
     out = []
     for k in range(STOCK_FIELD_ORDER):
-        off, sz, cnt = H[2+3*k], H[3+3*k], H[4+3*k]
-        out.append((names[k], off, sz, cnt, (sz//cnt if cnt else 0)))
+        off, sz, cnt = H[2 + 3 * k], H[3 + 3 * k], H[4 + 3 * k]
+        out.append((names[k], off, sz, cnt, (sz // cnt if cnt else 0)))
     return out
+
 
 def refine_by_literal_text(d, key):
     """Step 4: correct the key phases the cribs never pin, and keep the result only when the
@@ -139,7 +191,7 @@ def refine_by_literal_text(d, key):
 
 def _sections(d, key):
     """Header triples (offset, size, count) of sections 0..2, decrypted with `key`."""
-    H = struct.unpack_from('<11I', bytes(d[i] ^ key[i % L] for i in range(0, 48)), 0)
+    H = struct.unpack_from("<11I", bytes(d[i] ^ key[i % L] for i in range(0, 48)), 0)
     return (H[2], H[3], H[4]), (H[5], H[6], H[7]), (H[8], H[9], H[10])
 
 
@@ -172,7 +224,7 @@ def _text_vote(d, key, with_identifiers):
     # identifier-shaped text: lowercase most, then upper / digits / _ . / space; other printable
     # bytes a little (a printable-only score cannot tell a byte from its bit-0 twin, 0x26 / 0x27)
     weight = [0] * 256
-    for c in range(0x20, 0x7f):
+    for c in range(0x20, 0x7F):
         weight[c] = 1
     for c in b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./ ":
         weight[c] = 3
@@ -182,9 +234,9 @@ def _text_vote(d, key, with_identifiers):
     for j in range(L):
         hist = [0] * 256
         for off, size in spans:
-            for c in d[off + ((j - off) % L):off + size:L]:
+            for c in d[off + ((j - off) % L) : off + size : L]:
                 hist[c] += 1
-        score = lambda k: sum(hist[c ^ k] * weight[c] for c in printable)
+        score = lambda k: sum(hist[c ^ k] * weight[c] for c in printable)  # noqa: B023
         cur = score(key[j])
         best = max(range(256), key=score)
         if score(best) > cur * 1.02:
@@ -196,30 +248,38 @@ def _whole_file_errors(d, key):
     """How wrong a key is over the whole file: a wrong magic is fatal; otherwise the corrupt
     k__BackingField count plus the literal-index entries that break its ascending order."""
     dec = bytes(d[i] ^ key[i % L] for i in range(len(d)))
-    if struct.unpack_from('<I', dec, 0)[0] != MAGIC:
-        return 10 ** 9
-    corrupt = len(re.findall(rb'k__Backing(..)eld', dec)) - dec.count(b"k__BackingField")
-    lo, _ls, ln = struct.unpack_from('<3I', dec, 8)
+    if struct.unpack_from("<I", dec, 0)[0] != MAGIC:
+        return 10**9
+    corrupt = len(re.findall(rb"k__Backing(..)eld", dec)) - dec.count(b"k__BackingField")
+    lo, _ls, ln = struct.unpack_from("<3I", dec, 8)
     disorder = 0
     if 0 < lo and 0 < ln and lo + 4 * ln <= len(dec):
-        idx = struct.unpack_from(f'<{ln}I', dec, lo)
+        idx = struct.unpack_from(f"<{ln}I", dec, lo)
         disorder = sum(1 for i in range(1, ln) if idx[i] < idx[i - 1])
     return corrupt + disorder
+
 
 def installed_metadata():
     """The installed client's global-metadata.dat (`paths.game_root`: HOLODREAMS_DIR, Steam libraries)."""
     import os  # noqa: PLC0415
-    return os.path.join(paths.game_root(), "hololive-Dreams_Data", "il2cpp_data", "Metadata",
-                        "global-metadata.dat")
+
+    return os.path.join(
+        paths.game_root(), "hololive-Dreams_Data", "il2cpp_data", "Metadata", "global-metadata.dat"
+    )
+
 
 def decrypt(d, known=KNOWN_KEY):
     """(plaintext, key, refined phases) for the bytes of an encrypted global-metadata.dat.
     Fast path: the known key when it still decrypts this build cleanly; otherwise re-derived
     from scratch (e.g. after a game update changed the key)."""
+
     def quality(k):
         dc = bytes(d[i] ^ k[i % L] for i in range(min(len(d), 0x1000000)))
-        return struct.unpack_from('<I', dc, 0)[0] == MAGIC and \
-            len(re.findall(rb'k__Backing(..)eld', dc)) - dc.count(b"k__BackingField") == 0
+        return (
+            struct.unpack_from("<I", dc, 0)[0] == MAGIC
+            and len(re.findall(rb"k__Backing(..)eld", dc)) - dc.count(b"k__BackingField") == 0
+        )
+
     if len(known) == L and quality(known):
         key = known
     else:
@@ -227,40 +287,46 @@ def decrypt(d, known=KNOWN_KEY):
     key, refined = refine_by_literal_text(d, key)
     return bytes(d[i] ^ key[i % L] for i in range(len(d))), key, refined
 
+
 def main():
     src = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else installed_metadata()
-    out = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else "global-metadata-decrypted.dat"
+    out = (
+        sys.argv[2]
+        if len(sys.argv) > 2 and not sys.argv[2].startswith("--")
+        else "global-metadata-decrypted.dat"
+    )
     keyout = None
     if "--keyout" in sys.argv:
-        keyout = sys.argv[sys.argv.index("--keyout")+1]
-    d = open(src, 'rb').read()
+        keyout = sys.argv[sys.argv.index("--keyout") + 1]
+    d = open(src, "rb").read()
     dec, key, refined = decrypt(d)
     if refined:
         print(f"string-literal refine changed key phases {refined}")
-    mg = struct.unpack_from('<I', dec, 0)[0]
-    ver = struct.unpack_from('<I', dec, 4)[0]
-    corrupt = len(re.findall(rb'k__Backing(..)eld', dec)) - dec.count(b"k__BackingField")
+    mg = struct.unpack_from("<I", dec, 0)[0]
+    ver = struct.unpack_from("<I", dec, 4)[0]
+    corrupt = len(re.findall(rb"k__Backing(..)eld", dec)) - dec.count(b"k__BackingField")
     print(f"key={key.hex()}")
     print(f"matches KNOWN_KEY: {key == KNOWN_KEY}")
     print(f"magic={hex(mg)} ({'OK' if mg == MAGIC else 'BAD'}) version={ver}")
     print(f"exact k__BackingField={dec.count(b'k__BackingField')} corrupt={corrupt}")
-    open(out, 'wb').write(dec)
+    open(out, "wb").write(dec)
     print(f"wrote {out} ({len(dec)} bytes)")
     if keyout:
-        open(keyout, 'wb').write(key)
+        open(keyout, "wb").write(key)
         print(f"wrote key -> {keyout}")
     # also emit a header-deobfuscated copy (stock-order header) next to `out`
     if "--deobf-header" in sys.argv:
         ver = 29
         if "--metaver" in sys.argv:
-            ver = int(sys.argv[sys.argv.index("--metaver")+1])
+            ver = int(sys.argv[sys.argv.index("--metaver") + 1])
         stock = deobfuscate_header(dec, version=ver)
-        so = out.rsplit('.', 1)[0] + f"-stockhdr-v{ver}.dat"
-        open(so, 'wb').write(stock)
+        so = out.rsplit(".", 1)[0] + f"-stockhdr-v{ver}.dat"
+        open(so, "wb").write(stock)
         print(f"wrote header-deobfuscated (v{ver}) -> {so}")
         print("section table (name off size count elemsz):")
         for n, o, s, c, e in section_table(dec):
             print(f"  {n:28} {o:>9} {s:>9} {c:>9} {e:>4}")
+
 
 if __name__ == "__main__":
     run_cli(main)

@@ -13,6 +13,7 @@ ceiling with the singer's, and the Member Power-Up paid on that base).
 
 Needs the account's gitignored dumps; skips without them.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -28,8 +29,14 @@ _REPO = Path(__file__).resolve().parents[1]
 _TREE_OPTIMISE = _REPO / "tools" / "refresh" / "tree_optimise.py"
 # the golden's singer-led case: leader + 5 members on m0342 (Matsuri, chr-00007, is a member)
 SONG = "m0342"
-TEAM = ["card-00016-4-cmmn-0000-00", "card-00007-3-nrml-0008-00", "card-03007-5-uniq-0039-00",
-        "card-04015-5-uniq-0054-00", "card-06005-5-uniq-0061-00", "card-00031-5-uniq-0025-00"]
+TEAM = [
+    "card-00016-4-cmmn-0000-00",
+    "card-00007-3-nrml-0008-00",
+    "card-03007-5-uniq-0039-00",
+    "card-04015-5-uniq-0054-00",
+    "card-06005-5-uniq-0061-00",
+    "card-00031-5-uniq-0025-00",
+]
 
 
 def _load_tree_optimise():
@@ -91,8 +98,10 @@ def test_in_board_values_are_the_nodes_marginals_inside_that_board():
     values = _TREE._branch_values(_ORACLE, graphs, prices, TEAM[0], TEAM[1:], context=context)
 
     def score(nodes):
-        return _ORACLE.score_team(TEAM[0], TEAM[1:], _ORACLE.state_from(
-            {**context, leader_chr: sorted(nodes)}))
+        return _ORACLE.score_team(
+            TEAM[0], TEAM[1:], _ORACLE.state_from({**context, leader_chr: sorted(nodes)})
+        )
+
     full = score(set(context[leader_chr]) | {"S-001"})
     reds = sorted(n for n in values if n.startswith("R-"))[:3]
     assert reds

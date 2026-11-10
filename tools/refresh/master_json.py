@@ -29,6 +29,7 @@ schema from the newer protos to name it.
     python master_json.py --check-all             # every table that can be rendered
     python master_json.py --compile-schema dumps/holodori master_schema
 """
+
 from __future__ import annotations
 
 import json
@@ -40,13 +41,29 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
 OUT = paths.HOLODORI
 SCHEMA = paths.REFRESH_DIR / "master_schema" / "schema.json"
 
-_SCALARS = {"string", "bytes", "bool", "float", "double", "int32", "int64", "uint32", "uint64",
-            "sint32", "sint64", "fixed32", "fixed64", "sfixed32", "sfixed64"}
+_SCALARS = {
+    "string",
+    "bytes",
+    "bool",
+    "float",
+    "double",
+    "int32",
+    "int64",
+    "uint32",
+    "uint64",
+    "sint32",
+    "sint64",
+    "fixed32",
+    "fixed64",
+    "sfixed32",
+    "sfixed64",
+}
 _FIELD = re.compile(r"^\s*(repeated\s+|optional\s+)?([.\w]+)\s+(\w+)\s*=\s*(\d+)\s*(\[[^\]]*\])?\s*;")
 
 
@@ -61,12 +78,13 @@ def _snake(name: str) -> str:
 
 # --- schema ------------------------------------------------------------------------------------
 
+
 def compile_schema(proto_dirs: list[Path]) -> dict:
     """Every `message` and `enum` in the .proto files under `proto_dirs`, flattened to plain data."""
     messages: dict[str, list] = {}
     enums: dict[str, dict] = {}
     for path in sorted(p for d in proto_dirs for p in d.glob("*.proto")):
-        stack: list[tuple[str, str]] = []           # (kind, name) of the open blocks
+        stack: list[tuple[str, str]] = []  # (kind, name) of the open blocks
         for line in path.read_text(encoding="utf-8").splitlines():
             m = re.match(r"^\s*(message|enum)\s+(\w+)\s*\{", line)
             if m:
@@ -90,10 +108,16 @@ def compile_schema(proto_dirs: list[Path]) -> dict:
             f = _FIELD.match(line)
             if f:
                 label, typ, fname, num, opts = f.groups()
-                messages[name].append({"n": int(num), "name": fname, "json": _camel(fname),
-                                       "type": typ.lstrip(".").rsplit(".", 1)[-1],
-                                       "repeated": bool(label and label.strip() == "repeated"),
-                                       "pk": bool(opts and "options.master.pk) = true" in opts)})
+                messages[name].append(
+                    {
+                        "n": int(num),
+                        "name": fname,
+                        "json": _camel(fname),
+                        "type": typ.lstrip(".").rsplit(".", 1)[-1],
+                        "repeated": bool(label and label.strip() == "repeated"),
+                        "pk": bool(opts and "options.master.pk) = true" in opts),
+                    }
+                )
     return {"messages": messages, "enums": enums}
 
 
@@ -102,6 +126,7 @@ def load_schema() -> dict:
 
 
 # --- wire decoding -----------------------------------------------------------------------------
+
 
 def _varint(b: bytes, p: int) -> tuple[int, int]:
     s = r = 0
@@ -132,13 +157,13 @@ def _fields(b: bytes):
             v, p = _varint(b, p)
         elif wt == 2:
             ln, p = _varint(b, p)
-            v = b[p:p + ln]
+            v = b[p : p + ln]
             p += ln
         elif wt == 5:
-            v = b[p:p + 4]
+            v = b[p : p + 4]
             p += 4
         elif wt == 1:
-            v = b[p:p + 8]
+            v = b[p : p + 8]
             p += 8
         else:
             raise ValueError(f"wire type {wt} at byte {p}")
@@ -159,6 +184,7 @@ class Renderer:
             return v.decode("utf-8")
         if typ == "bytes":
             import base64
+
             return base64.b64encode(v).decode("ascii")
         if typ == "bool":
             return bool(v)
@@ -199,7 +225,7 @@ class Renderer:
             if ftyp in self.messages:
                 val = [self.message(ftyp, v)]
             elif wt == 2 and ftyp not in ("string", "bytes"):
-                val = list(self._packed(ftyp, v))          # a packed repeated scalar
+                val = list(self._packed(ftyp, v))  # a packed repeated scalar
             else:
                 val = [self._scalar(ftyp, wt, v)]
             if f["repeated"]:
@@ -212,10 +238,10 @@ class Renderer:
         p = 0
         if typ in ("float", "fixed32", "sfixed32"):
             for i in range(0, len(b), 4):
-                yield self._scalar(typ, 5, b[i:i + 4])
+                yield self._scalar(typ, 5, b[i : i + 4])
         elif typ in ("double", "fixed64", "sfixed64"):
             for i in range(0, len(b), 8):
-                yield self._scalar(typ, 1, b[i:i + 8])
+                yield self._scalar(typ, 1, b[i : i + 8])
         else:
             while p < len(b):
                 v, p = _varint(b, p)
@@ -236,6 +262,7 @@ def _float32(raw: bytes):
 
 # --- tables ------------------------------------------------------------------------------------
 
+
 def message_for(table: str, schema: dict) -> str | None:
     """The table's own message; every `Lang<X>_<Language>` table is the one `Lang` shape."""
     msgs = schema["messages"]
@@ -248,6 +275,7 @@ def message_for(table: str, schema: dict) -> str | None:
 
 def render(table: str, renderer: Renderer | None = None) -> list[dict]:
     import master_cache as mc  # noqa: PLC0415  (needs sqlcipher)
+
     schema = renderer and {"messages": renderer.messages, "enums": renderer.enums} or load_schema()
     renderer = renderer or Renderer(schema)
     typ = message_for(table, schema)
@@ -264,7 +292,7 @@ def render(table: str, renderer: Renderer | None = None) -> list[dict]:
                     row["data"] = renderer.message(typ, v)
                 elif pk_types.get(col, "string") == "string":
                     row[col] = v.decode("utf-8")
-                else:                                    # an int or enum key column
+                else:  # an int or enum key column
                     row[col] = int(v.decode())
             out.append(row)
         return out
@@ -286,8 +314,10 @@ def write(table: str, renderer: Renderer) -> Path:
 
 def compare(ours: list[dict], theirs: list[dict]) -> tuple[str, str]:
     """EXACT, or how the two differ (rows only one side has, rows that differ)."""
+
     def key(r):
         return json.dumps({k: v for k, v in r.items() if k != "data"}, sort_keys=True)
+
     a = {key(r): r for r in ours}
     b = {key(r): r for r in theirs}
     only_ours = sorted(set(a) - set(b))
@@ -298,8 +328,9 @@ def compare(ours: list[dict], theirs: list[dict]) -> tuple[str, str]:
     bits = [f"{len(a.keys() & b.keys()) - len(differ)} same"]
     if differ:
         k = differ[0]
-        fields = sorted(f for f in set(a[k]["data"]) | set(b[k]["data"])
-                        if a[k]["data"].get(f) != b[k]["data"].get(f))
+        fields = sorted(
+            f for f in set(a[k]["data"]) | set(b[k]["data"]) if a[k]["data"].get(f) != b[k]["data"].get(f)
+        )
         bits.append(f"{len(differ)} differ (e.g. {k} {fields[:4]})")
     if only_ours:
         bits.append(f"{len(only_ours)} only ours (e.g. {only_ours[0]})")
@@ -313,8 +344,7 @@ def main() -> int:
     argv = sys.argv[1:]
     if argv[:1] == ["--compile-schema"]:
         schema = compile_schema([Path(a) for a in argv[1:]])
-        SCHEMA.write_bytes(json.dumps(schema, ensure_ascii=False, indent=0, sort_keys=True)
-                           .encode("utf-8"))
+        SCHEMA.write_bytes(json.dumps(schema, ensure_ascii=False, indent=0, sort_keys=True).encode("utf-8"))
         print(f"{len(schema['messages'])} messages, {len(schema['enums'])} enums -> {SCHEMA}")
         return 0
     renderer = Renderer(load_schema())
@@ -324,9 +354,8 @@ def main() -> int:
         for t in names:
             path = OUT / f"main_{t}.json"
             try:
-                verdict, detail = compare(render(t, renderer),
-                                          json.loads(path.read_text(encoding="utf-8")))
-            except Exception as e:                       # noqa: BLE001  report and go on
+                verdict, detail = compare(render(t, renderer), json.loads(path.read_text(encoding="utf-8")))
+            except Exception as e:  # noqa: BLE001  report and go on
                 verdict, detail = "ERROR", f"{type(e).__name__}: {e}"
             counts[verdict] = counts.get(verdict, 0) + 1
             print(f"{t:44} {verdict:6} {detail}", flush=True)
@@ -341,7 +370,7 @@ def main() -> int:
             try:
                 path = write(t, renderer)
                 print(f"{t:36} -> {path.relative_to(paths.REPO)}")
-            except Exception as e:                       # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
                 print(f"{t:36} FAILED {type(e).__name__}: {e}")
                 bad += 1
     for typ, nums in sorted(renderer.unnamed.items()):

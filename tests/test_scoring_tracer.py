@@ -106,9 +106,7 @@ def test_run_state_gated_active_skill_scores_end_to_end_from_config_json():
 def test_run_state_gate_flipped_off_scores_exactly_base_stat_sum():
     team = _build_team()
     cfg = load_scoring_config()
-    cfg_off = dataclasses.replace(
-        cfg, run_state=RunState(life=0, combo=0)
-    )
+    cfg_off = dataclasses.replace(cfg, run_state=RunState(life=0, combo=0))
 
     assert score_fast(team, cfg_off) == 1500.0  # five members * 300
 

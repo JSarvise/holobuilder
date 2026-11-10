@@ -7,6 +7,7 @@ songs, the song cap binding before the matching, after it and not at all, and lo
 that make the capped matching's bisection choose -- every float `==` the Python leaf's; and
 the assembled boards themselves, `==`, with their named sockets.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -22,9 +23,9 @@ sys.path.insert(0, str(HERE))
 
 pytestmark = pytest.mark.skipif(shutil.which("gcc") is None, reason="no gcc to build the kernel")
 
-from hbuilder.domain import board_plan as bp  # noqa: E402
-
 import connect  # noqa: E402
+
+from hbuilder.domain import board_plan as bp  # noqa: E402
 
 REPO = HERE.parents[2]
 # m0342 (a group song whose bench singers' yellows pass the cap before any matching) and
@@ -52,8 +53,8 @@ def test_the_kernel_sums_floats_as_the_builtin_sum_does():
         values = [draw() for _ in range(rng.randrange(0, 30))]
         got, want = connect.py_sum(values), sum(values)
         assert got == want and str(got) == str(float(want)), values
-    assert connect.py_sum([0.1] * 10) == 1.0       # the compensated sum, not the naive 0.9999...
-    assert str(connect.py_sum([-0.0])) == "0.0"     # the int 0 start: 0 + -0.0 is +0.0
+    assert connect.py_sum([0.1] * 10) == 1.0  # the compensated sum, not the naive 0.9999...
+    assert str(connect.py_sum([-0.0])) == "0.0"  # the int 0 start: 0 + -0.0 is +0.0
 
 
 # ---------------------------------------------------------------------------
@@ -64,9 +65,9 @@ class Counting:
 
     def __init__(self):
         self.calls = self.declined = 0
-        self.bound = {0: 0, 1: 0, 2: 0, 3: 0}   # the check that bound: none / before / after / no checks
-        self.path = {0: 0, 1: 0, 2: 0}      # 0 uncapped, 1 capped first kept, 2 scaled kept
-        self.incumbent = self.capped_incumbent = 0   # calls with the account's placements
+        self.bound = {0: 0, 1: 0, 2: 0, 3: 0}  # the check that bound: none / before / after / no checks
+        self.path = {0: 0, 1: 0, 2: 0}  # 0 uncapped, 1 capped first kept, 2 scaled kept
+        self.incumbent = self.capped_incumbent = 0  # calls with the account's placements
 
     def __call__(self, *args, **kwargs):
         self.calls += 1
@@ -124,6 +125,7 @@ def held_views(monkeypatch):
 
 def _charts(count: int, seed: int):
     import leaf_inputs
+
     from hbuilder.domain.song import load_charts
 
     charts = load_charts(str(leaf_inputs.charts_path("EXPERT"))).at("EXPERT")
@@ -172,8 +174,9 @@ def _per_chart(ctx, teams, kernel):
 
 @pytest.mark.parametrize("cap", [None, 25.0], ids=["the game's cap", "cap 25"])
 @pytest.mark.parametrize("basis", ["maxed", "account"])
-def test_the_leaf_scores_real_teams_identically_with_the_board_kernel(request, monkeypatch,
-                                                                      held_views, basis, cap):
+def test_the_leaf_scores_real_teams_identically_with_the_board_kernel(
+    request, monkeypatch, held_views, basis, cap
+):
     """The leaf on 20 teams, maxed and with the account's own cards and boards (cards held on
     off-team sockets, the account's placements winning ties): one search per song (the song's whole cast, so off-team
     singers' yellows count) on five charts, and one search over ten charts (one board per
@@ -233,23 +236,44 @@ def test_the_assembled_boards_and_their_sockets_are_the_pythons(request, monkeyp
             bare = bd.active_pool / (1.0 + bd.combined_support_rate)
             for chart in _charts(4, 7):
                 sings = song_cast(chart)
-                plan = cached_team_plan(team.leader, team.members, cache=cache,
-                                        tree_for=pool._tree_for, budget_for=pool._budget_for,
-                                        node_effect_ids=ctx.node_effect_ids,
-                                        skilltree=ctx.skilltree, sings=sings)
+                plan = cached_team_plan(
+                    team.leader,
+                    team.members,
+                    cache=cache,
+                    tree_for=pool._tree_for,
+                    budget_for=pool._budget_for,
+                    node_effect_ids=ctx.node_effect_ids,
+                    skilltree=ctx.skilltree,
+                    sings=sings,
+                )
                 out = []
                 for kernel in (None, counting):
                     bp.BOARD_KERNEL = kernel
                     placed: list = []
                     try:
-                        out.append((board_model_from_plan(
-                            plan, team.leader, team.members, ctx.skilltree, ctx.node_effect_ids,
-                            overall_power=ds.overall_power, bonus_permil=ds.score_bonus_permil,
-                            k_constant=bp.UNIT_SCORE_K, active_pool_rate=bare,
-                            connect_cards=ctx.connect_cards, placements_out=placed,
-                            bench_characters=ctx.bench_characters, name_by_chr=ctx.name_by_chr,
-                            sings=sings, plan_cache=cache, bench_sockets=ctx.bench_sockets),
-                            [dataclasses.astuple(p) for p in placed]))
+                        out.append(
+                            (
+                                board_model_from_plan(
+                                    plan,
+                                    team.leader,
+                                    team.members,
+                                    ctx.skilltree,
+                                    ctx.node_effect_ids,
+                                    overall_power=ds.overall_power,
+                                    bonus_permil=ds.score_bonus_permil,
+                                    k_constant=bp.UNIT_SCORE_K,
+                                    active_pool_rate=bare,
+                                    connect_cards=ctx.connect_cards,
+                                    placements_out=placed,
+                                    bench_characters=ctx.bench_characters,
+                                    name_by_chr=ctx.name_by_chr,
+                                    sings=sings,
+                                    plan_cache=cache,
+                                    bench_sockets=ctx.bench_sockets,
+                                ),
+                                [dataclasses.astuple(p) for p in placed],
+                            )
+                        )
                     finally:
                         bp.BOARD_KERNEL = None
                 (want, want_placed), (got, got_placed) = out
@@ -305,27 +329,35 @@ def test_a_refined_row_is_developed_identically_with_the_board_kernel(request, b
     counting = Counting()
     refined = 0
     for chart in _charts(1, 13)[:2]:
-        ctx = dataclasses.replace(built["ctx"], charts=(chart,), board_per_chart=True,
-                                  refine_activation=True)
+        ctx = dataclasses.replace(built["ctx"], charts=(chart,), board_per_chart=True, refine_activation=True)
         pool = pr.RefinePool(ctx, workers=1)
         for team in _teams(built, 3, 13):
             out = []
             for kernel in (None, counting):
                 bp.BOARD_KERNEL = kernel
                 try:
-                    out.append(pr.develop_team(ctx, team, pool._tree_for, pool._budget_for, chart,
-                                               plan_cache=pr.new_plan_cache(ctx, built["by_id"]),
-                                               refine=True))
+                    out.append(
+                        pr.develop_team(
+                            ctx,
+                            team,
+                            pool._tree_for,
+                            pool._budget_for,
+                            chart,
+                            plan_cache=pr.new_plan_cache(ctx, built["by_id"]),
+                            refine=True,
+                        )
+                    )
                 finally:
                     bp.BOARD_KERNEL = None
             want, got = out
             assert got.plan == want.plan and got.board == want.board
             assert got.optimised_us == want.optimised_us and got.board_off_us == want.board_off_us
-            assert [dataclasses.astuple(p) for p in got.sockets] == \
-                [dataclasses.astuple(p) for p in want.sockets]
+            assert [dataclasses.astuple(p) for p in got.sockets] == [
+                dataclasses.astuple(p) for p in want.sockets
+            ]
             refined += got.plan.plan_keys == {}
     assert counting.declined == 0 and counting.calls > 0, vars(counting)
-    assert refined > 0         # some rows moved a node: their boards are the refined plan's
+    assert refined > 0  # some rows moved a node: their boards are the refined plan's
 
 
 def test_a_spawned_worker_picks_the_board_kernel_up_from_the_environment():
@@ -348,8 +380,10 @@ def test_a_spawned_worker_picks_the_board_kernel_up_from_the_environment():
 
     env[bp.BOARD_KERNEL_ENV] = f"{HERE / 'no_such_file.py'}:assemble"
     out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
-    assert "KERNEL None None False" in out.stdout and "could not be loaded" in out.stderr, \
-        (out.stdout, out.stderr)
+    assert "KERNEL None None False" in out.stdout and "could not be loaded" in out.stderr, (
+        out.stdout,
+        out.stderr,
+    )
 
 
 def test_enable_injects_both_seams(monkeypatch):

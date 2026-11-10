@@ -1,5 +1,6 @@
 """park_scan: the client's area-move quest gate, the request bytes, the guards, and the whole scan
 against a scripted server (no network, no game keys: a test seed seals the replies)."""
+
 from __future__ import annotations
 
 import datetime
@@ -30,11 +31,14 @@ def userdata_blob(area="area-a01", quests=(), steps=(), actions=(), last_login=N
     for q, start in quests:
         blob += _s(S.F_QUEST, _s(2, q) + (_v(3, start) if start else b"") + _v(4, 1))
     for q, group, cur, all_clear in steps:
-        blob += _s(S.F_QUEST_STEP, _s(2, q) + _v(3, group) + _v(4, cur)
-                   + (_v(5, all_clear) if all_clear else b""))
+        blob += _s(
+            S.F_QUEST_STEP, _s(2, q) + _v(3, group) + _v(4, cur) + (_v(5, all_clear) if all_clear else b"")
+        )
     for q, group, step, ptm, clear in actions:
-        blob += _s(S.F_QUEST_STEP_ACTION, _s(2, q) + _v(3, group) + _v(4, step) + _s(5, ptm)
-                   + (_v(6, clear) if clear else b""))
+        blob += _s(
+            S.F_QUEST_STEP_ACTION,
+            _s(2, q) + _v(3, group) + _v(4, step) + _s(5, ptm) + (_v(6, clear) if clear else b""),
+        )
     if last_login is not None:
         blob += _s(S.F_USER_TIME, _v(2, 1) + _v(3, last_login))
     return blob
@@ -44,9 +48,15 @@ def userdata(**kw) -> list:
     return list(snap.fields(userdata_blob(**kw)))
 
 
-MOVE = {"parkQuestId": "q", "stepGroupNumber": 1, "step": 2, "parkTargetMappingId": "tm-q-1-2",
-        "actionNumber": 1, "type": "ParkActionType_PARK_ACTION_TYPE_AREA_MOVE",
-        "areaId": "area-a03"}
+MOVE = {
+    "parkQuestId": "q",
+    "stepGroupNumber": 1,
+    "step": 2,
+    "parkTargetMappingId": "tm-q-1-2",
+    "actionNumber": 1,
+    "type": "ParkActionType_PARK_ACTION_TYPE_AREA_MOVE",
+    "areaId": "area-a03",
+}
 TALK = dict(MOVE, parkTargetMappingId="tm-talk", type="ParkActionType_PARK_ACTION_TYPE_QUEST_TALK")
 MASTER = [{"park_quest_id": "q", "data": MOVE}, {"park_quest_id": "q", "data": TALK}]
 
@@ -57,8 +67,9 @@ def gate(**kw):
 
 # ------------------------------------------------------------------ the gate
 def test_parse_reads_area_quests_steps_and_actions():
-    st = S.parse_quest_state(userdata(quests=[("q", 100)], steps=[("q", 1, 2, 0)],
-                                      actions=[("q", 1, 2, "tm-q-1-2", 150)]))
+    st = S.parse_quest_state(
+        userdata(quests=[("q", 100)], steps=[("q", 1, 2, 0)], actions=[("q", 1, 2, "tm-q-1-2", 150)])
+    )
     assert st.current_area_id == "area-a01"
     assert st.quest_start == {"q": 100}
     assert st.steps == [("q", 1, 2, 0)]
@@ -70,14 +81,12 @@ def test_open_step_with_an_uncleared_move_gates_the_area():
 
 
 def test_move_cleared_in_this_run_of_the_quest_does_not_gate():
-    assert gate(quests=[("q", 100)], steps=[("q", 1, 2, 0)],
-                actions=[("q", 1, 2, "tm-q-1-2", 150)]) == []
+    assert gate(quests=[("q", 100)], steps=[("q", 1, 2, 0)], actions=[("q", 1, 2, "tm-q-1-2", 150)]) == []
 
 
 def test_move_cleared_in_an_earlier_run_still_gates():
     # the quest restarted at 200; the action's clear at 150 belongs to the previous run
-    assert gate(quests=[("q", 200)], steps=[("q", 1, 2, 0)],
-                actions=[("q", 1, 2, "tm-q-1-2", 150)]) == [MOVE]
+    assert gate(quests=[("q", 200)], steps=[("q", 1, 2, 0)], actions=[("q", 1, 2, "tm-q-1-2", 150)]) == [MOVE]
 
 
 def test_all_cleared_step_does_not_gate():
@@ -104,12 +113,22 @@ def test_quest_the_account_does_not_hold_is_treated_as_open():
 
 
 def test_gate_detail_explains_each_area_move_row():
-    st = S.parse_quest_state(userdata(quests=[("q", 100)], steps=[("q", 1, 2, 300)],
-                                      actions=[("q", 1, 2, "tm-q-1-2", 150)]))
+    st = S.parse_quest_state(
+        userdata(quests=[("q", 100)], steps=[("q", 1, 2, 300)], actions=[("q", 1, 2, "tm-q-1-2", 150)])
+    )
     (row,) = S.gate_detail(st, MASTER)
-    assert row == {"quest": "q", "group": 1, "step": 2, "area": "area-a03", "quest_start": 100,
-                   "current_step": 2, "all_clear_time": 300, "action_clear_time": 150,
-                   "step_all_cleared": True, "action_cleared": True}
+    assert row == {
+        "quest": "q",
+        "group": 1,
+        "step": 2,
+        "area": "area-a03",
+        "quest_start": 100,
+        "current_step": 2,
+        "all_clear_time": 300,
+        "action_clear_time": 150,
+        "step_all_cleared": True,
+        "action_cleared": True,
+    }
 
 
 def test_enum_as_number_and_unknown_shapes():
@@ -129,10 +148,10 @@ def test_refresh_body_matches_the_game_client():
 
 
 def test_wire_bodies_frame_like_the_client(seed):
-    assert S.wire_body(b"") == bytes(5)                 # Park/Enter and User/Get: 00 00000000
+    assert S.wire_body(b"") == bytes(5)  # Park/Enter and User/Get: 00 00000000
     env = S.wire_body(S.refresh_body("area-a03"))
     assert env[:5] == b"\x00" + (len(env) - 5).to_bytes(4, "big")
-    assert env[5:9] == bytes.fromhex("0a000008")       # envelope header, 8-byte nonce
+    assert env[5:9] == bytes.fromhex("0a000008")  # envelope header, 8-byte nonce
     assert snap.unseal(env[5:]) == b"\x0a\x08area-a03"
 
 
@@ -141,19 +160,27 @@ def test_whitelist_gains_exactly_four_literals_in_the_scan_process_only(monkeypa
     monkeypatch.setattr(snap, "ALLOWED", snap.ALLOWED)
     before = set(snap.ALLOWED)
     S.widen_whitelist()
-    assert set(snap.ALLOWED) - before == {"/rpc.api.Park/Enter", "/rpc.api.Park/Refresh",
-                                          "/rpc.api.Home/Login",
-                                          "/rpc.api.MultiGame/ListPingServer"}
-    for write in ("/rpc.api.Park/SelectArea", "/rpc.api.Park/ReadTalkFree",
-                  "/rpc.api.Park/CollectRandomSymbol", "/rpc.api.ParkQuest/MoveArea",
-                  "/rpc.api.Home/AgreeRule", "/rpc.api.MultiGame/GeneratePrivateRoomId",
-                  "/rpc.api.LoginBonus/Check"):
+    assert set(snap.ALLOWED) - before == {
+        "/rpc.api.Park/Enter",
+        "/rpc.api.Park/Refresh",
+        "/rpc.api.Home/Login",
+        "/rpc.api.MultiGame/ListPingServer",
+    }
+    for write in (
+        "/rpc.api.Park/SelectArea",
+        "/rpc.api.Park/ReadTalkFree",
+        "/rpc.api.Park/CollectRandomSymbol",
+        "/rpc.api.ParkQuest/MoveArea",
+        "/rpc.api.Home/AgreeRule",
+        "/rpc.api.MultiGame/GeneratePrivateRoomId",
+        "/rpc.api.LoginBonus/Check",
+    ):
         with pytest.raises(PermissionError):
             snap._check_allowed(write, "us.game-hololive-dreams.com", None)
 
 
 def _utc(*a):
-    return datetime.datetime(*a, tzinfo=datetime.timezone.utc)
+    return datetime.datetime(*a, tzinfo=datetime.UTC)
 
 
 def _ms(d):
@@ -161,7 +188,7 @@ def _ms(d):
 
 
 def test_home_login_only_as_a_repeat_login_of_the_game_day():
-    now = _utc(2026, 11, 8, 23, 2)                     # 05:00 JST = 20:00 UTC the day before
+    now = _utc(2026, 11, 8, 23, 2)  # 05:00 JST = 20:00 UTC the day before
     assert S.logged_in_this_game_day(_ms(_utc(2026, 11, 8, 20, 50)), now, 5)
     assert not S.logged_in_this_game_day(_ms(_utc(2026, 11, 8, 19, 30)), now, 5)
     assert not S.logged_in_this_game_day(None, now, 5)
@@ -177,42 +204,65 @@ def test_once_per_game_day_counts_only_scans_that_moved():
     start = S.game_day.day_start_ms(now, 5)
     assert S.scanned_this_game_day({"counted": True, "game_day_start": start}, now, 5)
     assert not S.scanned_this_game_day({"counted": False, "game_day_start": start}, now, 5)
-    assert not S.scanned_this_game_day({"counted": True, "game_day_start": start - 86_400_000},
-                                       now, 5)
+    assert not S.scanned_this_game_day({"counted": True, "game_day_start": start - 86_400_000}, now, 5)
     assert not S.scanned_this_game_day(None, now, 5)
 
 
 # ------------------------------------------------------------------ the Park quest data
 def test_build_moves_keeps_area_moves_and_the_source_hashes():
-    doc = S.build_moves(MASTER, [{"data": {"id": "area-a03"}}, {"data": {"id": "area-a01"}}],
-                        {"ParkQuestStepAction": {"hash": "h1"}, "Area": {"hash": "h2"}})
+    doc = S.build_moves(
+        MASTER,
+        [{"data": {"id": "area-a03"}}, {"data": {"id": "area-a01"}}],
+        {"ParkQuestStepAction": {"hash": "h1"}, "Area": {"hash": "h2"}},
+    )
     assert doc["source"] == {"ParkQuestStepAction": "h1", "Area": "h2"}
     assert doc["areas"] == ["area-a01", "area-a03"]
     assert [m["parkTargetMappingId"] for m in doc["area_move_actions"]] == ["tm-q-1-2"]
     assert S.stale_tables(doc, {"ParkQuestStepAction": {"hash": "h1"}, "Area": {"hash": "h2"}}) == []
-    assert S.stale_tables(doc, {"ParkQuestStepAction": {"hash": "NEW"}, "Area": {"hash": "h2"}}) \
-        == ["ParkQuestStepAction"]
+    assert S.stale_tables(doc, {"ParkQuestStepAction": {"hash": "NEW"}, "Area": {"hash": "h2"}}) == [
+        "ParkQuestStepAction"
+    ]
     with pytest.raises(S.MissingInput):
         S.build_moves(MASTER, [], {"Area": {"hash": "h2"}})
 
 
 def test_chat_areas_include_interiors():
-    spots = {"free_chat": {"chats": {"a": {"area": "area-a03"}, "b": {"area": "area-a01-multiplay"},
-                                     "c": {"area": "area-a01"}, "d": {"area": "area-a03"}}}}
+    spots = {
+        "free_chat": {
+            "chats": {
+                "a": {"area": "area-a03"},
+                "b": {"area": "area-a01-multiplay"},
+                "c": {"area": "area-a01"},
+                "d": {"area": "area-a03"},
+            }
+        }
+    }
     assert S.chat_areas(spots) == ["area-a01", "area-a01-multiplay", "area-a03"]
 
 
 # ------------------------------------------------------------------ the scan, end to end
-NOW = _utc(2026, 11, 8, 23, 2)                       # 08:02 JST: day started 20:00 UTC
+NOW = _utc(2026, 11, 8, 23, 2)  # 08:02 JST: day started 20:00 UTC
 LOGGED_IN = _ms(_utc(2026, 11, 8, 20, 50))
-SPOTS = {"free_chat": {"chats": {
-    "chat-a01": {"area": "area-a01"}, "chat-int": {"area": "area-a01-multiplay"},
-    "chat-a03-1": {"area": "area-a03"}, "chat-a03-2": {"area": "area-a03"}}}}
-MOVES = {"source": {"ParkQuestStepAction": "h1", "Area": "h2"},
-         "areas": ["area-a01", "area-a01-multiplay", "area-a03"],
-         "area_move_actions": [dict(MOVE, type=2008)]}
-CHATS_IN = {"area-a01": ["chat-a01"], "area-a01-multiplay": ["chat-int"],
-            "area-a03": ["chat-a03-1", "chat-a03-2"]}
+SPOTS = {
+    "free_chat": {
+        "chats": {
+            "chat-a01": {"area": "area-a01"},
+            "chat-int": {"area": "area-a01-multiplay"},
+            "chat-a03-1": {"area": "area-a03"},
+            "chat-a03-2": {"area": "area-a03"},
+        }
+    }
+}
+MOVES = {
+    "source": {"ParkQuestStepAction": "h1", "Area": "h2"},
+    "areas": ["area-a01", "area-a01-multiplay", "area-a03"],
+    "area_move_actions": [dict(MOVE, type=2008)],
+}
+CHATS_IN = {
+    "area-a01": ["chat-a01"],
+    "area-a01-multiplay": ["chat-int"],
+    "area-a03": ["chat-a03-1", "chat-a03-2"],
+}
 
 
 @pytest.fixture
@@ -223,8 +273,7 @@ def seed(monkeypatch):
 class Server:
     """A scripted game server: the account's area moves with each Park/Refresh."""
 
-    def __init__(self, area="area-a01", fail=None, quest_steps=(), last_login=LOGGED_IN,
-                 manifest_hash="h1"):
+    def __init__(self, area="area-a01", fail=None, quest_steps=(), last_login=LOGGED_IN, manifest_hash="h1"):
         self.area, self.fail, self.calls = area, fail or {}, []
         self.quest_steps, self.last_login, self.manifest_hash = quest_steps, last_login, manifest_hash
         self.logins = 0
@@ -243,8 +292,9 @@ class Server:
         if label in self.fail:
             return {}, {"grpc-status": "13", "grpc-message": self.fail[label]}, b""
         if path == S.USER_GET:
-            out = userdata_blob(self.area, quests=[("q", 100)], steps=self.quest_steps,
-                                last_login=self.last_login)
+            out = userdata_blob(
+                self.area, quests=[("q", 100)], steps=self.quest_steps, last_login=self.last_login
+            )
         elif path == S.PARK_REFRESH:
             self.area = plain[2:].decode()
             chats = CHATS_IN.get(self.area, [])
@@ -277,8 +327,13 @@ def scan_env(monkeypatch, tmp_path, seed):
 def run(server, **kw):
     slept = []
     tick = iter(range(0, 10_000))
-    wire = S.Wire(master=server.master, login=server.login, send=server.send,
-                  sleep=slept.append, clock=lambda: float(next(tick)))
+    wire = S.Wire(
+        master=server.master,
+        login=server.login,
+        send=server.send,
+        sleep=slept.append,
+        clock=lambda: float(next(tick)),
+    )
     rec = S.scan(wire=wire, now=kw.pop("now", NOW), running=kw.pop("running", lambda: False), **kw)
     return rec, slept
 
@@ -287,14 +342,25 @@ def test_scan_visits_every_chat_area_in_the_client_order_and_goes_back(scan_env)
     tmp, written = scan_env
     server = Server()
     rec, slept = run(server)
-    assert server.calls == [S.SYSTEM_INFO, S.USER_GET, S.HOME_LOGIN, S.PING_SERVERS,
-                            S.PARK_ENTER, S.EVENT_INFO,
-                            f"{S.PARK_REFRESH} area-a01-multiplay", f"{S.PARK_REFRESH} area-a03",
-                            f"{S.PARK_REFRESH} area-a01", S.USER_GET]
+    assert server.calls == [
+        S.SYSTEM_INFO,
+        S.USER_GET,
+        S.HOME_LOGIN,
+        S.PING_SERVERS,
+        S.PARK_ENTER,
+        S.EVENT_INFO,
+        f"{S.PARK_REFRESH} area-a01-multiplay",
+        f"{S.PARK_REFRESH} area-a03",
+        f"{S.PARK_REFRESH} area-a01",
+        S.USER_GET,
+    ]
     assert rec["stopped"] is None and rec["restored"] is True and rec["counted"] is True
     assert server.area == "area-a01" and len(written) == 1
     assert [(a["area"], a["chats"], a["read"]) for a in rec["areas"]] == [
-        ("area-a01-multiplay", 1, 1), ("area-a03", 2, 1), ("area-a01", 1, 1)]
+        ("area-a01-multiplay", 1, 1),
+        ("area-a03", 2, 1),
+        ("area-a01", 1, 1),
+    ]
     log = json.loads((tmp / "log.json").read_text("utf8"))["chats"]
     assert set(log) == {"chat-a01", "chat-int", "chat-a03-1", "chat-a03-2"}
     assert json.loads((tmp / "last.json").read_text("utf8"))["counted"] is True
@@ -303,7 +369,7 @@ def test_scan_visits_every_chat_area_in_the_client_order_and_goes_back(scan_env)
 
 
 def test_an_area_with_an_open_move_step_is_skipped(scan_env):
-    server = Server(quest_steps=[("q", 1, 2, 0)])         # MOVE to area-a03 is open
+    server = Server(quest_steps=[("q", 1, 2, 0)])  # MOVE to area-a03 is open
     rec, _ = run(server)
     assert f"{S.PARK_REFRESH} area-a03" not in server.calls
     assert [s["area"] for s in rec["skipped"]] == ["area-a03"]
@@ -318,7 +384,7 @@ def test_an_original_area_with_an_open_move_step_stops_before_any_write(scan_env
 
 
 def test_first_login_of_the_game_day_stops_before_home_login(scan_env):
-    server = Server(last_login=_ms(_utc(2026, 11, 8, 19, 30)))   # before 05:00 JST
+    server = Server(last_login=_ms(_utc(2026, 11, 8, 19, 30)))  # before 05:00 JST
     rec, _ = run(server)
     assert server.calls == [S.SYSTEM_INFO, S.USER_GET]
     assert "first one" in rec["stopped"] and rec["restored"] is None
@@ -342,7 +408,7 @@ def test_once_per_game_day(scan_env):
     run(Server())
     with pytest.raises(S.ScanStop, match="already scanned"):
         run(Server())
-    later = _utc(2026, 11, 9, 20, 30)                   # the next game day
+    later = _utc(2026, 11, 9, 20, 30)  # the next game day
     rec, _ = run(Server(last_login=_ms(_utc(2026, 11, 9, 20, 10))), now=later)
     assert rec["stopped"] is None
 

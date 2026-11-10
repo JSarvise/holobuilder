@@ -18,6 +18,7 @@ value is the account's own read back from `User/Get`, and it backs up once to
 
     python -m pytest tools/web/test_refresh_merges_collection.py
 """
+
 from __future__ import annotations
 
 import ast
@@ -34,18 +35,27 @@ def test_the_refresh_route_passes_merge_collection():
     hit the live game. What can be checked without the network is that the argv
     the handler builds carries the flag."""
     source = (REPO / "tools" / "web" / "hbweb" / "admin.py").read_text(encoding="utf-8")
-    refresh = next(node for node in ast.parse(source).body
-                   if isinstance(node, ast.FunctionDef) and node.name == "refresh")
-    calls = [node for node in ast.walk(refresh) if isinstance(node, ast.Call)
-             and ast.unparse(node.func) == "scripts.run_recon_script"]
+    refresh = next(
+        node
+        for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef) and node.name == "refresh"
+    )
+    calls = [
+        node
+        for node in ast.walk(refresh)
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "scripts.run_recon_script"
+    ]
     assert len(calls) == 1, "refresh must start refresh_all.py through run_recon_script"
     assert ast.unparse(calls[0].args[1]) == "config.REFRESH_SCRIPT"
     assert config.REFRESH_SCRIPT.name == "refresh_all.py"
     # ...and it must reach the subprocess, not merely appear in a comment: the flag is a
     # string in the list bound to the argv the call passes.
     argv_name = ast.unparse(calls[0].args[3])
-    bound = [node.value for node in ast.walk(refresh) if isinstance(node, ast.Assign)
-             and [ast.unparse(t) for t in node.targets] == [argv_name]]
+    bound = [
+        node.value
+        for node in ast.walk(refresh)
+        if isinstance(node, ast.Assign) and [ast.unparse(t) for t in node.targets] == [argv_name]
+    ]
     assert bound and isinstance(bound[0], ast.List), "could not find the subprocess argv in refresh"
     flags = [elt.value for elt in bound[0].elts if isinstance(elt, ast.Constant)]
     assert "--merge-collection" in flags, (
@@ -58,9 +68,7 @@ def test_refresh_all_still_defaults_the_flag_OFF_for_the_command_line():
     """The button runs the merge; the command line does not by default. A bare
     `python refresh_all.py` must NOT write the account's collection, so the
     exception stays one explicit caller rather than becoming the default."""
-    source = (REPO / "tools" / "refresh" / "refresh_all.py").read_text(
-        encoding="utf-8"
-    )
+    source = (REPO / "tools" / "refresh" / "refresh_all.py").read_text(encoding="utf-8")
     marker = 'ap.add_argument(\n        "--merge-collection",'
     block = source.split(marker, 1)
     assert len(block) == 2, "could not find the --merge-collection argparse block"

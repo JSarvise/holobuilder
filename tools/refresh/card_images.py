@@ -24,20 +24,31 @@
 #       -> dumps/card_art/img_card_full/2048x1152_as_displayed/<asset name>.png (--as-displayed)
 #
 # Everything written lands under dumps/, which is gitignored: extracted assets stay local.
-import io, os, shutil, sys
+import io
+import os
+import shutil
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import MissingInput  # noqa: E402
+
 HERE = str(paths.REFRESH_DIR)
 sys.path.insert(0, HERE)
 
 DUMPS = str(paths.DUMPS)
 ASSETS = os.path.join(DUMPS, "card_assets")
 IMAGES = os.path.join(DUMPS, "card_images")
-FAMILIES = ("img_card_full", "img_card_thumb", "img_card_thin", "img_card_vert",
-            "img_card_live_thumb", "img_chr_mem_thumb", "img_cos_sd_thumb")
+FAMILIES = (
+    "img_card_full",
+    "img_card_thumb",
+    "img_card_thin",
+    "img_card_vert",
+    "img_card_live_thumb",
+    "img_chr_mem_thumb",
+    "img_cos_sd_thumb",
+)
 
 # The game's own asset cache. Card art bundles run ~2.5 MB; the cap skips the movie/voice blobs
 # (the largest is ~200 MB) without ever opening them.
@@ -62,6 +73,7 @@ def _catalog_by_md5():
     consumes whatever decrypted .dec files exist."""
     sys.path.insert(0, HERE)
     from master_db import decode_record
+
     out = {}
     # shipped first, then production overrides it
     for fn in ("octocacheevai.dec", "octocacheevai_prod.dec"):
@@ -85,8 +97,10 @@ def from_cache(cache_dir):
     install; the copies land in card_assets/ named by asset, which is what --render reads."""
     import hashlib
     import warnings
+
     warnings.filterwarnings("ignore")
     import UnityPy
+
     UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
     if not os.path.isdir(cache_dir):
         raise SystemExit(f"cache not found: {cache_dir}\n(pass --cache-dir <path>)")
@@ -117,7 +131,7 @@ def from_cache(cache_dir):
                 try:
                     names = [k for k in UnityPy.load(src).container if k.startswith(FAMILIES)]
                 except Exception:
-                    unreadable += 1    # a bad bundle must not abort an 11 GB walk
+                    unreadable += 1  # a bad bundle must not abort an 11 GB walk
             # Header-encrypted card (no UnityFS magic, or magic but empty container): identify by
             # md5 against the catalog, and copy under the real name so --render can recover it.
             if not names and by_md5:
@@ -132,14 +146,25 @@ def from_cache(cache_dir):
                 else:
                     shutil.copyfile(src, dst)
                     saved += 1
-    print(f"{saved} new card bundles -> {ASSETS}  "
-          f"({already} already had, {opened} bundles inspected"
-          + (f", {enc} header-encrypted matched by md5" if enc else "")
-          + (f", {unreadable} unreadable" if unreadable else "") + ")")
+    print(
+        f"{saved} new card bundles -> {ASSETS}  "
+        f"({already} already had, {opened} bundles inspected"
+        + (f", {enc} header-encrypted matched by md5" if enc else "")
+        + (f", {unreadable} unreadable" if unreadable else "")
+        + ")"
+    )
 
 
-def render(max_width, keep_full, only=None, out_dir=None, quality=82, lossless=False,
-           as_displayed=False, screen=(2048, 1152)):
+def render(
+    max_width,
+    keep_full,
+    only=None,
+    out_dir=None,
+    quality=82,
+    lossless=False,
+    as_displayed=False,
+    screen=(2048, 1152),
+):
     """UnityFS bundle -> the largest Texture2D in it -> webp (and optional full png).
 
     `max_width=0` keeps the texture at its NATIVE resolution (no downscale — the
@@ -182,11 +207,14 @@ def render(max_width, keep_full, only=None, out_dir=None, quality=82, lossless=F
 
     There is only ONE path: decrypt the header from the asset name, load, read the texture."""
     import warnings
+
     warnings.filterwarnings("ignore")
     import UnityPy
+
     # Card bundles ship with the Unity version string stripped, exactly like StreamingAssets.
     UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
     import octo_crypto
+
     images = out_dir or IMAGES
     os.makedirs(images, exist_ok=True)
 
@@ -199,15 +227,15 @@ def render(max_width, keep_full, only=None, out_dir=None, quality=82, lossless=F
                 os.remove(p)
                 gone += 1
         return gone
-    bundles = sorted(f for f in os.listdir(ASSETS) if f.endswith(".bundle")) \
-        if os.path.isdir(ASSETS) else []
 
-    if only:                                  # re-render one family without redoing the rest
+    bundles = sorted(f for f in os.listdir(ASSETS) if f.endswith(".bundle")) if os.path.isdir(ASSETS) else []
+
+    if only:  # re-render one family without redoing the rest
         bundles = [f for f in bundles if f.startswith(only)]
 
     done, failed, encrypted, purged = 0, [], 0, 0
     for fname in bundles:
-        name = fname[:-len(".bundle")]
+        name = fname[: -len(".bundle")]
         try:
             path = os.path.join(ASSETS, fname)
             raw = open(path, "rb").read()
@@ -234,12 +262,13 @@ def render(max_width, keep_full, only=None, out_dir=None, quality=82, lossless=F
             if as_displayed and name.startswith("img_card_full_"):
                 w, h = screen
                 import math
+
                 lod = math.log2(max(best.width / w, best.height / h))
                 if lod >= 0.5:
-                    raise SystemExit(f"--screen {w}x{h}: the GPU would sample mip "
-                                     f"{round(lod)}, only mip 0 is decoded here")
-                disp = os.path.join(DUMPS, "card_art", "img_card_full",
-                                    f"{w}x{h}_as_displayed")
+                    raise SystemExit(
+                        f"--screen {w}x{h}: the GPU would sample mip {round(lod)}, only mip 0 is decoded here"
+                    )
+                disp = os.path.join(DUMPS, "card_art", "img_card_full", f"{w}x{h}_as_displayed")
                 os.makedirs(disp, exist_ok=True)
                 # output pixel (x,y) centre -> texel (x*sx, y*sy); PIL's affine path uses
                 # pixel centres and a 4-tap bilinear filter, i.e. GPU bilinear at mip 0.
@@ -247,25 +276,29 @@ def render(max_width, keep_full, only=None, out_dir=None, quality=82, lossless=F
                 # BC7 left alpha at 254); the GPU samples straight channels, so do the same.
                 sx, sy = best.width / w, best.height / h
                 from PIL import Image
-                frame = Image.merge("RGBA", [ch.transform((w, h), 0, (sx, 0, 0, 0, sy, 0), 2)
-                                              for ch in best.convert("RGBA").split()])
+
+                frame = Image.merge(
+                    "RGBA",
+                    [ch.transform((w, h), 0, (sx, 0, 0, 0, sy, 0), 2) for ch in best.convert("RGBA").split()],
+                )
                 # 0 = AFFINE, 2 = BILINEAR
                 frame.save(os.path.join(disp, name + ".png"))
             thumb = best.copy()
-            if max_width:                                     # 0 = keep native
-                thumb.thumbnail((max_width, max_width * 4), 1)   # 1 = LANCZOS
-            save_kw = {"lossless": True, "method": 6} if lossless \
-                else {"quality": quality, "method": 6}
+            if max_width:  # 0 = keep native
+                thumb.thumbnail((max_width, max_width * 4), 1)  # 1 = LANCZOS
+            save_kw = {"lossless": True, "method": 6} if lossless else {"quality": quality, "method": 6}
             thumb.convert("RGBA").save(os.path.join(images, name + ".webp"), **save_kw)
             done += 1
         except Exception as exc:
             failed.append((name, repr(exc)[:70]))
             purged += discard(name)
     total = sum(os.path.getsize(os.path.join(images, f)) for f in os.listdir(images))
-    print(f"{done}/{len(bundles)} rendered -> {images}  ({total/1024:.0f} KB total)")
+    print(f"{done}/{len(bundles)} rendered -> {images}  ({total / 1024:.0f} KB total)")
     if encrypted:
-        print(f"  {encrypted} header-encrypted bundle(s) decrypted byte-exactly from their "
-              f"asset name (see octo_crypto.py)")
+        print(
+            f"  {encrypted} header-encrypted bundle(s) decrypted byte-exactly from their "
+            f"asset name (see octo_crypto.py)"
+        )
     if purged:
         print(f"  {purged} stale output file(s) deleted (bundle no longer decodable)")
     if failed:
@@ -282,6 +315,7 @@ def organize(dest=None):
     is exactly what build_explorer.py globs, and it only ever looks at `.webp`.
     Re-runnable: render writes flat again, organize re-sorts."""
     from PIL import Image
+
     dest = dest or os.path.join(DUMPS, "card_art")
     if not os.path.isdir(IMAGES):
         raise SystemExit(f"nothing to organize: {IMAGES} does not exist")
@@ -316,33 +350,42 @@ def organize(dest=None):
 
 def main():
     if "--from-cache" in sys.argv:
-        cdir = sys.argv[sys.argv.index("--cache-dir") + 1] if "--cache-dir" in sys.argv \
-            else CACHE_DIR
+        cdir = sys.argv[sys.argv.index("--cache-dir") + 1] if "--cache-dir" in sys.argv else CACHE_DIR
         from_cache(cdir)
     elif "--organize" in sys.argv:
         i = sys.argv.index("--organize") + 1
         organize(sys.argv[i] if i < len(sys.argv) and not sys.argv[i].startswith("-") else None)
     elif "--render" in sys.argv:
-        width = int(sys.argv[sys.argv.index("--max-width") + 1]) if "--max-width" in sys.argv \
-            else 320
+        width = int(sys.argv[sys.argv.index("--max-width") + 1]) if "--max-width" in sys.argv else 320
         only = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
         out = sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else None
-        quality = int(sys.argv[sys.argv.index("--quality") + 1]) if "--quality" in sys.argv \
-            else 82
-        screen = tuple(int(v) for v in sys.argv[sys.argv.index("--screen") + 1].lower()
-                       .split("x")) if "--screen" in sys.argv else (2048, 1152)
-        render(width, "--full" in sys.argv, only, out, quality=quality,
-               lossless="--lossless" in sys.argv, as_displayed="--as-displayed" in sys.argv,
-               screen=screen)
+        quality = int(sys.argv[sys.argv.index("--quality") + 1]) if "--quality" in sys.argv else 82
+        screen = (
+            tuple(int(v) for v in sys.argv[sys.argv.index("--screen") + 1].lower().split("x"))
+            if "--screen" in sys.argv
+            else (2048, 1152)
+        )
+        render(
+            width,
+            "--full" in sys.argv,
+            only,
+            out,
+            quality=quality,
+            lossless="--lossless" in sys.argv,
+            as_displayed="--as-displayed" in sys.argv,
+            screen=screen,
+        )
     else:
-        raise SystemExit("usage: --from-cache [--cache-dir <path>] "
-                         "| --render [--max-width N] [--full] [--as-displayed [--screen WxH]] [--only <prefix>]"
-                         " [--out <dir>]"
-                         " | --organize [<dir>]\n"
-                         "  --out      renders somewhere other than dumps/card_images/, so "
-                         "trial runs never touch the set the explorer reads\n"
-                         "  --organize sorts the flat output into <family>/<WxH>/ under "
-                         "dumps/card_art/ (PNGs moved, webp copied)")
+        raise SystemExit(
+            "usage: --from-cache [--cache-dir <path>] "
+            "| --render [--max-width N] [--full] [--as-displayed [--screen WxH]] [--only <prefix>]"
+            " [--out <dir>]"
+            " | --organize [<dir>]\n"
+            "  --out      renders somewhere other than dumps/card_images/, so "
+            "trial runs never touch the set the explorer reads\n"
+            "  --organize sorts the flat output into <family>/<WxH>/ under "
+            "dumps/card_art/ (PNGs moved, webp copied)"
+        )
 
 
 if __name__ == "__main__":

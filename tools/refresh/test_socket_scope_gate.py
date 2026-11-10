@@ -10,12 +10,12 @@ song mode, G (via the root S-001) always.
 
 Reads only gitignored master data, so it skips on a fresh checkout.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-
 import tree_optimise as to
 
 _REFRESH = Path(__file__).resolve().parent
@@ -59,8 +59,7 @@ def test_yellow_socket_becomes_payable_for_a_singer_in_song_mode():
     members = ["chr-00002", "chr-00016", "chr-00028", "chr-00031", "chr-00034"]
     # Make one member a singer: its yellow socket (S-004) now pays.
     singer = "chr-00002"
-    scope = to._payable_sockets(sk, leader, members, song_mode=True,
-                                singer_chars=frozenset({singer}))
+    scope = to._payable_sockets(sk, leader, members, song_mode=True, singer_chars=frozenset({singer}))
     assert "S-004" in scope[singer], "a singer's yellow socket must be payable in song mode"
     # A non-singer member still does not get the yellow socket.
     assert "S-004" not in scope["chr-00016"]
@@ -77,13 +76,11 @@ def test_blue_socket_is_dead_on_a_leader_with_no_member_card():
     sk = to._load(_DUMPS / "skilltree.json")
     leader = "chr-00036"
     members = ["chr-00031", "chr-03001", "chr-00034", "chr-03003", "chr-03002"]
-    scope = to._payable_sockets(sk, leader, members, song_mode=True,
-                                singer_chars=frozenset({"chr-00006"}))
+    scope = to._payable_sockets(sk, leader, members, song_mode=True, singer_chars=frozenset({"chr-00006"}))
     assert "S-003" not in scope[leader]
     assert "S-002" in scope[leader], "her red socket still pays: she leads"
     for m in members:
         assert "S-003" in scope[m]
     # a leader who ALSO fields a member card keeps her blue socket
-    scope = to._payable_sockets(sk, leader, [leader, *members[:4]], song_mode=True,
-                                singer_chars=frozenset())
+    scope = to._payable_sockets(sk, leader, [leader, *members[:4]], song_mode=True, singer_chars=frozenset())
     assert "S-003" in scope[leader]

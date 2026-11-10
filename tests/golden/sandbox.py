@@ -4,6 +4,7 @@ Every module finds its data relative to its own file (``REPO_ROOT = Path(__file_
 and friends), so the golden runs execute a copy of the code under test with the frozen inputs
 laid over it. Nothing a run writes can reach the live files or the snapshot itself.
 """
+
 from __future__ import annotations
 
 import os
@@ -32,8 +33,11 @@ def clock_of(frozen: Path) -> float:
 
 
 def _git_files(code: Path) -> list[str]:
-    out = subprocess.run(["git", "-C", str(code), "ls-files", "-z", "--cached", "--others",
-                          "--exclude-standard"], check=True, capture_output=True).stdout
+    out = subprocess.run(
+        ["git", "-C", str(code), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        check=True,
+        capture_output=True,
+    ).stdout
     return sorted({p for p in out.decode("utf-8").split("\0") if p})
 
 
@@ -75,8 +79,9 @@ def remove(sandbox: Path) -> None:
     shutil.rmtree(sandbox, ignore_errors=True)
 
 
-def env(sandbox: Path, frozen: Path, *, audit_log: Path, workers: int | None,
-        clock: float | None = None) -> dict[str, str]:
+def env(
+    sandbox: Path, frozen: Path, *, audit_log: Path, workers: int | None, clock: float | None = None
+) -> dict[str, str]:
     """The environment of every process of a golden run."""
     e = dict(os.environ)
     for key in list(e):
@@ -88,18 +93,20 @@ def env(sandbox: Path, frozen: Path, *, audit_log: Path, workers: int | None,
     # No PYTHONHASHSEED here: every process of a run hashes strings its own way, as the
     # app's do, so an answer that follows a set's order differs between runs and shows.
     e.pop("PYTHONHASHSEED", None)
-    e.update({
-        "PYTHONPATH": str(sandbox / "tests" / "golden" / "site"),
-        "PYTHONUTF8": "1",
-        "HB_GOLDEN_CLOCK": str(clock_of(frozen) if clock is None else clock),
-        "HB_GOLDEN_AUDIT": str(audit_log),
-        "HB_GOLDEN_OFFLINE": "1",
-        "LOCALAPPDATA": str(local),
-        "HB_MASTER_REPO": str(frozen / "master_repo"),
-        "HB_MASTER_NO_FETCH": "1",
-        "HB_CREDENTIAL_FILE": str(sandbox / "state" / "no_credential.json"),
-        "HBUILDER_CUTOFFS_POLL_MIN": "0",
-    })
+    e.update(
+        {
+            "PYTHONPATH": str(sandbox / "tests" / "golden" / "site"),
+            "PYTHONUTF8": "1",
+            "HB_GOLDEN_CLOCK": str(clock_of(frozen) if clock is None else clock),
+            "HB_GOLDEN_AUDIT": str(audit_log),
+            "HB_GOLDEN_OFFLINE": "1",
+            "LOCALAPPDATA": str(local),
+            "HB_MASTER_REPO": str(frozen / "master_repo"),
+            "HB_MASTER_NO_FETCH": "1",
+            "HB_CREDENTIAL_FILE": str(sandbox / "state" / "no_credential.json"),
+            "HBUILDER_CUTOFFS_POLL_MIN": "0",
+        }
+    )
     if workers is not None:
         e["HBUILDER_WEB_WORKERS"] = str(workers)
         e["HBUILDER_WORKERS"] = str(workers)
@@ -120,7 +127,11 @@ class Server:
         self.log = log.open("w", encoding="utf-8")
         self.proc = subprocess.Popen(
             [python, "-u", str(sandbox / "tools" / "web" / "server.py"), "--port", str(self.port)],
-            cwd=sandbox, env=environ, stdout=self.log, stderr=subprocess.STDOUT)
+            cwd=sandbox,
+            env=environ,
+            stdout=self.log,
+            stderr=subprocess.STDOUT,
+        )
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             if self.proc.poll() is not None:

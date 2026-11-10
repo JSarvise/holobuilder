@@ -33,11 +33,18 @@ def physical_ram_gb() -> float | None:
             import ctypes  # noqa: PLC0415
 
             class MemoryStatus(ctypes.Structure):
-                _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
-                            ("total_phys", ctypes.c_ulonglong), ("avail_phys", ctypes.c_ulonglong),
-                            ("total_page", ctypes.c_ulonglong), ("avail_page", ctypes.c_ulonglong),
-                            ("total_virtual", ctypes.c_ulonglong), ("avail_virtual", ctypes.c_ulonglong),
-                            ("avail_extended", ctypes.c_ulonglong)]
+                _fields_ = [
+                    ("length", ctypes.c_ulong),
+                    ("load", ctypes.c_ulong),
+                    ("total_phys", ctypes.c_ulonglong),
+                    ("avail_phys", ctypes.c_ulonglong),
+                    ("total_page", ctypes.c_ulonglong),
+                    ("avail_page", ctypes.c_ulonglong),
+                    ("total_virtual", ctypes.c_ulonglong),
+                    ("avail_virtual", ctypes.c_ulonglong),
+                    ("avail_extended", ctypes.c_ulonglong),
+                ]
+
             status = MemoryStatus()
             status.length = ctypes.sizeof(status)
             if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
@@ -69,4 +76,3 @@ def default_workers() -> int:
     cores = os.cpu_count() or 1
     fit = ram_workers(physical_ram_gb())
     return min(cores, fit) if fit is not None else cores
-

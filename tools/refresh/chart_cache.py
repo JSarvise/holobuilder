@@ -11,11 +11,14 @@
 #   python chart_cache.py                 -> coverage report
 #   python chart_cache.py --copy          -> copy every cached chart to dumps/charts/
 #   python chart_cache.py --show m0524 4  -> print one chart's header
-import os, shutil, sys
+import os
+import shutil
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 import master_cache as mc  # noqa: E402
 
@@ -26,8 +29,10 @@ DIFF = {1: "easy", 2: "normal", 3: "hard", 4: "expert"}
 
 def index():
     """md5 -> (music_id, difficulty, total_notes, flick_notes_unknown_until_read)."""
-    return {r["data"][5][0]: (r["music_id"], int(r["difficulty_type"]), r["data"][3][0])
-            for r in mc.rows("MusicDifficultyChart")}
+    return {
+        r["data"][5][0]: (r["music_id"], int(r["difficulty_type"]), r["data"][3][0])
+        for r in mc.rows("MusicDifficultyChart")
+    }
 
 
 def cached(want):

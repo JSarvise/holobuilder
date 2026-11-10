@@ -7,6 +7,7 @@ included) wherever the greedy is optimal, one hand board where the greedy is
 provably suboptimal, determinism under input shuffling, and — when the shipped
 skilltree dump is on disk — the additivity premise (no two sockets of a board
 reach a common node)."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -18,7 +19,9 @@ from pathlib import Path
 import pytest
 
 from hbuilder.domain.board_plan import (
-    _connect_assignment_exact, _max_weight_matching, _team_connect_assignment,
+    _connect_assignment_exact,
+    _max_weight_matching,
+    _team_connect_assignment,
 )
 
 REPO = Path(__file__).resolve().parents[1]
@@ -103,8 +106,9 @@ def _check_valid(triples, placements):
     assert len(sockets) == len(set(sockets)), "a socket used twice"
     known = {(t[1], t[2], t[5]): t for t in triples}
     for p in placements:
-        t = next(t for t in triples if t[1] == p.chr and t[2] == p.socket
-                 and p.card in t[5] and t[0] == p.value)
+        t = next(
+            t for t in triples if t[1] == p.chr and t[2] == p.socket and p.card in t[5] and t[0] == p.value
+        )
         assert p.multiplier == 1.0 + t[3] / 1000.0
         assert known[(t[1], t[2], t[5])] is t
 
@@ -207,8 +211,7 @@ def test_matching_is_deterministic_under_input_shuffling():
             rng.shuffle(shuffled)
             got = _connect_assignment_exact(shuffled)
             assert got[0] == ref[0]
-            assert [dataclasses.astuple(p) for p in got[1]] == \
-                [dataclasses.astuple(p) for p in ref[1]]
+            assert [dataclasses.astuple(p) for p in got[1]] == [dataclasses.astuple(p) for p in ref[1]]
 
 
 def test_hand_board_where_the_greedy_is_suboptimal():
@@ -224,7 +227,9 @@ def test_hand_board_where_the_greedy_is_suboptimal():
     connect = {"card-x": (((1, 0),), 1000), "card-y": (((0, 1),), 1000)}
     mults, placements = _team_connect_assignment(per_char, connect)
     assert sorted((p.chr, p.card, p.value) for p in placements) == [
-        ("chr-A", "card-y", 9.0), ("chr-B", "card-x", 9.0)]
+        ("chr-A", "card-y", 9.0),
+        ("chr-B", "card-x", 9.0),
+    ]
     assert mults == {"chr-A": {"N-2": 2.0}, "chr-B": {"N-1": 2.0}}
     # placements are emitted value-desc, then (chr, socket)
     assert [p.chr for p in placements] == ["chr-A", "chr-B"]
@@ -238,9 +243,13 @@ def test_shipped_shapes_never_let_two_sockets_reach_one_node():
     card) values add exactly)."""
     st = json.loads(SKILLTREE.read_text("utf-8"))
     extents, connect, card_connect = st["extents"], st["connect"], st["card_connect"]
-    shapes = sorted({tuple(map(tuple, extents[connect[e]["area"]]))
-                     for e in card_connect.values()
-                     if e in connect and connect[e].get("area") in extents})
+    shapes = sorted(
+        {
+            tuple(map(tuple, extents[connect[e]["area"]]))
+            for e in card_connect.values()
+            if e in connect and connect[e].get("area") in extents
+        }
+    )
     assert shapes
     checked = 0
     for positions in st["models"].values():
@@ -251,8 +260,8 @@ def test_shipped_shapes_never_let_two_sockets_reach_one_node():
             sx, sy = positions[s]
             for sh in shapes:
                 cover[(s, sh)] = frozenset(
-                    pos_to_node[(sx + dx, sy + dy)] for dx, dy in sh
-                    if (sx + dx, sy + dy) in pos_to_node)
+                    pos_to_node[(sx + dx, sy + dy)] for dx, dy in sh if (sx + dx, sy + dy) in pos_to_node
+                )
         for (s1, a), (s2, b) in itertools.combinations(cover, 2):
             if s1 != s2:
                 checked += 1
@@ -275,16 +284,14 @@ def test_a_card_stays_where_it_is_when_moving_it_gains_nothing(home):
     be moved between them -- a move worth nothing. One card, two boards of
     equal value: it stays on the board that holds it, whichever that is."""
     per_char, connect = _tie_boards()
-    _mults, placements = _team_connect_assignment(
-        per_char, connect, incumbent={(home, "S-001"): "card-x"})
+    _mults, placements = _team_connect_assignment(per_char, connect, incumbent={(home, "S-001"): "card-x"})
     assert [(p.chr, p.card) for p in placements] == [(home, "card-x")]
 
 
 def test_an_incumbent_never_beats_a_real_gain():
     per_char, connect = _tie_boards()
     per_char["chr-A"] = (per_char["chr-A"][0], per_char["chr-A"][1], {"N-1": 5.001})
-    _mults, placements = _team_connect_assignment(
-        per_char, connect, incumbent={("chr-B", "S-001"): "card-x"})
+    _mults, placements = _team_connect_assignment(per_char, connect, incumbent={("chr-B", "S-001"): "card-x"})
     assert [(p.chr, p.card) for p in placements] == [("chr-A", "card-x")]
 
 
@@ -293,10 +300,8 @@ def test_the_incumbent_card_of_an_equivalent_group_is_the_one_named():
     keeps card-2, not the group's lowest id."""
     per_char, _ = _tie_boards()
     connect = {"card-1": (((1, 0),), 1000), "card-2": (((1, 0),), 1000)}
-    _mults, placements = _team_connect_assignment(
-        per_char, connect, incumbent={("chr-B", "S-001"): "card-2"})
-    assert sorted((p.chr, p.card) for p in placements) == [("chr-A", "card-1"),
-                                                          ("chr-B", "card-2")]
+    _mults, placements = _team_connect_assignment(per_char, connect, incumbent={("chr-B", "S-001"): "card-2"})
+    assert sorted((p.chr, p.card) for p in placements) == [("chr-A", "card-1"), ("chr-B", "card-2")]
 
 
 def test_incumbents_never_change_the_optimum_on_random_instances():
@@ -319,9 +324,10 @@ def test_the_cached_path_keeps_the_incumbent_too():
     from hbuilder.domain.board_plan import _team_connect_assignment_grouped
 
     cards = ("card-1", "card-2", "card-3")
-    per_char = [(c, [("S-001", 1000, ("G-001",), (card,)) for card in cards], {"G-001": 7.0})
-                for c in ("chr-A", "chr-B", "chr-C")]
-    home = {("chr-A", "S-001"): "card-3", ("chr-B", "S-001"): "card-1",
-            ("chr-C", "S-001"): "card-2"}
+    per_char = [
+        (c, [("S-001", 1000, ("G-001",), (card,)) for card in cards], {"G-001": 7.0})
+        for c in ("chr-A", "chr-B", "chr-C")
+    ]
+    home = {("chr-A", "S-001"): "card-3", ("chr-B", "S-001"): "card-1", ("chr-C", "S-001"): "card-2"}
     _m, placed = _team_connect_assignment_grouped(per_char, home)
     assert {(p.chr, p.socket): p.card for p in placed} == home

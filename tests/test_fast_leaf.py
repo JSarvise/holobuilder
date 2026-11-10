@@ -17,20 +17,25 @@ import sys
 from pathlib import Path
 
 import pytest
+from support.builders import make_card, make_scoring_config
 
 from hbuilder.domain import board as board_mod
 from hbuilder.domain.board import BoardError, parse_effect_id
 from hbuilder.domain.board_plan import (
-    PlanCache, _team_connect_assignment,
-    _team_connect_assignment_grouped, board_model_from_plan, cached_team_plan,
-    compile_node_recipes, node_values_from_recipes, optimize_and_rerank,
-    power_node_values, song_cast,
+    PlanCache,
+    _team_connect_assignment,
+    _team_connect_assignment_grouped,
+    board_model_from_plan,
+    cached_team_plan,
+    compile_node_recipes,
+    node_values_from_recipes,
+    optimize_and_rerank,
+    power_node_values,
+    song_cast,
 )
 from hbuilder.domain.card import Stats
-from hbuilder.domain.skilltree import SkillTree, TreeNode, ROOT_NODE
+from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, TreeNode
 from hbuilder.domain.team import Team, TeamError
-
-from support.builders import make_card, make_scoring_config
 
 K = 2.03734
 REPO = Path(__file__).resolve().parents[1]
@@ -39,8 +44,7 @@ RESEARCH = REPO / "tests" / "fixtures" / "research"
 # ---------------------------------------------------------------------------
 # parse_effect_id memo
 # ---------------------------------------------------------------------------
-_LEADER = ("skill_tree_effect-all_parameter_up-100-skill_tree_effect_target"
-           "-all-set_live_leader")
+_LEADER = "skill_tree_effect-all_parameter_up-100-skill_tree_effect_target-all-set_live_leader"
 
 
 def test_parse_effect_id_is_memoised_per_id_and_branch_and_returns_the_same_instance():
@@ -69,23 +73,42 @@ def test_parse_effect_id_failures_are_not_cached_and_still_raise():
 # ---------------------------------------------------------------------------
 _STATS = Stats(performance=1000, technique=1000, sense=1000)
 _BIG = Stats(performance=3000, technique=2000, sense=1000)
-_MEMBER = ("skill_tree_effect-sense_up-50-skill_tree_effect_target"
-           "-skill_tree_character-always")
+_MEMBER = "skill_tree_effect-sense_up-50-skill_tree_effect_target-skill_tree_character-always"
 _GREEN = "skill_tree_effect-technique_up-10-skill_tree_effect_target-all-always"
-_ALLPCT = ("skill_tree_effect-all_parameter_up_permil_up-100-skill_tree_effect_target"
-           "-all-always")
-_R044 = ("skill_tree_effect-technique_up_permil_up-100-skill_tree_effect_target-all"
-         "-skill_tree_effect_passive_trigger-music_skill_tree_character-set_live_leader")
-_Y_SOLO = ("skill_tree_effect-live_music_score_bonus_permil_up-20-"
-           "skill_tree_effect_target-skill_tree_character-always-solo")
+_ALLPCT = "skill_tree_effect-all_parameter_up_permil_up-100-skill_tree_effect_target-all-always"
+_R044 = (
+    "skill_tree_effect-technique_up_permil_up-100-skill_tree_effect_target-all"
+    "-skill_tree_effect_passive_trigger-music_skill_tree_character-set_live_leader"
+)
+_Y_SOLO = (
+    "skill_tree_effect-live_music_score_bonus_permil_up-20-"
+    "skill_tree_effect_target-skill_tree_character-always-solo"
+)
 
-EFFECTS = {"R-001": [_LEADER], "R-002": [_ALLPCT], "R-044": [_R044],
-           "B-001": [_MEMBER], "B-002": [_MEMBER], "G-001": [_GREEN],
-           "G-002": [_ALLPCT], "Y-001": [_Y_SOLO]}
+EFFECTS = {
+    "R-001": [_LEADER],
+    "R-002": [_ALLPCT],
+    "R-044": [_R044],
+    "B-001": [_MEMBER],
+    "B-002": [_MEMBER],
+    "G-001": [_GREEN],
+    "G-002": [_ALLPCT],
+    "Y-001": [_Y_SOLO],
+}
 _IDS = list(EFFECTS)
-_POS = {ROOT_NODE: [0, 0], "R-001": [1, 0], "R-002": [2, 0], "R-044": [3, 0],
-        "B-001": [0, 1], "B-002": [0, 2], "G-001": [-1, 0], "G-002": [-2, 0],
-        "Y-001": [0, -1], "S-002": [1, 1], "S-003": [-1, 1]}
+_POS = {
+    ROOT_NODE: [0, 0],
+    "R-001": [1, 0],
+    "R-002": [2, 0],
+    "R-044": [3, 0],
+    "B-001": [0, 1],
+    "B-002": [0, 2],
+    "G-001": [-1, 0],
+    "G-002": [-2, 0],
+    "Y-001": [0, -1],
+    "S-002": [1, 1],
+    "S-003": [-1, 1],
+}
 SKILLTREE = {
     "nodes": {n: {"chr": {}} for n in EFFECTS},
     "members": [{"chr": f"chr-{i:05d}", "model": "m"} for i in range(1, 12)],
@@ -97,13 +120,17 @@ SKILLTREE = {
 # five owned Connect cards: two IDENTICAL (shape, permil) pairs so the grouped
 # assignment's tie run is exercised, one covering the S-002 branch.
 CONNECT = {
-    "cc-a1": (((1, 0), (2, 0)), 1500), "cc-a2": (((1, 0), (2, 0)), 1500),
-    "cc-b1": (((0, 1), (0, 2)), 1200), "cc-b2": (((0, 1), (0, 2)), 1200),
+    "cc-a1": (((1, 0), (2, 0)), 1500),
+    "cc-a2": (((1, 0), (2, 0)), 1500),
+    "cc-b1": (((0, 1), (0, 2)), 1200),
+    "cc-b2": (((0, 1), (0, 2)), 1200),
     "cc-c": (((-1, 0), (-2, 0), (1, 0)), 900),
 }
 BENCH = {
-    "Chr99": [{"node": "G-001", "effects": [_GREEN], "connect_multiplier": 1.5},
-              {"node": "R-002", "effects": [_ALLPCT]}],
+    "Chr99": [
+        {"node": "G-001", "effects": [_GREEN], "connect_multiplier": 1.5},
+        {"node": "R-002", "effects": [_ALLPCT]},
+    ],
 }
 
 
@@ -111,8 +138,10 @@ def _tree() -> SkillTree:
     nodes = {ROOT_NODE: TreeNode(node_id=ROOT_NODE, branch="S", cost=0, player_level=None)}
     for n in _IDS + ["S-002", "S-003"]:
         nodes[n] = TreeNode(node_id=n, branch=n[0], cost=1, player_level=None)
-    adjacency = {ROOT_NODE: frozenset(_IDS + ["S-002", "S-003"]),
-                 **{n: frozenset({ROOT_NODE}) for n in _IDS + ["S-002", "S-003"]}}
+    adjacency = {
+        ROOT_NODE: frozenset(_IDS + ["S-002", "S-003"]),
+        **{n: frozenset({ROOT_NODE}) for n in _IDS + ["S-002", "S-003"]},
+    }
     return SkillTree(nodes=nodes, positions={}, adjacency=adjacency)
 
 
@@ -120,28 +149,48 @@ TREE = _tree()
 
 
 def _card(chr_no: int, star: int = 5, stats: Stats = _STATS):
-    return make_card(f"card-{chr_no:05d}-{star}-uniq-0000-00", member=f"Chr{chr_no}",
-                     stats=stats)
+    return make_card(f"card-{chr_no:05d}-{star}-uniq-0000-00", member=f"Chr{chr_no}", stats=stats)
 
 
 def _team(leader_no, member_nos, stats=None):
-    return Team(leader=_card(leader_no),
-                members=tuple(_card(n, stats=(stats or {}).get(n, _STATS)) for n in member_nos))
+    return Team(
+        leader=_card(leader_no),
+        members=tuple(_card(n, stats=(stats or {}).get(n, _STATS)) for n in member_nos),
+    )
 
 
 def _both_boards(team, cache, *, budget, sings, connect, bench, ctx=(20000.0, 300.0, 0.4)):
     """(plain, fast) BoardModels + placements for one team on one cache."""
-    plan = cached_team_plan(team.leader, team.members, cache=cache, tree_for=lambda c: TREE,
-                            budget_for=lambda c: budget, node_effect_ids=EFFECTS,
-                            skilltree=SKILLTREE, sings=sings)
+    plan = cached_team_plan(
+        team.leader,
+        team.members,
+        cache=cache,
+        tree_for=lambda c: TREE,
+        budget_for=lambda c: budget,
+        node_effect_ids=EFFECTS,
+        skilltree=SKILLTREE,
+        sings=sings,
+    )
     op, bp_, pool = ctx
     out = []
     for pc in (None, cache):
         placements = []
         board = board_model_from_plan(
-            plan, team.leader, team.members, SKILLTREE, EFFECTS, overall_power=op,
-            bonus_permil=bp_, k_constant=K, active_pool_rate=pool, connect_cards=connect,
-            placements_out=placements, bench_characters=bench, sings=sings, plan_cache=pc)
+            plan,
+            team.leader,
+            team.members,
+            SKILLTREE,
+            EFFECTS,
+            overall_power=op,
+            bonus_permil=bp_,
+            k_constant=K,
+            active_pool_rate=pool,
+            connect_cards=connect,
+            placements_out=placements,
+            bench_characters=bench,
+            sings=sings,
+            plan_cache=pc,
+        )
         out.append((board, placements))
     return out
 
@@ -152,22 +201,21 @@ def test_fast_assembly_equals_plain_assembly_on_synthetic_boards(connect, sings)
     cache = PlanCache.from_team(_team(1, [2, 3, 4, 5, 6]), make_scoring_config())
     teams = [
         _team(1, [2, 3, 4, 5, 6]),
-        _team(1, [1, 3, 4, 5, 6]),                      # leader also a member
+        _team(1, [1, 3, 4, 5, 6]),  # leader also a member
         _team(7, [2, 3, 8, 9, 10], {8: _BIG, 9: _BIG}),  # a different linearisation point
-        _team(1, [2, 3, 4, 5, 6]),                      # cache hit for everything
+        _team(1, [2, 3, 4, 5, 6]),  # cache hit for everything
     ]
     for budget in (3, 453):
         for i, team in enumerate(teams):
             ctx = (20000.0 + 1000.0 * i, 300.0 + 7.0 * i, 0.4 - 0.05 * i)
             (plain, p_pl), (fast, p_fast) = _both_boards(
-                team, cache, budget=budget, sings=sings, connect=connect, bench=BENCH, ctx=ctx)
+                team, cache, budget=budget, sings=sings, connect=connect, bench=BENCH, ctx=ctx
+            )
             assert fast == plain
-            assert [dataclasses.astuple(p) for p in p_fast] == \
-                [dataclasses.astuple(p) for p in p_pl]
+            assert [dataclasses.astuple(p) for p in p_fast] == [dataclasses.astuple(p) for p in p_pl]
             # the ORDER of nodes and the parsed effects are the same too
             for name, cb in plain.characters.items():
-                assert [n.node_id for n in fast.characters[name].nodes] == \
-                    [n.node_id for n in cb.nodes]
+                assert [n.node_id for n in fast.characters[name].nodes] == [n.node_id for n in cb.nodes]
     assert cache.assembled  # the fast path did go through the assembled cache
 
 
@@ -180,16 +228,32 @@ def test_recipes_reproduce_power_node_values_bit_for_bit():
         for sings in (0.0, 1.0):
             for own in (team.leader, team.members[1], None):
                 full = power_node_values(
-                    EFFECTS, is_leader=is_leader, own_card=own, member_cards=team.members,
-                    bonus_permil=321.0, overall_power=23456.0, k_constant=K,
-                    active_pool_rate=0.37, skilltree={"nodes": SKILLTREE["nodes"]},
-                    model_id="", own_chr="chr-00001", singer_weight=sings)
+                    EFFECTS,
+                    is_leader=is_leader,
+                    own_card=own,
+                    member_cards=team.members,
+                    bonus_permil=321.0,
+                    overall_power=23456.0,
+                    k_constant=K,
+                    active_pool_rate=0.37,
+                    skilltree={"nodes": SKILLTREE["nodes"]},
+                    model_id="",
+                    own_chr="chr-00001",
+                    singer_weight=sings,
+                )
                 recipes = compile_node_recipes(EFFECTS, SKILLTREE["nodes"], "chr-00001")
                 sub = tuple(r for r in recipes if r[0] in ("R-001", "R-044", "B-001", "Y-001"))
                 part = node_values_from_recipes(
-                    sub, is_leader=is_leader, own_card=own, member_cards=team.members,
-                    bonus_permil=321.0, overall_power=23456.0, k_constant=K,
-                    active_pool_rate=0.37, singer_weight=sings)
+                    sub,
+                    is_leader=is_leader,
+                    own_card=own,
+                    member_cards=team.members,
+                    bonus_permil=321.0,
+                    overall_power=23456.0,
+                    k_constant=K,
+                    active_pool_rate=0.37,
+                    singer_weight=sings,
+                )
                 assert part == {k: full[k] for k in part}
                 assert set(part) == {"R-001", "R-044", "B-001", "Y-001"}
 
@@ -213,8 +277,7 @@ def test_grouped_connect_assignment_matches_the_per_card_path_on_random_boards()
                     positions[f"N-{x}{y}"] = [x, y]
         shapes = []
         for _ in range(rng.randint(1, 5)):
-            offs = tuple(sorted({(rng.randint(-3, 3), rng.randint(-3, 3))
-                                 for _ in range(rng.randint(1, 4))}))
+            offs = tuple(sorted({(rng.randint(-3, 3), rng.randint(-3, 3)) for _ in range(rng.randint(1, 4))}))
             shapes.append((offs, rng.choice([500, 1000, 1500, 2000])))
         connect = {}
         for k in range(rng.randint(1, 8)):
@@ -240,9 +303,11 @@ def test_grouped_connect_assignment_matches_the_per_card_path_on_random_boards()
                 if socket != "S-001" and socket not in selected:
                     continue
                 for (offs, permil), ids in groups.items():
-                    covered = [pos_to_node[(sx + dx, sy + dy)] for dx, dy in offs
-                               if (sx + dx, sy + dy) in pos_to_node
-                               and pos_to_node[(sx + dx, sy + dy)] in selected]
+                    covered = [
+                        pos_to_node[(sx + dx, sy + dy)]
+                        for dx, dy in offs
+                        if (sx + dx, sy + dy) in pos_to_node and pos_to_node[(sx + dx, sy + dy)] in selected
+                    ]
                     if covered:
                         entries.append((socket, permil, tuple(covered), tuple(sorted(ids))))
             entries_by_chr.append((chr_id, tuple(entries), values))
@@ -259,25 +324,44 @@ def test_optimize_and_rerank_on_the_cache_still_matches_the_plain_assembly():
     cache = PlanCache.from_team(_team(1, [2, 3, 4, 5, 6]), cfg)
     teams = [_team(1, [2, 3, 4, 5, 6]), _team(7, [1, 3, 8, 9, 10], {8: _BIG})]
     rows = optimize_and_rerank(
-        teams, cfg, tree_for=lambda c: TREE, budget_for=lambda c: 453,
-        node_effect_ids=EFFECTS, skilltree=SKILLTREE, connect_cards=CONNECT,
-        bench_characters=BENCH, plan_cache=cache, sings=True)
+        teams,
+        cfg,
+        tree_for=lambda c: TREE,
+        budget_for=lambda c: 453,
+        node_effect_ids=EFFECTS,
+        skilltree=SKILLTREE,
+        connect_cards=CONNECT,
+        bench_characters=BENCH,
+        plan_cache=cache,
+        sings=True,
+    )
     for row in rows:
         (plain, p_pl), (fast, _p_fast) = _both_boards(
-            row.team, cache, budget=453, sings=True, connect=CONNECT, bench=BENCH,
-            ctx=(0.0, 0.0, 0.0))
+            row.team, cache, budget=453, sings=True, connect=CONNECT, bench=BENCH, ctx=(0.0, 0.0, 0.0)
+        )
         # the row's board was built at the TEAM's own linearisation point, so
         # compare node sets and effects (the assembly), not the placements
-        assert {n: [x.node_id for x in b.nodes] for n, b in row.board.characters.items()} == \
-            {n: [x.node_id for x in b.nodes] for n, b in plain.characters.items()}
+        assert {n: [x.node_id for x in b.nodes] for n, b in row.board.characters.items()} == {
+            n: [x.node_id for x in b.nodes] for n, b in plain.characters.items()
+        }
 
 
 def test_refine_context_defaults_off_and_the_seed_is_required():
     from hbuilder.solver.parallel_refine import RefineContext, new_plan_cache
+
     ctx = RefineContext(
-        cards=(), cfg=make_scoring_config(), charts=(), skilltree=SKILLTREE, node_master=(),
-        node_effect_ids=EFFECTS, connect_cards=None, bench_characters=None, name_by_chr={},
-        flat_budget=453, granted={})
+        cards=(),
+        cfg=make_scoring_config(),
+        charts=(),
+        skilltree=SKILLTREE,
+        node_master=(),
+        node_effect_ids=EFFECTS,
+        connect_cards=None,
+        bench_characters=None,
+        name_by_chr={},
+        flat_budget=453,
+        granted={},
+    )
     assert ctx.use_plan_cache is False and ctx.plan_cache_seed is None
     with pytest.raises(ValueError):
         new_plan_cache(dataclasses.replace(ctx, use_plan_cache=True), {})
@@ -286,16 +370,23 @@ def test_refine_context_defaults_off_and_the_seed_is_required():
 # ---------------------------------------------------------------------------
 # real rosters (skipped without the recon dumps)
 # ---------------------------------------------------------------------------
-_DATA_DIR = "".join(("da", "ta"))   # the real catalogue/account dir, see the note below
+_DATA_DIR = "".join(("da", "ta"))  # the real catalogue/account dir, see the note below
 _LEAF_INPUTS = REPO / "tools" / "web" / "leaf_inputs.py"
 _DUMPS = REPO / "tools" / "recon" / "proxy" / "dumps"
-_HAVE_REAL = all(p.is_file() for p in (
-    _LEAF_INPUTS, _DUMPS / "skilltree.json", _DUMPS / "master_SkillTreeNode.json",
-    # the catalogue + account files, spelled through a joined name so the
-    # fixture-isolation guard (tests/test_fixture_isolation.py) does not
-    # read this real-data skip guard as a fixture recoupling
-    REPO / _DATA_DIR / "cards.json", REPO / _DATA_DIR / "owned.json",
-    RESEARCH / "exhaustive_m0334_0042_sample.json"))
+_HAVE_REAL = all(
+    p.is_file()
+    for p in (
+        _LEAF_INPUTS,
+        _DUMPS / "skilltree.json",
+        _DUMPS / "master_SkillTreeNode.json",
+        # the catalogue + account files, spelled through a joined name so the
+        # fixture-isolation guard (tests/test_fixture_isolation.py) does not
+        # read this real-data skip guard as a fixture recoupling
+        REPO / _DATA_DIR / "cards.json",
+        REPO / _DATA_DIR / "owned.json",
+        RESEARCH / "exhaustive_m0334_0042_sample.json",
+    )
+)
 
 
 @pytest.mark.skipif(not _HAVE_REAL, reason="recon dumps / research rosters not present")
@@ -313,9 +404,14 @@ def test_twenty_real_rosters_score_identically_on_the_fast_leaf():
         # `evaluate` scores on the deck screen's own Overall Power when
         # `song_absolute_deck_power` is on; score the other
         # three paths on the same deck power or they compare different quantities
-        power = (lambda ldr: overall_power_for(team.members, ldr, cfg_b))             if cfg_b.song_absolute_deck_power else None
-        return score_song_detailed(team.members, (team.leader,), chart, cfg_b,
-                                   deck_power=power)[0].total_score
+        power = (
+            (lambda ldr: overall_power_for(team.members, ldr, cfg_b))
+            if cfg_b.song_absolute_deck_power
+            else None
+        )
+        return score_song_detailed(team.members, (team.leader,), chart, cfg_b, deck_power=power)[
+            0
+        ].total_score
 
     if str(_LEAF_INPUTS.parent) not in sys.path:
         sys.path.insert(0, str(_LEAF_INPUTS.parent))
@@ -342,9 +438,16 @@ def test_twenty_real_rosters_score_identically_on_the_fast_leaf():
         except TeamError:
             continue
     assert len(teams) == 20
-    ref = ("card-04001-5-uniq-0042-00", ("card-04001-5-uniq-0042-00", "card-00032-5-uniq-0026-00",
-                                         "card-04003-5-uniq-0044-00", "card-00007-5-uniq-0008-00",
-                                         "card-00006-5-uniq-0007-00"))
+    ref = (
+        "card-04001-5-uniq-0042-00",
+        (
+            "card-04001-5-uniq-0042-00",
+            "card-00032-5-uniq-0026-00",
+            "card-04003-5-uniq-0044-00",
+            "card-00007-5-uniq-0008-00",
+            "card-00006-5-uniq-0007-00",
+        ),
+    )
     ctx = dataclasses.replace(ctx, use_plan_cache=True, plan_cache_seed=ref)
     pool = pr.RefinePool(ctx, workers=1)
     cache = pr.new_plan_cache(ctx, by_id)
@@ -358,28 +461,62 @@ def test_twenty_real_rosters_score_identically_on_the_fast_leaf():
         bd = score_with_breakdown(team, cfg_off)
         ds = deck_screen_unit_score(bd)
         bare = bd.active_pool / (1.0 + bd.combined_support_rate)
-        plan = cached_team_plan(team.leader, team.members, cache=cache, tree_for=pool._tree_for,
-                                budget_for=pool._budget_for, node_effect_ids=ctx.node_effect_ids,
-                                skilltree=ctx.skilltree, sings=sings)
+        plan = cached_team_plan(
+            team.leader,
+            team.members,
+            cache=cache,
+            tree_for=pool._tree_for,
+            budget_for=pool._budget_for,
+            node_effect_ids=ctx.node_effect_ids,
+            skilltree=ctx.skilltree,
+            sings=sings,
+        )
         boards = []
         for pc in (None, cache):
-            boards.append(board_model_from_plan(
-                plan, team.leader, team.members, ctx.skilltree, ctx.node_effect_ids,
-                overall_power=ds.overall_power, bonus_permil=ds.score_bonus_permil,
-                k_constant=K, active_pool_rate=bare, connect_cards=ctx.connect_cards,
-                bench_characters=ctx.bench_characters, name_by_chr=ctx.name_by_chr,
-                sings=sings, plan_cache=pc))
+            boards.append(
+                board_model_from_plan(
+                    plan,
+                    team.leader,
+                    team.members,
+                    ctx.skilltree,
+                    ctx.node_effect_ids,
+                    overall_power=ds.overall_power,
+                    bonus_permil=ds.score_bonus_permil,
+                    k_constant=K,
+                    active_pool_rate=bare,
+                    connect_cards=ctx.connect_cards,
+                    bench_characters=ctx.bench_characters,
+                    name_by_chr=ctx.name_by_chr,
+                    sings=sings,
+                    plan_cache=pc,
+                )
+            )
         assert boards[1] == boards[0]
         for lst, board in zip((plain, fast), boards):
             lst.append(song_total(team, dataclasses.replace(ctx.cfg, board=board)))
-        via_eval.append(pr.evaluate(ctx, by_id, pool._tree_for, pool._budget_for,
-                                    (team.leader.id, tuple(m.id for m in team.members)),
-                                    plan_cache=cache))
+        via_eval.append(
+            pr.evaluate(
+                ctx,
+                by_id,
+                pool._tree_for,
+                pool._budget_for,
+                (team.leader.id, tuple(m.id for m in team.members)),
+                plan_cache=cache,
+            )
+        )
         bt = optimize_and_rerank(
-            [team], ctx.cfg, tree_for=pool._tree_for, budget_for=pool._budget_for,
-            node_effect_ids=ctx.node_effect_ids, skilltree=ctx.skilltree,
-            connect_cards=ctx.connect_cards, bench_characters=ctx.bench_characters,
-            name_by_chr=ctx.name_by_chr, plan_cache=cache, sings=sings)[0]
+            [team],
+            ctx.cfg,
+            tree_for=pool._tree_for,
+            budget_for=pool._budget_for,
+            node_effect_ids=ctx.node_effect_ids,
+            skilltree=ctx.skilltree,
+            connect_cards=ctx.connect_cards,
+            bench_characters=ctx.bench_characters,
+            name_by_chr=ctx.name_by_chr,
+            plan_cache=cache,
+            sings=sings,
+        )[0]
         via_rerank.append(song_total(team, dataclasses.replace(ctx.cfg, board=bt.board)))
     assert fast == plain
     assert via_eval == plain
@@ -394,24 +531,45 @@ def test_fast_assembly_equals_plain_with_cards_held_on_a_bench_green(sings):
     lifts a green are out of the team's matching on BOTH paths -- the cache's grouped
     entries drop them (cc-a1 leaves its group of two with one card) -- and the two paths
     still agree, placements included."""
-    skilltree = {**SKILLTREE,
-                 "members": [*SKILLTREE["members"][:10], {"chr": "chr-00011", "model": "mb"}],
-                 "models": {**SKILLTREE["models"], "mb": {**_POS, "S-002": [-3, 0]}}}
+    skilltree = {
+        **SKILLTREE,
+        "members": [*SKILLTREE["members"][:10], {"chr": "chr-00011", "model": "mb"}],
+        "models": {**SKILLTREE["models"], "mb": {**_POS, "S-002": [-3, 0]}},
+    }
     sockets = {"chr-00011": {"S-001": "cc-c", "S-002": "cc-a1", "S-003": "cc-b1"}}
     # cc-c on S-001 reaches G-001, cc-a1 on S-002 reaches G-002: held; cc-b1 reaches no green
     cache = PlanCache.from_team(_team(1, [2, 3, 4, 5, 6]), make_scoring_config())
     for team in (_team(1, [2, 3, 4, 5, 6]), _team(7, [2, 3, 8, 9, 10], {8: _BIG, 9: _BIG})):
-        plan = cached_team_plan(team.leader, team.members, cache=cache, tree_for=lambda c: TREE,
-                                budget_for=lambda c: 453, node_effect_ids=EFFECTS,
-                                skilltree=skilltree, sings=sings)
+        plan = cached_team_plan(
+            team.leader,
+            team.members,
+            cache=cache,
+            tree_for=lambda c: TREE,
+            budget_for=lambda c: 453,
+            node_effect_ids=EFFECTS,
+            skilltree=skilltree,
+            sings=sings,
+        )
         out = []
         for pc in (None, cache):
             placements = []
             board = board_model_from_plan(
-                plan, team.leader, team.members, skilltree, EFFECTS, overall_power=20000.0,
-                bonus_permil=300.0, k_constant=K, active_pool_rate=0.4, connect_cards=CONNECT,
-                placements_out=placements, bench_characters=BENCH, sings=sings, plan_cache=pc,
-                bench_sockets=sockets)
+                plan,
+                team.leader,
+                team.members,
+                skilltree,
+                EFFECTS,
+                overall_power=20000.0,
+                bonus_permil=300.0,
+                k_constant=K,
+                active_pool_rate=0.4,
+                connect_cards=CONNECT,
+                placements_out=placements,
+                bench_characters=BENCH,
+                sings=sings,
+                plan_cache=pc,
+                bench_sockets=sockets,
+            )
             out.append((board, placements))
         (plain, p_pl), (fast, p_fast) = out
         assert fast == plain
@@ -429,13 +587,18 @@ def test_a_team_over_the_song_cap_at_multiplier_one_skips_the_fast_matching(monk
     the fast path, asked anyway, would have returned None. The capped path, too, takes the
     team's boards from the plan cache."""
     import hbuilder.domain.board_plan as bp
+
     monkeypatch.setattr(bp, "SONG_ALL_CAP_PERMIL", cap)
     family = "live_score_bonus_add_permil_up_by_music_skill_tree_character_and_music_singer_type"
-    y_solo = (f"skill_tree_effect-{family}-50-skill_tree_effect_passive_trigger-"
-              "music_skill_tree_character_and_music_singer_type-solo-always-solo")
+    y_solo = (
+        f"skill_tree_effect-{family}-50-skill_tree_effect_passive_trigger-"
+        "music_skill_tree_character_and_music_singer_type-solo-always-solo"
+    )
     effects = {**EFFECTS, "Y-001": [y_solo]}
-    skilltree = {**SKILLTREE, "nodes": {**SKILLTREE["nodes"],
-                                        "Y-001": {"chr": {}, "e": {"t": family, "tr": "solo"}}}}
+    skilltree = {
+        **SKILLTREE,
+        "nodes": {**SKILLTREE["nodes"], "Y-001": {"chr": {}, "e": {"t": family, "tr": "solo"}}},
+    }
     # an off-team singer's bought solo yellow pays on this song (m0342's case: the bench
     # singers' yellows alone pass the cap)
     sings = bp.SongCast({"chr-00099"}, "solo")
@@ -443,29 +606,63 @@ def test_a_team_over_the_song_cap_at_multiplier_one_skips_the_fast_matching(monk
     names_bench = {"chr-00099": "Chr99"}
     team = _team(1, [2, 3, 4, 5, 6])
     cache = PlanCache.from_team(team, make_scoring_config())
-    plan = cached_team_plan(team.leader, team.members, cache=cache, tree_for=lambda c: TREE,
-                            budget_for=lambda c: 453, node_effect_ids=effects,
-                            skilltree=skilltree, sings=sings)
+    plan = cached_team_plan(
+        team.leader,
+        team.members,
+        cache=cache,
+        tree_for=lambda c: TREE,
+        budget_for=lambda c: 453,
+        node_effect_ids=effects,
+        skilltree=skilltree,
+        sings=sings,
+    )
     calls = []
     fast_path = bp._board_model_from_cache
-    monkeypatch.setattr(bp, "_board_model_from_cache",
-                        lambda *a, **k: calls.append(1) or fast_path(*a, **k))
-    kw = dict(overall_power=20000.0, bonus_permil=300.0, k_constant=K, active_pool_rate=0.4,
-              connect_cards=CONNECT, bench_characters=bench, sings=sings, name_by_chr=names_bench)
+    monkeypatch.setattr(bp, "_board_model_from_cache", lambda *a, **k: calls.append(1) or fast_path(*a, **k))
+    kw = dict(
+        overall_power=20000.0,
+        bonus_permil=300.0,
+        k_constant=K,
+        active_pool_rate=0.4,
+        connect_cards=CONNECT,
+        bench_characters=bench,
+        sings=sings,
+        name_by_chr=names_bench,
+    )
     p_cached, p_plain = [], []
-    cached = board_model_from_plan(plan, team.leader, team.members, skilltree, effects,
-                                   plan_cache=cache, placements_out=p_cached, **kw)
+    cached = board_model_from_plan(
+        plan, team.leader, team.members, skilltree, effects, plan_cache=cache, placements_out=p_cached, **kw
+    )
     assert bool(calls) is not over
     # either way the team's boards come from the plan cache's assemblies (`team_board`)
     assert {k[1] for k in cache._team_boards} == {c.member for c in (team.leader, *team.members)}
-    plain = board_model_from_plan(plan, team.leader, team.members, skilltree, effects,
-                                  placements_out=p_plain, **kw)
+    plain = board_model_from_plan(
+        plan, team.leader, team.members, skilltree, effects, placements_out=p_plain, **kw
+    )
     assert cached == plain
     assert [dataclasses.astuple(p) for p in p_cached] == [dataclasses.astuple(p) for p in p_plain]
     if over:
-        names = {**names_bench, **{"chr-" + c.id.split("-")[1]: c.member
-                                   for c in (team.leader, *team.members)}}
-        assert fast_path(plan, team.leader, team.members, skilltree, effects, names,
-                         overall_power=20000.0, bonus_permil=300.0, k_constant=K,
-                         active_pool_rate=0.4, connect_cards=CONNECT, placements_out=None,
-                         bench_characters=bench, sings=sings, cache=cache) is None
+        names = {
+            **names_bench,
+            **{"chr-" + c.id.split("-")[1]: c.member for c in (team.leader, *team.members)},
+        }
+        assert (
+            fast_path(
+                plan,
+                team.leader,
+                team.members,
+                skilltree,
+                effects,
+                names,
+                overall_power=20000.0,
+                bonus_permil=300.0,
+                k_constant=K,
+                active_pool_rate=0.4,
+                connect_cards=CONNECT,
+                placements_out=None,
+                bench_characters=bench,
+                sings=sings,
+                cache=cache,
+            )
+            is None
+        )

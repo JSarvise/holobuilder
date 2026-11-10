@@ -1,22 +1,47 @@
 from __future__ import annotations
-import json, sys
+
+import json
+import sys
 from pathlib import Path
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import gacha_sync as gsy  # noqa: E402
 import gacha_store as gs  # noqa: E402
+import gacha_sync as gsy  # noqa: E402
 
-LIST = {"gacha_groups": [{"gacha_group_id": "g", "gachas": [
-    {"gacha_id": "gacha-a", "name": "A", "type": 1, "start_time": 1, "end_time": 9,
-     "pickup_card_ids": ["card-p"], "icon_asset_id": "a",
-     "gacha_buttons": [{"gacha_button_id": "btn", "drawn_count": 3, "limit_count": 0}],
-     "gacha_point": {"gacha_point_id": "gp", "quantity": 12}}]}]}
-HIST = {"histories": [
-    {"gacha_name": "A", "card_id": "card-x", "draw_time": 100},
-    {"gacha_name": "A", "card_id": "card-x", "draw_time": 100},
-    {"gacha_name": "Old", "card_id": "card-y", "draw_time": 50}]}
-RATES = {"gacha-a": {"normal": {"normal": [{"rarity": 5, "ppm": 500000, "cards": []}]},
-                     "card_select": {"error": "grpc-status 3 INVALID_ARGUMENT"}}}
+LIST = {
+    "gacha_groups": [
+        {
+            "gacha_group_id": "g",
+            "gachas": [
+                {
+                    "gacha_id": "gacha-a",
+                    "name": "A",
+                    "type": 1,
+                    "start_time": 1,
+                    "end_time": 9,
+                    "pickup_card_ids": ["card-p"],
+                    "icon_asset_id": "a",
+                    "gacha_buttons": [{"gacha_button_id": "btn", "drawn_count": 3, "limit_count": 0}],
+                    "gacha_point": {"gacha_point_id": "gp", "quantity": 12},
+                }
+            ],
+        }
+    ]
+}
+HIST = {
+    "histories": [
+        {"gacha_name": "A", "card_id": "card-x", "draw_time": 100},
+        {"gacha_name": "A", "card_id": "card-x", "draw_time": 100},
+        {"gacha_name": "Old", "card_id": "card-y", "draw_time": 50},
+    ]
+}
+RATES = {
+    "gacha-a": {
+        "normal": {"normal": [{"rarity": 5, "ppm": 500000, "cards": []}]},
+        "card_select": {"error": "grpc-status 3 INVALID_ARGUMENT"},
+    }
+}
 
 
 def test_apply_sync_appends_and_reports_disk_deltas(tmp_path):
@@ -36,7 +61,7 @@ def test_apply_sync_twice_adds_no_pulls_or_banners_but_keeps_rate_history(tmp_pa
     gsy.apply_sync(tmp_path, 1000, LIST, HIST, RATES)
     s = gsy.apply_sync(tmp_path, 2000, LIST, HIST, RATES)
     assert s["pulls"] == 0 and s["banners"] == 0
-    assert s["rates"] == 1 and s["counters"] == 1   # per-sync series, by design
+    assert s["rates"] == 1 and s["counters"] == 1  # per-sync series, by design
 
 
 def test_history_gap_only_when_a_full_window_starts_past_the_store(tmp_path):
@@ -44,8 +69,7 @@ def test_history_gap_only_when_a_full_window_starts_past_the_store(tmp_path):
     AND its oldest entry is newer than everything stored, the pulls in between are
     gone from the wire for good -- the sync must SAY so, not silently under-count."""
     stored = [{"draw_time": 50, "gacha_name": "Old", "card_id": "card-y"}]
-    full = [{"draw_time": 1000 + i, "gacha_name": "A", "card_id": "card-x"}
-            for i in range(gsy.HISTORY_CAP)]
+    full = [{"draw_time": 1000 + i, "gacha_name": "A", "card_id": "card-x"} for i in range(gsy.HISTORY_CAP)]
     assert gsy.history_gap(full, stored) is True
     # Overlap with the store: nothing was skipped.
     overlapping = [{"draw_time": 50, "gacha_name": "Old", "card_id": "card-y"}] + full[:-1]
@@ -63,22 +87,28 @@ def test_history_gap_when_the_last_sync_is_older_than_the_window():
     some = [{"draw_time": 1000, "gacha_name": "A", "card_id": "card-x"}]
     day = 86400
     assert gsy.history_gap(some, stored, last_sync=0, synced_at=31 * day) is True
-    assert gsy.history_gap(some, stored, last_sync=0, synced_at=10 * day) is False   # nothing pulled between
+    assert gsy.history_gap(some, stored, last_sync=0, synced_at=10 * day) is False  # nothing pulled between
     assert gsy.history_gap(some, stored) is False
 
 
 def test_apply_sync_flags_possible_gap(tmp_path):
     gsy.apply_sync(tmp_path, 1000, LIST, HIST, RATES)
-    full = {"histories": [{"gacha_name": "A", "card_id": "card-x", "draw_time": 9000 + i}
-                          for i in range(gsy.HISTORY_CAP)]}
+    full = {
+        "histories": [
+            {"gacha_name": "A", "card_id": "card-x", "draw_time": 9000 + i} for i in range(gsy.HISTORY_CAP)
+        ]
+    }
     s = gsy.apply_sync(tmp_path, 2000, LIST, full, RATES)
     assert s["possible_gap"] is True
 
 
 def test_alias_gacha_ids_reads_the_hand_maintained_file(tmp_path):
     p = tmp_path / "banner_aliases.json"
-    p.write_bytes(json.dumps({"_doc": "notes", "Old": {"gacha_id": "gacha-old", "kind": "pickup"},
-                              "NoId": {"kind": "ticket"}}).encode("utf8"))
+    p.write_bytes(
+        json.dumps(
+            {"_doc": "notes", "Old": {"gacha_id": "gacha-old", "kind": "pickup"}, "NoId": {"kind": "ticket"}}
+        ).encode("utf8")
+    )
     assert gsy.alias_gacha_ids(p) == ["gacha-old"]
     assert gsy.alias_gacha_ids(tmp_path / "absent.json") == []
 

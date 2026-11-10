@@ -11,8 +11,9 @@ import queue
 import threading
 import time
 import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
+from typing import Any
 
 from hbweb import basis, config, songs
 
@@ -20,7 +21,7 @@ from hbweb import basis, config, songs
 @dataclass
 class Job:
     job_id: str
-    events: "queue.Queue[dict[str, Any]]" = field(default_factory=queue.Queue)
+    events: queue.Queue[dict[str, Any]] = field(default_factory=queue.Queue)
     cancel: threading.Event = field(default_factory=threading.Event)
     done: bool = False
 
@@ -30,11 +31,17 @@ JOBS_LOCK = threading.Lock()
 
 # The stages an event job announces in its `plan` event (and `POST /api/event/run` answers).
 EVENT_STAGES = (
-    {"id": "build", "label": "Account basis",
-     "detail": "every owned card at its real level and bloom, boards rebuilt for the song"},
+    {
+        "id": "build",
+        "label": "Account basis",
+        "detail": "every owned card at its real level and bloom, boards rebuilt for the song",
+    },
     {"id": "score_search", "label": "Search by score", "detail": "two-stage search; its best is S_max"},
-    {"id": "event_search", "label": "Search by event objective",
-     "detail": "the same search ranking by the event objective"},
+    {
+        "id": "event_search",
+        "label": "Search by event objective",
+        "detail": "the same search ranking by the event objective",
+    },
     {"id": "bound", "label": "Bound", "detail": "every member set that could still win, exact-scored"},
 )
 
@@ -44,8 +51,7 @@ def launch(runner: Callable[[Job, Mapping], None], opts: Mapping, name: str) -> 
     job = Job(job_id=uuid.uuid4().hex)
     with JOBS_LOCK:
         JOBS[job.job_id] = job
-    threading.Thread(target=runner, args=(job, opts),
-                     name=f"{name}-{job.job_id[:8]}", daemon=True).start()
+    threading.Thread(target=runner, args=(job, opts), name=f"{name}-{job.job_id[:8]}", daemon=True).start()
     return job
 
 
@@ -62,10 +68,17 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for=None) -> None:
     emit = JobProgress(job.events.put)
     t0 = time.monotonic()
     try:
-        emit({"type": "plan", "stages": [{"id": "build", "label": "Load your account"},
-                                         {"id": "search", "label": "Search every leader and team"},
-                                         {"id": "refine", "label": "Refine the best teams"}],
-              "opts": {k: v for k, v in opts.items() if k not in ("filters", "assumptions")}})
+        emit(
+            {
+                "type": "plan",
+                "stages": [
+                    {"id": "build", "label": "Load your account"},
+                    {"id": "search", "label": "Search every leader and team"},
+                    {"id": "refine", "label": "Refine the best teams"},
+                ],
+                "opts": {k: v for k, v in opts.items() if k not in ("filters", "assumptions")},
+            }
+        )
         basis_name, difficulty = opts["basis"], opts["difficulty"]
         assumptions = opts.get("assumptions")
         # the engine keeps the account loaded between searches and reloads it when a
@@ -74,25 +87,39 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for=None) -> None:
         if engine_for is None:
             levels = opts.get("levels")
             if assumptions is not None:
-                eng = ondemand.engine(basis_name, difficulty, workers=basis.web_workers(),
-                                      assumptions=assumptions, levels=levels,
-                                      play=opts.get("play") or ("mobile", False),
-                                      current_key=lambda: ondemand.account_key(difficulty))
+                eng = ondemand.engine(
+                    basis_name,
+                    difficulty,
+                    workers=basis.web_workers(),
+                    assumptions=assumptions,
+                    levels=levels,
+                    play=opts.get("play") or ("mobile", False),
+                    current_key=lambda: ondemand.account_key(difficulty),
+                )
             else:
                 eng = ondemand.engine(
-                    basis_name, difficulty, workers=basis.web_workers(), levels=levels,
+                    basis_name,
+                    difficulty,
+                    workers=basis.web_workers(),
+                    levels=levels,
                     play=opts.get("play") or ("mobile", False),
-                    current_key=lambda: ondemand.basis_key(basis_name, difficulty))
+                    current_key=lambda: ondemand.basis_key(basis_name, difficulty),
+                )
         else:
             eng = engine_for(basis_name, difficulty)
         emit({"type": "stage", "stage": "build", "state": "done"})
         emit({"type": "stage", "stage": "search", "state": "active"})
         # this request's plan options: one engine serves every option of the re-plan
         own = {"assumptions": assumptions} if assumptions is not None and engine_for is None else {}
-        payload = eng.search(opts["song"], opts["filters"], emit=emit, cancel=job.cancel,
-                             top=opts.get("top") or ondemand.RANKING, **own)
-        emit({"type": "result", "payload": payload,
-              "elapsed_ms": round((time.monotonic() - t0) * 1000)})
+        payload = eng.search(
+            opts["song"],
+            opts["filters"],
+            emit=emit,
+            cancel=job.cancel,
+            top=opts.get("top") or ondemand.RANKING,
+            **own,
+        )
+        emit({"type": "result", "payload": payload, "elapsed_ms": round((time.monotonic() - t0) * 1000)})
     except ondemand.Cancelled:
         emit({"type": "cancelled", "elapsed_ms": round((time.monotonic() - t0) * 1000)})
     except KeyError as exc:
@@ -113,14 +140,16 @@ def _event_song_info(opts: Mapping) -> dict:
     import event_mode  # noqa: PLC0415
 
     titles, singers = songs.song_labels()
-    seconds = next((d.get("playingSeconds") for d in songs.music_rows()
-                    if d.get("id") == opts["song"]), None)
-    song_info = {"title": titles.get(opts["song"]), "singer": singers.get(opts["song"]),
-                 "seconds": seconds}
+    seconds = next((d.get("playingSeconds") for d in songs.music_rows() if d.get("id") == opts["song"]), None)
+    song_info = {"title": titles.get(opts["song"]), "singer": singers.get(opts["song"]), "seconds": seconds}
     if event_mode.is_highlight(opts["song"]):
-        song_info = {"title": "Highlight", "music_rows": songs.music_rows(), "titles": titles,
-                     "singers": singers,
-                     "charted": set(songs.chart_note_counts(opts["difficulty"]) or ())}
+        song_info = {
+            "title": "Highlight",
+            "music_rows": songs.music_rows(),
+            "titles": titles,
+            "singers": singers,
+            "charted": set(songs.chart_note_counts(opts["difficulty"]) or ()),
+        }
     return song_info
 
 
@@ -131,18 +160,24 @@ def run_event_job(job: Job, opts: Mapping, *, runner=None) -> None:
     import event_mode  # noqa: PLC0415
     from job_progress import JobProgress  # noqa: PLC0415
 
-    emit = JobProgress(job.events.put)     # + eta_s / best_so_far on progress events
+    emit = JobProgress(job.events.put)  # + eta_s / best_so_far on progress events
     t0 = time.monotonic()
     try:
         emit({"type": "plan", "stages": [dict(s) for s in EVENT_STAGES], "opts": dict(opts)})
         _raw, event, _keys = event_mode.load_event_bundle(config.EVENT_BONUS_PATH, opts.get("event"))
-        collection = ((config.read_json(config.COLLECTION_PATH) or {}).get("cards") or {})
+        collection = (config.read_json(config.COLLECTION_PATH) or {}).get("cards") or {}
         song_info = _event_song_info(opts)
         run = runner or event_mode.run_account_search
-        payload = run(opts, emit=emit, cancel=job.cancel, event=event, collection=collection,
-                      song_info=song_info, workers=opts.get("workers") or basis.web_workers())
-        emit({"type": "result", "payload": payload,
-              "elapsed_ms": round((time.monotonic() - t0) * 1000)})
+        payload = run(
+            opts,
+            emit=emit,
+            cancel=job.cancel,
+            event=event,
+            collection=collection,
+            song_info=song_info,
+            workers=opts.get("workers") or basis.web_workers(),
+        )
+        emit({"type": "result", "payload": payload, "elapsed_ms": round((time.monotonic() - t0) * 1000)})
     except event_mode.EventCancelled:
         emit({"type": "cancelled", "elapsed_ms": round((time.monotonic() - t0) * 1000)})
     except Exception as exc:  # noqa: BLE001 — every failure is an event, never a dead stream
@@ -191,9 +226,7 @@ def serve_events(h, job_id: str) -> None:
                 h.wfile.write(b": keepalive\n\n")
                 h.wfile.flush()
                 continue
-            h.wfile.write(
-                b"data: " + json.dumps(event).encode("utf-8") + b"\n\n"
-            )
+            h.wfile.write(b"data: " + json.dumps(event).encode("utf-8") + b"\n\n")
             h.wfile.flush()
             if event.get("type") == "end":
                 break

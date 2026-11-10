@@ -47,17 +47,17 @@ REPO = paths.REPO
 SCENARIOS = ("account", "my-cards-maxed", "full-collection-maxed")
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
+import dataclasses  # noqa: E402
+
 import build_board  # noqa: E402
 import node_price  # noqa: E402
 
-from hbuilder.inputs import apply_collection, default_paths  # noqa: E402
 from hbuilder.domain.board import BoardError, BoardModel, board_from_mapping  # noqa: E402
 from hbuilder.domain.loader import load_cards, load_owned  # noqa: E402
 from hbuilder.domain.scoring_config import load_scoring_config  # noqa: E402
-from hbuilder.domain.team import MEMBER_COUNT  # noqa: E402,F401  (the planner reads to.MEMBER_COUNT)
 from hbuilder.domain.skilltree import neighbours  # noqa: E402
-
-import dataclasses  # noqa: E402
+from hbuilder.domain.team import MEMBER_COUNT  # noqa: E402,F401  (the planner reads to.MEMBER_COUNT)
+from hbuilder.inputs import apply_collection, default_paths  # noqa: E402
 
 # The eight account-wide skill-tree currencies, in the node-price table's order.
 CURRENCIES = (
@@ -118,8 +118,9 @@ def _prices_from_export(path: Path | None = None) -> dict[str, dict]:
     try:
         rows = json.loads(path.read_text("utf8"))
     except FileNotFoundError:
-        raise MissingInput(f"missing {path}: the board prices need the game's sqlcipher.dll "
-                           "or this synced export") from None
+        raise MissingInput(
+            f"missing {path}: the board prices need the game's sqlcipher.dll or this synced export"
+        ) from None
     out: dict[str, dict] = {}
     for row in rows:
         data = row.get("data") or {}
@@ -233,8 +234,7 @@ def balance_from_disk(directory: Path = DUMPS) -> tuple[dict, str] | tuple[None,
     # `items` carries the currency ids verbatim; `skill_tree` is the same eight
     # under their English names, which is the display side.
     try:
-        held = {k: int(v) for k, v in (document.get("items") or {}).items()
-                if k in CURRENCIES}
+        held = {k: int(v) for k, v in (document.get("items") or {}).items() if k in CURRENCIES}
     except (AttributeError, TypeError, ValueError):
         return None, None
     if len(held) != len(CURRENCIES):
@@ -303,9 +303,7 @@ class Oracle:
         # Oracle is unchanged. A named scenario takes over both axes.
         if scenario is not None:
             if scenario not in SCENARIOS:
-                raise ValueError(
-                    f"--scenario: unknown {scenario!r}; one of {', '.join(SCENARIOS)}"
-                )
+                raise ValueError(f"--scenario: unknown {scenario!r}; one of {', '.join(SCENARIOS)}")
             maxed = scenario != "account"
         self._full_pool = scenario == "full-collection-maxed"
         self.scenario = scenario or "account"
@@ -437,9 +435,15 @@ class Oracle:
             return tuple(
                 score
                 for leader in leaders
-                for score in score_song(members, (leader,), self._chart, cfg,
-                                        deck_power=overall_power_for(members, leader, cfg),
-                                        auto=cfg.song_auto))
+                for score in score_song(
+                    members,
+                    (leader,),
+                    self._chart,
+                    cfg,
+                    deck_power=overall_power_for(members, leader, cfg),
+                    auto=cfg.song_auto,
+                )
+            )
         from hbuilder.domain.scoring import score_card_set  # noqa: PLC0415
 
         return score_card_set(members, leaders, cfg)
@@ -461,15 +465,18 @@ class Oracle:
         missing = {}
         for chr_id in sorted(state):
             entry = state[chr_id]
-            key = (chr_id, tuple(entry.get("nodes") or ()),
-                   tuple(sorted((entry.get("slots") or {}).items())))
+            key = (chr_id, tuple(entry.get("nodes") or ()), tuple(sorted((entry.get("slots") or {}).items())))
             keys[chr_id] = key
             if key not in memo:
                 missing[chr_id] = entry
         if missing:
             document, _report, problems = build_board.build(
-                missing, self.skilltree, self.node_master, level=None,
-                collection=self.collection, caps_by_rarity=self.caps,
+                missing,
+                self.skilltree,
+                self.node_master,
+                level=None,
+                collection=self.collection,
+                caps_by_rarity=self.caps,
             )
             if problems:
                 return self._board_for_full(state)
@@ -486,8 +493,7 @@ class Oracle:
             holomem, board, digest = memo[keys[chr_id]]
             characters[holomem] = board
             digests[holomem] = digest
-        return BoardModel(characters=characters, name_by_chr=dict(self._name_by_chr),
-                          _digests=digests)
+        return BoardModel(characters=characters, name_by_chr=dict(self._name_by_chr), _digests=digests)
 
     def _board_for_full(self, state: dict):
         """`board_for` without the memo: the whole state built and parsed at once."""
@@ -505,7 +511,6 @@ class Oracle:
 
     def _cfg(self, state: dict):
         return dataclasses.replace(self.base_cfg, board=self.board_for(state))
-
 
     def score_team(self, leader_id: str, member_ids, state: dict) -> float:
         """ONE team's score under ONE board.
@@ -531,7 +536,7 @@ class Oracle:
         for each would cost about half a second of a plan)."""
         path = DUMPS / "board_state.json"
         if not path.exists():
-            return _load(path)          # its MissingInput
+            return _load(path)  # its MissingInput
         stamp = path.stat().st_mtime_ns
         held = getattr(self, "_state_file", None)
         if held is None or held[0] != stamp:
@@ -586,7 +591,11 @@ DEFAULT_PATH_LENGTH = 20
 
 
 def cheapest_paths(
-    owned: set[str], graph: dict[str, set[str]], prices: dict, *, max_nodes: int,
+    owned: set[str],
+    graph: dict[str, set[str]],
+    prices: dict,
+    *,
+    max_nodes: int,
     allowed=None,
 ) -> dict[str, tuple[str, ...]]:
     """`target -> the cheapest chain of UNOWNED nodes that reaches it`.
@@ -647,7 +656,8 @@ def cheapest_paths(
                 heap,
                 (cost + prices[other]["points"], counter, other, path + (other,)),
             )
-    return {node: path for node, (_cost, path) in best.items()}  # the Connect socket at [0, 0]; every model has it there
+    # the Connect socket at [0, 0]; every model has it there
+    return {node: path for node, (_cost, path) in best.items()}
 
 
 def frontier(owned: set[str], graph: dict[str, set[str]]) -> set[str]:
@@ -730,14 +740,11 @@ def _interactive_node_ids(skilltree) -> frozenset:
     — the ones `fill_boards` values in context rather than in isolation."""
     nodes = skilltree.get("nodes", {})
     return frozenset(
-        nid for nid, meta in nodes.items()
-        if (meta.get("e") or {}).get("t") in _ACTIVE_UPTIME_EFFECT_TYPES
+        nid for nid, meta in nodes.items() if (meta.get("e") or {}).get("t") in _ACTIVE_UPTIME_EFFECT_TYPES
     )
 
 
-def _move_in_scope(
-    target: str, on_team: bool, *, song_mode: bool = False, is_singer: bool = False
-) -> bool:
+def _move_in_scope(target: str, on_team: bool, *, song_mode: bool = False, is_singer: bool = False) -> bool:
     """Whether buying `target` is worth searching on this character.
 
     RED is leader-scoped and BLUE reaches only its own character's cards, so both
@@ -820,20 +827,34 @@ def _payable_sockets(skilltree, leader_chr, member_chrs, *, song_mode, singer_ch
                 continue
             sx, sy = spos
             covered = {(sx + dx, sy + dy) for dx, dy in offsets}
-            branches = {nodes.get(nid, {}).get("br")
-                        for nid, pos in positions.items()
-                        if tuple(pos) in covered and not nid.startswith("S-")}
-            if _socket_branch_pays(branches, is_leader=is_leader,
-                                   song_mode=song_mode, is_singer=cid in singer_chars,
-                                   is_member=cid in member_set):
+            branches = {
+                nodes.get(nid, {}).get("br")
+                for nid, pos in positions.items()
+                if tuple(pos) in covered and not nid.startswith("S-")
+            }
+            if _socket_branch_pays(
+                branches,
+                is_leader=is_leader,
+                song_mode=song_mode,
+                is_singer=cid in singer_chars,
+                is_member=cid in member_set,
+            ):
                 payable.add(socket)
         out[cid] = payable
     return out
 
 
-def _branch_values(oracle, graphs, prices, leader_id, member_ids, *,
-                   path_length=DEFAULT_PATH_LENGTH, singer_chars=frozenset(),
-                   context: dict | None = None):
+def _branch_values(
+    oracle,
+    graphs,
+    prices,
+    leader_id,
+    member_ids,
+    *,
+    path_length=DEFAULT_PATH_LENGTH,
+    singer_chars=frozenset(),
+    context: dict | None = None,
+):
     """OWN value of each node FOR THE FIXED TEAM, computed ONCE per node:
     RED on the leader, BLUE on a member, GREEN global, YELLOW on a SINGER (song
     mode) else global. `score_team` marginal over a bare board — the effect is
@@ -856,9 +877,11 @@ def _branch_values(oracle, graphs, prices, leader_id, member_ids, *,
     Over a bare board a node is worth less than inside a built one, and not by one factor
     (measured: a flat-stat red x1.2, an Act.Power red x1.8), so the bare values can rank two
     nearly equal plans the wrong way round; the planner re-solves on these."""
+
     def tscore(nodes_by_chr):
         return oracle.score_team(
-            leader_id, member_ids,
+            leader_id,
+            member_ids,
             oracle.state_from({c: sorted(v) for c, v in nodes_by_chr.items()}),
         )
 
@@ -866,8 +889,9 @@ def _branch_values(oracle, graphs, prices, leader_id, member_ids, *,
     base = tscore(bare)
     leader_chr = "chr-" + leader_id.split("-")[1]
     member_chrs = ["chr-" + m.split("-")[1] for m in member_ids]
-    rep_member = next((c for c in member_chrs if c != leader_chr),
-                      member_chrs[0] if member_chrs else leader_chr)
+    rep_member = next(
+        (c for c in member_chrs if c != leader_chr), member_chrs[0] if member_chrs else leader_chr
+    )
 
     # node -> the host character it pays on (RED=leader, BLUE=a member, GREEN=any,
     # YELLOW=a singer in song mode else any).
@@ -883,8 +907,7 @@ def _branch_values(oracle, graphs, prices, leader_id, member_ids, *,
                 host = rep_member
             elif branch == "Y" and singer_chars:
                 # value it on a singer who has the node, else it reads 0
-                host = next((s for s in singer_chars
-                             if s in graphs and target in graphs[s]), cid)
+                host = next((s for s in singer_chars if s in graphs and target in graphs[s]), cid)
             else:
                 host = cid  # green (account-global), or general-mode yellow
             if host in graphs:
@@ -911,11 +934,24 @@ def _branch_values(oracle, graphs, prices, leader_id, member_ids, *,
     return values
 
 
-def fill_boards(graphs, prices, state, wallet, points, values,
-                leader_chr, member_chrs, *, path_length=DEFAULT_PATH_LENGTH,
-                song_mode=False, singer_chars=frozenset(),
-                interactive_nodes=frozenset(), score_fn=None,
-                socket_scope=None, node_ok=None):
+def fill_boards(
+    graphs,
+    prices,
+    state,
+    wallet,
+    points,
+    values,
+    leader_chr,
+    member_chrs,
+    *,
+    path_length=DEFAULT_PATH_LENGTH,
+    song_mode=False,
+    singer_chars=frozenset(),
+    interactive_nodes=frozenset(),
+    score_fn=None,
+    socket_scope=None,
+    node_ok=None,
+):
     """Top every character's LEFTOVER points after the beam, per its ROLE:
     the LEADER with RED, each MEMBER with BLUE, GREEN everywhere, and YELLOW where
     it pays. The beam (with its lookahead) crosses the red corridor; this greedy
@@ -960,8 +996,12 @@ def fill_boards(graphs, prices, state, wallet, points, values,
             have = state.get(cid, {ROOT})
             best = None  # cheapest reachable unbought socket: (path, price)
             for target, path in cheapest_paths(
-                    have, graph, prices, max_nodes=path_length,
-                    allowed=None if node_ok is None else (lambda n, c=cid: node_ok(c, n))).items():
+                have,
+                graph,
+                prices,
+                max_nodes=path_length,
+                allowed=None if node_ok is None else (lambda n, c=cid: node_ok(c, n)),
+            ).items():
                 if not target.startswith("S-"):
                     continue
                 if allowed is not None and target not in allowed:
@@ -997,11 +1037,14 @@ def fill_boards(graphs, prices, state, wallet, points, values,
             have = state.get(cid, {ROOT})
             best = None  # (value_per_point, path, price)
             for target, path in cheapest_paths(
-                    have, graph, prices, max_nodes=path_length,
-                    allowed=None if node_ok is None else (lambda n, c=cid: node_ok(c, n))).items():
+                have,
+                graph,
+                prices,
+                max_nodes=path_length,
+                allowed=None if node_ok is None else (lambda n, c=cid: node_ok(c, n)),
+            ).items():
                 # Interactive nodes wait for phase 2 (their isolated value lies).
-                if (target[0] not in scope or target in PER_CHARACTER_GREEN
-                        or target in interactive_nodes):
+                if target[0] not in scope or target in PER_CHARACTER_GREEN or target in interactive_nodes:
                     continue
                 price = {"points": 0}
                 for node in path:
@@ -1011,8 +1054,7 @@ def fill_boards(graphs, prices, state, wallet, points, values,
                     continue
                 # A path may still PASS THROUGH an interactive prereq; it just does
                 # not count toward the value (its isolated number would inflate it).
-                value = sum(values.get(n, 0.0) for n in path
-                            if n[0] in scope and n not in interactive_nodes)
+                value = sum(values.get(n, 0.0) for n in path if n[0] in scope and n not in interactive_nodes)
                 if value <= 0:
                     continue
                 per_pt = value / max(price["points"], 1)
@@ -1049,8 +1091,12 @@ def fill_boards(graphs, prices, state, wallet, points, values,
             on_team = cid in team
             have = state.get(cid, {ROOT})
             for target, path in cheapest_paths(
-                    have, graph, prices, max_nodes=path_length,
-                    allowed=None if node_ok is None else (lambda n, c=cid: node_ok(c, n))).items():
+                have,
+                graph,
+                prices,
+                max_nodes=path_length,
+                allowed=None if node_ok is None else (lambda n, c=cid: node_ok(c, n)),
+            ).items():
                 # interactive: team only (member-scoped); gen-greens: any character.
                 if target in interactive_nodes:
                     if not on_team:
@@ -1154,4 +1200,3 @@ def resolve_at_max_level(scenario: str, at_max_flag: bool, real_flag: bool) -> b
             )
         return True
     return at_max_flag or (scenario == "my-cards-maxed" and not real_flag)
-

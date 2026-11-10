@@ -20,12 +20,11 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+from support.builders import CERTAIN_TIERS, make_card, make_scoring_config, make_skill
 
 from hbuilder.domain.card import EffectTarget, Stats
 from hbuilder.domain.scoring import _effective_stat_sum
 from hbuilder.domain.song import ChartNote, SongChart, score_song_detailed
-
-from support.builders import CERTAIN_TIERS, make_card, make_scoring_config, make_skill
 
 BIG = Stats(performance=900, technique=900, sense=900)
 SMALL = Stats(performance=10, technique=10, sense=10)
@@ -171,9 +170,7 @@ def test_when_no_count_limit_binds_the_stat_sum_is_order_invariant():
             target=EffectTarget(kind="type", value="Cute", count=5),
         ),
     )
-    best = score_song_detailed(
-        tuple(members), (make_card("leader"),), CHART, _cfg()
-    )[0]
+    best = score_song_detailed(tuple(members), (make_card("leader"),), CHART, _cfg())[0]
     assert best.deck_power == pytest.approx(10980.0)
     # Still pays the cue, because that half never stopped binding.
     assert best.member_order[4] == "card-A"

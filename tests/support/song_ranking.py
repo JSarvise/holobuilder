@@ -11,8 +11,8 @@ best of the candidates.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
-from typing import Callable, Iterable, Sequence
 
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.song import SongChart
@@ -131,10 +131,7 @@ def _check_boards(teams: Sequence[Team], boards) -> None:
     board TEAM i is scored against. A silent zip would score teams on the wrong
     board the first time a caller filters one list and not the other."""
     if boards is not None and len(boards) != len(teams):
-        raise ValueError(
-            f"boards must align with teams: {len(teams)} team(s) but "
-            f"{len(boards)} board(s)"
-        )
+        raise ValueError(f"boards must align with teams: {len(teams)} team(s) but {len(boards)} board(s)")
 
 
 def score_teams_on_chart(
@@ -209,7 +206,8 @@ def assemble_across_charts(
         )
     if not charts:
         return RankedOnSongs(
-            teams=(), charts=(),
+            teams=(),
+            charts=(),
             filtered_from=len(teams) if filtered_from is None else filtered_from,
         )
     for chart, row in zip(charts, rows):
@@ -279,7 +277,8 @@ def rank_across_charts(
     chart_list = tuple(charts)
     if not chart_list:
         return RankedOnSongs(
-            teams=(), charts=(),
+            teams=(),
+            charts=(),
             filtered_from=len(teams) if filtered_from is None else filtered_from,
         )
 
@@ -288,16 +287,9 @@ def rank_across_charts(
     done = 0
     for chart in chart_list:
         per_team_progress = (
-            None
-            if progress is None
-            else lambda scored, base=done: progress(base + scored, total)
+            None if progress is None else lambda scored, base=done: progress(base + scored, total)
         )
-        rows.append(
-            score_teams_on_chart(teams, chart, cfg, boards=boards,
-                                 progress=per_team_progress)
-        )
+        rows.append(score_teams_on_chart(teams, chart, cfg, boards=boards, progress=per_team_progress))
         done += len(teams)
 
-    return assemble_across_charts(
-        teams, chart_list, rows, filtered_from=filtered_from, auto=cfg.song_auto
-    )
+    return assemble_across_charts(teams, chart_list, rows, filtered_from=filtered_from, auto=cfg.song_auto)

@@ -2,6 +2,7 @@
 
 Set ``HB_GOLDEN_FROZEN`` to a snapshot made by ``freeze.py`` that holds an ``expected/`` run.
 """
+
 from __future__ import annotations
 
 import os

@@ -36,6 +36,7 @@ as exact literals (`widen_whitelist`).
     python tools/refresh/park_scan.py --dry-run       # what it would do; opens no socket
     python tools/refresh/park_scan.py --write-moves   # park_moves.json from this PC's master
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,13 +47,15 @@ import sys
 import time
 import zlib
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import game_day, paths  # noqa: E402
 from hbuilder.errors import MissingInput, run_cli  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
 import account_snapshot as snap  # noqa: E402
@@ -87,13 +90,13 @@ AREA_MOVE_NAME = "PARK_ACTION_TYPE_AREA_MOVE"
 MOVE_TABLES = ("ParkQuestStepAction", "Area")
 
 # rpc.api.common.UserData field numbers (user_data.gen.proto)
-F_USER_PARK = 227737460            # UserPark: 3 current_area_id
-F_QUEST = 296076812                # UserParkQuest: 2 park_quest_id, 3 start_time
-F_QUEST_STEP = 228511112           # UserParkQuestStep: 2 id, 3 group, 4 current_step, 5 all_clear_time
-F_QUEST_STEP_ACTION = 439898815    # UserParkQuestStepAction: 2 id, 3 group, 4 step,
+F_USER_PARK = 227737460  # UserPark: 3 current_area_id
+F_QUEST = 296076812  # UserParkQuest: 2 park_quest_id, 3 start_time
+F_QUEST_STEP = 228511112  # UserParkQuestStep: 2 id, 3 group, 4 current_step, 5 all_clear_time
+F_QUEST_STEP_ACTION = 439898815  # UserParkQuestStepAction: 2 id, 3 group, 4 step,
 #                                    5 park_target_mapping_id, 6 clear_time
-F_USER_TIME = 165033958            # UserTime: 3 last_login_time (unix ms)
-F_COMMON_RESPONSE = 9999           # a write's common_response {1 updated_data, 2 deleted_data}
+F_USER_TIME = 165033958  # UserTime: 3 last_login_time (unix ms)
+F_COMMON_RESPONSE = 9999  # a write's common_response {1 updated_data, 2 deleted_data}
 
 GAME_EXE = "hololive-Dreams.exe"
 GAP_S = 5.0
@@ -108,7 +111,7 @@ class ScanStop(RuntimeError):
 @dataclass
 class QuestState:
     current_area_id: str | None = None
-    quest_start: dict[str, int] = field(default_factory=dict)        # quest -> start_time
+    quest_start: dict[str, int] = field(default_factory=dict)  # quest -> start_time
     steps: list[tuple[str, int, int, int]] = field(default_factory=list)
     action_clear: dict[tuple[str, int, int, str], int] = field(default_factory=dict)
 
@@ -133,8 +136,7 @@ def parse_quest_state(userdata_fields: Iterable[tuple[int, int, Any]]) -> QuestS
             st.quest_start[_text(d.get(2, b""))] = int(d.get(3, 0))
         elif fn == F_QUEST_STEP:
             d = {f2: v2 for f2, _w, v2 in snap.fields(v)}
-            st.steps.append((_text(d.get(2, b"")), int(d.get(3, 0)), int(d.get(4, 0)),
-                             int(d.get(5, 0))))
+            st.steps.append((_text(d.get(2, b"")), int(d.get(3, 0)), int(d.get(4, 0)), int(d.get(5, 0))))
         elif fn == F_QUEST_STEP_ACTION:
             d = {f2: v2 for f2, _w, v2 in snap.fields(v)}
             key = (_text(d.get(2, b"")), int(d.get(3, 0)), int(d.get(4, 0)), _text(d.get(5, b"")))
@@ -189,8 +191,7 @@ def area_move_actions(area_id: str, state: QuestState, step_actions: list[dict])
     by_step: dict[tuple[str, int, int], list[dict]] = defaultdict(list)
     for row in step_actions:
         d = row.get("data", row)
-        by_step[(d.get("parkQuestId", ""), int(d.get("stepGroupNumber", 0)),
-                 int(d.get("step", 0)))].append(d)
+        by_step[(d.get("parkQuestId", ""), int(d.get("stepGroupNumber", 0)), int(d.get("step", 0)))].append(d)
     out = []
     for step in state.steps:
         if step_all_cleared(step, state.quest_start):
@@ -217,12 +218,21 @@ def gate_detail(state: QuestState, step_actions: list[dict]) -> list[dict]:
         q, g, s = d.get("parkQuestId", ""), int(d.get("stepGroupNumber", 0)), int(d.get("step", 0))
         cur, allc = steps.get((q, g), (None, None))
         key = (q, g, s, d.get("parkTargetMappingId", ""))
-        out.append({"quest": q, "group": g, "step": s, "area": d.get("areaId"),
-                    "quest_start": state.quest_start.get(q), "current_step": cur,
-                    "all_clear_time": allc, "action_clear_time": state.action_clear.get(key),
-                    "step_all_cleared": cur is not None and step_all_cleared((q, g, cur, allc),
-                                                                             state.quest_start),
-                    "action_cleared": action_cleared(key, state.action_clear, state.quest_start)})
+        out.append(
+            {
+                "quest": q,
+                "group": g,
+                "step": s,
+                "area": d.get("areaId"),
+                "quest_start": state.quest_start.get(q),
+                "current_step": cur,
+                "all_clear_time": allc,
+                "action_clear_time": state.action_clear.get(key),
+                "step_all_cleared": cur is not None
+                and step_all_cleared((q, g, cur, allc), state.quest_start),
+                "action_cleared": action_cleared(key, state.action_clear, state.quest_start),
+            }
+        )
     return out
 
 
@@ -238,15 +248,22 @@ def build_moves(step_rows: list[dict], area_rows: list[dict], index: dict) -> di
     for row in step_rows:
         d = row.get("data", row)
         if is_area_move(d.get("type")):
-            moves.append({"parkQuestId": d.get("parkQuestId", ""),
-                          "stepGroupNumber": int(d.get("stepGroupNumber", 0)),
-                          "step": int(d.get("step", 0)),
-                          "parkTargetMappingId": d.get("parkTargetMappingId", ""),
-                          "type": AREA_MOVE, "areaId": d.get("areaId")})
-    moves.sort(key=lambda m: (m["parkQuestId"], m["stepGroupNumber"], m["step"],
-                              m["parkTargetMappingId"]))
-    return {"source": source, "areas": sorted(r.get("data", r)["id"] for r in area_rows),
-            "area_move_actions": moves}
+            moves.append(
+                {
+                    "parkQuestId": d.get("parkQuestId", ""),
+                    "stepGroupNumber": int(d.get("stepGroupNumber", 0)),
+                    "step": int(d.get("step", 0)),
+                    "parkTargetMappingId": d.get("parkTargetMappingId", ""),
+                    "type": AREA_MOVE,
+                    "areaId": d.get("areaId"),
+                }
+            )
+    moves.sort(key=lambda m: (m["parkQuestId"], m["stepGroupNumber"], m["step"], m["parkTargetMappingId"]))
+    return {
+        "source": source,
+        "areas": sorted(r.get("data", r)["id"] for r in area_rows),
+        "area_move_actions": moves,
+    }
 
 
 def write_moves(path: Path = MOVES_PATH) -> dict:
@@ -254,8 +271,11 @@ def write_moves(path: Path = MOVES_PATH) -> dict:
     import master_json  # noqa: PLC0415  (needs SQLCipher)
 
     r = master_json.Renderer(master_json.load_schema())
-    doc = build_moves(master_json.render("ParkQuestStepAction", r), master_json.render("Area", r),
-                      json.loads(INDEX_PATH.read_bytes().decode("utf-8")))
+    doc = build_moves(
+        master_json.render("ParkQuestStepAction", r),
+        master_json.render("Area", r),
+        json.loads(INDEX_PATH.read_bytes().decode("utf-8")),
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_io.write_bytes(path, json.dumps(doc, ensure_ascii=False, indent=1).encode("utf-8"))
     return doc
@@ -263,8 +283,9 @@ def write_moves(path: Path = MOVES_PATH) -> dict:
 
 def stale_tables(moves: dict, manifest: dict) -> list[str]:
     """The tables whose live hash is not the one `park_moves.json` was built from."""
-    return [t for t in MOVE_TABLES
-            if (manifest.get(t) or {}).get("hash") != (moves.get("source") or {}).get(t)]
+    return [
+        t for t in MOVE_TABLES if (manifest.get(t) or {}).get("hash") != (moves.get("source") or {}).get(t)
+    ]
 
 
 def chat_areas(spots: dict) -> list[str]:
@@ -301,16 +322,15 @@ def last_login_ms(userdata_fields: Iterable[tuple[int, int, Any]]) -> int | None
     return None
 
 
-def logged_in_this_game_day(last_ms: int | None, now: datetime.datetime,
-                            hour: int | None = None) -> bool:
+def logged_in_this_game_day(last_ms: int | None, now: datetime.datetime, hour: int | None = None) -> bool:
     return bool(last_ms) and last_ms >= game_day.day_start_ms(now, hour)
 
 
-def scanned_this_game_day(last: dict | None, now: datetime.datetime,
-                          hour: int | None = None) -> bool:
+def scanned_this_game_day(last: dict | None, now: datetime.datetime, hour: int | None = None) -> bool:
     """A scan that sent any area refresh in the game day `now` falls in."""
-    return bool(last and last.get("counted")
-                and last.get("game_day_start") == game_day.day_start_ms(now, hour))
+    return bool(
+        last and last.get("counted") and last.get("game_day_start") == game_day.day_start_ms(now, hour)
+    )
 
 
 def userdata_of(plain: bytes) -> list | None:
@@ -330,8 +350,12 @@ def updated_userdata(plain: bytes) -> list | None:
 def game_running() -> bool | None:
     """True when the game's process is up; None where it cannot be told."""
     if sys.platform == "win32":
-        out = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {GAME_EXE}", "/NH"],
-                             capture_output=True, text=True, check=False).stdout
+        out = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {GAME_EXE}", "/NH"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
         return GAME_EXE.lower() in out.lower()
     proc = Path("/proc")
     if not proc.is_dir():
@@ -376,6 +400,7 @@ def master_live(host: str, ident) -> tuple[str, dict]:
 @dataclass
 class Wire:
     """What the scan needs from the network, replaceable in tests."""
+
     master: Callable[[str, Any], tuple[str, dict]] = master_live
     login: Callable[..., str] = snap.login
     send: Callable[..., tuple[dict, dict, bytes]] = snap.call
@@ -404,9 +429,15 @@ class Session:
         self.calls.append(rec)
         print(f"  {label:38s} ", end="", flush=True)
         try:
-            rh, tr, data = self.wire.send(self.host, path, wire_body(plain), token=self.token,
-                                          ident=self.ident, master_version=self.master_version)
-        except Exception as e:                  # noqa: BLE001  recorded, then stops the scan
+            rh, tr, data = self.wire.send(
+                self.host,
+                path,
+                wire_body(plain),
+                token=self.token,
+                ident=self.ident,
+                master_version=self.master_version,
+            )
+        except Exception as e:  # noqa: BLE001  recorded, then stops the scan
             rec["error"] = f"{type(e).__name__}: {e}"
             print(rec["error"])
             raise ScanStop(f"{label}: {rec['error']}") from e
@@ -415,11 +446,17 @@ class Session:
         msgs = [m for m in snap.unframe(data) if m]
         resp = snap.unseal(msgs[0]) if msgs else b""
         rec["bytes"] = len(resp)
-        print(f"ok ({len(resp):,} B)" if status in (None, "0") else f"grpc-status {status} "
-              f"{rec['grpc_message']}")
+        print(
+            f"ok ({len(resp):,} B)"
+            if status in (None, "0")
+            else f"grpc-status {status} {rec['grpc_message']}"
+        )
         if status not in (None, "0"):
-            hint = (": the game day changed, open the game once and close it"
-                    if "DATE_CHANGED" in rec["grpc_message"] else "")
+            hint = (
+                ": the game day changed, open the game once and close it"
+                if "DATE_CHANGED" in rec["grpc_message"]
+                else ""
+            )
             raise ScanStop(f"{label} refused, grpc-status {status} {rec['grpc_message']}{hint}")
         return resp
 
@@ -438,12 +475,19 @@ def _merge_area(plain: bytes, area: str, at: str, spots: dict, keep: set | None)
     except (OSError, ValueError):
         before = {}
     park_free_chat.update_log(LOG_PATH, fc, at, keep)
-    cat = ((spots.get("free_chat") or {}).get("chats") or {})
-    mine = {d["talk_free"]: d["read"] for d in fc["details"]
-            if (cat.get(d["talk_free"]) or {}).get("area") == area}
-    return {"area": area, "sites": sum(1 for p in fc["picks"] if p.get("area") == area),
-            "chats": len(mine), "read": sum(1 for r in mine.values() if r),
-            "new_read": sum(1 for c, r in mine.items() if r and not (before.get(c) or {}).get("read"))}
+    cat = (spots.get("free_chat") or {}).get("chats") or {}
+    mine = {
+        d["talk_free"]: d["read"]
+        for d in fc["details"]
+        if (cat.get(d["talk_free"]) or {}).get("area") == area
+    }
+    return {
+        "area": area,
+        "sites": sum(1 for p in fc["picks"] if p.get("area") == area),
+        "chats": len(mine),
+        "read": sum(1 for r in mine.values() if r),
+        "new_read": sum(1 for c, r in mine.items() if r and not (before.get(c) or {}).get("read")),
+    }
 
 
 def _write_last(record: dict) -> None:
@@ -451,17 +495,24 @@ def _write_last(record: dict) -> None:
     atomic_io.write_bytes(LAST_PATH, json.dumps(record, ensure_ascii=False, indent=1).encode("utf-8"))
 
 
-def scan(*, wire: Wire | None = None, now: datetime.datetime | None = None,
-         gap: float = GAP_S, running: Callable[[], bool | None] = game_running) -> dict:
+def scan(
+    *,
+    wire: Wire | None = None,
+    now: datetime.datetime | None = None,
+    gap: float = GAP_S,
+    running: Callable[[], bool | None] = game_running,
+) -> dict:
     """The whole scan; returns its record (also written to `park_scan_last.json` once anything
     has been sent). Raises ScanStop for a refusal before any network call."""
     wire = wire or Wire()
-    now = now or datetime.datetime.now(datetime.timezone.utc)
+    now = now or datetime.datetime.now(datetime.UTC)
     hour = game_day.reset_hour()
     day_start = game_day.day_start_ms(now, hour)
     if scanned_this_game_day(read_json(LAST_PATH), now, hour):
-        raise ScanStop("already scanned this game day; the next scan opens at "
-                       + _local(game_day.next_day_start_ms(now, hour)))
+        raise ScanStop(
+            "already scanned this game day; the next scan opens at "
+            + _local(game_day.next_day_start_ms(now, hour))
+        )
     if game_day.minutes_to_rollover(now, hour) < ROLLOVER_MARGIN_MIN:
         raise ScanStop("the game day rolls over in under 10 minutes: scan after it")
     state = running()
@@ -471,16 +522,27 @@ def scan(*, wire: Wire | None = None, now: datetime.datetime | None = None,
         raise ScanStop("the game is running: close it first (a login ends its session)")
     moves, spots = read_json(MOVES_PATH), read_json(SPOTS_PATH)
     if not moves or not spots:
-        raise ScanStop("the Park data is missing on this PC (park_export/park_moves.json, "
-                       "park_spots.json): refresh first")
+        raise ScanStop(
+            "the Park data is missing on this PC (park_export/park_moves.json, "
+            "park_spots.json): refresh first"
+        )
     areas = chat_areas(spots)
     keep = park_free_chat.catalogue_ids(SPOTS_PATH)
     host, credential = snap.load_credential("main")
     ident = snap.client_headers("main")
 
-    record: dict = {"started_at": now_iso(), "game_day_start": day_start, "counted": False,
-                    "original": None, "areas": [], "skipped": [], "restored": None,
-                    "current_area_id_after": None, "stopped": None, "calls": []}
+    record: dict = {
+        "started_at": now_iso(),
+        "game_day_start": day_start,
+        "counted": False,
+        "original": None,
+        "areas": [],
+        "skipped": [],
+        "restored": None,
+        "current_area_id_after": None,
+        "stopped": None,
+        "calls": [],
+    }
     s = Session(host, ident, gap, wire, record["calls"])
     moved = False
     try:
@@ -489,9 +551,11 @@ def scan(*, wire: Wire | None = None, now: datetime.datetime | None = None,
         version, manifest = wire.master(host, ident)
         stale = stale_tables(moves, manifest)
         if stale:
-            raise ScanStop(f"the game's Park quest data changed ({', '.join(stale)}) since this "
-                           "PC's Park data was built: refresh first (in the app: wait for the next "
-                           "data update)")
+            raise ScanStop(
+                f"the game's Park quest data changed ({', '.join(stale)}) since this "
+                "PC's Park data was built: refresh first (in the app: wait for the next "
+                "data update)"
+            )
         s.master_version = version
         s.pace()
         s.token = wire.login(host, credential, ident, version)
@@ -507,9 +571,11 @@ def scan(*, wire: Wire | None = None, now: datetime.datetime | None = None,
             raise ScanStop(f"the account's area {original!r} is not an area of the master")
         rows = moves.get("area_move_actions") or []
         if area_move_actions(original, state, rows):
-            raise ScanStop(f"an open quest step moves the account into {original}, where it "
-                           "stands: the game would send ParkQuest/MoveArea there, so the scan "
-                           "could not come back")
+            raise ScanStop(
+                f"an open quest step moves the account into {original}, where it "
+                "stands: the game would send ParkQuest/MoveArea there, so the scan "
+                "could not come back"
+            )
         order = []
         for area in areas:
             if area == original:
@@ -517,14 +583,20 @@ def scan(*, wire: Wire | None = None, now: datetime.datetime | None = None,
             if area not in known:
                 record["skipped"].append({"area": area, "reason": "not an area of the master"})
             elif area_move_actions(area, state, rows):
-                record["skipped"].append({"area": area, "reason": "an open quest step moves "
-                                          "there (the game would send ParkQuest/MoveArea)"})
+                record["skipped"].append(
+                    {
+                        "area": area,
+                        "reason": "an open quest step moves there (the game would send ParkQuest/MoveArea)",
+                    }
+                )
             else:
                 order.append(area)
         last = last_login_ms(before)
         if not logged_in_this_game_day(last, now, hour):
-            raise ScanStop("the account has not opened the game this game day: the scan's login "
-                           "would be the day's first one. Open the game once, close it, scan again")
+            raise ScanStop(
+                "the account has not opened the game this game day: the scan's login "
+                "would be the day's first one. Open the game once, close it, scan again"
+            )
 
         s.call(HOME_LOGIN, b"", "Home/Login")
         s.call(PING_SERVERS, b"", "MultiGame/ListPingServer")
@@ -535,7 +607,7 @@ def scan(*, wire: Wire | None = None, now: datetime.datetime | None = None,
             record["counted"] = True
             plain = s.call(PARK_REFRESH, refresh_body(area), f"Park/Refresh {area}")
             record["areas"].append(_merge_area(plain, area, now_iso(), spots, keep))
-    except Exception as e:                      # noqa: BLE001  recorded; the restore still runs
+    except Exception as e:  # noqa: BLE001  recorded; the restore still runs
         record["stopped"] = str(e) if isinstance(e, ScanStop) else f"{type(e).__name__}: {e}"
         print(f"  stopped: {record['stopped']}")
     finally:
@@ -550,9 +622,10 @@ def scan(*, wire: Wire | None = None, now: datetime.datetime | None = None,
                 record["current_area_id_after"] = after
                 record["restored"] = after == original
                 if not record["restored"]:
-                    record["stopped"] = (record["stopped"] or "") + \
-                        f" | the account is in {after}, not back in {original}"
-        except Exception as e:                  # noqa: BLE001
+                    record["stopped"] = (
+                        record["stopped"] or ""
+                    ) + f" | the account is in {after}, not back in {original}"
+        except Exception as e:  # noqa: BLE001
             record["restored"] = False
             record["stopped"] = (record["stopped"] or "") + f" | going back failed: {e}"
             print(f"  GOING BACK FAILED: {e}")
@@ -576,24 +649,29 @@ def _local(ms: int) -> str:
 def report(record: dict) -> str:
     lines = []
     for a in record.get("areas") or []:
-        lines.append(f"  {a['area']:22s} {a['chats']:3d} chats, {a['read']:3d} read"
-                     + (f" ({a['new_read']} newly)" if a.get("new_read") else "")
-                     + f", {a['sites']} sites")
+        lines.append(
+            f"  {a['area']:22s} {a['chats']:3d} chats, {a['read']:3d} read"
+            + (f" ({a['new_read']} newly)" if a.get("new_read") else "")
+            + f", {a['sites']} sites"
+        )
     for sk in record.get("skipped") or []:
         lines.append(f"  {sk['area']:22s} skipped: {sk['reason']}")
     if record.get("restored") is not None:
-        lines.append(f"  back in {record.get('current_area_id_after')}: "
-                     f"{'yes' if record['restored'] else 'NO'}")
+        lines.append(
+            f"  back in {record.get('current_area_id_after')}: {'yes' if record['restored'] else 'NO'}"
+        )
     lines.append("  done" if not record.get("stopped") else f"  stopped: {record['stopped']}")
     return "\n".join(lines)
 
 
 def dry_run(now: datetime.datetime | None = None) -> int:
-    now = now or datetime.datetime.now(datetime.timezone.utc)
+    now = now or datetime.datetime.now(datetime.UTC)
     hour = game_day.reset_hour()
     moves, spots = read_json(MOVES_PATH), read_json(SPOTS_PATH)
-    print(f"dry run, no socket. Game day starts at {hour:02d}:00 JST "
-          f"({_local(game_day.day_start_ms(now, hour))} here).")
+    print(
+        f"dry run, no socket. Game day starts at {hour:02d}:00 JST "
+        f"({_local(game_day.day_start_ms(now, hour))} here)."
+    )
     print(f"scanned this game day: {scanned_this_game_day(read_json(LAST_PATH), now, hour)}")
     print(f"game running: {game_running()}")
     print(f"Park quest data: {'missing' if not moves else moves['source']}")
@@ -601,9 +679,11 @@ def dry_run(now: datetime.datetime | None = None) -> int:
         for m in moves["area_move_actions"]:
             print(f"    AREA_MOVE {m['parkQuestId']} {m['stepGroupNumber']}-{m['step']} -> {m['areaId']}")
     print(f"areas with Free Chats: {chat_areas(spots) if spots else 'catalogue missing'}")
-    print("calls: System/GetSystemInfo, Master/Get, Auth/Login, User/Get, Home/Login, "
-          "MultiGame/ListPingServer, Park/Enter, Event/ListEventInfo, Park/Refresh per area, "
-          "Park/Refresh <the area it started in>, User/Get")
+    print(
+        "calls: System/GetSystemInfo, Master/Get, Auth/Login, User/Get, Home/Login, "
+        "MultiGame/ListPingServer, Park/Enter, Event/ListEventInfo, Park/Refresh per area, "
+        "Park/Refresh <the area it started in>, User/Get"
+    )
     return 0
 
 
@@ -611,14 +691,16 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--dry-run", action="store_true", help="what the scan would do; no socket")
-    g.add_argument("--write-moves", action="store_true",
-                   help="write park_export/park_moves.json from this PC's master")
+    g.add_argument(
+        "--write-moves", action="store_true", help="write park_export/park_moves.json from this PC's master"
+    )
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     if args.write_moves:
         doc = write_moves()
-        print(f"park_moves.json: {len(doc['area_move_actions'])} AREA_MOVE actions, "
-              f"{len(doc['areas'])} areas")
+        print(
+            f"park_moves.json: {len(doc['area_move_actions'])} AREA_MOVE actions, {len(doc['areas'])} areas"
+        )
         return 0
     if args.dry_run:
         return dry_run()

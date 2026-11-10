@@ -19,7 +19,6 @@ import json
 import sys
 from pathlib import Path
 
-
 _REFRESH = Path(__file__).resolve().parents[1] / "tools" / "refresh"
 sys.path.insert(0, str(_REFRESH))
 
@@ -93,9 +92,7 @@ def test_a_card_only_one_side_knows_is_left_to_the_id_probe(tmp_path):
 
 def test_a_missing_file_is_no_drift_rather_than_a_crash(tmp_path):
     """The probe runs before the account step on a fresh checkout."""
-    assert refresh_all.collection_level_drift(
-        tmp_path / "nope.json", tmp_path / "also-nope.json"
-    ) == []
+    assert refresh_all.collection_level_drift(tmp_path / "nope.json", tmp_path / "also-nope.json") == []
 
 
 # --------------------------------------------------------------------------

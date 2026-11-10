@@ -21,10 +21,14 @@ bytes) is copied from there and the CDN is not asked at all.
 
 Output: dumps/octo_fetched/<asset name>.bundle  (raw, exactly as served)
 """
-import hashlib, os, sys, time
+
+import hashlib
+import os
+import sys
+import time
+from pathlib import Path
 
 import requests
-from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
@@ -33,7 +37,7 @@ from hbuilder.errors import MissingInput, run_cli  # noqa: E402
 HERE = str(paths.REFRESH_DIR)
 DUMPS = str(paths.DUMPS)
 OUT = os.path.join(DUMPS, "octo_fetched")
-DELAY = 1.0                      # be a good citizen; these are a handful of small files
+DELAY = 1.0  # be a good citizen; these are a handful of small files
 UA = "hololive-builder-recon/1.0 (personal tooling; single-user)"
 
 
@@ -41,6 +45,7 @@ def catalog():
     """(url template, {asset name: (token, md5)}) from the production catalogue."""
     sys.path.insert(0, HERE)
     from master_db import decode_record
+
     for fn in ("octocacheevai_prod.dec", "octocacheevai.dec"):
         path = os.path.join(DUMPS, fn)
         if not os.path.exists(path):
@@ -108,7 +113,7 @@ def fetch(names):
     os.makedirs(OUT, exist_ok=True)
     ok = bad = skipped = local = 0
     fetched_any = False
-    cached = None                # the game cache's index, built on the first file to get
+    cached = None  # the game cache's index, built on the first file to get
     for name in names:
         dst = os.path.join(OUT, name + ".bundle")
         if os.path.exists(dst):
@@ -157,14 +162,14 @@ def fetch(names):
             fh.write(r.content)
         print(f"  OK        {name}  {len(r.content)} B  md5 verified")
         ok += 1
-    print(f"\n{ok} downloaded ({local} from the game's cache), {skipped} already here, "
-          f"{bad} failed -> {OUT}")
+    print(f"\n{ok} downloaded ({local} from the game's cache), {skipped} already here, {bad} failed -> {OUT}")
     return ok
 
 
 def missing_names():
     """What skill_icons.py asked for and could not find in the cache."""
     import json
+
     p = os.path.join(DUMPS, "skill_icons", "index.json")
     if not os.path.exists(p):
         raise SystemExit("ejecuta skill_icons.py primero")

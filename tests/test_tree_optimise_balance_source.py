@@ -44,9 +44,7 @@ except MissingInput as exc:  # gitignored account data missing
 else:
     _WHY = ""
 
-pytestmark = pytest.mark.skipif(
-    _TREE is None, reason=f"tree_optimise needs gitignored account data: {_WHY}"
-)
+pytestmark = pytest.mark.skipif(_TREE is None, reason=f"tree_optimise needs gitignored account data: {_WHY}")
 
 
 def _write_inventory(directory: Path, held: dict, captured_at: str) -> Path:
@@ -85,8 +83,7 @@ def test_a_partial_inventory_is_refused_rather_than_read_as_zero(tmp_path):
     balance, source = _TREE.balance_from_disk(tmp_path)
 
     assert balance is None and source is None, (
-        "an incomplete inventory means UNKNOWN, never a partial "
-        f"balance; got {balance!r} from {source!r}"
+        f"an incomplete inventory means UNKNOWN, never a partial balance; got {balance!r} from {source!r}"
     )
 
 

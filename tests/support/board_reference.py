@@ -4,6 +4,7 @@ through `BoardModel`'s memoised readers (`power_bonus_for`, `score_bonus_rate`,
 `skill_effect_up_for`, `song_score_bonus_for`); the tests check those against this walk,
 which keeps the same accumulation order so the two stay bit-identical.
 """
+
 from __future__ import annotations
 
 import math
@@ -73,9 +74,7 @@ class BoardContribution:
     # mapping is honest: it says "no per-holomem breakdown was supplied", and
     # `song_score_bonus_for` then returns 0.0 for every cast rather than
     # inventing one from the pooled total.
-    song_score_bonus_by_holomem: Mapping[str, Mapping[str, float]] = field(
-        default_factory=dict
-    )
+    song_score_bonus_by_holomem: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 
     def power_bonus(self, members: Iterable[Card]) -> float:
         """The game's own `up_by_skill_tree` line — the "Holomem Board Bonus"
@@ -131,13 +130,9 @@ class BoardContribution:
         singers, so it needs `song_score_bonus` keyed per character, which
         `resolve()` does not do. The comment at `resolve()`'s song branch is
         true only of `all`."""
-        return min(
-            self.song_score_bonus.get("all", 0.0), SONG_ALL_CAP_PERMIL / 1000.0
-        )
+        return min(self.song_score_bonus.get("all", 0.0), SONG_ALL_CAP_PERMIL / 1000.0)
 
-    def song_score_bonus_for(
-        self, singers: Iterable[str], *, scope: str
-    ) -> float:
+    def song_score_bonus_for(self, singers: Iterable[str], *, scope: str) -> float:
         """`ScoreUpBonusRatioBySkillTree` for ONE song, as the game computes it.
 
         The song-specific Y tiles need to know *which boards contribute* —
@@ -168,15 +163,12 @@ class BoardContribution:
 
         Returns a RATE (permil/1000), matching `score_bonus_rate()`."""
         total = sum(
-            self.song_score_bonus_by_holomem.get(holomem, {}).get(scope, 0.0)
-            for holomem in set(singers)
+            self.song_score_bonus_by_holomem.get(holomem, {}).get(scope, 0.0) for holomem in set(singers)
         )
         return min(total, SONG_ALL_CAP_PERMIL / 1000.0)
 
 
-def resolve(
-    model: BoardModel, leader: Card | None, members: tuple[Card, ...]
-) -> BoardContribution:
+def resolve(model: BoardModel, leader: Card | None, members: tuple[Card, ...]) -> BoardContribution:
     """Every unlocked node on every captured board, routed to the five members.
 
     Deterministic in `model.characters` iteration order then node order then

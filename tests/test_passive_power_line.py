@@ -34,7 +34,6 @@ from pathlib import Path
 
 import pytest
 
-from hbuilder.inputs import apply_collection, default_paths
 from hbuilder.domain.collection import (
     caps_by_rarity_from_mapping,
     collection_stats,
@@ -44,6 +43,7 @@ from hbuilder.domain.loader import load_cards, load_owned
 from hbuilder.domain.scoring import score_with_breakdown
 from hbuilder.domain.scoring_config import load_scoring_config
 from hbuilder.domain.team import Team, TeamError
+from hbuilder.inputs import apply_collection, default_paths
 
 _REPO = Path(__file__).resolve().parents[1]
 _DUMPS = _REPO / "tools" / "recon" / "proxy" / "dumps"
@@ -111,9 +111,7 @@ def test_stat_up_moves_overall_power_by_what_the_server_says(tmp_path):
         # this project keeps paying for.
         capture_file = tmp_path / f"capture_{index}.json"
         capture_file.write_text(json.dumps(document), encoding="utf-8")
-        cards, _basis = apply_collection(
-            catalogue, str(capture_file), owned_ids=[c.id for c in owned]
-        )
+        cards, _basis = apply_collection(catalogue, str(capture_file), owned_ids=[c.id for c in owned])
         by_id = {card.id: card for card in cards}
         if any(cid not in by_id for cid in ids):
             continue

@@ -23,8 +23,8 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-
 from hbweb import config
+
 from hbuilder.domain.team import MEMBER_COUNT
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -61,9 +61,7 @@ def test_an_unknown_song_is_a_state_not_a_crash(web_base):
     assert "m9999" in answer["reason"]
 
 
-@pytest.mark.skipif(
-    not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
-)
+@pytest.mark.skipif(not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored")
 def test_the_drawing_is_of_the_arrangement_the_scorer_chose(web_base):
     """⛔ The one that matters.
 
@@ -82,9 +80,7 @@ def test_the_drawing_is_of_the_arrangement_the_scorer_chose(web_base):
         f"different set: {order} vs {cards[1:]}"
     )
     lanes = answer["timeline"]["lanes"]
-    assert [lane["card_id"] for lane in lanes] == order, (
-        "lane i must be the member the scorer put in slot i"
-    )
+    assert [lane["card_id"] for lane in lanes] == order, "lane i must be the member the scorer put in slot i"
     assert [lane["slot"] for lane in lanes] == list(range(1, len(lanes) + 1))
 
     # The negative control. If the scorer's order happened to equal the order
@@ -98,9 +94,7 @@ def test_the_drawing_is_of_the_arrangement_the_scorer_chose(web_base):
     )
 
 
-@pytest.mark.skipif(
-    not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
-)
+@pytest.mark.skipif(not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored")
 def test_every_lane_gets_its_own_cue_and_its_SPECIAL_sits_on_it(web_base):
     """A chart carries five cues, one per slot. A lane whose SPECIAL floated
     free of its cue would be drawing the skill somewhere it never fires."""
@@ -115,15 +109,12 @@ def test_every_lane_gets_its_own_cue_and_its_SPECIAL_sits_on_it(web_base):
         )
         for window in lane["special"]:
             assert window["start"] == pytest.approx(lane["cue"]), (
-                "a SPECIAL starts at its cue -- that is what makes it a fact "
-                "rather than a chance"
+                "a SPECIAL starts at its cue -- that is what makes it a fact rather than a chance"
             )
             assert window["end"] >= window["start"]
 
 
-@pytest.mark.skipif(
-    not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored"
-)
+@pytest.mark.skipif(not config.CHARTS_PATH.is_file(), reason="dumps/ is gitignored")
 def test_active_windows_are_ordered_and_never_silently_clamped(web_base):
     """`song.py` deliberately does not clip windows to the song's end. A route
     that clamped them would be a second, quieter definition of when a skill is
@@ -156,12 +147,12 @@ def test_the_timeline_honours_the_level_bloom_what_if(web_base):
     (often level-1) stats — the ranking was solved with the what-if, so the
     timeline's total must move with it (REDESIGN-PLAN D6)."""
     real = _post(web_base, {"song": "m0001", "cards": _six(), "basis": "maxed"})
-    maxed = _post(web_base, {"song": "m0001", "cards": _six(), "basis": "maxed",
-                             "assume_level": "max", "assume_bloom": "max"})
+    maxed = _post(
+        web_base,
+        {"song": "m0001", "cards": _six(), "basis": "maxed", "assume_level": "max", "assume_bloom": "max"},
+    )
     assert real["available"] and maxed["available"]
     assert maxed["total_score"] >= real["total_score"]
     # and the uptime model is honoured too: steady vs finite differ
-    steady = _post(web_base, {"song": "m0001", "cards": _six(), "basis": "maxed",
-                              "uptime_model": "steady"})
-    assert steady["available"]          # parsed and scored; the two models may coincide on a chart
-
+    steady = _post(web_base, {"song": "m0001", "cards": _six(), "basis": "maxed", "uptime_model": "steady"})
+    assert steady["available"]  # parsed and scored; the two models may coincide on a chart

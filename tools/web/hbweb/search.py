@@ -14,8 +14,11 @@ import dataclasses
 import datetime as _dt
 import json
 import types
-from typing import Mapping
+from collections.abc import Mapping
 from urllib.parse import parse_qs
+
+import compare_view
+import row_detail
 
 from hbuilder import paths
 from hbuilder.domain.board import BoardError
@@ -25,11 +28,12 @@ from hbuilder.domain.song import SongError, charts_from_mapping, timeline
 from hbuilder.domain.team import MEMBER_COUNT, Team, TeamError
 from hbuilder.errors import MissingInput
 from hbuilder.inputs import (
-    _LoadFailure, apply_collection, load_board_basis, load_inputs, max_level_board_points)
-
-import compare_view
-import row_detail
-
+    _LoadFailure,
+    apply_collection,
+    load_board_basis,
+    load_inputs,
+    max_level_board_points,
+)
 from hbweb import admin, basis, config, jobs, songs
 
 
@@ -45,8 +49,8 @@ def start_search(h) -> None:
     exclude?, top?}` -- the optimiser ON DEMAND (`ondemand.py`): 202
     `{job_id}`; events on `/events/<id>`; cancel with `POST /cancel/<id>`.
     Read-only."""
-    import ondemand  # noqa: PLC0415
     import leaf_inputs  # noqa: PLC0415
+    import ondemand  # noqa: PLC0415
 
     try:
         body = h.read_json_body()
@@ -94,12 +98,24 @@ def start_search(h) -> None:
             h.reply_json(400, {"error": "levels need no song (In general) and 1 <= lowest <= highest <= 40"})
             return
         levels = (lo, hi)
-    opts = {"song": song, "basis": basis_name, "difficulty": difficulty, "top": top,
-            "filters": ondemand.parse_filters(body), "assumptions": assumptions,
-            "levels": levels, "play": ondemand.parse_play(body)}
+    opts = {
+        "song": song,
+        "basis": basis_name,
+        "difficulty": difficulty,
+        "top": top,
+        "filters": ondemand.parse_filters(body),
+        "assumptions": assumptions,
+        "levels": levels,
+        "play": ondemand.parse_play(body),
+    }
     job = jobs.launch(jobs.run_search_job, opts, "search")
-    h.reply_json(202, {"job_id": job.job_id, "opts": {k: v for k, v in opts.items()
-                                                     if k not in ("filters", "assumptions")}})
+    h.reply_json(
+        202,
+        {
+            "job_id": job.job_id,
+            "opts": {k: v for k, v in opts.items() if k not in ("filters", "assumptions")},
+        },
+    )
 
 
 def row_request(body: Mapping) -> dict:
@@ -109,15 +125,18 @@ def row_request(body: Mapping) -> dict:
     song = str(body.get("song") or "").strip()
     ids = [str(c) for c in (body.get("cards") or []) if c]
     if not song or len(ids) != MEMBER_COUNT + 1:
-        raise basis.HttpError(400, {"error": f"need a song and {MEMBER_COUNT + 1} card ids "
-                                             "(leader + 5 members)"})
+        raise basis.HttpError(
+            400, {"error": f"need a song and {MEMBER_COUNT + 1} card ids (leader + 5 members)"}
+        )
     basis_name = str(body.get("basis") or "account")
     import leaf_inputs  # noqa: PLC0415
+
     if basis_name not in leaf_inputs.BASES:
         raise basis.HttpError(400, {"error": f"basis must be one of {sorted(leaf_inputs.BASES)}"})
     difficulty = basis.parse_difficulty(body, song)
     order = body.get("member_order") if isinstance(body.get("member_order"), list) else None
     import ondemand  # noqa: PLC0415
+
     assumptions = None
     if isinstance(body.get("assumptions"), dict):
         try:
@@ -125,11 +144,18 @@ def row_request(body: Mapping) -> dict:
         except (TypeError, ValueError) as exc:
             raise basis.HttpError(400, {"error": f"assumptions: {exc}"}) from None
     pool = [str(s) for s in body.get("pool") or [] if s] if isinstance(body.get("pool"), list) else []
-    return {"song": song, "ids": ids, "basis": basis_name, "difficulty": difficulty,
-            "refine": body.get("refine"), "order": [str(c) for c in order] if order else None,
-            "assumptions": assumptions, "pool": pool,
-            # the search's platform and AUTO, or the row is not its own
-            "play": ondemand.parse_play(body)}
+    return {
+        "song": song,
+        "ids": ids,
+        "basis": basis_name,
+        "difficulty": difficulty,
+        "refine": body.get("refine"),
+        "order": [str(c) for c in order] if order else None,
+        "assumptions": assumptions,
+        "pool": pool,
+        # the search's platform and AUTO, or the row is not its own
+        "play": ondemand.parse_play(body),
+    }
 
 
 def row_figures(req: Mapping, body: Mapping, *, keep_law: bool = False) -> dict:
@@ -139,27 +165,57 @@ def row_figures(req: Mapping, body: Mapping, *, keep_law: bool = False) -> dict:
     if req["pool"]:
         # a Highlight row on the WHOLE pool: one board, one slot order
         # (`row_detail.pool_detail`); `song` is any pool song (the difficulty's)
-        out = row_detail.pool_detail(req["basis"], req["pool"], req["difficulty"], ids[0], ids[1:],
-                                     assumptions=req["assumptions"],
-                                     refine=req["refine"] is not False, play=req["play"])
-        out.update({"available": True, "difficulty": req["difficulty"], "basis": req["basis"],
-                    "leader_id": ids[0], "member_ids": ids[1:]})
+        out = row_detail.pool_detail(
+            req["basis"],
+            req["pool"],
+            req["difficulty"],
+            ids[0],
+            ids[1:],
+            assumptions=req["assumptions"],
+            refine=req["refine"] is not False,
+            play=req["play"],
+        )
+        out.update(
+            {
+                "available": True,
+                "difficulty": req["difficulty"],
+                "basis": req["basis"],
+                "leader_id": ids[0],
+                "member_ids": ids[1:],
+            }
+        )
         return out
     # the row's refinement level (`refined`: True = 1, 2 when every frequency count was
     # tried, "counts" for an In general row, its frequency counts chosen song by song);
     # anything else is the plain develop
     refine = req["refine"] if req["refine"] is True or req["refine"] in (2, "counts") else False
     out = row_detail.two_stage_detail(
-        req["basis"], req["song"], req["difficulty"], ids[0], ids[1:], refine=refine,
+        req["basis"],
+        req["song"],
+        req["difficulty"],
+        ids[0],
+        ids[1:],
+        refine=refine,
         assumptions=req["assumptions"],
         want_distribution=body.get("distribution") is True,
         want_timeline=body.get("timeline") is True,
         member_order=req["order"],
         as_is=body.get("as_is") is not False,
-        want_reset_price=body.get("reset_price") is True, play=req["play"], keep_law=keep_law,
-        want_notes=body.get("notes") is True)
-    out.update({"available": True, "song": req["song"], "difficulty": req["difficulty"],
-                "basis": req["basis"], "leader_id": ids[0], "member_ids": ids[1:]})
+        want_reset_price=body.get("reset_price") is True,
+        play=req["play"],
+        keep_law=keep_law,
+        want_notes=body.get("notes") is True,
+    )
+    out.update(
+        {
+            "available": True,
+            "song": req["song"],
+            "difficulty": req["difficulty"],
+            "basis": req["basis"],
+            "leader_id": ids[0],
+            "member_ids": ids[1:],
+        }
+    )
     return out
 
 
@@ -177,7 +233,7 @@ def _row_reply(h, make) -> None:
     except (TeamError, BoardError, SongError, ValueError) as exc:
         h.reply_json(400, {"error": f"{type(exc).__name__}: {exc}"})
         return
-    except MissingInput as exc:    # a chart or an account dump that is not on disk
+    except MissingInput as exc:  # a chart or an account dump that is not on disk
         h.reply_json(400, {"error": str(exc)})
         return
     except Exception as exc:  # noqa: BLE001 — report as JSON, never HTML 500
@@ -222,14 +278,23 @@ def export_team_route(h) -> None:
     def make() -> dict:
         import hbteam  # noqa: PLC0415
         import team_file  # noqa: PLC0415  (tools/refresh: tools/web/ writes no files)
+
         req = row_request(body)
         out = row_figures(req, {**body, "distribution": True, "timeline": False, "notes": True})
-        doc = hbteam.document(hbteam.request_of(body), out,
-                              shown=body.get("shown") if isinstance(body.get("shown"), dict) else None,
-                              search=body.get("search") if isinstance(body.get("search"), dict) else None)
+        doc = hbteam.document(
+            hbteam.request_of(body),
+            out,
+            shown=body.get("shown") if isinstance(body.get("shown"), dict) else None,
+            search=body.get("search") if isinstance(body.get("search"), dict) else None,
+        )
         path, csv_path = team_file.save(doc)
-        return {"path": str(path), "name": path.name, "bytes": path.stat().st_size,
-                "csv": csv_path.name if csv_path else None}
+        return {
+            "path": str(path),
+            "name": path.name,
+            "bytes": path.stat().st_size,
+            "csv": csv_path.name if csv_path else None,
+        }
+
     _row_reply(h, make)
 
 
@@ -247,15 +312,16 @@ def _timeline_inputs(body: Mapping, basis_name: str):
     cfg = dataclasses.replace(cfg, **basis.auto_premise(cfg, body))
     try:
         cards, _collection_basis, cfg, ma_scenario = basis.apply_basis(
-            cards, owned, cfg, basis_name,
-            assume_level=assume_level, assume_bloom=assume_bloom)
+            cards, owned, cfg, basis_name, assume_level=assume_level, assume_bloom=assume_bloom
+        )
     except basis.MaxedAccountUnavailable as exc:
         raise basis.HttpError(503, {"error": str(exc)}) from None
     return cards, cfg, ma_scenario
 
 
-def _timeline_board(team, chart, cfg, cards, basis_name: str, board_state: dict | None,
-                    use_board: bool, ma_scenario):
+def _timeline_board(
+    team, chart, cfg, cards, basis_name: str, board_state: dict | None, use_board: bool, ma_scenario
+):
     """`(board_model, optimised_model)`: the row's own board when `board_state` is
     given (rebuilt EXACTLY as the develop assembled it, `row_detail.board_from_state`:
     the basis' Connect cards, bench boards, cast names and singer context), else the
@@ -265,19 +331,27 @@ def _timeline_board(team, chart, cfg, cards, basis_name: str, board_state: dict 
         dev = compare_view._Developer(cfg, cards, basis_name, None, chart, ma_scenario)
         try:
             optimised_model, _placements = row_detail.board_from_state(
-                team, board_state, cfg=cfg, skilltree=dev.skilltree,
-                node_effect_ids=dev.effects, tree_for=dev.tree_for,
-                connect_cards=dev.connect_cards, bench_characters=dev.bench_characters,
-                name_by_chr=dev.name_by_chr, sings=dev.cast,
+                team,
+                board_state,
+                cfg=cfg,
+                skilltree=dev.skilltree,
+                node_effect_ids=dev.effects,
+                tree_for=dev.tree_for,
+                connect_cards=dev.connect_cards,
+                bench_characters=dev.bench_characters,
+                name_by_chr=dev.name_by_chr,
+                sings=dev.cast,
                 # a state carrying its sockets keeps them (the row's own board)
-                use_slots=any((v or {}).get("slots") for v in board_state.values()))
+                use_slots=any((v or {}).get("slots") for v in board_state.values()),
+            )
         except ValueError as exc:
             raise basis.HttpError(400, {"error": f"board_state: {exc}"}) from None
     if ma_scenario is not None:
         captured = None if (config.BOARD_DISABLED or not use_board) else ma_scenario.board_model
     else:
         captured = load_board_basis(
-            None if (config.BOARD_DISABLED or not use_board) else config.BOARD_PATH).model
+            None if (config.BOARD_DISABLED or not use_board) else config.BOARD_PATH
+        ).model
     return (optimised_model if optimised_model is not None else captured), optimised_model
 
 
@@ -298,13 +372,16 @@ def serve_timeline(h) -> None:
     music_id = str(body.get("song") or "")
     wanted = [str(c) for c in (body.get("cards") or []) if c]
     if not music_id or len(wanted) != MEMBER_COUNT + 1:
-        h.reply_json(400, {
-            "error": (
-                f"need a song and exactly {MEMBER_COUNT + 1} card ids "
-                f"(1 leader + {MEMBER_COUNT} members); "
-                f"got song={music_id!r} and {len(wanted)} card(s)"
-            ),
-        })
+        h.reply_json(
+            400,
+            {
+                "error": (
+                    f"need a song and exactly {MEMBER_COUNT + 1} card ids "
+                    f"(1 leader + {MEMBER_COUNT} members); "
+                    f"got song={music_id!r} and {len(wanted)} card(s)"
+                ),
+            },
+        )
         return
     try:
         difficulty = basis.parse_difficulty(body, music_id)
@@ -315,10 +392,13 @@ def serve_timeline(h) -> None:
     raw = config.read_json(charts_file)
     chart_doc = ((raw or {}).get("charts") or {}).get(f"{music_id}/{difficulty}")
     if not chart_doc:
-        h.reply_json(200, {
-            "available": False,
-            "reason": f"no {difficulty} chart for {music_id} in {charts_file.name}",
-        })
+        h.reply_json(
+            200,
+            {
+                "available": False,
+                "reason": f"no {difficulty} chart for {music_id} in {charts_file.name}",
+            },
+        )
         return
 
     basis_name = basis.parse_basis(body.get("basis"))
@@ -328,21 +408,25 @@ def serve_timeline(h) -> None:
         cards, cfg, ma_scenario = _timeline_inputs(body, basis_name)
         team, cfg = _timeline_team(cards, wanted, cfg)
         chart = charts_from_mapping(
-            {"schema_version": raw.get("schema_version"),
-             "charts": {f"{music_id}/{difficulty}": chart_doc}},
+            {"schema_version": raw.get("schema_version"), "charts": {f"{music_id}/{difficulty}": chart_doc}},
             source=str(charts_file.name),
         ).get(music_id, difficulty)
 
         cfg = dataclasses.replace(cfg, board=None)
         board_model, optimised_model = _timeline_board(
-            team, chart, cfg, cards, basis_name, board_state, use_board, ma_scenario)
+            team, chart, cfg, cards, basis_name, board_state, use_board, ma_scenario
+        )
         cfg_board = dataclasses.replace(cfg, board=board_model)
 
         fig = row_detail.figures(team, chart, cfg_board)
         drawing = timeline(team.members, chart, cfg_board, tuple(fig["member_order"]))
-        law = (row_detail.distribution(team, chart, cfg_board, fig["member_order"],
-                                       fig["deck_power"], row_score=fig["song_est"])
-               if body.get("distribution") is True else None)
+        law = (
+            row_detail.distribution(
+                team, chart, cfg_board, fig["member_order"], fig["deck_power"], row_score=fig["song_est"]
+            )
+            if body.get("distribution") is True
+            else None
+        )
     except basis.HttpError as exc:
         h.reply_json(exc.code, exc.obj)
         return
@@ -353,11 +437,23 @@ def serve_timeline(h) -> None:
         # First-class, like every other bad input on this server: a readable
         # reason beats an HTML error page whose JSON parse error names a
         # column number.
-        h.reply_json(200, {"available": False,
-                           "reason": f"{type(exc).__name__}: {exc}"})
+        h.reply_json(200, {"available": False, "reason": f"{type(exc).__name__}: {exc}"})
         return
-    h.reply_json(200, _timeline_payload(body, music_id, difficulty, basis_name, team.leader.id,
-                                        fig, board_model, optimised_model, drawing, law))
+    h.reply_json(
+        200,
+        _timeline_payload(
+            body,
+            music_id,
+            difficulty,
+            basis_name,
+            team.leader.id,
+            fig,
+            board_model,
+            optimised_model,
+            drawing,
+            law,
+        ),
+    )
 
 
 def _timeline_team(cards, wanted: list[str], cfg):
@@ -373,13 +469,24 @@ def _timeline_team(cards, wanted: list[str], cfg):
     try:
         return Team(leader=leader, members=members), cfg
     except TeamError:
-        return (types.SimpleNamespace(leader=leader, members=members),
-                dataclasses.replace(cfg, song_absolute_deck_power=False))
+        return (
+            types.SimpleNamespace(leader=leader, members=members),
+            dataclasses.replace(cfg, song_absolute_deck_power=False),
+        )
 
 
-def _timeline_payload(body: Mapping, music_id: str, difficulty: str, basis_name: str,
-                      leader_id: str, fig: Mapping, board_model, optimised_model,
-                      drawing, law) -> dict:
+def _timeline_payload(
+    body: Mapping,
+    music_id: str,
+    difficulty: str,
+    basis_name: str,
+    leader_id: str,
+    fig: Mapping,
+    board_model,
+    optimised_model,
+    drawing,
+    law,
+) -> dict:
     """The timeline's answer: the row's figures, the board it was drawn on, the lanes."""
     out = {
         "available": True,
@@ -450,22 +557,26 @@ def serve_meta(h) -> None:
     try:
         cards, owned, _cfg, _prov = load_inputs(config.CARDS_PATH, config.OWNED_PATH)
         _cards2, collection_basis = apply_collection(
-            cards, str(config.COLLECTION_PATH),
-            owned_ids=[c.id for c in owned], maxed=False,
+            cards,
+            str(config.COLLECTION_PATH),
+            owned_ids=[c.id for c in owned],
+            maxed=False,
         )
         bonuses = collection_basis.bonuses
         bs = config.read_json(config.BOARD_STATE_PATH) or {}
         captured = sum(1 for v in bs.values() if (v or {}).get("nodes"))
         try:
-            snapshot_mtime = _dt.datetime.fromtimestamp(
-                config.SNAPSHOT_PATH.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            snapshot_mtime = _dt.datetime.fromtimestamp(config.SNAPSHOT_PATH.stat().st_mtime).strftime(
+                "%Y-%m-%d %H:%M"
+            )
         except OSError:
             snapshot_mtime = None
         charts_raw = config.read_json(config.CHARTS_PATH) or {}
-        chart_count = len((charts_raw.get("charts") or {}))
+        chart_count = len(charts_raw.get("charts") or {})
         difficulties = songs.difficulties_listing()
         try:
             import importlib.util  # noqa: PLC0415
+
             solver_available = importlib.util.find_spec("highspy") is not None
         except Exception:  # noqa: BLE001
             solver_available = False
@@ -473,39 +584,42 @@ def serve_meta(h) -> None:
             max_points = max_level_board_points()
         except MissingInput:
             max_points = None
-        h.reply_json(200, {
-            "catalogue": len(cards),
-            "owned": len(owned),
-            # provenance the header strip states in one line
-            "snapshot_mtime": snapshot_mtime,
-            # a page reloaded mid-refresh shows it running instead of offering a second
-            "refresh_running": admin.REFRESH_LOCK.locked(),
-            "chart_count": chart_count,
-            # the chart difficulties a run may ask for (`difficulty` on the searches,
-            # /api/compare, /api/timeline, ?difficulty= on /api/songs): the default, what is on disk, how many
-            # charts each holds, and — only when they vary — the EXPERT
-            # songs with no chart at a difficulty
-            "difficulties": difficulties,
-            # whether the exact HiGHS plan can run at all (typed 503 otherwise)
-            "solver_available": solver_available,
-            "boards_with_nodes": captured,
-            # what a max-level holomem holds (the master's CharacterLevel), the "Max
-            # Holomem Board Pt" switch and the maxed account; None when the export is absent
-            "max_level_board_points": max_points,
-            "boards_total": len(bs),
-            "memory_posters": getattr(bonuses, "posters", None) if bonuses else None,
-            "memory_bonus_permil": (bonuses.memory_permil
-                                    if bonuses is not None else None),
-            "power_up_permyriad": (
-                bonuses.power_up_permyriad
-                if bonuses is not None and bonuses.power_up_permyriad is not None
-                # `player.power_up_permyriad: "auto"` — the derived value the
-                # scoring itself uses, never a hand-typed stale one.
-                else getattr(collection_basis.derived_power_up, "permyriad", None)),
-            # `?level=&bloom=&sp_training=&keep_higher=` (the Optimizer's "Upgraded
-            # cards") or `?basis=maxed`: the bonuses that search scores with, else None
-            "assumed": _meta_assumed(h),
-        })
+        h.reply_json(
+            200,
+            {
+                "catalogue": len(cards),
+                "owned": len(owned),
+                # provenance the header strip states in one line
+                "snapshot_mtime": snapshot_mtime,
+                # a page reloaded mid-refresh shows it running instead of offering a second
+                "refresh_running": admin.REFRESH_LOCK.locked(),
+                "chart_count": chart_count,
+                # the chart difficulties a run may ask for (`difficulty` on the searches,
+                # /api/compare, /api/timeline, ?difficulty= on /api/songs): the default, what is on disk, how many
+                # charts each holds, and — only when they vary — the EXPERT
+                # songs with no chart at a difficulty
+                "difficulties": difficulties,
+                # whether the exact HiGHS plan can run at all (typed 503 otherwise)
+                "solver_available": solver_available,
+                "boards_with_nodes": captured,
+                # what a max-level holomem holds (the master's CharacterLevel), the "Max
+                # Holomem Board Pt" switch and the maxed account; None when the export is absent
+                "max_level_board_points": max_points,
+                "boards_total": len(bs),
+                "memory_posters": getattr(bonuses, "posters", None) if bonuses else None,
+                "memory_bonus_permil": (bonuses.memory_permil if bonuses is not None else None),
+                "power_up_permyriad": (
+                    bonuses.power_up_permyriad
+                    if bonuses is not None and bonuses.power_up_permyriad is not None
+                    # `player.power_up_permyriad: "auto"` — the derived value the
+                    # scoring itself uses, never a hand-typed stale one.
+                    else getattr(collection_basis.derived_power_up, "permyriad", None)
+                ),
+                # `?level=&bloom=&sp_training=&keep_higher=` (the Optimizer's "Upgraded
+                # cards") or `?basis=maxed`: the bonuses that search scores with, else None
+                "assumed": _meta_assumed(h),
+            },
+        )
     except Exception as exc:  # noqa: BLE001 — an info strip must never 500 the page
         # `load_inputs` raises `_LoadFailure(exit code)` from the real error: say that one
         # (otherwise the page shows "_LoadFailure: 3" for "owned: id '...' is not present

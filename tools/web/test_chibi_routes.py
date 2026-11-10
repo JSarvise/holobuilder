@@ -4,6 +4,7 @@ gitignored folder). The index must always answer (the page shows a plain bar whe
 available); the file route must refuse anything outside its own name pattern.
     python -m pytest tools/web/test_chibi_routes.py
 """
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,6 @@ import urllib.error
 import urllib.request
 
 import pytest
-
 
 
 def _get(url):
@@ -33,10 +33,16 @@ def test_index_always_answers_with_its_shape(web_base):
         assert o["typ"] in (0, 1, 2) and o["chr"].startswith("chr-")
 
 
-@pytest.mark.parametrize("path", [
-    "/chibi/../server.py", "/chibi/index.json", "/chibi/models/../index.json",
-    "/chibi/models/sdcos-00001-cmmn-0000-00.glb.exe", "/chibi/models/evil.js",
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/chibi/../server.py",
+        "/chibi/index.json",
+        "/chibi/models/../index.json",
+        "/chibi/models/sdcos-00001-cmmn-0000-00.glb.exe",
+        "/chibi/models/evil.js",
+    ],
+)
 def test_paths_outside_the_pattern_are_refused(web_base, path):
     status, _body, _kind = _get(web_base + path)
     assert status in (400, 404)

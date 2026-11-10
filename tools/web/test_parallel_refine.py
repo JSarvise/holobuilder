@@ -5,17 +5,18 @@ and fall back to serial when the pool cannot stand up.
 Uses the real dumps (skilltree + master + charts, gitignored) and SKIPS when
 they are absent — the same first-class-absence contract the develop routes
 have. Small on purpose: three teams, two workers, one chart."""
+
 from __future__ import annotations
 
 import dataclasses
 
 import pytest
-
 from hbweb import config
-from hbuilder.inputs import apply_collection, load_inputs
+
 from hbuilder.domain.board_plan import node_effect_ids_from_master
 from hbuilder.domain.song import load_charts
 from hbuilder.domain.team import Team
+from hbuilder.inputs import apply_collection, load_inputs
 from hbuilder.solver.parallel_refine import RefineContext, RefinePool
 
 
@@ -28,26 +29,29 @@ def _context():
     chart = next((library.get(m) for m in library.music_ids), None)
     if chart is None:
         pytest.skip("no chart in the library")
-    cards, owned, cfg, _ = load_inputs(
-        config.CARDS_PATH, config.OWNED_PATH)
-    cards, cb = apply_collection(
-        cards, None, owned_ids=[c.id for c in owned], maxed=True)
+    cards, owned, cfg, _ = load_inputs(config.CARDS_PATH, config.OWNED_PATH)
+    cards, cb = apply_collection(cards, None, owned_ids=[c.id for c in owned], maxed=True)
     if cb.bonuses is not None:
         cfg = dataclasses.replace(cfg, account=cb.bonuses)
     ctx = RefineContext(
-        cards=tuple(cards), cfg=dataclasses.replace(cfg, board=None),
-        charts=(chart,), skilltree=skilltree, node_master=node_master,
+        cards=tuple(cards),
+        cfg=dataclasses.replace(cfg, board=None),
+        charts=(chart,),
+        skilltree=skilltree,
+        node_master=node_master,
         node_effect_ids=node_effect_ids_from_master(node_master),
-        connect_cards=None, bench_characters=None,
+        connect_cards=None,
+        bench_characters=None,
         name_by_chr={"chr-" + c.id.split("-")[1]: c.member for c in cards},
-        flat_budget=453, granted={})
-    by_id = {c.id: c for c in cards}
+        flat_budget=453,
+        granted={},
+    )
     five = [c for c in cards if c.rarity.startswith("5")]
     teams = []
     for k in range(3):
         leader = five[k]
         members = []
-        for c in five[k + 1:]:
+        for c in five[k + 1 :]:
             if c.member != leader.member and c.member not in {m.member for m in members}:
                 members.append(c)
             if len(members) == 5:
@@ -61,10 +65,10 @@ def test_pool_scores_match_the_serial_path_in_order():
     with RefinePool(ctx, workers=1) as serial:
         expect = serial.batch_score(teams)
     with RefinePool(ctx, workers=2) as pool:
-        assert pool._pool is not None      # the pool really stood up
+        assert pool._pool is not None  # the pool really stood up
         got = pool.batch_score(teams)
     assert len(got) == len(teams) == 3
-    assert got == expect            # same floats, same order — not approx
+    assert got == expect  # same floats, same order — not approx
     assert all(v > 0 for v in got)
 
 
@@ -97,16 +101,22 @@ def test_develop_team_board_scores_to_the_leaf_float(use_cache, refine):
     ctx, teams = _context()
     team = teams[0]
     if use_cache:
-        ctx = dataclasses.replace(ctx, use_plan_cache=True, plan_cache_seed=(
-            team.leader.id, tuple(m.id for m in team.members)))
+        ctx = dataclasses.replace(
+            ctx, use_plan_cache=True, plan_cache_seed=(team.leader.id, tuple(m.id for m in team.members))
+        )
     ctx = dataclasses.replace(ctx, refine_activation=refine)
     with RefinePool(ctx, workers=1) as pool:
         by_id = pool._by_id
         cache = new_plan_cache(ctx, by_id) if use_cache else None
-        leaf = evaluate(ctx, by_id, pool._tree_for, pool._budget_for,
-                        (team.leader.id, tuple(m.id for m in team.members)), plan_cache=cache)
-        bt = develop_team(ctx, team, pool._tree_for, pool._budget_for, ctx.charts[0],
-                          plan_cache=cache)
+        leaf = evaluate(
+            ctx,
+            by_id,
+            pool._tree_for,
+            pool._budget_for,
+            (team.leader.id, tuple(m.id for m in team.members)),
+            plan_cache=cache,
+        )
+        bt = develop_team(ctx, team, pool._tree_for, pool._budget_for, ctx.charts[0], plan_cache=cache)
     got = score_team_on_chart(team, ctx.charts[0], dataclasses.replace(ctx.cfg, board=bt.board))
     assert got.total_score == leaf
 
@@ -124,21 +134,34 @@ def test_develop_team_plans_the_off_team_singers_boards_as_the_leaf_does(refine)
     team = teams[0]
     on_team = {"chr-" + c.id.split("-")[1] for c in (team.leader, *team.members)}
     library = load_charts(str(config.CHARTS_PATH))
-    chart = next((library.get(m) for m in sorted(library.music_ids)
-                  if set(library.get(m).singers or ()) - on_team), None)
+    chart = next(
+        (library.get(m) for m in sorted(library.music_ids) if set(library.get(m).singers or ()) - on_team),
+        None,
+    )
     if chart is None:
         pytest.skip("no chart sung by a holomem off the team")
     ctx = dataclasses.replace(
-        ctx, charts=(chart,), refine_activation=refine, use_plan_cache=True,
+        ctx,
+        charts=(chart,),
+        refine_activation=refine,
+        use_plan_cache=True,
         plan_cache_seed=(team.leader.id, tuple(m.id for m in team.members)),
-        bench_characters={"(no captured board)": []}, plan_singer_bench=True)
+        bench_characters={"(no captured board)": []},
+        plan_singer_bench=True,
+    )
     ids = (team.leader.id, tuple(m.id for m in team.members))
     with RefinePool(ctx, workers=1) as pool:
         by_id = pool._by_id
         cache = new_plan_cache(ctx, by_id)
         leaf = evaluate(ctx, by_id, pool._tree_for, pool._budget_for, ids, plan_cache=cache)
-        unplanned = evaluate(dataclasses.replace(ctx, plan_singer_bench=False), by_id,
-                             pool._tree_for, pool._budget_for, ids, plan_cache=cache)
+        unplanned = evaluate(
+            dataclasses.replace(ctx, plan_singer_bench=False),
+            by_id,
+            pool._tree_for,
+            pool._budget_for,
+            ids,
+            plan_cache=cache,
+        )
         bt = develop_team(ctx, team, pool._tree_for, pool._budget_for, chart, plan_cache=cache)
     assert leaf > unplanned, "the case must have an off-team singer whose yellows pay"
     got = score_team_on_chart(team, chart, dataclasses.replace(ctx.cfg, board=bt.board))
@@ -172,22 +195,41 @@ def test_scores_over_several_singer_benches_do_not_depend_on_how_many_are_held(m
         pytest.skip("fewer than three charts sung by these teams' holomems")
     team = teams[0]
     ctx = dataclasses.replace(
-        ctx, charts=tuple(charts), board_per_chart=True, use_plan_cache=True,
+        ctx,
+        charts=tuple(charts),
+        board_per_chart=True,
+        use_plan_cache=True,
         plan_cache_seed=(team.leader.id, tuple(m.id for m in team.members)),
-        bench_characters={"(no captured board)": []}, plan_singer_bench=True)
+        bench_characters={"(no captured board)": []},
+        plan_singer_bench=True,
+    )
     ids = [(t.leader.id, tuple(m.id for m in t.members)) for t in teams]
 
     def scores(held: int):
         monkeypatch.setattr(board_plan, "_BENCHES_HELD", held)
         monkeypatch.setattr(pr, "SINGER_CONTEXTS_HELD", held)
-        for memo in (board_plan._SINGER_BENCH, board_plan._BENCH_BOUGHT,
-                     board_plan._GREEN_HOLDERS, pr._SINGER_CTX):
+        for memo in (
+            board_plan._SINGER_BENCH,
+            board_plan._BENCH_BOUGHT,
+            board_plan._GREEN_HOLDERS,
+            pr._SINGER_CTX,
+        ):
             memo.clear()
         with RefinePool(ctx, workers=1) as pool:
             cache = pr.new_plan_cache(ctx, pool._by_id)
-            out = [pr.evaluate(ctx, pool._by_id, pool._tree_for, pool._budget_for, team_ids,
-                               plan_cache=cache, per_chart=True)
-                   for _ in range(2) for team_ids in ids]
+            out = [
+                pr.evaluate(
+                    ctx,
+                    pool._by_id,
+                    pool._tree_for,
+                    pool._budget_for,
+                    team_ids,
+                    plan_cache=cache,
+                    per_chart=True,
+                )
+                for _ in range(2)
+                for team_ids in ids
+            ]
             counts = len(cache._benches), len(pr._SINGER_CTX)
         # a closed pool's context takes the entries that hold it with it, and a discarded
         # plan cache its singer benches (`forget_context`)
@@ -199,8 +241,8 @@ def test_scores_over_several_singer_benches_do_not_depend_on_how_many_are_held(m
 
     one, benches_one, contexts_one = scores(1)
     many, benches_many, contexts_many = scores(128)
-    assert many == one                                  # the same floats, chart by chart
-    assert many[:len(ids)] == many[len(ids):]           # and the same on the second pass
+    assert many == one  # the same floats, chart by chart
+    assert many[: len(ids)] == many[len(ids) :]  # and the same on the second pass
     assert benches_one == contexts_one == 1
     # one bench and one context per singer context met, each made once (the bench as
     # captured is one more when some chart has no singer on some team)
@@ -222,8 +264,7 @@ def test_the_ceiling_is_the_all_fire_score_on_the_leaf_board(refine):
         for team in teams[:3]:
             ids = (team.leader.id, tuple(m.id for m in team.members))
             leaf = evaluate(ctx, by_id, pool._tree_for, pool._budget_for, ids)
-            ceiling = evaluate(ctx, by_id, pool._tree_for, pool._budget_for,
-                               (*ids, None, refine, True, None))
+            ceiling = evaluate(ctx, by_id, pool._tree_for, pool._budget_for, (*ids, None, refine, True, None))
             bt = develop_team(ctx, team, pool._tree_for, pool._budget_for, ctx.charts[0])
             cfg = dataclasses.replace(ctx.cfg, board=bt.board)
             order = score_team_on_chart(team, ctx.charts[0], cfg).member_order
@@ -239,8 +280,9 @@ def test_two_contexts_on_one_shared_pool_score_as_their_own_pools():
 
     ctx, teams = _context()
     library = load_charts(str(config.CHARTS_PATH))
-    chart = next(library.get(m) for m in sorted(library.music_ids)
-                 if library.get(m).music_id != ctx.charts[0].music_id)
+    chart = next(
+        library.get(m) for m in sorted(library.music_ids) if library.get(m).music_id != ctx.charts[0].music_id
+    )
     other = dataclasses.replace(ctx, charts=(chart,))
     with RefinePool(ctx, workers=1) as a1, RefinePool(other, workers=1) as b1:
         expect_a, expect_b = a1.batch_score(teams), b1.batch_score(teams)
@@ -275,7 +317,7 @@ def test_a_shared_pool_stops_one_contexts_tasks_only():
             a.stop_through(ga)
             slot_a, slot_b = a._token[1], b._token[1]
             assert shared._stop[slot_a] >= ga and shared._stop[slot_b] < gb
-            assert gb > ga        # generations are counted across the contexts
+            assert gb > ga  # generations are counted across the contexts
         with RefinePool(ctx, shared=shared) as c:
             assert shared._stop[c._token[1]] >= gb
     finally:
@@ -326,34 +368,54 @@ def test_one_overall_power_serves_the_boards_that_agree_on_what_it_reads(monkeyp
         pytest.skip("fewer than two scopes among the charts this team does not sing")
     charts = [*charts, *unsung.values()]
     ctx = dataclasses.replace(
-        ctx, charts=tuple(charts), board_per_chart=True, use_plan_cache=True,
+        ctx,
+        charts=tuple(charts),
+        board_per_chart=True,
+        use_plan_cache=True,
         plan_cache_seed=(team.leader.id, tuple(m.id for m in team.members)),
-        bench_characters={"(no captured board)": []})
+        bench_characters={"(no captured board)": []},
+    )
     ids = [(t.leader.id, tuple(m.id for m in t.members)) for t in teams]
-    seen: list = []            # (team ids, key, power) of every Overall Power computed
+    seen: list = []  # (team ids, key, power) of every Overall Power computed
     real_power, real_key = pr.overall_power_for, song.overall_power_board_key
 
     def counted(members, leader, cfg):
         power = real_power(members, leader, cfg)
-        seen.append(((leader.id, *(m.id for m in members)), real_key(members, leader, cfg.board),
-                     (power.value, power.power_up_bases)))
+        seen.append(
+            (
+                (leader.id, *(m.id for m in members)),
+                real_key(members, leader, cfg.board),
+                (power.value, power.power_up_bases),
+            )
+        )
         return power
+
     monkeypatch.setattr(pr, "overall_power_for", counted)
 
     def scores():
         seen.clear()
         with RefinePool(ctx, workers=1) as pool:
             cache = pr.new_plan_cache(ctx, pool._by_id)
-            return [pr.evaluate(ctx, pool._by_id, pool._tree_for, pool._budget_for, team_ids,
-                                plan_cache=cache, per_chart=True) for team_ids in ids]
+            return [
+                pr.evaluate(
+                    ctx,
+                    pool._by_id,
+                    pool._tree_for,
+                    pool._budget_for,
+                    team_ids,
+                    plan_cache=cache,
+                    per_chart=True,
+                )
+                for team_ids in ids
+            ]
 
     shared = scores()
     computed_shared = len(seen)
     # no two boards share: every board's own Overall Power
     monkeypatch.setattr(pr, "overall_power_board_key", lambda members, leader, board: object())
     own = scores()
-    assert shared == own                                  # the same floats, chart by chart
-    assert computed_shared < len(seen)                    # and fewer Overall Powers computed
+    assert shared == own  # the same floats, chart by chart
+    assert computed_shared < len(seen)  # and fewer Overall Powers computed
     by_key: dict = {}
     for team_ids, key, power in seen:
         assert by_key.setdefault((team_ids, key), power) == power
@@ -369,24 +431,27 @@ def test_a_teams_board_off_point_is_computed_once_for_all_its_boards(monkeypatch
     charts = _sung_charts(teams)
     team = teams[0]
     ctx = dataclasses.replace(
-        ctx, use_plan_cache=True, bench_characters={"(no captured board)": []},
-        plan_cache_seed=(team.leader.id, tuple(m.id for m in team.members)))
+        ctx,
+        use_plan_cache=True,
+        bench_characters={"(no captured board)": []},
+        plan_cache_seed=(team.leader.id, tuple(m.id for m in team.members)),
+    )
     calls = []
     real = pr.score_with_breakdown
-    monkeypatch.setattr(pr, "score_with_breakdown",
-                        lambda t, cfg: (calls.append(cfg.board), real(t, cfg))[1])
+    monkeypatch.setattr(pr, "score_with_breakdown", lambda t, cfg: (calls.append(cfg.board), real(t, cfg))[1])
     with RefinePool(ctx, workers=1) as pool:
         cache = pr.new_plan_cache(ctx, pool._by_id)
         on_team = frozenset("chr-" + c.id.split("-")[1] for c in (team.leader, *team.members))
         casts = [SongCast(on_team & frozenset(c.singers or ()), c.singer_type) for c in charts]
-        each = [pr._cached_board(ctx, team, pool._tree_for, pool._budget_for, cache, cast)
-                for cast in casts]
+        each = [pr._cached_board(ctx, team, pool._tree_for, pool._budget_for, cache, cast) for cast in casts]
         assert len(calls) == len(casts)
         calls.clear()
         point: list = []
-        once = [pr._cached_board(ctx, team, pool._tree_for, pool._budget_for, cache, cast, point)
-                for cast in casts]
-    assert calls == [None]                                # one board-off score for them all
+        once = [
+            pr._cached_board(ctx, team, pool._tree_for, pool._budget_for, cache, cast, point)
+            for cast in casts
+        ]
+    assert calls == [None]  # one board-off score for them all
     assert once == each
 
 
@@ -406,10 +471,10 @@ def test_a_team_prepared_once_scores_each_chart_as_a_fresh_call_does():
             for cfg in (ctx.cfg, dataclasses.replace(ctx.cfg, board=board)):
                 power = overall_power_for(tuple(team.members), team.leader, cfg)
                 for chart in charts:
-                    fresh = score_song_detailed(team.members, (team.leader,), chart, cfg,
-                                                deck_power=power)
-                    held = score_song_detailed(team.members, (team.leader,), chart, cfg,
-                                               deck_power=power, team_setup=setup)
+                    fresh = score_song_detailed(team.members, (team.leader,), chart, cfg, deck_power=power)
+                    held = score_song_detailed(
+                        team.members, (team.leader,), chart, cfg, deck_power=power, team_setup=setup
+                    )
                     assert held == fresh
                 assert setup[id(cfg)][0] is cfg and team.leader.id in setup[id(cfg)][3]
             assert len(setup) == 2
@@ -418,9 +483,13 @@ def test_a_team_prepared_once_scores_each_chart_as_a_fresh_call_does():
 def _per_chart_context(charts, team):
     ctx, _teams = _context()
     return dataclasses.replace(
-        ctx, charts=tuple(charts), board_per_chart=True, use_plan_cache=True,
+        ctx,
+        charts=tuple(charts),
+        board_per_chart=True,
+        use_plan_cache=True,
         plan_cache_seed=(team.leader.id, tuple(m.id for m in team.members)),
-        bench_characters={"(no captured board)": []})
+        bench_characters={"(no captured board)": []},
+    )
 
 
 def test_counts_chosen_per_chart_are_scores_of_real_boards_never_below_the_plain_ones():
@@ -442,8 +511,14 @@ def test_counts_chosen_per_chart_are_scores_of_real_boards_never_below_the_plain
         for team in teams:
             ids = (team.leader.id, tuple(m.id for m in team.members))
             run = lambda *sel, **kw: pr.evaluate(  # noqa: E731
-                ctx, pool._by_id, pool._tree_for, pool._budget_for, (*ids, *sel),
-                plan_cache=cache, **kw)
+                ctx,
+                pool._by_id,
+                pool._tree_for,
+                pool._budget_for,
+                (*ids, *sel),  # noqa: B023
+                plan_cache=cache,
+                **kw,
+            )
             plain = run(per_chart=True)
             counted = run(None, pr.COUNTS, per_chart=True)
             assert all(c >= p for p, c in zip(plain, counted))
@@ -454,12 +529,20 @@ def test_counts_chosen_per_chart_are_scores_of_real_boards_never_below_the_plain
             for chart, p, c in zip(charts, plain, counted):
                 cast = SongCast(on_team & frozenset(chart.singers or ()), chart.singer_type)
                 plan, board, assemble = pr._planned_board(
-                    ctx, team, pool._tree_for, pool._budget_for, cache, cast)
+                    ctx, team, pool._tree_for, pool._budget_for, cache, cast
+                )
                 cfg = dataclasses.replace(ctx.cfg, board=board)
-                power_of = lambda cfg_b: overall_power_for(tuple(team.members), team.leader, cfg_b)  # noqa: E731
-                chooser = pr.ChartCounts(team, cfg, plan, assemble, tree_for=pool._tree_for,
-                                         budget_for=pool._budget_for, skilltree=ctx.skilltree,
-                                         power_of=power_of)
+                power_of = lambda cfg_b: overall_power_for(tuple(team.members), team.leader, cfg_b)  # noqa: B023, E731
+                chooser = pr.ChartCounts(
+                    team,
+                    cfg,
+                    plan,
+                    assemble,
+                    tree_for=pool._tree_for,
+                    budget_for=pool._budget_for,
+                    skilltree=ctx.skilltree,
+                    power_of=power_of,
+                )
                 assert chooser.choose(chart)[:2] == (p, c)
                 combo = chooser.choose(chart)[2]
                 if combo is None:
@@ -468,12 +551,13 @@ def test_counts_chosen_per_chart_are_scores_of_real_boards_never_below_the_plain
                 lifted += 1
                 assert c > p
                 cfg_v = chooser.config_at(combo)
-                exact = score_song_detailed(team.members, (team.leader,), chart, cfg_v,
-                                            deck_power=power_of(cfg_v))[0].total_score
+                exact = score_song_detailed(
+                    team.members, (team.leader,), chart, cfg_v, deck_power=power_of(cfg_v)
+                )[0].total_score
                 assert c == exact
-                chosen = pr.plan_with_counts(plan, chooser.axes, combo,
-                                             {x.id: x for x in (team.leader, *team.members)},
-                                             pool._tree_for)
+                chosen = pr.plan_with_counts(
+                    plan, chooser.axes, combo, {x.id: x for x in (team.leader, *team.members)}, pool._tree_for
+                )
                 for card_id, before in plan.per_character.items():
                     after = chosen.per_character[card_id].selected
                     assert after <= before.selected and before.selected - after <= family
@@ -497,12 +581,18 @@ def test_develop_team_with_counts_is_the_board_the_leaf_scores_the_chart_on():
             cache = pr.new_plan_cache(ctx, pool._by_id)
             for team in teams:
                 ids = (team.leader.id, tuple(m.id for m in team.members))
-                leaf = pr.evaluate(ctx, pool._by_id, pool._tree_for, pool._budget_for,
-                                   (*ids, None, pr.COUNTS), plan_cache=cache)
-                plain = pr.evaluate(ctx, pool._by_id, pool._tree_for, pool._budget_for, ids,
-                                    plan_cache=cache)
-                bt = pr.develop_team(ctx, team, pool._tree_for, pool._budget_for, chart,
-                                     plan_cache=cache, refine=pr.COUNTS)
+                leaf = pr.evaluate(
+                    ctx,
+                    pool._by_id,
+                    pool._tree_for,
+                    pool._budget_for,
+                    (*ids, None, pr.COUNTS),
+                    plan_cache=cache,
+                )
+                plain = pr.evaluate(ctx, pool._by_id, pool._tree_for, pool._budget_for, ids, plan_cache=cache)
+                bt = pr.develop_team(
+                    ctx, team, pool._tree_for, pool._budget_for, chart, plan_cache=cache, refine=pr.COUNTS
+                )
                 got = score_team_on_chart(team, chart, dataclasses.replace(ctx.cfg, board=bt.board))
                 assert got.total_score == leaf >= plain
                 moved += leaf > plain
@@ -523,9 +613,12 @@ def test_the_count_axes_are_the_ones_the_level_two_refinement_tries():
         for team in teams:
             bt = pr.develop_team(ctx, team, pool._tree_for, pool._budget_for, chart)
             cards = {c.id: c for c in (team.leader, *team.members)}
-            kw = dict(tree_for=pool._tree_for, budget_for=pool._budget_for,
-                      cooldown_nodes=cooldown_node_ids(ctx.skilltree),
-                      member_ids=frozenset(m.id for m in team.members))
+            kw = dict(
+                tree_for=pool._tree_for,
+                budget_for=pool._budget_for,
+                cooldown_nodes=cooldown_node_ids(ctx.skilltree),
+                member_ids=frozenset(m.id for m in team.members),
+            )
             every = cooldown_count_axes(bt.plan, cards, **kw)
             memo: dict = {}
             drops = cooldown_count_axes(bt.plan, cards, drops_only=True, memo=memo, **kw)

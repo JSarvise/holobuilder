@@ -1,5 +1,6 @@
 """tools/refresh/game_keys.py --find: the seed is the one literal whose MD5 opens the server's
 own Master/Get answer. Driven with a made-up seed, so no game, no keys and no network."""
+
 from __future__ import annotations
 
 import json
@@ -112,7 +113,7 @@ def test_the_cipher_reads_a_seed_that_arrives_after_import(monkeypatch, no_priva
 
 def test_a_refresh_that_reads_the_api_stops_before_anything_runs(monkeypatch, capsys):
     monkeypatch.setattr(game_keys, "grpc_seed", lambda required=True: None)
-    monkeypatch.setattr(A, "in_maintenance", lambda account="main": None)   # no network here
+    monkeypatch.setattr(A, "in_maintenance", lambda account="main": None)  # no network here
 
     def ran(*a, **k):
         raise AssertionError("a step ran")

@@ -23,8 +23,8 @@ free root excepted).
 
 from __future__ import annotations
 
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Collection, Iterable, Mapping
 
 from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, tree_from_mapping
 
@@ -65,17 +65,12 @@ class SelectionVerdict:
 
     @property
     def ok(self) -> bool:
-        return not (
-            self.disconnected or self.unknown or self.level_locked or self.over_budget
-        )
+        return not (self.disconnected or self.unknown or self.level_locked or self.over_budget)
 
     def messages(self) -> tuple[str, ...]:
         out: list[str] = []
         if self.unknown:
-            out.append(
-                f"{len(self.unknown)} node(s) are not in the tree: "
-                + ", ".join(self.unknown[:6])
-            )
+            out.append(f"{len(self.unknown)} node(s) are not in the tree: " + ", ".join(self.unknown[:6]))
         if self.disconnected:
             out.append(
                 f"{len(self.disconnected)} node(s) have no path to {ROOT_NODE}: "
@@ -84,10 +79,7 @@ class SelectionVerdict:
             )
         if self.level_locked:
             worst = max(level for _node, level in self.level_locked)
-            out.append(
-                f"{len(self.level_locked)} node(s) need a higher account level "
-                f"(up to {worst})"
-            )
+            out.append(f"{len(self.level_locked)} node(s) need a higher account level (up to {worst})")
         if self.over_budget and self.budget is not None:
             out.append(
                 f"{self.spent} points spent against a budget of {self.budget} "
@@ -115,9 +107,7 @@ class PlacementVerdict:
 
     @property
     def ok(self) -> bool:
-        return not (
-            self.reused or self.not_a_socket or self.socket_not_owned
-        )
+        return not (self.reused or self.not_a_socket or self.socket_not_owned)
 
     @property
     def problems(self) -> tuple[str, ...]:
@@ -142,8 +132,7 @@ class PlacementVerdict:
         Refusing it would be inventing a rule; staying silent would let the
         user think a slot was working."""
         return tuple(
-            f"{holomem}: {card} in {slot} grants nothing — it has no Connect "
-            f"effect (only rarity 4 and 5 do)"
+            f"{holomem}: {card} in {slot} grants nothing — it has no Connect effect (only rarity 4 and 5 do)"
             for holomem, slot, card in self.without_effect
         )
 
@@ -230,9 +219,7 @@ def check_placements(
                 without_effect.append((holomem, slot, card))
             where.setdefault(card, []).append(f"{holomem}/{slot}")
 
-    reused = tuple(
-        (card, tuple(seats)) for card, seats in sorted(where.items()) if len(seats) > 1
-    )
+    reused = tuple((card, tuple(seats)) for card, seats in sorted(where.items()) if len(seats) > 1)
     return PlacementVerdict(
         reused=reused,
         not_a_socket=tuple(not_a_socket),

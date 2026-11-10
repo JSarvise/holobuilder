@@ -21,7 +21,8 @@ import datetime
 import json
 import os
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from hbuilder import game_day
 from hbweb import config
@@ -34,12 +35,12 @@ from hbweb import config
 # exported beside the maps; `site-*.jpg` are
 # the Free Chat sites' photos (the game's facility thumbnails) and `icon-*.png` their icons.
 PARK_IMAGE_NAME_RE = re.compile(
-    r"^((area-[a-z0-9-]+|chest|symbol|icon-[a-z_]+)\.png|site-area-[a-z0-9-]+\.jpg)$")
+    r"^((area-[a-z0-9-]+|chest|symbol|icon-[a-z_]+)\.png|site-area-[a-z0-9-]+\.jpg)$"
+)
 
 # The game's per-character Free Chat achievement: its progress is the number of distinct Free
 # Chats read with that character in the cast, capped at the last threshold.
-FREE_CHAT_MISSION = re.compile(
-    r"^mission-achievement-(chr-\d+)-absolute_park_talk_free_unique_count$")
+FREE_CHAT_MISSION = re.compile(r"^mission-achievement-(chr-\d+)-absolute_park_talk_free_unique_count$")
 FREE_CHAT_COUNTER_CAP = 10
 
 
@@ -80,8 +81,9 @@ def resolve_spot(
     return area, spot, px
 
 
-def _join_area(area_id: str, ainfo: Mapping, live: Mapping | None, export: Mapping,
-               opened: set) -> dict[str, Any]:
+def _join_area(
+    area_id: str, ainfo: Mapping, live: Mapping | None, export: Mapping, opened: set
+) -> dict[str, Any]:
     """One area of the join: its picked symbols placed on the map (or reported in
     `unresolved`), its candidate spots and its fixed chests."""
     mapping_to_spot = export.get("mapping_to_spot") or {}
@@ -97,32 +99,34 @@ def _join_area(area_id: str, ainfo: Mapping, live: Mapping | None, export: Mappi
     for mapping in picked_ids:
         m_area, spot, px = resolve_spot(mapping, mapping_to_spot, spots)
         if px is None:
-            unresolved.append({
-                "mapping": mapping,
-                "reason": (
-                    "no entry in the export's mapping_to_spot"
-                    if m_area is None
-                    else f"spot {spot!r} has no pixel in {area_id}"
-                ),
-            })
+            unresolved.append(
+                {
+                    "mapping": mapping,
+                    "reason": (
+                        "no entry in the export's mapping_to_spot"
+                        if m_area is None
+                        else f"spot {spot!r} has no pixel in {area_id}"
+                    ),
+                }
+            )
             continue
-        picked_out.append({
-            "mapping": mapping,
-            "spot": spot,
-            "x": px.get("x"),
-            "y": px.get("y"),
-            # `collected` is per-symbol and comes from THIS area's
-            # collected list, so it is a strict subset of `picked`.
-            "collected": mapping in collected_ids,
-        })
+        picked_out.append(
+            {
+                "mapping": mapping,
+                "spot": spot,
+                "x": px.get("x"),
+                "y": px.get("y"),
+                # `collected` is per-symbol and comes from THIS area's
+                # collected list, so it is a strict subset of `picked`.
+                "collected": mapping in collected_ids,
+            }
+        )
 
     candidates_out: list[dict[str, Any]] = []
     for mapping in (export.get("candidates") or {}).get(area_id) or []:
         _a, spot, px = resolve_spot(mapping, mapping_to_spot, spots)
         if px is not None:
-            candidates_out.append(
-                {"spot": spot, "x": px.get("x"), "y": px.get("y")}
-            )
+            candidates_out.append({"spot": spot, "x": px.get("x"), "y": px.get("y")})
 
     treasures_out: list[dict[str, Any]] = []
     for tid, tinfo in sorted((export.get("treasures") or {}).items()):
@@ -130,13 +134,15 @@ def _join_area(area_id: str, ainfo: Mapping, live: Mapping | None, export: Mappi
             continue
         spot = (tinfo or {}).get("spot")
         px = spots.get(spot) if spot else None
-        treasures_out.append({
-            "id": tid,
-            "spot": spot,
-            "x": (px or {}).get("x"),
-            "y": (px or {}).get("y"),
-            "opened": tid in opened,
-        })
+        treasures_out.append(
+            {
+                "id": tid,
+                "spot": spot,
+                "x": (px or {}).get("x"),
+                "y": (px or {}).get("y"),
+                "opened": tid in opened,
+            }
+        )
 
     return {
         "id": area_id,
@@ -176,16 +182,16 @@ def join_park(export: Mapping[str, Any], state: Mapping[str, Any]) -> dict:
     random_state = state.get("random") or {}
     opened = set(state.get("opened_treasures") or [])
 
-    areas_out = [_join_area(area_id, export_areas[area_id] or {}, random_state.get(area_id),
-                            export, opened)
-                 for area_id in sorted(export_areas)]
+    areas_out = [
+        _join_area(area_id, export_areas[area_id] or {}, random_state.get(area_id), export, opened)
+        for area_id in sorted(export_areas)
+    ]
     unresolved_total = sum(len(a["unresolved"]) for a in areas_out)
 
     # The three chests in areas with no map (see docstring) -- counted so a
     # treasure list of 39 is explained rather than mysteriously short.
     unplaceable_treasures = sum(
-        1 for t in all_treasures.values()
-        if (t or {}).get("area") not in export_areas
+        1 for t in all_treasures.values() if (t or {}).get("area") not in export_areas
     )
     # A live area the export does not know about must not vanish silently.
     unmapped_areas = sorted(a for a in random_state if a not in export_areas)
@@ -211,8 +217,7 @@ def free_chat_counters(snapshot: Mapping | None) -> dict[str, int]:
     return out
 
 
-def join_free_chat(fc: Mapping | None, log: Mapping | None,
-                   counters: Mapping[str, int]) -> dict[str, Any]:
+def join_free_chat(fc: Mapping | None, log: Mapping | None, counters: Mapping[str, int]) -> dict[str, Any]:
     """The exported Free Chat catalogue joined to the account's read log.
 
     Status per chat: `read` once any response carried read marks on it (marks are permanent),
@@ -220,19 +225,31 @@ def join_free_chat(fc: Mapping | None, log: Mapping | None,
     response has carried it yet (each login shows only the picked sites of the area the
     account stands in, so a site can go unobserved for a while)."""
     if not fc or not fc.get("chats"):
-        return {"available": False, "reason": (
-            f"the Free Chat catalogue is not in {config.PARK_SPOTS_PATH.name}: rebuild it "
-            "with tools/refresh/park_export.py")}
+        return {
+            "available": False,
+            "reason": (
+                f"the Free Chat catalogue is not in {config.PARK_SPOTS_PATH.name}: rebuild it "
+                "with tools/refresh/park_export.py"
+            ),
+        }
     seen = (log or {}).get("chats") or {}
     chats = []
     for cid, c in fc["chats"].items():
         s = seen.get(cid) or {}
         status = "read" if s.get("read") else "pending" if s.get("seen") else "unseen"
-        chats.append({
-            "id": cid, "site": c["site"], "x": c["x"], "y": c["y"], "cast": c["cast"],
-            "conditions": [fc.get("conditions", {}).get(k, k) for k in c.get("conditions", [])],
-            "status": status, "seen": s.get("seen"), "read_seen": s.get("read_seen"),
-        })
+        chats.append(
+            {
+                "id": cid,
+                "site": c["site"],
+                "x": c["x"],
+                "y": c["y"],
+                "cast": c["cast"],
+                "conditions": [fc.get("conditions", {}).get(k, k) for k in c.get("conditions", [])],
+                "status": status,
+                "seen": s.get("seen"),
+                "read_seen": s.get("read_seen"),
+            }
+        )
 
     def tally(rows):
         out = {"total": len(rows), "read": 0, "pending": 0, "unseen": 0}
@@ -243,24 +260,35 @@ def join_free_chat(fc: Mapping | None, log: Mapping | None,
     sites = []
     for fid, s in fc.get("sites", {}).items():
         mine = [c for c in chats if c["site"] == fid]
-        sites.append({
-            "id": fid, "name": s["name"], "map": s["map"], "x": s["x"], "y": s["y"],
-            "inside": bool(s.get("inside")),
-            "photo": f"/park/{s['photo'][len('park-'):]}" if s.get("photo") else None,
-            "icon": f"/park/{s['icon_image'][len('park-'):]}" if s.get("icon_image") else None,
-            **tally(mine),
-        })
+        sites.append(
+            {
+                "id": fid,
+                "name": s["name"],
+                "map": s["map"],
+                "x": s["x"],
+                "y": s["y"],
+                "inside": bool(s.get("inside")),
+                "photo": f"/park/{s['photo'][len('park-') :]}" if s.get("photo") else None,
+                "icon": f"/park/{s['icon_image'][len('park-') :]}" if s.get("icon_image") else None,
+                **tally(mine),
+            }
+        )
     sites.sort(key=lambda s: (-(s["pending"] + s["unseen"]), s["name"]))
     characters = []
     for cid, names in fc.get("characters", {}).items():
         mine = [c for c in chats if cid in c["cast"]]
         counter = counters.get(cid)
-        characters.append({
-            "id": cid, "name": names.get("name"), "short": names.get("short"), **tally(mine),
-            # the game's own count; None for a character the game gives no achievement
-            "game_read": counter,
-            "game_capped": counter is not None and counter >= FREE_CHAT_COUNTER_CAP,
-        })
+        characters.append(
+            {
+                "id": cid,
+                "name": names.get("name"),
+                "short": names.get("short"),
+                **tally(mine),
+                # the game's own count; None for a character the game gives no achievement
+                "game_read": counter,
+                "game_capped": counter is not None and counter >= FREE_CHAT_COUNTER_CAP,
+            }
+        )
     obs = (log or {}).get("observations") or []
     return {
         "available": True,
@@ -278,13 +306,15 @@ def join_free_chat(fc: Mapping | None, log: Mapping | None,
 def park_free_chat() -> dict[str, Any]:
     """`join_free_chat` of what is on disk (export, log, account snapshot)."""
     export = park_export() or {}
-    return join_free_chat(export.get("free_chat"),
-                          config.read_json(config.PARK_FREE_CHAT_LOG_PATH),
-                          free_chat_counters(config.read_json(config.SNAPSHOT_PATH)))
+    return join_free_chat(
+        export.get("free_chat"),
+        config.read_json(config.PARK_FREE_CHAT_LOG_PATH),
+        free_chat_counters(config.read_json(config.SNAPSHOT_PATH)),
+    )
 
 
 def _now() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
+    return datetime.datetime.now(datetime.UTC)
 
 
 SCAN_LAST_KEYS = ("finished_at", "counted", "original", "areas", "skipped", "restored", "stopped")
@@ -294,11 +324,12 @@ def scan_status(now: datetime.datetime | None = None) -> dict[str, Any]:
     """What the page needs for "Scan all areas": whether it is on, whether this game day's
     scan is used (a scan counts once it entered an area, as `park_scan` rules), when the next
     one opens, and what the last one did (`park_scan_last.json`)."""
-    now = now or datetime.datetime.now(datetime.timezone.utc)
+    now = now or datetime.datetime.now(datetime.UTC)
     hour = game_day.reset_hour()
     last = config.read_json(config.PARK_SCAN_LAST_PATH)
-    done = bool(last and last.get("counted")
-                and last.get("game_day_start") == game_day.day_start_ms(now, hour))
+    done = bool(
+        last and last.get("counted") and last.get("game_day_start") == game_day.day_start_ms(now, hour)
+    )
     return {
         "enabled": os.environ.get(config.PARK_SCAN_ENV) == "1",
         "done_today": done,
@@ -312,26 +343,38 @@ def serve_park(h) -> None:
     The pick is the last account refresh's (`park_saved_state`); this route never logs in."""
     export = park_export()
     if export is None:
-        h.reply_json(200, {
-            "available": False,
-            "reason": (
-                f"{config.PARK_SPOTS_PATH.name} is not on disk (it lives under "
-                f"gitignored dumps/). Build it with "
-                f"tools/refresh/park_export.py."
-            ),
-            "areas": [],
-            "scan": scan_status(),
-            "game_day_start": game_day.day_start_ms(_now()),
-        })
+        h.reply_json(
+            200,
+            {
+                "available": False,
+                "reason": (
+                    f"{config.PARK_SPOTS_PATH.name} is not on disk (it lives under "
+                    f"gitignored dumps/). Build it with "
+                    f"tools/refresh/park_export.py."
+                ),
+                "areas": [],
+                "scan": scan_status(),
+                "game_day_start": game_day.day_start_ms(_now()),
+            },
+        )
         return
     state = park_saved_state()
     if state is None:
-        h.reply_json(200, {"available": False, "reason": (
-            "today's park pick is read by the account refresh: press Refresh "
-            f"(it writes {config.PARK_STATE_PATH.name})."),
-            # the maps still travel: the Free Chat section draws on them from its own log
-            "areas": join_park(export, {})["areas"], "free_chat": park_free_chat(),
-            "scan": scan_status(), "game_day_start": game_day.day_start_ms(_now())})
+        h.reply_json(
+            200,
+            {
+                "available": False,
+                "reason": (
+                    "today's park pick is read by the account refresh: press Refresh "
+                    f"(it writes {config.PARK_STATE_PATH.name})."
+                ),
+                # the maps still travel: the Free Chat section draws on them from its own log
+                "areas": join_park(export, {})["areas"],
+                "free_chat": park_free_chat(),
+                "scan": scan_status(),
+                "game_day_start": game_day.day_start_ms(_now()),
+            },
+        )
         return
     out = join_park(export, state)
     out["captured_at"] = state.get("_captured_at")
@@ -354,10 +397,7 @@ def serve_park_image(h, name: str) -> None:
     # `park-` prefix: the URL carries the area id (`area-a01.png`), the file
     # is `park-area-a01.png` -- the export's own filename convention.
     path = config.PARK_EXPORT_DIR / f"park-{name}"
-    if (
-        not path.is_file()
-        or config.PARK_EXPORT_DIR.resolve() not in path.resolve().parents
-    ):
+    if not path.is_file() or config.PARK_EXPORT_DIR.resolve() not in path.resolve().parents:
         h.reply(404, b"no park image", "text/plain; charset=utf-8")
         return
     ctype = "image/jpeg" if name.endswith(".jpg") else "image/png"

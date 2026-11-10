@@ -8,16 +8,15 @@ and of plan 01-04's fixture expansion.
 from __future__ import annotations
 
 import pytest
+from support.team_reference import effective_skill_instances
 
 from hbuilder.domain.card import Card, SkillSlot, Stats
 from hbuilder.domain.team import (
     MEMBER_COUNT,
-    TeamError,
     Team,
+    TeamError,
     build_team,
 )
-
-from support.team_reference import effective_skill_instances
 
 _STATS = Stats(performance=100, technique=100, sense=100)
 
@@ -203,9 +202,7 @@ def test_leader_contributes_its_outfit_skill_and_nothing_else():
     members = tuple(_card(f"member_{i:02d}") for i in range(1, MEMBER_COUNT + 1))
     team = Team(leader=leader, members=members)
 
-    leader_instances = [
-        i for i in effective_skill_instances(team) if i.card_id == leader.id
-    ]
+    leader_instances = [i for i in effective_skill_instances(team) if i.card_id == leader.id]
 
     assert len(leader_instances) == 1, "the leader's own SP/A/P must not count"
     assert leader_instances[0].source == "costume"

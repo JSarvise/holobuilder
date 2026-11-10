@@ -19,14 +19,15 @@ Web/recon side: this module needs the compiled screen and takes the exact
 scorer as a function, so it runs over a `RefinePool`, a worker pool, or (in the
 tests) an oracle table.
 """
+
 from __future__ import annotations
 
 import math
 import random
 import sys
 import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Callable, Sequence
 
 _KERNEL = Path(__file__).resolve().parent / "kernel"
 if str(_KERNEL) not in sys.path:
@@ -37,8 +38,9 @@ import surrogate  # noqa: E402
 ScoreSets = Callable[[list[tuple[int, ...]]], Sequence[float]]
 
 
-def random_legal_sets(holomems: Sequence[str], count: int, rng: random.Random,
-                      exclude=()) -> list[tuple[int, ...]]:
+def random_legal_sets(
+    holomems: Sequence[str], count: int, rng: random.Random, exclude=()
+) -> list[tuple[int, ...]]:
     """`count` distinct legal sets (ascending pool indices, five different
     holomems), uniform over the legal sets, none of them in `exclude`."""
     n = len(holomems)
@@ -48,7 +50,7 @@ def random_legal_sets(holomems: Sequence[str], count: int, rng: random.Random,
     while len(out) < count:
         attempts += 1
         if attempts > 200 * count + 1000:
-            break                      # the pool has fewer legal sets than asked for
+            break  # the pool has fewer legal sets than asked for
         pick = tuple(sorted(rng.sample(range(n), 5)))
         if pick in seen or len({holomems[i] for i in pick}) != 5:
             continue
@@ -138,7 +140,7 @@ def search(
                 continue
             expanded.add(members)
             for position in range(5):
-                rest = members[:position] + members[position + 1:]
+                rest = members[:position] + members[position + 1 :]
                 names = {holomems[i] for i in rest}
                 for card in range(count):
                     if card in members or holomems[card] in names:
@@ -153,8 +155,12 @@ def search(
 
     first = [tuple(s) for s in dict.fromkeys(tuple(sorted(s)) for s in seeds)]
     for s in first:
-        if (len(s) != 5 or len(set(s)) != 5 or not all(isinstance(i, int) and 0 <= i < count for i in s)
-                or len({holomems[i] for i in s}) != 5):
+        if (
+            len(s) != 5
+            or len(set(s)) != 5
+            or not all(isinstance(i, int) and 0 <= i < count for i in s)
+            or len({holomems[i] for i in s}) != 5
+        ):
             raise ValueError(f"seed {s} is not a legal member set of this {count}-card pool")
     # The random sample is drawn in full whatever the seeds: a first fit on
     # seeds alone would be a fit on one corner of the space.
@@ -165,9 +171,17 @@ def search(
     legal = None
     leaders = top(stable_top)
     unchanged = 0
-    record = {"round": 0, "exact_evals": len(scored), "best": leaders[0][0] if leaders else None,
-              "exact_seconds": exact_seconds, "fit_seconds": 0.0, "scan_seconds": 0.0,
-              "fit_mae_log": None, "top_changed": True, "neighbour_sets": neighbour_sets}
+    record = {
+        "round": 0,
+        "exact_evals": len(scored),
+        "best": leaders[0][0] if leaders else None,
+        "exact_seconds": exact_seconds,
+        "fit_seconds": 0.0,
+        "scan_seconds": 0.0,
+        "fit_mae_log": None,
+        "top_changed": True,
+        "neighbour_sets": neighbour_sets,
+    }
     rounds.append(record)
     if on_round:
         on_round(record)
@@ -186,8 +200,7 @@ def search(
         mae = screen.fit(fit_sets, [math.log(scored[s]) for s in fit_sets])
         fit_seconds = time.perf_counter() - t0
         t0 = time.perf_counter()
-        wide, _predictions, legal = screen.best(max(step, net_window) if net > 0 else step,
-                                                scored.keys())
+        wide, _predictions, legal = screen.best(max(step, net_window) if net > 0 else step, scored.keys())
         proposed = wide[:step]
         net_sets = 0
         if net > 0:
@@ -212,10 +225,18 @@ def search(
         changed = [s for _v, s in now] != [s for _v, s in leaders]
         leaders = now
         unchanged = 0 if changed else unchanged + 1
-        record = {"round": number, "exact_evals": len(scored), "best": leaders[0][0],
-                  "exact_seconds": exact_seconds, "fit_seconds": fit_seconds,
-                  "scan_seconds": scan_seconds, "fit_mae_log": mae, "top_changed": changed,
-                  "neighbour_sets": neighbour_sets, "net_sets": net_sets}
+        record = {
+            "round": number,
+            "exact_evals": len(scored),
+            "best": leaders[0][0],
+            "exact_seconds": exact_seconds,
+            "fit_seconds": fit_seconds,
+            "scan_seconds": scan_seconds,
+            "fit_mae_log": mae,
+            "top_changed": changed,
+            "neighbour_sets": neighbour_sets,
+            "net_sets": net_sets,
+        }
         rounds.append(record)
         if on_round:
             on_round(record)
@@ -226,21 +247,29 @@ def search(
         "ranking": top(len(scored)),
         "rounds": rounds,
         "stats": {
-            "stop": stop, "exact_evals": len(scored), "legal_sets": legal,
+            "stop": stop,
+            "exact_evals": len(scored),
+            "legal_sets": legal,
             "scored_fraction": (len(scored) / legal) if legal else None,
             "seconds": time.perf_counter() - started,
             "exact_seconds": sum(r["exact_seconds"] for r in rounds),
             "screen_seconds": sum(r["fit_seconds"] + r["scan_seconds"] for r in rounds),
-            "initial": initial, "step": step, "seed": seed, "neighbours": neighbours, "net": net,
+            "initial": initial,
+            "step": step,
+            "seed": seed,
+            "neighbours": neighbours,
+            "net": net,
             "net_evals": sum(r.get("net_sets", 0) for r in rounds),
             "neighbour_evals": sum(r["neighbour_sets"] for r in rounds),
         },
     }
 
 
-def objective_scorer(score: Callable[[object, list[tuple[int, ...]]], Sequence[float]],
-                     bonus: Sequence[tuple[int, int]], objective: str,
-                     ) -> Callable[[object, list[tuple[int, ...]]], list[float]]:
+def objective_scorer(
+    score: Callable[[object, list[tuple[int, ...]]], Sequence[float]],
+    bonus: Sequence[tuple[int, int]],
+    objective: str,
+) -> Callable[[object, list[tuple[int, ...]]], list[float]]:
     """`score(leader, sets)` turned into the event objective, so the whole search —
     screen fit, proposals, neighbours, leader triage — ranks by it instead of
     re-sorting a list found by score. `bonus[i]` = pool card i's
@@ -253,10 +282,15 @@ def objective_scorer(score: Callable[[object, list[tuple[int, ...]]], Sequence[f
     def apply(values, sets):
         if objective == "score":
             return [float(v) for v in values]
-        return [event_objective(value, objective=objective,
-                                live_permil=sum(bonus[i][0] for i in members),
-                                song_permil=max(bonus[i][1] for i in members))
-                for value, members in zip(values, sets)]
+        return [
+            event_objective(
+                value,
+                objective=objective,
+                live_permil=sum(bonus[i][0] for i in members),
+                song_permil=max(bonus[i][1] for i in members),
+            )
+            for value, members in zip(values, sets)
+        ]
 
     def wrapped(leader, sets):
         sets = list(sets)
@@ -267,6 +301,7 @@ def objective_scorer(score: Callable[[object, list[tuple[int, ...]]], Sequence[f
         def wrapped_many(groups):
             groups = [(leader, list(sets)) for leader, sets in groups]
             return [apply(values, sets) for (_l, sets), values in zip(groups, many(groups))]
+
         wrapped.many = wrapped_many
     return wrapped
 
@@ -371,16 +406,24 @@ def search_song(
         sets = list(chosen)
         scored = sorted(zip(take(leader, sets), sets), key=lambda r: (-r[0], r[1]))
         triage_lists[position] = scored
-        rows.append({"position": position, "leader": leader, "status": "triage",
-                     "best": scored[0][0], "members": scored[0][1],
-                     "triage_best": scored[0][0], "triage_sets": len(sets), "exact_evals": len(sets),
-                     # the short list's own order: the next sets under this leader
-                     # (a searched row replaces it with its search ranking)
-                     "ranking": scored[:100]})
+        rows.append(
+            {
+                "position": position,
+                "leader": leader,
+                "status": "triage",
+                "best": scored[0][0],
+                "members": scored[0][1],
+                "triage_best": scored[0][0],
+                "triage_sets": len(sets),
+                "exact_evals": len(sets),
+                # the short list's own order: the next sets under this leader
+                # (a searched row replaces it with its search ranking)
+                "ranking": scored[:100],
+            }
+        )
     best_triage = max(r["best"] for r in rows)
     forced = {id(leader) for leader in always}
-    wanted = [r for r in rows
-              if id(r["leader"]) in forced or r["best"] >= (1.0 - margin) * best_triage]
+    wanted = [r for r in rows if id(r["leader"]) in forced or r["best"] >= (1.0 - margin) * best_triage]
     wanted.sort(key=lambda r: (id(r["leader"]) not in forced, -r["best"]))
     within_margin = len(wanted)
     keep = max(max_searched, sum(id(r["leader"]) in forced for r in wanted))
@@ -391,13 +434,22 @@ def search_song(
             skipped += 1
             continue
         leader = row["leader"]
-        result = search(cards, lambda sets, leader=leader: take(leader, sets), seed=seed,
-                        seeds=[s for _v, s in triage_lists[row["position"]][:triage_top]],
-                        **search_options)
+        result = search(
+            cards,
+            lambda sets, leader=leader: take(leader, sets),
+            seed=seed,
+            seeds=[s for _v, s in triage_lists[row["position"]][:triage_top]],
+            **search_options,
+        )
         best, members = result["ranking"][0]
-        row.update(status="searched", best=best, members=members,
-                   exact_evals=row["exact_evals"] + result["stats"]["exact_evals"],
-                   stop=result["stats"]["stop"], ranking=result["ranking"][:100])
+        row.update(
+            status="searched",
+            best=best,
+            members=members,
+            exact_evals=row["exact_evals"] + result["stats"]["exact_evals"],
+            stop=result["stats"]["stop"],
+            ranking=result["ranking"][:100],
+        )
         if on_leader:
             on_leader(row)
     rows.sort(key=lambda r: (-r["best"], r["position"]))
@@ -405,10 +457,16 @@ def search_song(
         "rows": rows,
         "base": base["stats"],
         "stats": {
-            "leaders": len(rows), "searched": sum(r["status"] == "searched" for r in rows),
-            "not_reached": skipped, "exact_evals": evals, "margin": margin,
-            "within_margin": within_margin, "max_searched": max_searched,
-            "triage_top": triage_top, "tier": tier, "legal_sets": base["stats"]["legal_sets"],
+            "leaders": len(rows),
+            "searched": sum(r["status"] == "searched" for r in rows),
+            "not_reached": skipped,
+            "exact_evals": evals,
+            "margin": margin,
+            "within_margin": within_margin,
+            "max_searched": max_searched,
+            "triage_top": triage_top,
+            "tier": tier,
+            "legal_sets": base["stats"]["legal_sets"],
             "seconds": time.perf_counter() - started,
         },
     }
@@ -429,9 +487,9 @@ def chart_sample(charts: Sequence, count: int = 16) -> list:
     for chart in charts:
         kinds.setdefault(getattr(chart, "singer_type", None) or None, []).append(chart)
     quota = {kind: max(1, round(count * len(group) / len(charts))) for kind, group in kinds.items()}
-    while sum(quota.values()) > count:                       # trim the largest
+    while sum(quota.values()) > count:  # trim the largest
         quota[max(quota, key=lambda k: (quota[k], len(kinds[k])))] -= 1
-    while sum(quota.values()) < count:                       # top up the most under-sampled
+    while sum(quota.values()) < count:  # top up the most under-sampled
         quota[max(quota, key=lambda k: len(kinds[k]) / quota[k])] += 1
     picked = []
     for kind in sorted(kinds, key=str):
@@ -512,8 +570,9 @@ def search_general(
     [(full score, leader, set), ...] over all candidates, "stats": {...}}`."""
     started = time.perf_counter()
     cards = list(cards)
-    found = search_song(cards, leaders, score_sample, base_leader=base_leader,
-                        gate_of=gate_of, **song_options)
+    found = search_song(
+        cards, leaders, score_sample, base_leader=base_leader, gate_of=gate_of, **song_options
+    )
     position = {id(leader): k for k, leader in enumerate(leaders)}
     candidates: dict[int, dict[tuple[int, ...], float | None]] = {}
     for row in found["rows"]:
@@ -526,7 +585,7 @@ def search_general(
     for leader, members in extra:
         candidates.setdefault(position[id(leader)], {}).setdefault(tuple(sorted(members)), None)
     ranking = []
-    pairs = []                                  # (sample score, full score) where both exist
+    pairs = []  # (sample score, full score) where both exist
     full_evals = 0
     for k, sets in candidates.items():
         order = list(sets)
@@ -543,25 +602,39 @@ def search_general(
         if k in seen:
             continue
         seen.add(k)
-        rows.append({"position": k, "leader": leaders[k], "best": value, "members": members,
-                     "status": status[k], "candidates": len(candidates[k])})
+        rows.append(
+            {
+                "position": k,
+                "leader": leaders[k],
+                "best": value,
+                "members": members,
+                "status": status[k],
+                "candidates": len(candidates[k]),
+            }
+        )
     by_sample = sorted(pairs, key=lambda r: -r[0])
     best_full = max(v for _s, v in pairs) if pairs else None
     agreement = {
         "candidates": len(pairs),
         # where the full objective's best candidate sat in the SAMPLE's order
         "rank_of_full_best_in_sample_order": (
-            next(i for i, (_s, v) in enumerate(by_sample) if v == best_full) + 1 if pairs else None),
+            next(i for i, (_s, v) in enumerate(by_sample) if v == best_full) + 1 if pairs else None
+        ),
         "sample_best_over_full_best": (by_sample[0][1] / best_full) if pairs else None,
     }
     return {
         "rows": rows,
         "ranking": [(value, leaders[k], members) for value, k, members in ranking],
         "stats": {
-            "leaders": len(rows), "searched": found["stats"]["searched"],
-            "sample_exact_evals": found["stats"]["exact_evals"], "full_evals": full_evals,
+            "leaders": len(rows),
+            "searched": found["stats"]["searched"],
+            "sample_exact_evals": found["stats"]["exact_evals"],
+            "full_evals": full_evals,
             "sample_seconds": found["stats"]["seconds"],
-            "seconds": time.perf_counter() - started, "keep": keep, "extra": len(extra),
-            "sample_agreement": agreement, "legal_sets": found["stats"]["legal_sets"],
+            "seconds": time.perf_counter() - started,
+            "keep": keep,
+            "extra": len(extra),
+            "sample_agreement": agreement,
+            "legal_sets": found["stats"]["legal_sets"],
         },
     }

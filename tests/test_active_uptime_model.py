@@ -14,13 +14,14 @@ The assertions pin the two readings against each other with `!=`, not a
 direction-only check, so a silent revert to one value cannot pass under the
 other.
 """
+
 from __future__ import annotations
 
 import dataclasses
 
-from hbuilder.domain.scoring import _active_occupancy, _finite_window_uptime
-
 from support.builders import make_resolved, make_scoring_config, make_skill
+
+from hbuilder.domain.scoring import _active_occupancy, _finite_window_uptime
 
 # A long-cooldown active where the dead zone bites: interval (30 s) well above
 # duration (8 s), so finite-window < steady-state by more than a rounding wobble.
@@ -31,9 +32,7 @@ _INTERVAL = 30.0
 def _occ(model: str) -> float:
     cfg = make_scoring_config(probability_tiers={"t": 1.0})
     cfg = dataclasses.replace(cfg, active_uptime_model=model)
-    skill = make_skill(
-        "ACTIVE", duration=_DURATION, interval=_INTERVAL, probability_tier="t"
-    )
+    skill = make_skill("ACTIVE", duration=_DURATION, interval=_INTERVAL, probability_tier="t")
     resolved = make_resolved("card-x", "ACTIVE", skill, member="Holomem X")
     return _active_occupancy(resolved, cfg, team_rate_up=0.0)
 
@@ -64,12 +63,8 @@ def test_steady_exceeds_finite_by_the_dead_zone():
 def test_an_unknown_model_falls_back_to_finite_not_a_crash():
     cfg = make_scoring_config(probability_tiers={"t": 1.0})
     cfg = dataclasses.replace(cfg, active_uptime_model="not-a-real-model")
-    skill = make_skill(
-        "ACTIVE", duration=_DURATION, interval=_INTERVAL, probability_tier="t"
-    )
+    skill = make_skill("ACTIVE", duration=_DURATION, interval=_INTERVAL, probability_tier="t")
     resolved = make_resolved("card-x", "ACTIVE", skill, member="Holomem X")
     # Only the exact string "steady" switches behaviour; anything else is the
     # safe in-run default, never an exception.
-    assert _active_occupancy(resolved, cfg, 0.0) == _finite_window_uptime(
-        _DURATION, _INTERVAL
-    )
+    assert _active_occupancy(resolved, cfg, 0.0) == _finite_window_uptime(_DURATION, _INTERVAL)

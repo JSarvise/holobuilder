@@ -1,4 +1,5 @@
 """tracker_health.py: the Event page warns when the tracker stops reading during an open event."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,10 +7,16 @@ from pathlib import Path
 import tracker_health as th
 
 NOW = 1_793_900_000.0
-OPEN = {"events": [{"event_id": "e", "starts_at": "2026-11-01T00:00:00+00:00",
-                    "ends_at": "2026-12-01T00:00:00+00:00"}]}
-CLOSED = {"events": [{"event_id": "e", "starts_at": "2026-10-01T00:00:00+00:00",
-                      "ends_at": "2026-10-10T00:00:00+00:00"}]}
+OPEN = {
+    "events": [
+        {"event_id": "e", "starts_at": "2026-11-01T00:00:00+00:00", "ends_at": "2026-12-01T00:00:00+00:00"}
+    ]
+}
+CLOSED = {
+    "events": [
+        {"event_id": "e", "starts_at": "2026-10-01T00:00:00+00:00", "ends_at": "2026-10-10T00:00:00+00:00"}
+    ]
+}
 
 
 def _status(**regions):
@@ -25,9 +32,11 @@ def test_open_comes_from_the_listed_events_or_the_trackers_own_chapters():
 
 
 def test_a_region_silent_past_30_minutes_is_stale_with_its_error():
-    st = _status(us={"borders_at": NOW - 300, "error": None},
-                 jp={"borders_at": NOW - 31 * 60, "error": "OUTDATED_APP"},
-                 **{"as": {"borders_at": None, "error": "boom"}})
+    st = _status(
+        us={"borders_at": NOW - 300, "error": None},
+        jp={"borders_at": NOW - 31 * 60, "error": "OUTDATED_APP"},
+        **{"as": {"borders_at": None, "error": "boom"}},
+    )
     got = {r["region"]: r for r in th.stale_regions(st, NOW)}
     assert set(got) == {"jp", "as"}
     assert got["jp"]["minutes"] == 31 and got["jp"]["error"] == "OUTDATED_APP"

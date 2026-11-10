@@ -28,12 +28,18 @@ CONDITIONS, matching every other network tool here:
   python master_refetch.py <Table> [<Table> ...]
   python master_refetch.py --check <Table>     # open it, no network
 """
-import json, os, shutil, sys, time, urllib.request
 
+import json
+import os
+import shutil
+import sys
+import time
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 DUMPS = str(paths.DUMPS)
 OUT = os.path.join(DUMPS, "master_refetched")
@@ -54,6 +60,7 @@ def path_for(table):
 def opens(path, seed_hex):
     """True if SQLCipher can decrypt the file under this seed -- a per-page hmac check."""
     from master_db import MasterDB
+
     tmp = os.path.join(DUMPS, f"_verify_{os.path.basename(path)}")
     shutil.copy(path, tmp)
     db = None
@@ -119,7 +126,7 @@ def fetch(tables):
         with open(dst, "wb") as fh:
             fh.write(body)
         if not opens(dst, e["seed_hex"]):
-            os.remove(dst)          # never leave an undecryptable body sitting on disk
+            os.remove(dst)  # never leave an undecryptable body sitting on disk
             print(f"  WILL NOT DECRYPT  {table}: discarded")
             bad += 1
             continue
@@ -132,6 +139,7 @@ def fetch(tables):
 def check(table):
     """Open the re-downloaded copy with the index seed and report what is inside."""
     from master_db import MasterDB, decode_record
+
     idx = index()
     p = path_for(table)
     if not os.path.exists(p):
@@ -144,19 +152,19 @@ def check(table):
     shutil.copy(p, tmp)
     try:
         db = MasterDB(tmp, idx[table]["seed_hex"])
-        names = [next(iter(r.values())) for r in
-                 db.query("SELECT name FROM sqlite_master WHERE type='table'")]
+        names = [
+            next(iter(r.values())) for r in db.query("SELECT name FROM sqlite_master WHERE type='table'")
+        ]
         names = [n.decode() if isinstance(n, bytes) else n for n in names]
         real = [n for n in names if not n.startswith("sqlite_")]
         print(f"{table}: opens. sql tables = {names}")
         if real:
-            rs = list(db.query(f"SELECT * FROM {real[0]}"))   # query() is a generator
+            rs = list(db.query(f"SELECT * FROM {real[0]}"))  # query() is a generator
             print(f"  {len(rs)} rows")
             for r in rs[:3]:
                 out = {}
                 for k, v in r.items():
-                    out[k] = (decode_record(v) if k == "data"
-                              else v.decode("utf-8", "replace"))
+                    out[k] = decode_record(v) if k == "data" else v.decode("utf-8", "replace")
                 print("   ", str(out)[:220])
         db.close()
         return 0

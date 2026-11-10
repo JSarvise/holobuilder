@@ -20,6 +20,7 @@ game just shipped may not be there yet; the CDN has it.
     python card_art_sync.py            # fetch + render what is missing
     python card_art_sync.py --status   # list what is missing, no network
 """
+
 from __future__ import annotations
 
 import io
@@ -32,6 +33,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import run_cli  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 DUMPS = paths.DUMPS
 CARDS = paths.DATA / "cards.json"
@@ -49,21 +51,23 @@ def missing_ids() -> list[str]:
     raw = json.loads(CARDS.read_text(encoding="utf-8"))
     cards = raw["cards"] if isinstance(raw, dict) else raw
     have = set(os.listdir(ART_DIR)) if ART_DIR.is_dir() else set()
-    return sorted(c["id"] for c in cards
-                  if any(c["id"] + suffix not in have for _fam, suffix in FAMILIES))
+    return sorted(c["id"] for c in cards if any(c["id"] + suffix not in have for _fam, suffix in FAMILIES))
 
 
 def asset_names(cid: str) -> list[str]:
-    tail = cid[len("card-"):] if cid.startswith("card-") else cid
+    tail = cid[len("card-") :] if cid.startswith("card-") else cid
     return [f"{fam}_{tail}" for fam, _s in FAMILIES]
 
 
 def _texture(name: str):
     import warnings
+
     warnings.filterwarnings("ignore")
     import UnityPy
+
     UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
     import octo_crypto
+
     src = FETCHED / (name + ".bundle")
     if not src.exists():
         return None, "bundle not fetched"
@@ -81,6 +85,7 @@ def _texture(name: str):
 
 def sync(ids: list[str]) -> int:
     import octo_fetch
+
     names = [n for cid in ids for n in asset_names(cid)]
     todo = [n for n in names if not (FETCHED / (n + ".bundle")).exists()]
     if todo:
@@ -116,8 +121,10 @@ def sync(ids: list[str]) -> int:
 def main() -> int:
     ids = missing_ids()
     if "--status" in sys.argv[1:] or not ids:
-        print(f"{len(ids)} card(s) without art in {ART_DIR}"
-              + (": " + ", ".join(ids) if ids else " -- nothing to do"))
+        print(
+            f"{len(ids)} card(s) without art in {ART_DIR}"
+            + (": " + ", ".join(ids) if ids else " -- nothing to do")
+        )
         return 0
     print(f"{len(ids)} card(s) without art: {', '.join(ids)}")
     return sync(ids)

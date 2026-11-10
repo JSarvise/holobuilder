@@ -28,6 +28,7 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 from hbuilder.domain.scoring import (
     SCORE_BUCKET_ACTIVE,
@@ -38,16 +39,12 @@ from hbuilder.domain.scoring import (
 )
 from hbuilder.domain.scoring_models import ACTIVE_STACKING_MODELS
 
-from support.builders import make_card, make_scoring_config, make_skill, make_team
-
 # the builders' STATS baseline is 300 total per card, so five members are 1500.0.
 BASE_STAT_SUM = 1500.0
 
 
 def _cfg(stacking: str = "max"):
-    return dataclasses.replace(
-        make_scoring_config(), active_stacking_model=ACTIVE_STACKING_MODELS[stacking]
-    )
+    return dataclasses.replace(make_scoring_config(), active_stacking_model=ACTIVE_STACKING_MODELS[stacking])
 
 
 def _scorer(card_id: str, magnitude: float, *, duration: float = 10.0, interval: float = 10.0):
@@ -209,9 +206,7 @@ def test_a_certain_active_masks_every_weaker_one_except_over_the_dead_zone():
                = 0.39042764553836656   ; 1500 * 1.39042764553836656 = 2085.64146830755
         summed = 0.40 + 0.30 = 0.70    ; 1500 * 1.70 = 2550.0
     """
-    cfg = dataclasses.replace(
-        _cfg(), probability_tiers={"Low": 0.37, "Medium": 1.0, "High": 0.55}
-    )
+    cfg = dataclasses.replace(_cfg(), probability_tiers={"Low": 0.37, "Medium": 1.0, "High": 0.55})
     team = _team(_scorer("a", 40.0), _scorer("b", 30.0))
 
     assert score_fast(team, cfg) == pytest.approx(2085.64146830755)
@@ -272,9 +267,7 @@ def test_only_active_score_up_skills_enter_the_pool():
     `0.25 + 0.1697142857142857 * 0.75`-shaped and strictly smaller."""
     passive_scorer = make_card(
         "passive_scorer",
-        passive=make_skill(
-            "PASSIVE", family="conditional_score_up", effect_type="score", magnitude=25.0
-        ),
+        passive=make_skill("PASSIVE", family="conditional_score_up", effect_type="score", magnitude=25.0),
     )
     team = _team(_scorer("a", 40.0), passive_scorer)
 
@@ -347,9 +340,7 @@ def test_two_specials_share_one_bucket_inside_b_but_do_not_discount_each_other()
     the same reading on the steady-state occupancy. Neither is the additive-bucket
     `1500 * (1 + 0.184 + 0.09) = 1911.0`, which the SPECIAL collapse
     excludes."""
-    team = _team(
-        _scorer("a", 40.0), _special_scorer("s1", 50.0), _special_scorer("s2", 40.0)
-    )
+    team = _team(_scorer("a", 40.0), _special_scorer("s1", 50.0), _special_scorer("s2", 40.0))
 
     assert score_fast(team, _cfg()) == pytest.approx(1777.4828571428573)
     # 1800.84 is the answer on the steady-state duty cycle.
@@ -394,9 +385,7 @@ def test_two_buckets_take_two_maxima_and_add_them_at_the_model_level():
     ]
 
     assert model.combine(terms) == pytest.approx(0.51704)
-    one_bucket = model.combine(
-        [(SCORE_BUCKET_ACTIVE, m, o, 0, x) for _b, m, o, _i, x in terms]
-    )
+    one_bucket = model.combine([(SCORE_BUCKET_ACTIVE, m, o, 0, x) for _b, m, o, _i, x in terms])
     assert one_bucket == pytest.approx(0.34533083)
     assert one_bucket < model.combine(terms)
 

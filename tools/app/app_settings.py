@@ -19,6 +19,7 @@ state/app_settings.json (gitignored, this PC only):
 Everything the server and the refresh need is passed as environment variables (`env()`), so
 none of the existing tools learns about this file.
 """
+
 from __future__ import annotations
 
 import json
@@ -32,17 +33,25 @@ STATE = paths.STATE
 SETTINGS = STATE / "app_settings.json"
 SERVER_API = STATE / "server_api.json"
 
-REGION_HOSTS = {"us": "us.game-hololive-dreams.com", "jp": "jp.game-hololive-dreams.com",
-                "as": "as.game-hololive-dreams.com"}
+REGION_HOSTS = {
+    "us": "us.game-hololive-dreams.com",
+    "jp": "jp.game-hololive-dreams.com",
+    "as": "as.game-hololive-dreams.com",
+}
 # The game's own folder on this PC. Its account file is the one file there with a 32-character
 # name and a credential's size: 255 bytes, plus a UTF-8 BOM.
 LOCALLOW = paths.GAME_DATA
 NENE = "chr-00031"
 DEFAULTS = {
-    "credential_path": "", "region": "us", "steam_id": "",
+    "credential_path": "",
+    "region": "us",
+    "steam_id": "",
     # the holobuilder server (HB_SERVER_URL for a self-hosted one; the installer saves its own)
-    "server_url": os.environ.get("HB_SERVER_URL") or "https://api.holobuilder.dev", "server_token": "",
-    "workers": 0, "cache_mb": 0, "holomem": NENE,
+    "server_url": os.environ.get("HB_SERVER_URL") or "https://api.holobuilder.dev",
+    "server_token": "",
+    "workers": 0,
+    "cache_mb": 0,
+    "holomem": NENE,
     "park_scan": False,
 }
 
@@ -54,7 +63,7 @@ def load(path: Path = SETTINGS) -> dict:
         saved = {}
     out = dict(DEFAULTS)
     out.update({k: v for k, v in saved.items() if k in DEFAULTS})
-    if not out["server_token"]:                     # a PC set up before Settings existed
+    if not out["server_token"]:  # a PC set up before Settings existed
         try:
             out["server_token"] = json.loads(SERVER_API.read_text("utf8")).get("token", "")
         except (OSError, ValueError):
@@ -65,8 +74,11 @@ def load(path: Path = SETTINGS) -> dict:
 def credential_files(folder: Path = LOCALLOW) -> list[Path]:
     """The files in the game's LocalLow folder shaped like its account file ([] without it)."""
     try:
-        return sorted(p for p in folder.iterdir()
-                      if p.is_file() and len(p.name) == 32 and 200 <= p.stat().st_size <= 303)
+        return sorted(
+            p
+            for p in folder.iterdir()
+            if p.is_file() and len(p.name) == 32 and 200 <= p.stat().st_size <= 303
+        )
     except OSError:
         return []
 
@@ -109,24 +121,34 @@ def save(s: dict, path: Path = SETTINGS) -> dict:
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(clean, indent=1), "utf8")
     if clean["server_token"]:
-        SERVER_API.write_text(json.dumps({"url": clean["server_url"], "token": clean["server_token"],
-                                          "_warning": "Bearer token for the holobuilder API."},
-                                         indent=1), "utf8")
+        SERVER_API.write_text(
+            json.dumps(
+                {
+                    "url": clean["server_url"],
+                    "token": clean["server_token"],
+                    "_warning": "Bearer token for the holobuilder API.",
+                },
+                indent=1,
+            ),
+            "utf8",
+        )
     return clean
 
 
 def env(s: dict, base: dict | None = None) -> dict:
     """The environment for the server and everything it starts."""
     e = dict(os.environ if base is None else base)
-    e.update({
-        "HB_APP_MODE": "1",                  # server: the refresh button is --account-only
-        "HB_NO_GAME": "1",                   # never read a game install, even if there is one
-        "HB_CREDENTIAL_FILE": s["credential_path"],
-        "HB_ACCOUNT_HOST": REGION_HOSTS.get(s["region"], REGION_HOSTS["us"]),
-        "HB_CONTENT_CACHE_MB": str(int(s["cache_mb"])),
-        "HB_PARK_SCAN": "1" if s.get("park_scan") is True else "0",
-        "PYTHONIOENCODING": "utf-8",
-    })
+    e.update(
+        {
+            "HB_APP_MODE": "1",  # server: the refresh button is --account-only
+            "HB_NO_GAME": "1",  # never read a game install, even if there is one
+            "HB_CREDENTIAL_FILE": s["credential_path"],
+            "HB_ACCOUNT_HOST": REGION_HOSTS.get(s["region"], REGION_HOSTS["us"]),
+            "HB_CONTENT_CACHE_MB": str(int(s["cache_mb"])),
+            "HB_PARK_SCAN": "1" if s.get("park_scan") is True else "0",
+            "PYTHONIOENCODING": "utf-8",
+        }
+    )
     if int(s["workers"]) > 0:
         e["HBUILDER_WORKERS"] = e["HBUILDER_WEB_WORKERS"] = str(int(s["workers"]))
     return e

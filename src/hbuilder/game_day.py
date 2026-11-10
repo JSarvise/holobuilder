@@ -4,6 +4,7 @@ Daily things roll over at that hour: the Park's symbols and sites, the account's
 "once per game day" limits this tool keeps. Japan has no daylight saving, so the start in UTC is
 the same every day.
 """
+
 from __future__ import annotations
 
 import datetime

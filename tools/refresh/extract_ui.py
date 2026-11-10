@@ -7,12 +7,19 @@ rather than a 4096x4096 sheet.
 
 Output: dumps/ui_sprites/<atlas-or-bundle>/<sprite name>.png
 """
-import os, re, sys, warnings, collections
+
+import collections
+import os
+import re
+import sys
+import warnings
+
 warnings.filterwarnings("ignore")
-import UnityPy
+import UnityPy  # noqa: E402
+
 UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
 
-from pathlib import Path
+from pathlib import Path  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
@@ -68,7 +75,7 @@ def main():
                     if img is None or img.width == 0:
                         continue
                     p = os.path.join(d, name + ".png")
-                    if os.path.exists(p):          # duplicate names across bundles
+                    if os.path.exists(p):  # duplicate names across bundles
                         p = os.path.join(d, f"{name}__{f[:8]}.png")
                     img.save(p)
                     saved += 1

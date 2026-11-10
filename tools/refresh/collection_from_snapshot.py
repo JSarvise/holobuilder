@@ -31,6 +31,7 @@ Usage:
     python collection_from_snapshot.py [--snapshot dumps/account_snapshot_main.json]
     python collection_from_snapshot.py --dry-run     # show the diff, write nothing
 """
+
 from __future__ import annotations
 
 import argparse
@@ -96,11 +97,13 @@ def describe(snapshot: dict) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
-        "--snapshot", default=str(DEFAULT_SNAPSHOT),
+        "--snapshot",
+        default=str(DEFAULT_SNAPSHOT),
         help=f"saved snapshot to merge (default {DEFAULT_SNAPSHOT})",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="print the per-card diff and write nothing",
     )
     args = parser.parse_args()
@@ -109,8 +112,7 @@ def main() -> int:
     path = Path(args.snapshot)
     if not path.exists():
         print(
-            f"no snapshot at {path}.\n"
-            f"Take one with:  python account_snapshot.py --snapshot",
+            f"no snapshot at {path}.\nTake one with:  python account_snapshot.py --snapshot",
             file=sys.stderr,
         )
         return 2

@@ -45,9 +45,7 @@ except MissingInput as exc:  # gitignored account data missing
 else:
     _WHY = ""
 
-pytestmark = pytest.mark.skipif(
-    _TREE is None, reason=f"tree_optimise needs gitignored account data: {_WHY}"
-)
+pytestmark = pytest.mark.skipif(_TREE is None, reason=f"tree_optimise needs gitignored account data: {_WHY}")
 
 
 def _oracle(scenario):

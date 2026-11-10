@@ -4,6 +4,7 @@
 and the page score in-run (`finite`). Left on the file's value, the MILP planned
 boards for a different objective and its plans scored up to 12.7 % below the
 search's greedy plans on the in-run score."""
+
 from __future__ import annotations
 
 import inspect

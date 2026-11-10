@@ -1,6 +1,7 @@
 """octo_fetch takes a bundle from the game's own cache when its md5 matches the catalogue's,
 and goes to the CDN only for what the cache lacks (on a typical refresh most bundles, about
 920 of 1,028, are already on disk byte-identical)."""
+
 from __future__ import annotations
 
 import hashlib
@@ -17,11 +18,10 @@ def test_local_cache_first_cdn_only_for_the_rest(tmp_path, monkeypatch):
     cache = tmp_path / "cache" / "ab"
     cache.mkdir(parents=True)
     (cache / md5["a"]).write_bytes(good)
-    (cache / md5["b"]).write_bytes(partial)          # named right, wrong bytes: not trusted
+    (cache / md5["b"]).write_bytes(partial)  # named right, wrong bytes: not trusted
     index = {n: (f"tok-{n}", m) for n, m in md5.items()}
     monkeypatch.setattr(octo_fetch, "catalog", lambda: ("https://cdn/{o}", index, "test"))
-    monkeypatch.setattr(octo_fetch, "local_cache_index",
-                        lambda: {p.name: str(p) for p in cache.iterdir()})
+    monkeypatch.setattr(octo_fetch, "local_cache_index", lambda: {p.name: str(p) for p in cache.iterdir()})
     monkeypatch.setattr(octo_fetch, "OUT", str(tmp_path / "out"))
     monkeypatch.setattr(octo_fetch, "DELAY", 0)
     asked = []

@@ -18,8 +18,8 @@ Two consequences that trip people up:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from hbuilder.domain.card import Card
 
@@ -38,10 +38,7 @@ class Team:
     def __post_init__(self) -> None:
         # Check 1: exactly MEMBER_COUNT members.
         if len(self.members) != MEMBER_COUNT:
-            raise TeamError(
-                f"Team requires exactly {MEMBER_COUNT} members, got "
-                f"{len(self.members)}"
-            )
+            raise TeamError(f"Team requires exactly {MEMBER_COUNT} members, got {len(self.members)}")
 
         # Check 2: the same card may not be listed twice AS A MEMBER.
         # `getattr` guards against a non-Card element that has no `.id`, so
@@ -75,10 +72,7 @@ class Team:
         # Check 4: every element is a Card instance.
         for card in (self.leader, *self.members):
             if not isinstance(card, Card):
-                raise TeamError(
-                    f"Team members must all be Card instances, got "
-                    f"{type(card).__name__}"
-                )
+                raise TeamError(f"Team members must all be Card instances, got {type(card).__name__}")
 
     def base_stat_sum(self) -> int:
         """The 5 members' stats. The leader slot contributes none — if
@@ -86,9 +80,7 @@ class Team:
         return sum(card.stat_sum() for card in self.members)
 
 
-def build_team(
-    cards: Iterable[Card], leader_id: str, member_ids: Iterable[str]
-) -> Team:
+def build_team(cards: Iterable[Card], leader_id: str, member_ids: Iterable[str]) -> Team:
     """Resolve `leader_id`/`member_ids` against `cards` and build a `Team`.
 
     Raises `TeamError` naming any id not found among `cards`.

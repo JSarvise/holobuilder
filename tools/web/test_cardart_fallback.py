@@ -7,6 +7,7 @@ filled answers 404 while its art sits in the explorer art directory. Both
 directories here are fakes
 (a real image copied in by the builder's writer is not needed: the route is
 asked for the ORIGINAL bytes, no `?w=`)."""
+
 from __future__ import annotations
 
 import shutil
@@ -15,7 +16,6 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-
 import server as web_server
 from hbweb import config
 
@@ -31,8 +31,8 @@ def web(tmp_path, tmp_path_factory, monkeypatch, serve_web):
         pytest.skip("no card art in this checkout to use as sample bytes")
     # two directories pytest makes: nothing under tools/web creates one (`test_no_writes.py`)
     images, art = tmp_path, tmp_path_factory.mktemp("art")
-    shutil.copyfile(sample, images / f"img_card_vert_{OLD[5:]}.webp")       # the cache has the old card
-    shutil.copyfile(sample, art / f"{NEW}.webp")                            # the refresh brought the new one
+    shutil.copyfile(sample, images / f"img_card_vert_{OLD[5:]}.webp")  # the cache has the old card
+    shutil.copyfile(sample, art / f"{NEW}.webp")  # the refresh brought the new one
     shutil.copyfile(sample, art / f"{NEW}.sq.webp")
     monkeypatch.setattr(config, "CARD_IMAGES_DIR", images)
     monkeypatch.setattr(web_server.Handler, "art_dir", art, raising=False)
@@ -53,7 +53,7 @@ def test_a_card_missing_from_the_game_cache_is_served_from_the_refreshed_art(web
     for family in ("vert", "full", "thumb"):
         status, body = _get(f"{base}/cardart/{family}/{NEW}")
         assert status == 200 and len(body) > 0, family
-    assert _get(f"{base}/cardart/vert/{OLD}")[0] == 200                     # the cache still answers first
+    assert _get(f"{base}/cardart/vert/{OLD}")[0] == 200  # the cache still answers first
     # a card in NEITHER directory is still a 404, and so is a family the cache lacks
     assert _get(f"{base}/cardart/vert/card-09999-5-uniq-9999-00")[0] == 404
     assert _get(f"{base}/cardart/thumb/{OLD}")[0] == 404

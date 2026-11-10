@@ -8,6 +8,7 @@ decrypting the moment the game ships a new master version (the seeds rotate with
 still won over the game's own, current copy, the whole refresh_all cards/songs/charts chain
 would fail with `prepare failed: SELECT ... sqlite_master`.
 """
+
 import os
 import sys
 import tempfile
@@ -106,5 +107,5 @@ def test_a_pick_another_process_parked_is_picked_again(cache, monkeypatch):
     ours, theirs = cache
     _decrypting(monkeypatch, ours, theirs)
     assert master_cache.cached_path(TABLE, INDEX) == ours
-    os.replace(ours, ours + ".stale")                     # the other process's park
+    os.replace(ours, ours + ".stale")  # the other process's park
     assert master_cache.cached_path(TABLE, INDEX) == theirs

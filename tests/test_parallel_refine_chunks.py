@@ -16,4 +16,4 @@ def test_a_large_batch_is_cut_into_bounded_chunks_that_still_use_every_worker():
         for count in (2_000, 20_000, 5_000_000):
             size = _chunksize(count, workers)
             assert 1 <= size <= 64
-            assert count / size >= workers * 8      # at least 8 chunks per worker
+            assert count / size >= workers * 8  # at least 8 chunks per worker

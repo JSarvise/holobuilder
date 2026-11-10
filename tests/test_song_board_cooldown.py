@@ -22,10 +22,11 @@ from __future__ import annotations
 
 import dataclasses
 
+from support.builders import certain_config as cfg
+from support.builders import make_card, make_scoring_config, make_skill
+
 from hbuilder.domain.board import BoardEffect, BoardModel, BoardNode, CharacterBoard
 from hbuilder.domain.song import ChartNote, OverallPower, SongChart, score_song
-
-from support.builders import certain_config as cfg, make_card, make_scoring_config, make_skill
 
 UNCERTAIN_TIERS = {"Low": 0.5, "Medium": 0.5, "High": 0.5}
 
@@ -38,21 +39,26 @@ def cfg_uncertain(**overrides):
 def _cooldown(permil: float) -> BoardEffect:
     return BoardEffect(
         family="live_active_skill_cool_time_shorten_permil_up",
-        kind="cooldown_shorten", stat="", value=permil / 1000.0, scope="member",
+        kind="cooldown_shorten",
+        stat="",
+        value=permil / 1000.0,
+        scope="member",
     )
 
 
 def _rate(permil: float) -> BoardEffect:
     return BoardEffect(
         family="live_active_skill_activation_probability_up_permil_up",
-        kind="activation_rate_up", stat="", value=permil / 1000.0, scope="member",
+        kind="activation_rate_up",
+        stat="",
+        value=permil / 1000.0,
+        scope="member",
     )
 
 
 def _board(holomem: str, effect: BoardEffect) -> BoardModel:
     return BoardModel(
-        characters={holomem: CharacterBoard(
-            holomem=holomem, nodes=(BoardNode("B-000", (effect,)),))},
+        characters={holomem: CharacterBoard(holomem=holomem, nodes=(BoardNode("B-000", (effect,)),))},
     )
 
 
@@ -65,8 +71,13 @@ def _cooldown_sensitive_scorer(member: str):
         member.lower().replace(" ", "-"),
         member=member,
         active=make_skill(
-            "ACTIVE", family="conditional_score_up", effect_type="score",
-            duration=5.0, interval=30.0, probability_tier="High", magnitude=80.0,
+            "ACTIVE",
+            family="conditional_score_up",
+            effect_type="score",
+            duration=5.0,
+            interval=30.0,
+            probability_tier="High",
+            magnitude=80.0,
         ),
     )
 
@@ -83,7 +94,9 @@ def _chart_with_note_in_the_gap() -> SongChart:
     but inside the shortened active's first window [20,25). So the board node moves
     it from baseline to boosted."""
     return SongChart(
-        music_id="m0001", difficulty="easy", difficulty_level=5,
+        music_id="m0001",
+        difficulty="easy",
+        difficulty_level=5,
         live_score_coefficient_permil=4,
         notes=(ChartNote(time=22.0, perfect_permil=1000),),
         special_cues=(10.0, 20.0, 30.0, 40.0, 50.0),
@@ -109,7 +122,9 @@ def test_a_board_activation_rate_node_raises_an_uncertain_active_score():
     # A note squarely inside a window at BOTH cooldowns, so only the PROBABILITY
     # (not the window coverage) moves: t = 33 is in the base window [30, 35).
     chart = SongChart(
-        music_id="m0001", difficulty="easy", difficulty_level=5,
+        music_id="m0001",
+        difficulty="easy",
+        difficulty_level=5,
         live_score_coefficient_permil=4,
         notes=(ChartNote(time=33.0, perfect_permil=1000),),
         special_cues=(10.0, 20.0, 30.0, 40.0, 50.0),
@@ -117,7 +132,9 @@ def test_a_board_activation_rate_node_raises_an_uncertain_active_score():
     board = _board("Member A", _rate(400.0))
 
     without = score_song(members, leaders, chart, cfg_uncertain(), deck_power=OverallPower.fixed(2000))[0]
-    with_board = score_song(members, leaders, chart, cfg_uncertain(board=board), deck_power=OverallPower.fixed(2000))[0]
+    with_board = score_song(
+        members, leaders, chart, cfg_uncertain(board=board), deck_power=OverallPower.fixed(2000)
+    )[0]
 
     assert with_board.total_score > without.total_score, (
         "the board activation-rate node must raise the ACTIVE proc chance; equal "
@@ -148,20 +165,24 @@ def test_active_all_fire_is_a_ceiling_above_the_probabilistic_estimate():
     # a note INSIDE the base active's first window [30,35), so the active COVERS it
     # and its PROC CHANCE matters: uncertain (0.5) half-covers, all-fire fully covers.
     chart = dataclasses.replace(
-        _chart_with_note_in_the_gap(),
-        notes=(ChartNote(time=32.0, perfect_permil=1000),))
+        _chart_with_note_in_the_gap(), notes=(ChartNote(time=32.0, perfect_permil=1000),)
+    )
 
     estimate = score_song(members, leaders, chart, cfg_uncertain(), deck_power=OverallPower.fixed(2000))[0]
-    ceiling = score_song(members, leaders, chart,
-                         cfg_uncertain(active_all_fire=True), deck_power=OverallPower.fixed(2000))[0]
+    ceiling = score_song(
+        members, leaders, chart, cfg_uncertain(active_all_fire=True), deck_power=OverallPower.fixed(2000)
+    )[0]
     assert ceiling.total_score > estimate.total_score, (
-        "all-fire must raise a probabilistic active's score above the estimate")
+        "all-fire must raise a probabilistic active's score above the estimate"
+    )
 
     certain = score_song(members, leaders, chart, cfg(), deck_power=OverallPower.fixed(2000))[0]
-    certain_all = score_song(members, leaders, chart,
-                             cfg(active_all_fire=True), deck_power=OverallPower.fixed(2000))[0]
+    certain_all = score_song(
+        members, leaders, chart, cfg(active_all_fire=True), deck_power=OverallPower.fixed(2000)
+    )[0]
     assert certain_all.total_score == certain.total_score, (
-        "an active that already fires with probability 1 is unchanged by all-fire")
+        "an active that already fires with probability 1 is unchanged by all-fire"
+    )
 
 
 def test_a_with_cooldowns_copy_scores_as_the_board_built_with_that_cooldown():
@@ -175,15 +196,16 @@ def test_a_with_cooldowns_copy_scores_as_the_board_built_with_that_cooldown():
     copy_fast = built_slow.with_cooldowns({"Member A": 0.5})
 
     def total(board):
-        return score_song(members, leaders, chart, cfg(board=board),
-                          deck_power=OverallPower.fixed(2000))[0].total_score
+        return score_song(members, leaders, chart, cfg(board=board), deck_power=OverallPower.fixed(2000))[
+            0
+        ].total_score
 
     assert copy_fast.uptime_for("Member A") == built_fast.uptime_for("Member A")
     assert total(copy_fast) == total(built_fast) != total(built_slow)
     assert copy_fast.power_identity is built_slow
     assert copy_fast.with_cooldowns({"Member A": 0.1}).power_identity is built_slow
     assert built_slow.power_identity is built_slow
-    assert built_slow.uptime_for("Member A")[1] == 0.1      # the source is untouched
+    assert built_slow.uptime_for("Member A")[1] == 0.1  # the source is untouched
 
 
 def test_cooldown_variants_score_exactly_as_each_board_scored_whole():
@@ -194,7 +216,9 @@ def test_cooldown_variants_score_exactly_as_each_board_scored_whole():
 
     members, leaders = _team()
     chart = SongChart(
-        music_id="m0001", difficulty="easy", difficulty_level=5,
+        music_id="m0001",
+        difficulty="easy",
+        difficulty_level=5,
         live_score_coefficient_permil=4,
         notes=tuple(ChartNote(time=float(t), perfect_permil=1000) for t in range(5, 120, 3)),
         special_cues=(10.0, 30.0, 50.0, 70.0, 90.0),
@@ -203,12 +227,14 @@ def test_cooldown_variants_score_exactly_as_each_board_scored_whole():
     config = cfg_uncertain(board=board)
     variants = [{"Member A": cd} for cd in (0.0, 0.1, 0.2, 0.35, 0.5, 1.0)]
     power = OverallPower.fixed(2000)
-    got = score_song_cooldown_variants(members, leaders[0], chart, config, variants,
-                                       deck_power=power)
+    got = score_song_cooldown_variants(members, leaders[0], chart, config, variants, deck_power=power)
     for variant, score in zip(variants, got):
         whole = score_song_detailed(
-            members, leaders, chart,
+            members,
+            leaders,
+            chart,
             dataclasses.replace(config, board=board.with_cooldowns(variant)),
-            deck_power=power)[0]
+            deck_power=power,
+        )[0]
         assert (score.total_score, score.member_order) == (whole.total_score, whole.member_order)
-    assert len({s.total_score for s in got}) > 1          # the cooldown does move the score
+    assert len({s.total_score for s in got}) > 1  # the cooldown does move the score

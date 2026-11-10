@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
 OUT = os.path.join(paths.DUMPS, "marathon_bonus.json")
@@ -55,20 +56,43 @@ ATTRIBUTE = {1: "Cute", 2: "Pure", 3: "Happy"}
 #   "chr"  b"chr-..."          "card" b"card-..."  "music" b"m...."
 #   "attr" varint in ATTRIBUTE "rar"  varint in {3,4,5}   "bloom" varint 0..10
 TEMPLATES = {
-    "live": {1: ("group_id", "grp"), 2: ("number", "int"), 3: ("character_id", "chr"),
-             4: ("card_id", "card"), 5: ("attribute", "attr"), 6: ("rarity", "rar"),
-             7: ("bloom", "bloom"), 8: ("permil", "permil")},
-    "music": {1: ("group_id", "grp"), 2: ("music_id", "music"), 3: ("number", "int"),
-              4: ("character_id", "chr"), 5: ("card_id", "card"), 6: ("attribute", "attr"),
-              7: ("rarity", "rar"), 8: ("bloom", "bloom"), 9: ("permil", "permil")},
-    "minigame": {1: ("group_id", "grp"), 2: ("number", "int"), 3: ("card_id", "card"),
-                 4: ("rarity", "rar"), 5: ("bloom", "bloom"), 6: ("permil", "permil")},
+    "live": {
+        1: ("group_id", "grp"),
+        2: ("number", "int"),
+        3: ("character_id", "chr"),
+        4: ("card_id", "card"),
+        5: ("attribute", "attr"),
+        6: ("rarity", "rar"),
+        7: ("bloom", "bloom"),
+        8: ("permil", "permil"),
+    },
+    "music": {
+        1: ("group_id", "grp"),
+        2: ("music_id", "music"),
+        3: ("number", "int"),
+        4: ("character_id", "chr"),
+        5: ("card_id", "card"),
+        6: ("attribute", "attr"),
+        7: ("rarity", "rar"),
+        8: ("bloom", "bloom"),
+        9: ("permil", "permil"),
+    },
+    "minigame": {
+        1: ("group_id", "grp"),
+        2: ("number", "int"),
+        3: ("card_id", "card"),
+        4: ("rarity", "rar"),
+        5: ("bloom", "bloom"),
+        6: ("permil", "permil"),
+    },
 }
 # What each template's permil MEANS, for the printout. The live one raises Event Pt / Event Badge
 # earned; the music one is `Event Score Up`, a different mechanic on the SCORE.
-MEANING = {"live": "Event Pt / Event Badge up (the Event Bonus)",
-           "music": "Event Score Up -- raises the SCORE on that song, not the points",
-           "minigame": "minigame Event Pt up"}
+MEANING = {
+    "live": "Event Pt / Event Badge up (the Event Bonus)",
+    "music": "Event Score Up -- raises the SCORE on that song, not the points",
+    "minigame": "minigame Event Pt up",
+}
 
 
 def _strict(b):
@@ -94,15 +118,15 @@ def _strict(b):
             if wt == 2:
                 if p + v > len(b):
                     return None
-                v, p = b[p:p + v], p + v
+                v, p = b[p : p + v], p + v
         elif wt == 5:
             if p + 4 > len(b):
                 return None
-            v, p = int.from_bytes(b[p:p + 4], "little"), p + 4
+            v, p = int.from_bytes(b[p : p + 4], "little"), p + 4
         elif wt == 1:
             if p + 8 > len(b):
                 return None
-            v, p = int.from_bytes(b[p:p + 8], "little"), p + 8
+            v, p = int.from_bytes(b[p : p + 8], "little"), p + 8
         else:
             return None
         out.setdefault(fn, []).append(v)
@@ -226,8 +250,13 @@ def tables(rows):
             bloom.setdefault(r["rarity"], {})[r["bloom"]] = p
         else:
             other.append(r)
-    return {"CardBonusRates": card, "CharacterBonusRates": chrs, "AttributeRates": attr,
-            "PotentialUpgradeRates": bloom, "unmatched": other}
+    return {
+        "CardBonusRates": card,
+        "CharacterBonusRates": chrs,
+        "AttributeRates": attr,
+        "PotentialUpgradeRates": bloom,
+        "unmatched": other,
+    }
 
 
 def _plaintexts(path):
@@ -267,9 +296,11 @@ def collect(paths):
             print(f"  {os.path.basename(p)}: {type(exc).__name__}: {exc}")
     out = {}
     for key, byno in merged.items():
-        out[key] = {"rows": [byno[n] for n in sorted(byno)],
-                    "rpcs": sorted(sources[key]),
-                    "decrypt": "cbc-lossy" if key in lossy else "exact"}
+        out[key] = {
+            "rows": [byno[n] for n in sorted(byno)],
+            "rpcs": sorted(sources[key]),
+            "decrypt": "cbc-lossy" if key in lossy else "exact",
+        }
     return out
 
 
@@ -339,22 +370,33 @@ def main():
     current = sorted({gid for gid, _kind in collect([live])}) if os.path.exists(live) else []
     event_songs = _event_songs(live) if os.path.exists(live) else {}
     _report_songs(event_songs, found)
-    payload = {"current_group_ids": current,
-               "live_fetched_at": os.path.getmtime(live) if os.path.exists(live) else None,
-               # each open chapter's songs as the server lists them (its per-song ranking,
-               # field 17): every one earns Event Pt, with or without a song-score bonus row
-               "event_songs": event_songs,
-               "groups": [{"group_id": gid, "kind": kind, "rpcs": info["rpcs"],
-                           "decrypt": info["decrypt"], "rows": info["rows"],
-                           "tables": tables(info["rows"])}
-                          for (gid, kind), info in sorted(found.items())]}
+    payload = {
+        "current_group_ids": current,
+        "live_fetched_at": os.path.getmtime(live) if os.path.exists(live) else None,
+        # each open chapter's songs as the server lists them (its per-song ranking,
+        # field 17): every one earns Event Pt, with or without a song-score bonus row
+        "event_songs": event_songs,
+        "groups": [
+            {
+                "group_id": gid,
+                "kind": kind,
+                "rpcs": info["rpcs"],
+                "decrypt": info["decrypt"],
+                "rows": info["rows"],
+                "tables": tables(info["rows"]),
+            }
+            for (gid, kind), info in sorted(found.items())
+        ],
+    }
     with open(OUT, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=1, ensure_ascii=False)
     print(f"\nwritten to {OUT}")
     if COLLISIONS:
-        print(f"\n!! {len(COLLISIONS)} bonus row(s) shared a row key with a DIFFERENT row of the "
-              "same response -- one of each pair is lost. The row identity (`_row_key`) needs "
-              "another field:")
+        print(
+            f"\n!! {len(COLLISIONS)} bonus row(s) shared a row key with a DIFFERENT row of the "
+            "same response -- one of each pair is lost. The row identity (`_row_key`) needs "
+            "another field:"
+        )
         for gid, rk, first, second in COLLISIONS[:10]:
             print(f"   {gid} {rk}: {first} / {second}")
         sys.exit(1)
@@ -381,12 +423,15 @@ def _report_songs(event_songs: dict, found: dict) -> None:
     for (gid, kind), info in found.items():
         if kind == "music":
             rows_by_chapter.setdefault(gid.split("-", 1)[1], set()).update(
-                r.get("music_id") for r in info["rows"])
+                r.get("music_id") for r in info["rows"]
+            )
     for chapter, songs in sorted(event_songs.items()):
         have = rows_by_chapter.get(chapter, set())
         missing = [m for m in songs if m not in have]
-        print(f"\n{chapter}: {len(songs)} event song(s), {len(songs) - len(missing)} with a "
-              f"song-score bonus row" + (f"; NO row for {', '.join(missing)}" if missing else ""))
+        print(
+            f"\n{chapter}: {len(songs)} event song(s), {len(songs) - len(missing)} with a "
+            f"song-score bonus row" + (f"; NO row for {', '.join(missing)}" if missing else "")
+        )
 
 
 if __name__ == "__main__":

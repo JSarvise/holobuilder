@@ -38,6 +38,7 @@ reads: `/sys/class/dmi/id` (device), `/proc/cpuinfo` (CPU), `/proc/meminfo` (RAM
 `loginusers.vdf`). A `state/client_profile.json` put there by hand (copied from a Windows PC, or
 captured) always wins; with neither, `ProfileUnavailable` says what to do. Nothing is made up.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -67,7 +68,7 @@ FIXED = {
     "x-app-graphics-shader-level": "50",
 }
 LOCALLOW = paths.GAME_DATA
-STEAM_BASE = 76561197960265728            # SteamID64 of account id 0 (individual, public universe)
+STEAM_BASE = 76561197960265728  # SteamID64 of account id 0 (individual, public universe)
 _GPU_CLASS = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
 
 
@@ -88,7 +89,7 @@ def vendor_id(matching_device_id: str | None) -> str:
     s = (matching_device_id or "").upper()
     i = s.find("VEN_")
     try:
-        return str(int(s[i + 4:i + 8], 16)) if i >= 0 else "0"
+        return str(int(s[i + 4 : i + 8], 16)) if i >= 0 else "0"
     except ValueError:
         return "0"
 
@@ -142,8 +143,10 @@ def pick_gpu(adapters: list[dict]) -> dict:
 
 # ------------------------------------------------------------------ Windows probes
 
+
 def _reg(root, path: str, name: str):
     import winreg  # noqa: PLC0415
+
     try:
         with winreg.OpenKey(root, path) as k:
             return winreg.QueryValueEx(k, name)[0]
@@ -153,6 +156,7 @@ def _reg(root, path: str, name: str):
 
 def _adapters() -> list[dict]:
     import winreg  # noqa: PLC0415
+
     out = []
     for i in range(32):
         sub = f"{_GPU_CLASS}\\{i:04d}"
@@ -163,18 +167,30 @@ def _adapters() -> list[dict]:
         if mem is None:
             raw = _reg(winreg.HKEY_LOCAL_MACHINE, sub, "HardwareInformation.MemorySize")
             mem = int.from_bytes(raw, "little") if isinstance(raw, bytes) else raw
-        out.append({"name": desc, "memory": int(mem or 0),
-                    "vendor": vendor_id(_reg(winreg.HKEY_LOCAL_MACHINE, sub, "MatchingDeviceId"))})
+        out.append(
+            {
+                "name": desc,
+                "memory": int(mem or 0),
+                "vendor": vendor_id(_reg(winreg.HKEY_LOCAL_MACHINE, sub, "MatchingDeviceId")),
+            }
+        )
     return out
 
 
 def _ram_mb() -> int:
     class MEMORYSTATUSEX(ctypes.Structure):
-        _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
-                    ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
-                    ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
-                    ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
-                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        _fields_ = [
+            ("dwLength", ctypes.c_ulong),
+            ("dwMemoryLoad", ctypes.c_ulong),
+            ("ullTotalPhys", ctypes.c_ulonglong),
+            ("ullAvailPhys", ctypes.c_ulonglong),
+            ("ullTotalPageFile", ctypes.c_ulonglong),
+            ("ullAvailPageFile", ctypes.c_ulonglong),
+            ("ullTotalVirtual", ctypes.c_ulonglong),
+            ("ullAvailVirtual", ctypes.c_ulonglong),
+            ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+        ]
+
     st = MEMORYSTATUSEX()
     st.dwLength = ctypes.sizeof(st)
     ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st))
@@ -184,7 +200,7 @@ def _ram_mb() -> int:
 def _screen() -> tuple[int, int, int]:
     user32 = ctypes.windll.user32
     try:
-        user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))   # per-monitor v2
+        user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # per-monitor v2
     except (AttributeError, OSError):
         pass
     try:
@@ -197,12 +213,17 @@ def _screen() -> tuple[int, int, int]:
 def steam_id() -> str | None:
     """This PC's Steam account: the running one (registry ActiveUser), else loginusers.vdf."""
     import winreg  # noqa: PLC0415
+
     sid = steam_id64(_reg(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam\ActiveProcess", "ActiveUser"))
     if sid:
         return sid
     root = paths.steam_path()
     try:
-        return most_recent_login((Path(root) / "config" / "loginusers.vdf").read_text("utf8", "replace"))             if root else None
+        return (
+            most_recent_login((Path(root) / "config" / "loginusers.vdf").read_text("utf8", "replace"))
+            if root
+            else None
+        )
     except OSError:
         return None
 
@@ -221,22 +242,34 @@ def _vram_mb() -> int | None:
 def probe() -> dict:
     """This PC's hardware, as raw facts."""
     import winreg  # noqa: PLC0415
+
     bios = r"HARDWARE\DESCRIPTION\System\BIOS"
-    cpu = _reg(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
-               "ProcessorNameString") or platform.processor()
+    cpu = (
+        _reg(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+            "ProcessorNameString",
+        )
+        or platform.processor()
+    )
     w, h, dpi = _screen()
     return {
         "product": _reg(winreg.HKEY_LOCAL_MACHINE, bios, "SystemProductName"),
         "maker": _reg(winreg.HKEY_LOCAL_MACHINE, bios, "SystemManufacturer"),
-        "cpu": cpu, "threads": os.cpu_count() or 1, "ram_mb": _ram_mb(),
-        "gpu": pick_gpu(_adapters()), "vram_mb": _vram_mb(), "screen": [w, h, dpi],
-        "build": sys.getwindowsversion().build, "release": platform.release(),
+        "cpu": cpu,
+        "threads": os.cpu_count() or 1,
+        "ram_mb": _ram_mb(),
+        "gpu": pick_gpu(_adapters()),
+        "vram_mb": _vram_mb(),
+        "screen": [w, h, dpi],
+        "build": sys.getwindowsversion().build,
+        "release": platform.release(),
     }
 
 
 # ------------------------------------------------------------------ Linux (Proton) probes
 
-GPU_VENDORS = {"nvidia": "4318", "amd": "4098", "ati": "4098", "intel": "32902"}   # PCI ids, decimal
+GPU_VENDORS = {"nvidia": "4318", "amd": "4098", "ati": "4098", "intel": "32902"}  # PCI ids, decimal
 _REG_SECTION = re.compile(r"^\[(.+?)\](?:\s+\d+)?\s*$")
 _REG_VALUE = re.compile(r'^(@|"(?:[^"\\]|\\.)*")=(.*)$')
 
@@ -280,8 +313,11 @@ def player_log_gpu(text: str) -> dict | None:
     name = re.sub(r"\s*\(ID=0x[0-9a-fA-F]+\)$", "", renderer.group(1))
     vendor = re.search(r"^\s*Vendor:\s*(.+?)\s*$", text, re.M)
     words = (vendor.group(1) if vendor else name).lower().split()
-    return {"name": name, "vendor": next((GPU_VENDORS[w] for w in words if w in GPU_VENDORS), None),
-            "vram_mb": player_log_vram(text)}
+    return {
+        "name": name,
+        "vendor": next((GPU_VENDORS[w] for w in words if w in GPU_VENDORS), None),
+        "vram_mb": player_log_vram(text),
+    }
 
 
 def drm_screen(sys_root: Path) -> tuple[int, int] | None:
@@ -319,8 +355,10 @@ def probe_proton(game_data: Path | None = None, sys_root: Path = Path("/")) -> d
     sources). ProfileUnavailable, naming what is missing, when one cannot be read."""
     game_data = paths.GAME_DATA if game_data is None else game_data
     prefix = proton_prefix(game_data)
-    start = ("start hololive Dreams once through Steam (Proton) and get past its title screen, "
-             "or copy state/client_profile.json from a PC where the game runs on Windows")
+    start = (
+        "start hololive Dreams once through Steam (Proton) and get past its title screen, "
+        "or copy state/client_profile.json from a PC where the game runs on Windows"
+    )
     if prefix is None:
         raise ProfileUnavailable(f"no Proton prefix with a system.reg around {game_data}: {start}")
     system = wine_reg(_read(prefix / "system.reg") or "")
@@ -336,7 +374,9 @@ def probe_proton(game_data: Path | None = None, sys_root: Path = Path("/")) -> d
     if gpu is None or not gpu["vram_mb"]:
         raise ProfileUnavailable(f"no graphics lines in {game_data / 'Player.log'}: {start}")
     bios = system.get(r"hardware\description\system\bios", {})
-    product = bios.get("systemproductname") or (_read(sys_root / "sys/class/dmi/id/product_name") or "").strip()
+    product = (
+        bios.get("systemproductname") or (_read(sys_root / "sys/class/dmi/id/product_name") or "").strip()
+    )
     maker = bios.get("systemmanufacturer") or (_read(sys_root / "sys/class/dmi/id/sys_vendor") or "").strip()
     cpu = system.get(r"hardware\description\system\centralprocessor\0", {}).get("processornamestring")
     if not cpu:
@@ -344,21 +384,38 @@ def probe_proton(game_data: Path | None = None, sys_root: Path = Path("/")) -> d
         cpu = m.group(1) if m else None
     ram = re.search(r"^MemTotal:\s*(\d+)\s*kB", _read(sys_root / "proc/meminfo") or "", re.M)
     screen = drm_screen(sys_root)
-    missing = [what for what, v in (("the device name (/sys/class/dmi/id)", product or maker),
-                                    ("the CPU (/proc/cpuinfo)", cpu), ("the RAM (/proc/meminfo)", ram),
-                                    ("the screen size (/sys/class/drm)", screen),
-                                    ("the GPU vendor (Player.log)", gpu["vendor"])) if not v]
+    missing = [
+        what
+        for what, v in (
+            ("the device name (/sys/class/dmi/id)", product or maker),
+            ("the CPU (/proc/cpuinfo)", cpu),
+            ("the RAM (/proc/meminfo)", ram),
+            ("the screen size (/sys/class/drm)", screen),
+            ("the GPU vendor (Player.log)", gpu["vendor"]),
+        )
+        if not v
+    ]
     if missing:
-        raise ProfileUnavailable("cannot read " + ", ".join(missing) + " on this PC: copy "
-                                 "state/client_profile.json from a PC where the game runs on Windows")
-    dpi = user.get(r"control panel\desktop", {}).get("logpixels") or \
-        user.get(r"software\wine\fonts", {}).get("logpixels") or 96
+        raise ProfileUnavailable(
+            "cannot read " + ", ".join(missing) + " on this PC: copy "
+            "state/client_profile.json from a PC where the game runs on Windows"
+        )
+    dpi = (
+        user.get(r"control panel\desktop", {}).get("logpixels")
+        or user.get(r"software\wine\fonts", {}).get("logpixels")
+        or 96
+    )
     return {
-        "product": product, "maker": maker, "cpu": cpu, "threads": os.cpu_count() or 1,
+        "product": product,
+        "maker": maker,
+        "cpu": cpu,
+        "threads": os.cpu_count() or 1,
         "ram_mb": int(ram.group(1)) // 1024,
         "gpu": {"name": gpu["name"], "vendor": gpu["vendor"], "memory": gpu["vram_mb"] << 20},
-        "vram_mb": gpu["vram_mb"], "screen": [screen[0], screen[1], int(dpi)],
-        "build": build, "release": release,
+        "vram_mb": gpu["vram_mb"],
+        "screen": [screen[0], screen[1], int(dpi)],
+        "build": build,
+        "release": release,
     }
 
 
@@ -384,21 +441,25 @@ def headers(facts: dict, *, version: str, steam_id: str | None = None) -> dict:
     gpu = facts.get("gpu") or {}
     w, h, dpi = facts["screen"]
     out = dict(FIXED)
-    out.update({
-        "x-app-version": version,
-        "x-app-device-name": device_name(facts.get("product"), facts.get("maker")),
-        "x-app-os-version": os_version(facts["release"], facts["build"]),
-        "x-app-cpu": cpu_name(facts["cpu"]),
-        "x-app-gpu": gpu.get("name", "Microsoft Basic Render Driver"),
-        "x-app-graphics-device-vendor-id": gpu.get("vendor", "0"),
-        "x-app-graphics-device-memory-size": str(facts.get("vram_mb") or gpu.get("memory", 0) // (1024 * 1024)),
-        "x-app-processor-model": cpu_name(facts["cpu"]),
-        "x-app-processor-count": str(facts["threads"]),
-        "x-app-system-memory-size": str(facts["ram_mb"]),
-        "x-app-screen-dpi": str(dpi),
-        "x-app-screen-height": str(h),
-        "x-app-screen-width": str(w),
-    })
+    out.update(
+        {
+            "x-app-version": version,
+            "x-app-device-name": device_name(facts.get("product"), facts.get("maker")),
+            "x-app-os-version": os_version(facts["release"], facts["build"]),
+            "x-app-cpu": cpu_name(facts["cpu"]),
+            "x-app-gpu": gpu.get("name", "Microsoft Basic Render Driver"),
+            "x-app-graphics-device-vendor-id": gpu.get("vendor", "0"),
+            "x-app-graphics-device-memory-size": str(
+                facts.get("vram_mb") or gpu.get("memory", 0) // (1024 * 1024)
+            ),
+            "x-app-processor-model": cpu_name(facts["cpu"]),
+            "x-app-processor-count": str(facts["threads"]),
+            "x-app-system-memory-size": str(facts["ram_mb"]),
+            "x-app-screen-dpi": str(dpi),
+            "x-app-screen-height": str(h),
+            "x-app-screen-width": str(w),
+        }
+    )
     if steam_id:
         out["x-app-steam-id"] = steam_id
     return out
@@ -408,8 +469,15 @@ GENERATED = "generated from this PC's hardware (tools/app/client_profile.py)"
 GENERATED_PROTON = "generated from this PC's Proton prefix and hardware (tools/app/client_profile.py)"
 
 
-def ensure(steam_override: str | None = None, *, path: Path = PROFILE, facts: dict | None = None,
-           find_steam=None, version: str | None = None, platform: str = sys.platform) -> dict:
+def ensure(
+    steam_override: str | None = None,
+    *,
+    path: Path = PROFILE,
+    facts: dict | None = None,
+    find_steam=None,
+    version: str | None = None,
+    platform: str = sys.platform,
+) -> dict:
     """Make state/client_profile.json this PC's, at every start of the app.
 
     A CAPTURED profile (the real client's own headers) is never touched. A generated one is
@@ -424,8 +492,11 @@ def ensure(steam_override: str | None = None, *, path: Path = PROFILE, facts: di
     # Linux: a profile put there by hand (a Windows PC's, a captured one) is kept as it is
     mine = GENERATED if platform == "win32" else GENERATED_PROTON
     if old is not None and old.get("source") != mine:
-        return {"captured": True, "written": False,
-                "steam_id": "found" if old.get("headers", {}).get("x-app-steam-id") else None}
+        return {
+            "captured": True,
+            "written": False,
+            "steam_id": "found" if old.get("headers", {}).get("x-app-steam-id") else None,
+        }
     typed = (steam_override or "").strip()
     sid, how = (typed, "typed") if valid_steam_id(typed) else (None, None)
     if not sid:
@@ -434,6 +505,7 @@ def ensure(steam_override: str | None = None, *, path: Path = PROFILE, facts: di
     if version is None:
         sys.path.insert(0, str(paths.REFRESH_DIR))
         import account_snapshot as A  # noqa: PLC0415
+
         version = A.app_version() or dict(A.GENERIC_HEADERS)["x-app-version"]
     if facts is None:
         facts = probe() if platform == "win32" else probe_proton()
@@ -441,30 +513,50 @@ def ensure(steam_override: str | None = None, *, path: Path = PROFILE, facts: di
     if old is not None and old.get("headers") == hdrs:
         return {"captured": False, "written": False, "steam_id": how}
     path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps({
-        "headers": hdrs, "source": mine,
-        "_warning": "This PC's hardware identity" + (" and Steam ID" if sid else "")
-                    + ". state/ is gitignored."}, indent=1), "utf8")
+    path.write_text(
+        json.dumps(
+            {
+                "headers": hdrs,
+                "source": mine,
+                "_warning": "This PC's hardware identity"
+                + (" and Steam ID" if sid else "")
+                + ". state/ is gitignored.",
+            },
+            indent=1,
+        ),
+        "utf8",
+    )
     return {"captured": False, "written": True, "steam_id": how}
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--write", action="store_true",
-                    help="write state/client_profile.json (a captured profile is never replaced)")
+    ap.add_argument(
+        "--write",
+        action="store_true",
+        help="write state/client_profile.json (a captured profile is never replaced)",
+    )
     ap.add_argument("--steam-id", default=None, help="the account's SteamID64; read off Steam when left out")
     args = ap.parse_args(argv)
     if args.write:
         r = ensure(args.steam_id)
-        print(f"{PROFILE}: " + ("captured profile, left as it is" if r["captured"]
-                               else "written" if r["written"] else "already current")
-              + f"; Steam ID {r['steam_id'] or 'NOT FOUND'}")
+        print(
+            f"{PROFILE}: "
+            + (
+                "captured profile, left as it is"
+                if r["captured"]
+                else "written"
+                if r["written"]
+                else "already current"
+            )
+            + f"; Steam ID {r['steam_id'] or 'NOT FOUND'}"
+        )
         return 0
     sid = args.steam_id if valid_steam_id(args.steam_id) else steam_id()
     sys.path.insert(0, str(paths.REFRESH_DIR))
     import account_snapshot as A  # noqa: PLC0415
-    hdrs = headers(probe(), version=A.app_version() or dict(A.GENERIC_HEADERS)["x-app-version"],
-                   steam_id=sid)
+
+    hdrs = headers(probe(), version=A.app_version() or dict(A.GENERIC_HEADERS)["x-app-version"], steam_id=sid)
     for k, v in hdrs.items():
         print(f"  {k}: " + ("<steam id found>" if k == "x-app-steam-id" else v))
     return 0

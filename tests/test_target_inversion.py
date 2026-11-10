@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from support.builders import make_resolved, make_scoring_config, make_skill
 
 from hbuilder.domain.card import EffectTarget, card_from_record
 from hbuilder.domain.loader import load_cards
@@ -30,8 +31,6 @@ from hbuilder.domain.schema import (
 from hbuilder.domain.scoring import _resolve_skill, team_taint
 from hbuilder.domain.team import MEMBER_COUNT, Team
 from hbuilder.domain.unknown import UNKNOWN
-
-from support.builders import make_resolved, make_scoring_config, make_skill
 
 
 def _passive_slot(**overrides: object) -> dict:
@@ -94,9 +93,7 @@ def _write_cards_document(tmp_path, *card_records: dict):
 
 
 def _all_target_filler_card(card_id: str, type_: str = "Pure") -> object:
-    return card_from_record(
-        _card_record(card_id=card_id, target={"kind": "all"}, type_=type_)
-    )
+    return card_from_record(_card_record(card_id=card_id, target={"kind": "all"}, type_=type_))
 
 
 # --- null taints, {"kind": "all"} does not ----------------------------------
@@ -124,9 +121,7 @@ def test_all_kind_target_does_not_appear_in_unknown_fields():
 
 
 def test_null_target_taints_the_team(tmp_path):
-    path = _write_cards_document(
-        tmp_path, _card_record(card_id="untranscribed_target_01", target=None)
-    )
+    path = _write_cards_document(tmp_path, _card_record(card_id="untranscribed_target_01", target=None))
     cards = load_cards(path)
     # The card under test must be a MEMBER: taint, gates and EV are all
     # computed over the five members, and a leader's own slots are never
@@ -145,17 +140,13 @@ def test_null_target_taints_the_team(tmp_path):
 
 
 def test_all_target_with_value_present_is_rejected_naming_target_value():
-    record = _card_record(
-        card_id="bad_all_target_01", target={"kind": "all", "value": "Cute"}
-    )
+    record = _card_record(card_id="bad_all_target_01", target={"kind": "all", "value": "Cute"})
     errors = validate_skill_slot(record["skills"]["PASSIVE"], "bad_all_target_01", "PASSIVE")
     assert any("target.value" in e and "bad_all_target_01" in e for e in errors)
 
 
 def test_all_target_with_count_present_is_rejected_naming_target_count():
-    record = _card_record(
-        card_id="bad_all_target_02", target={"kind": "all", "count": 2}
-    )
+    record = _card_record(card_id="bad_all_target_02", target={"kind": "all", "count": 2})
     errors = validate_skill_slot(record["skills"]["PASSIVE"], "bad_all_target_02", "PASSIVE")
     assert any("target.count" in e and "bad_all_target_02" in e for e in errors)
 
@@ -164,9 +155,7 @@ def test_self_target_with_count_present_is_rejected_naming_target_count():
     # "self" reaches exactly one card by definition — a count is not a
     # second way to say it, the same structurally-absent discipline "all"
     # carries.
-    record = _card_record(
-        card_id="bad_self_target_01", target={"kind": "self", "count": 1}
-    )
+    record = _card_record(card_id="bad_self_target_01", target={"kind": "self", "count": 1})
     errors = validate_skill_slot(record["skills"]["PASSIVE"], "bad_self_target_01", "PASSIVE")
     assert any("target.count" in e and "bad_self_target_01" in e for e in errors)
 
@@ -195,9 +184,7 @@ def test_generation_target_with_unknown_generation_value_is_rejected_naming_targ
         card_id="bad_generation_target_01",
         target={"kind": "generation", "value": "6期生", "count": 2},
     )
-    errors = validate_skill_slot(
-        record["skills"]["PASSIVE"], "bad_generation_target_01", "PASSIVE"
-    )
+    errors = validate_skill_slot(record["skills"]["PASSIVE"], "bad_generation_target_01", "PASSIVE")
     assert any("target.value" in e and "bad_generation_target_01" in e for e in errors)
 
 

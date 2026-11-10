@@ -68,9 +68,7 @@ def test_cooldown_shorten_is_an_exact_fraction_never_a_rounded_second():
 
 
 def _plain(**kw) -> PanelCard:
-    base = dict(
-        magnitude_permil=1000, probability_permil=460, cooldown_s=20, duration_s=10
-    )
+    base = dict(magnitude_permil=1000, probability_permil=460, cooldown_s=20, duration_s=10)
     base.update(kw)
     return PanelCard(**base)
 
@@ -150,9 +148,7 @@ def test_each_line_is_its_own_ceiling_and_the_pedestal_is_an_identity():
     209. Shares 5:2:3 of 209 are 104.5, 41.8 and 62.7 -> 105, 42, 63; the fracs
     sum to 2, so the total is 419 + 3 - 2 = 420, where the pedestal rule says 421.
     """
-    two = deck_panel(
-        [_plain(outfit_effect_up_permil=500, passive_effect_up_permil=200)]
-    )
+    two = deck_panel([_plain(outfit_effect_up_permil=500, passive_effect_up_permil=200)])
     assert two.tot_raw == Fraction(91 * 782, 200)
     assert two.active == 210
     assert (two.outfit, two.passive, two.board) == (105, 42, 0)
@@ -170,7 +166,7 @@ def test_each_line_is_its_own_ceiling_and_the_pedestal_is_an_identity():
     assert three.tot_raw == Fraction(91 * 920, 200)
     assert three.active == 210
     assert (three.outfit, three.passive, three.board) == (105, 42, 63)
-    assert _nonspecial_total(three) == 420          # the pedestal rule says 421
+    assert _nonspecial_total(three) == 420  # the pedestal rule says 421
 
     # the identity itself, spelled out on the three-line deck
     base = 419 - 210
@@ -219,7 +215,7 @@ def test_rounding_p_prime_is_a_no_op_without_a_board():
     for p in (370, 460, 550):
         plain = deck_panel([_plain(probability_permil=p)])
         assert plain.tot_raw == Fraction(p * 91, 200)
-        assert plain.a_raw == plain.tot_raw          # no effect-up, so mag' = mag
+        assert plain.a_raw == plain.tot_raw  # no effect-up, so mag' = mag
 
 
 def test_the_active_line_ceils_the_servers_float64_sum_not_the_exact_one():
@@ -238,20 +234,16 @@ def test_the_active_line_ceils_the_servers_float64_sum_not_the_exact_one():
     read back from the module, so the assertion is not circular."""
     specs = ((500, 20, 7), (400, 30, 13), (700, 23, 10))
     cards = [
-        PanelCard(
-            magnitude_permil=mag, probability_permil=460, cooldown_s=cd, duration_s=dur
-        )
+        PanelCard(magnitude_permil=mag, probability_permil=460, cooldown_s=cd, duration_s=dur)
         for mag, cd, dur in specs
     ]
-    live = {
-        mag: live_seconds(cooldown_s=cd, duration_s=dur) for mag, cd, dur in specs
-    }
+    live = {mag: live_seconds(cooldown_s=cd, duration_s=dur) for mag, cd, dur in specs}
     assert [len(v) for v in live.values()] == [64, 78, 80]
 
     panel = deck_panel(cards)
-    assert panel.a_raw == 262           # the EXACT sum is an integer, on the nose
+    assert panel.a_raw == 262  # the EXACT sum is an integer, on the nose
     assert ceil(panel.a_raw) == 262
-    assert panel.active == 263          # ...and the server's float ceils one above
+    assert panel.active == 263  # ...and the server's float ceils one above
 
     # the same accumulation, hand-rolled: n_t / d_t per live second, then / 200.
     # 76 seconds have one card live, 55 have two and 12 have all three — and only
@@ -265,9 +257,9 @@ def test_the_active_line_ceils_the_servers_float64_sum_not_the_exact_one():
     assert sorted(livecount.values()).count(3) == 12
     s = 0.0
     for t in sorted(numerator):
-        s += numerator[t] / max(10 ** 6, livecount[t] * 460 * 1000)
+        s += numerator[t] / max(10**6, livecount[t] * 460 * 1000)
     s /= 200
-    assert s == 262.00000000000006      # 262 plus one ulp of accumulated error
+    assert s == 262.00000000000006  # 262 plus one ulp of accumulated error
     assert ceil(s) == panel.active
 
 
@@ -337,9 +329,7 @@ def test_the_attribution_weight_is_an_unshortened_rate_with_no_saturation_clamp(
     Three cards of P = 550 saturate hard (sum 1650 > the 1000 floor), yet each
     card's weight is unchanged by the presence of the others: 1000*550*10/20."""
     cards = [
-        PanelCard(
-            magnitude_permil=1000, probability_permil=550, cooldown_s=20, duration_s=10
-        )
+        PanelCard(magnitude_permil=1000, probability_permil=550, cooldown_s=20, duration_s=10)
         for _ in range(3)
     ]
     w = _attribution_weights(cards)
@@ -348,16 +338,12 @@ def test_the_attribution_weight_is_an_unshortened_rate_with_no_saturation_clamp(
     alone = _attribution_weights(cards[:1])
     assert alone[0] == w[0]  # saturation of the deck does not touch the weight
     # and no board buff enters the weight — not the probability-up...
-    buffed = _attribution_weights(
-        [dataclasses.replace(cards[0], board_probability_up_permil=500)]
-    )
+    buffed = _attribution_weights([dataclasses.replace(cards[0], board_probability_up_permil=500)])
     assert buffed[0] == alone[0]
     # ...and not the cooldown-shorten either (it multiplies the
     # card's own rate inside ITS board gain, and putting it in the weight is
     # what made the shorten look concave and cost the three-line decks)
-    shortened = _attribution_weights(
-        [dataclasses.replace(cards[0], board_cooldown_shorten_permil=120)]
-    )
+    shortened = _attribution_weights([dataclasses.replace(cards[0], board_cooldown_shorten_permil=120)])
     assert shortened[0] == alone[0]
     # the shorten DOES still move the lattice, so this is not a no-op elsewhere
     assert len(live_seconds(cooldown_s=20, duration_s=10, shorten_permil=120)) != len(
@@ -465,11 +451,17 @@ def test_the_board_gain_is_per_card_not_a_product_of_deck_means():
     which is exactly when a passive line is also drawn, so it decides the
     three-line decks."""
     e_card = PanelCard(
-        magnitude_permil=1000, probability_permil=460, cooldown_s=20, duration_s=10,
+        magnitude_permil=1000,
+        probability_permil=460,
+        cooldown_s=20,
+        duration_s=10,
         board_effect_up_permil=100,
     )
     u_card = PanelCard(
-        magnitude_permil=1000, probability_permil=460, cooldown_s=20, duration_s=10,
+        magnitude_permil=1000,
+        probability_permil=460,
+        cooldown_s=20,
+        duration_s=10,
         board_probability_up_permil=100,
     )
     w = Fraction(1000 * 460 * 10, 20)
@@ -509,7 +501,7 @@ def test_a_displayed_source_with_no_live_carrier_falls_back_and_still_shows():
         duration_s=10,
         outfit_effect_up_permil=500,
     )
-    panel = deck_panel([carrier, worker])
+    deck_panel([carrier, worker])
     assert _split_quotas([carrier, worker])[1] == 0
 
 
@@ -524,9 +516,7 @@ def test_a_boost_that_does_not_beat_the_base_zeroes_all_three_lines():
     saturates: v' = (2000*550 + 100*740)/1290 = 910.08 — the dilution costs
     more than the buff earns."""
     cards = [
-        PanelCard(
-            magnitude_permil=2000, probability_permil=550, cooldown_s=20, duration_s=10
-        ),
+        PanelCard(magnitude_permil=2000, probability_permil=550, cooldown_s=20, duration_s=10),
         PanelCard(
             magnitude_permil=100,
             probability_permil=370,
@@ -555,9 +545,7 @@ def test_a_deck_with_no_source_at_all_shows_only_the_active_line():
 def test_the_special_line_is_the_active_integer_times_the_special_pool():
     """Special = ceil(Active * sum smag*(1 + R/2000)*sdur / 120000).
     Active = 210, smag = 800, sdur = 7 -> 210*5600/120000 = 9.8 -> 10."""
-    panel = deck_panel(
-        [_plain(special_magnitude_permil=800, special_duration_s=7)]
-    )
+    panel = deck_panel([_plain(special_magnitude_permil=800, special_duration_s=7)])
     assert panel.active == 210
     assert panel.special == 10
 
@@ -656,9 +644,7 @@ def _oracle_rows():
 def test_oracle_active_line_is_bit_exact():
     rows = _oracle_rows()
     misses = [
-        row["capture_index"]
-        for row, cards in rows
-        if deck_panel(cards).active != row["bonus"]["active"]
+        row["capture_index"] for row, cards in rows if deck_panel(cards).active != row["bonus"]["active"]
     ]
     assert misses == [], f"{len(misses)}/{len(rows)} Active misses"
 
@@ -669,16 +655,12 @@ def test_oracle_special_line_is_bit_exact_on_board_free_rows():
         (row, cards)
         for row, cards in rows
         if not any(
-            c.board_effect_up_permil
-            or c.board_probability_up_permil
-            or c.board_cooldown_shorten_permil
+            c.board_effect_up_permil or c.board_probability_up_permil or c.board_cooldown_shorten_permil
             for c in cards
         )
     ]
     assert len(board_free) >= 100
-    exact = sum(
-        deck_panel(cards).special == row["bonus"]["special"] for row, cards in board_free
-    )
+    exact = sum(deck_panel(cards).special == row["bonus"]["special"] for row, cards in board_free)
     # Exact on all but two rows. The two misses are decks whose product lands on an
     # exact integer, where the server's own float lands one above; `floor + 1`
     # fixes those two and breaks 26 others, so `ceil` stands.
@@ -716,10 +698,7 @@ def test_oracle_unit_score_is_bit_exact_from_the_servers_own_lines():
     OWN Score Bonus it must reproduce the server's OWN Unit Score, every row."""
     rows = _oracle_rows()
     for row, _cards in rows:
-        assert (
-            unit_score_from_panel(row["overall_power"], row["score_bonus_permil"])
-            == row["unit_score"]
-        )
+        assert unit_score_from_panel(row["overall_power"], row["score_bonus_permil"]) == row["unit_score"]
 
 
 # --- the per-song (singers') board bonus ---------------------------------
@@ -750,8 +729,7 @@ def test_a_fractional_song_bonus_pays_one_ceiling():
     e = Fraction(111, 2)
     assert sung.board == plain.board + ceil(e + rest * e / 1000)
     # the integer case is the old law unchanged
-    assert deck_panel([_plain()], song_bonus_permil=100).board == \
-        plain.board + 100 + -(-rest * 100 // 1000)
+    assert deck_panel([_plain()], song_bonus_permil=100).board == plain.board + 100 + -(-rest * 100 // 1000)
 
 
 # One deck read from the server with and without a song (SaveDeck -> GetDeck,
@@ -772,20 +750,19 @@ _LUI_DECK = (
 @pytest.mark.parametrize(
     "red, eff3, power, lines, unit_score",
     [
-        (0, 0, 297167, (634, 0, 19, 414, 369), 1474829),     # no song
+        (0, 0, 297167, (634, 0, 19, 414, 369), 1474829),  # no song
         (240, 50, 309580, (634, 0, 19, 713, 369), 1725019),  # her solo
-        (240, 0, 309580, (634, 0, 19, 611, 369), 1660686),   # a unit song, no yellow
+        (240, 0, 309580, (634, 0, 19, 611, 369), 1660686),  # a unit song, no yellow
         (240, 60, 309580, (634, 0, 19, 733, 369), 1737633),  # a unit song with yellow
         (0, 55.5, 297167, (634, 0, 19, 527, 369), 1543242),  # another member's solo
-        (0, 28, 297167, (634, 0, 19, 471, 369), 1509338),    # a whole-roster song
+        (0, 28, 297167, (634, 0, 19, 471, 369), 1509338),  # a whole-roster song
     ],
 )
 def test_the_song_deck_screen_matches_the_server(red, eff3, power, lines, unit_score):
     """A singer's red effect-up joins every card's board effect-up BEFORE the
     panel runs; the yellow eff3 is then folded into the Board line. Every line
     and the Unit Score equal the server's GetDeck for that song."""
-    cards = [dataclasses.replace(c, board_effect_up_permil=c.board_effect_up_permil + red)
-             for c in _LUI_DECK]
+    cards = [dataclasses.replace(c, board_effect_up_permil=c.board_effect_up_permil + red) for c in _LUI_DECK]
     panel = deck_panel(cards, overall_power=power, song_bonus_permil=eff3)
     assert (panel.active, panel.outfit, panel.passive, panel.board, panel.special) == lines
     assert panel.score_bonus_permil == sum(lines)

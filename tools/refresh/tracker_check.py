@@ -15,6 +15,7 @@ The ntfy topic is a long random name that only the VPS holds: `NTFY_TOPIC` in th
 EnvironmentFile, never in the repository. Messages carry no account, host or credential data:
 regions, minutes and the error's class (e.g. OUTDATED_APP).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,7 +28,7 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent / "web"))      # tracker_health.py lives with the Event page
+sys.path.insert(0, str(HERE.parent / "web"))  # tracker_health.py lives with the Event page
 import tracker_health  # noqa: E402
 
 STATUS_URL = os.environ.get("HB_TRACKER_STATUS_URL", "http://127.0.0.1:8790/status")
@@ -104,8 +105,11 @@ def notify(text: str, topic: str | None = None) -> None:
     topic = topic or os.environ.get("NTFY_TOPIC", "")
     if not topic:
         raise SystemExit("NTFY_TOPIC is not set")
-    req = urllib.request.Request(f"{NTFY_URL}/{topic}", data=text.encode(),
-                                 headers={"Title": "hololive-builder tracker", "Tags": "warning"})
+    req = urllib.request.Request(
+        f"{NTFY_URL}/{topic}",
+        data=text.encode(),
+        headers={"Title": "hololive-builder tracker", "Tags": "warning"},
+    )
     urllib.request.urlopen(req, timeout=20).read()  # noqa: S310 -- the ntfy server
 
 

@@ -17,7 +17,17 @@ import re
 from pathlib import Path
 
 import pytest
+from support.builders import (
+    DEFAULT_RUN_STATE,
+    FIXTURE_CARDS_PATH,
+    make_card,
+    make_resolved,
+    make_scoring_config,
+    make_skill,
+    make_team,
+)
 
+import hbuilder.domain.scoring as scoring_module
 from hbuilder.domain.card import EffectTarget, GateCondition, SlotOverride, Stats
 from hbuilder.domain.gates import GatePredicate, GateResolution, resolve_team_gates
 from hbuilder.domain.loader import load_cards
@@ -37,18 +47,6 @@ from hbuilder.domain.scoring import (
 from hbuilder.domain.scoring_config import REFERENCE_RUN_SECONDS, load_scoring_config
 from hbuilder.domain.team import build_team
 from hbuilder.domain.unknown import UNKNOWN
-
-import hbuilder.domain.scoring as scoring_module
-
-from support.builders import (
-    DEFAULT_RUN_STATE,
-    FIXTURE_CARDS_PATH,
-    make_card,
-    make_resolved,
-    make_scoring_config,
-    make_skill,
-    make_team,
-)
 
 _CERTAIN_TIERS = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
 
@@ -124,16 +122,11 @@ def test_non_active_activation_rate_up_slot_is_rejected_by_the_schema_constraint
         "rider": {"kind": "none"},
     }
     errors = validate_skill_slot(record, "card_rateup_defense_01", "PASSIVE")
-    assert any(
-        e.startswith("family") and "activation_rate_up" in e and "ACTIVE" in e
-        for e in errors
-    )
+    assert any(e.startswith("family") and "activation_rate_up" in e and "ACTIVE" in e for e in errors)
 
 
 def test_fold_activation_rate_up_raises_scoring_error_for_a_non_active_slot_that_bypassed_load_time_validation():
-    skill = make_skill(
-        "PASSIVE", family="activation_rate_up", effect_type="activation_rate", magnitude=15.0
-    )
+    skill = make_skill("PASSIVE", family="activation_rate_up", effect_type="activation_rate", magnitude=15.0)
     resolved = make_resolved("card_rateup_defense_02", "PASSIVE", skill)
     cfg = make_scoring_config()
 
@@ -146,9 +139,7 @@ def test_fold_activation_rate_up_raises_scoring_error_for_a_non_active_slot_that
 
 
 def test_fold_activation_rate_up_raises_scoring_error_even_when_the_gate_did_not_fire():
-    skill = make_skill(
-        "PASSIVE", family="activation_rate_up", effect_type="activation_rate", magnitude=15.0
-    )
+    skill = make_skill("PASSIVE", family="activation_rate_up", effect_type="activation_rate", magnitude=15.0)
     gate = GateResolution(
         predicate=GatePredicate(dimension="type", value="Cute", threshold=3),
         fired=False,
@@ -274,9 +265,7 @@ def test_costume_slot_dispatches_through_its_own_entry_and_matches_passive_evalu
     passive_skill = make_skill("PASSIVE", magnitude=10.0)
     costume_skill = make_skill(COSTUME_SLOT_KIND, magnitude=10.0)
     passive_resolved = make_resolved("card_costume_01", "PASSIVE", passive_skill)
-    costume_resolved = make_resolved(
-        "card_costume_01", "costume", costume_skill, source="costume"
-    )
+    costume_resolved = make_resolved("card_costume_01", "costume", costume_skill, source="costume")
     cfg = make_scoring_config()
 
     passive_ev = _score_passive(passive_resolved, cfg, 0.0)
@@ -305,9 +294,7 @@ def test_active_ev_at_duration_equal_to_interval_and_probability_one_is_the_fini
     The unit contract is what this test is really for: divide the EV back by that uptime and the magnitude comes out as a
     fraction, 25.0 -> 0.25, never the raw percentage-point number and never a
     further /100."""
-    skill = make_skill(
-        "ACTIVE", duration=20.0, interval=20.0, probability_tier="Medium", magnitude=25.0
-    )
+    skill = make_skill("ACTIVE", duration=20.0, interval=20.0, probability_tier="Medium", magnitude=25.0)
     resolved = make_resolved("card_uptime_01", "ACTIVE", skill)
     cfg = make_scoring_config(probability_tiers=dict(_CERTAIN_TIERS))
 
@@ -397,9 +384,7 @@ def test_active_ev_at_duration_below_interval_is_proportional_only_while_the_las
     # And not proportional once the sixth window is truncated: short by
     # exactly the 1.2 s it loses off the end of the run.
     assert _ev_at(10.0) != pytest.approx(2 * _ev_at(5.0))
-    assert _ev_at(10.0) == pytest.approx(
-        2 * _ev_at(5.0) - 0.25 * (1.2 / REFERENCE_RUN_SECONDS)
-    )
+    assert _ev_at(10.0) == pytest.approx(2 * _ev_at(5.0) - 0.25 * (1.2 / REFERENCE_RUN_SECONDS))
 
 
 # --- UNKNOWN skip-and-taint path --------------------------------------------
@@ -425,9 +410,7 @@ def test_active_skill_with_unknown_field_resolves_to_zero_and_data_missing_state
 
 
 def test_known_zero_magnitude_is_applied_state_not_confused_with_missing_data():
-    skill = make_skill(
-        "ACTIVE", duration=10.0, interval=10.0, probability_tier="Medium", magnitude=0.0
-    )
+    skill = make_skill("ACTIVE", duration=10.0, interval=10.0, probability_tier="Medium", magnitude=0.0)
     resolved = make_resolved("card_known_zero", "ACTIVE", skill)
     cfg = make_scoring_config()
 
@@ -472,9 +455,7 @@ def test_team_score_is_invariant_under_member_permutation():
             "perm_m3",
             type_="Pure",
             generations=frozenset({"2期生"}),
-            passive=make_skill(
-                "PASSIVE", family="stat_up", effect_type="performance", magnitude=6.0
-            ),
+            passive=make_skill("PASSIVE", family="stat_up", effect_type="performance", magnitude=6.0),
         ),
         make_card("perm_m4", type_="Happy", generations=frozenset({"3期生"})),
         make_card("perm_m5", type_="Pure", generations=frozenset({"4期生"})),
@@ -549,9 +530,7 @@ def test_life_recovery_passive_contributes_zero_at_default_weight_and_nonzero_wh
 
 def test_scoring_module_contains_no_rounding_decimal_or_quantize_construct():
     source = Path(scoring_module.__file__).read_text(encoding="utf-8")
-    code_text = "\n".join(
-        line for line in source.splitlines() if not line.strip().startswith("#")
-    )
+    code_text = "\n".join(line for line in source.splitlines() if not line.strip().startswith("#"))
 
     assert not re.search(r"\bround\(", code_text)
     assert not re.search(r"\bDecimal\b", code_text)
@@ -587,9 +566,7 @@ def _targeted_stat_up_cards():
     excluded outright by type — both are what prove the scorer targets N
     *cards*, never "every card of the type" and never "every card"."""
     target = EffectTarget(kind="type", value="Cute", count=2)
-    skill = make_skill(
-        "PASSIVE", family="stat_up", effect_type="performance", magnitude=10.0, target=target
-    )
+    skill = make_skill("PASSIVE", family="stat_up", effect_type="performance", magnitude=10.0, target=target)
     return [
         # First entry is the OUTFIT card (make_team's cards[0]): a Happy
         # filler, deliberately outside the five so it neither qualifies for
@@ -640,9 +617,9 @@ def test_targeted_stat_up_applies_only_to_the_named_stat_of_the_targeted_members
     # is untouched despite being the highest of all six, because it is not
     # Cute — a target-blind formula would apply the rate to
     # base_stat_sum in full, touching every stat of every card regardless.
-    base_stat_sum = (300 + 100 + 100) + (250 + 100 + 100) + (50 + 100 + 100) + (
-        999 + 100 + 100
-    ) + (10 + 100 + 100)
+    base_stat_sum = (
+        (300 + 100 + 100) + (250 + 100 + 100) + (50 + 100 + 100) + (999 + 100 + 100) + (10 + 100 + 100)
+    )
     expected = base_stat_sum + 0.10 * (300 + 250)
     assert score_fast(team, cfg) == pytest.approx(expected)
 
@@ -674,9 +651,7 @@ def test_targeted_stat_up_total_differs_from_the_team_wide_stat_up_total():
     # Located by id, not by index: index 0 is the OUTFIT card, and
     # replacing that one would leave the subset-targeted skill in place and
     # make the two totals trivially equal.
-    carrier_index = next(
-        i for i, card in enumerate(team_wide_cards) if card.id == "target_leader"
-    )
+    carrier_index = next(i for i, card in enumerate(team_wide_cards) if card.id == "target_leader")
     team_wide_cards[carrier_index] = make_card(
         "target_leader",
         type_="Cute",
@@ -704,24 +679,12 @@ def _all_stats_base_cards():
     leader slot, where a normal skill would not be emitted at all. Every
     skill under test therefore goes on indices 1-5, the five members."""
     return [
-        make_card(
-            "as_outfit", type_="Happy", stats=Stats(performance=40, technique=40, sense=40)
-        ),
-        make_card(
-            "as_leader", type_="Cute", stats=Stats(performance=300, technique=150, sense=120)
-        ),
-        make_card(
-            "as_member_1", type_="Cute", stats=Stats(performance=200, technique=180, sense=90)
-        ),
-        make_card(
-            "as_member_2", type_="Pure", stats=Stats(performance=140, technique=220, sense=60)
-        ),
-        make_card(
-            "as_member_3", type_="Pure", stats=Stats(performance=90, technique=90, sense=300)
-        ),
-        make_card(
-            "as_member_4", type_="Happy", stats=Stats(performance=60, technique=60, sense=200)
-        ),
+        make_card("as_outfit", type_="Happy", stats=Stats(performance=40, technique=40, sense=40)),
+        make_card("as_leader", type_="Cute", stats=Stats(performance=300, technique=150, sense=120)),
+        make_card("as_member_1", type_="Cute", stats=Stats(performance=200, technique=180, sense=90)),
+        make_card("as_member_2", type_="Pure", stats=Stats(performance=140, technique=220, sense=60)),
+        make_card("as_member_3", type_="Pure", stats=Stats(performance=90, technique=90, sense=300)),
+        make_card("as_member_4", type_="Happy", stats=Stats(performance=60, technique=60, sense=200)),
     ]
 
 
@@ -753,9 +716,7 @@ def test_all_parameter_up_team_wide_total_equals_three_single_stat_team_wide_ski
     technique_skill = make_skill(
         "PASSIVE", family="stat_up", effect_type="technique", magnitude=10.0, target=None
     )
-    sense_skill = make_skill(
-        "PASSIVE", family="stat_up", effect_type="sense", magnitude=10.0, target=None
-    )
+    sense_skill = make_skill("PASSIVE", family="stat_up", effect_type="sense", magnitude=10.0, target=None)
     split_cards = _all_stats_base_cards()
     split_cards[1] = make_card(
         "as_leader",
@@ -787,15 +748,11 @@ def _targeted_all_stats_cards():
     technique, AND sense, so the targeted-vs-team-wide comparison below
     cannot pass under a formula that ignores the target."""
     target = EffectTarget(kind="type", value="Cute", count=2)
-    skill = make_skill(
-        "PASSIVE", family="stat_up", effect_type="all_stats", magnitude=10.0, target=target
-    )
+    skill = make_skill("PASSIVE", family="stat_up", effect_type="all_stats", magnitude=10.0, target=target)
     return [
         # Index 0 is the OUTFIT card: Happy, so it never qualifies for the
         # Cute target, and outside the five so it adds no stats.
-        make_card(
-            "as_filler_happy_2", type_="Happy", stats=Stats(performance=10, technique=10, sense=10)
-        ),
+        make_card("as_filler_happy_2", type_="Happy", stats=Stats(performance=10, technique=10, sense=10)),
         make_card(
             "as_target_leader",
             type_="Cute",
@@ -807,17 +764,13 @@ def _targeted_all_stats_cards():
             type_="Cute",
             stats=Stats(performance=250, technique=150, sense=100),
         ),
-        make_card(
-            "as_target_low", type_="Cute", stats=Stats(performance=50, technique=50, sense=50)
-        ),
+        make_card("as_target_low", type_="Cute", stats=Stats(performance=50, technique=50, sense=50)),
         make_card(
             "as_filler_pure",
             type_="Pure",
             stats=Stats(performance=999, technique=999, sense=999),
         ),
-        make_card(
-            "as_filler_happy_1", type_="Happy", stats=Stats(performance=10, technique=10, sense=10)
-        ),
+        make_card("as_filler_happy_1", type_="Happy", stats=Stats(performance=10, technique=10, sense=10)),
     ]
 
 
@@ -859,15 +812,11 @@ def _all_stats_selection_ranking_cards():
     fail if all_stats target ranking fell back to a single stat instead of
     stat_sum()."""
     target = EffectTarget(kind="type", value="Cute", count=2)
-    skill = make_skill(
-        "PASSIVE", family="stat_up", effect_type="all_stats", magnitude=10.0, target=target
-    )
+    skill = make_skill("PASSIVE", family="stat_up", effect_type="all_stats", magnitude=10.0, target=target)
     return [
         # Index 0 is the OUTFIT card: Happy, outside the four Cute candidates
         # the ranking is about, and contributing no stats.
-        make_card(
-            "as_rank_filler_2", type_="Happy", stats=Stats(performance=10, technique=10, sense=10)
-        ),
+        make_card("as_rank_filler_2", type_="Happy", stats=Stats(performance=10, technique=10, sense=10)),
         make_card(
             "as_rank_high_perf",
             type_="Cute",
@@ -889,9 +838,7 @@ def _all_stats_selection_ranking_cards():
             type_="Cute",
             stats=Stats(performance=40, technique=190, sense=190),
         ),
-        make_card(
-            "as_rank_filler_1", type_="Happy", stats=Stats(performance=10, technique=10, sense=10)
-        ),
+        make_card("as_rank_filler_1", type_="Happy", stats=Stats(performance=10, technique=10, sense=10)),
     ]
 
 
@@ -901,9 +848,7 @@ def test_all_parameter_up_target_selection_ranks_candidates_by_stat_sum_not_a_si
 
     breakdown = score_with_breakdown(team, cfg)
     all_stats_contribution = next(
-        contribution
-        for contribution in breakdown.contributions
-        if contribution.effect_type == "all_stats"
+        contribution for contribution in breakdown.contributions if contribution.effect_type == "all_stats"
     )
 
     assert set(all_stats_contribution.target_card_ids) == {
@@ -933,9 +878,7 @@ def _override_active_skill(magnitude: float, override_magnitude: float):
 
 
 def _plain_active_skill(magnitude: float):
-    return make_skill(
-        "ACTIVE", duration=20.0, interval=20.0, probability_tier="Medium", magnitude=magnitude
-    )
+    return make_skill("ACTIVE", duration=20.0, interval=20.0, probability_tier="Medium", magnitude=magnitude)
 
 
 def _team_with_pure_member_count(skill, pure_count: int):
@@ -948,9 +891,7 @@ def _team_with_pure_member_count(skill, pure_count: int):
     `pure_count` alone decides."""
     carrier = make_card("override_leader", type_="Happy", active=skill)
     types = ["Pure"] * pure_count + ["Cute"] * (4 - pure_count)
-    members = [carrier] + [
-        make_card(f"override_member_{i}", type_=types[i]) for i in range(4)
-    ]
+    members = [carrier] + [make_card(f"override_member_{i}", type_=types[i]) for i in range(4)]
     return make_team([make_card("override_outfit", type_="Happy"), *members])
 
 
@@ -963,9 +904,7 @@ def test_a_fired_override_scores_exactly_what_a_plain_base_magnitude_slot_of_the
         ),
         cfg,
     )
-    plain_70_total = score_fast(
-        _team_with_pure_member_count(_plain_active_skill(70.0), pure_count=2), cfg
-    )
+    plain_70_total = score_fast(_team_with_pure_member_count(_plain_active_skill(70.0), pure_count=2), cfg)
 
     assert fired_total == plain_70_total
 
@@ -979,9 +918,7 @@ def test_an_unfired_override_scores_exactly_what_a_plain_base_slot_scores():
         ),
         cfg,
     )
-    plain_35_total = score_fast(
-        _team_with_pure_member_count(_plain_active_skill(35.0), pure_count=0), cfg
-    )
+    plain_35_total = score_fast(_team_with_pure_member_count(_plain_active_skill(35.0), pure_count=0), cfg)
 
     assert unfired_total == plain_35_total
 
@@ -1012,9 +949,7 @@ def test_a_fired_override_never_sums_with_the_base_strictly_less_than_the_summed
         ),
         cfg,
     )
-    summed_total = score_fast(
-        _team_with_pure_member_count(_plain_active_skill(105.0), pure_count=2), cfg
-    )
+    summed_total = score_fast(_team_with_pure_member_count(_plain_active_skill(105.0), pure_count=2), cfg)
 
     assert fired_total < summed_total
 
@@ -1039,7 +974,5 @@ def test_effective_magnitude_returns_the_override_magnitude_only_when_its_own_ga
     )
     assert _effective_magnitude(unfired) == 35.0
 
-    no_override = make_resolved(
-        "card_effmag_03", "ACTIVE", _plain_active_skill(35.0)
-    )
+    no_override = make_resolved("card_effmag_03", "ACTIVE", _plain_active_skill(35.0))
     assert _effective_magnitude(no_override) == 35.0

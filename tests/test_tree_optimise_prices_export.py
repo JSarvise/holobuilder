@@ -1,5 +1,6 @@
 """Board prices on a PC without the game's `sqlcipher.dll`: `tree_optimise._prices` reads the
 synced master export `holodori/main_SkillTreeNode.json`, and it gives the master's prices."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -35,17 +36,27 @@ needs_tree = pytest.mark.skipif(_TREE is None, reason=_WHY)
 @needs_tree
 def test_the_export_keeps_every_consumption_and_the_points(tmp_path):
     rows = [
-        {"group_id": "R-001", "data": {"groupId": "R-001", "consumptionSkillTreePointQuantity": 3,
-                                       "consumptions": [{"resourceId": "item-a", "quantity": "200"},
-                                                        {"resourceId": "item-b", "quantity": "5"},
-                                                        {"resourceId": "item-a", "quantity": "1"}]}},
+        {
+            "group_id": "R-001",
+            "data": {
+                "groupId": "R-001",
+                "consumptionSkillTreePointQuantity": 3,
+                "consumptions": [
+                    {"resourceId": "item-a", "quantity": "200"},
+                    {"resourceId": "item-b", "quantity": "5"},
+                    {"resourceId": "item-a", "quantity": "1"},
+                ],
+            },
+        },
         {"group_id": "R-001", "data": {"groupId": "R-001", "consumptionSkillTreePointQuantity": 9}},
         {"group_id": "S-001", "data": {"groupId": "S-001"}},
     ]
     path = tmp_path / "main_SkillTreeNode.json"
     path.write_text(json.dumps(rows), "utf8")
     assert _TREE._prices_from_export(path) == {
-        "R-001": {"points": 3, "item-a": 201, "item-b": 5}, "S-001": {"points": 0}}
+        "R-001": {"points": 3, "item-a": 201, "item-b": 5},
+        "S-001": {"points": 0},
+    }
 
 
 @needs_tree
@@ -71,9 +82,11 @@ def _tree_budget():
 
 
 def test_the_level_grants_export_reads_skill_tree_points_per_level(tmp_path):
-    rows = [{"data": {"groupId": "level-group-1", "level": 1}},
-            {"data": {"groupId": "level-group-1", "level": 2, "skillTreePointQuantity": 3}},
-            {"data": {"groupId": "level-group-2", "level": 2, "skillTreePointQuantity": 9}}]
+    rows = [
+        {"data": {"groupId": "level-group-1", "level": 1}},
+        {"data": {"groupId": "level-group-1", "level": 2, "skillTreePointQuantity": 3}},
+        {"data": {"groupId": "level-group-2", "level": 2, "skillTreePointQuantity": 9}},
+    ]
     path = tmp_path / "main_CharacterLevel.json"
     path.write_text(json.dumps(rows), "utf8")
     assert _tree_budget().level_grants_from_export(path=path) == {1: 0, 2: 3}

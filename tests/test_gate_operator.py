@@ -21,12 +21,11 @@ is unchanged.
 from __future__ import annotations
 
 import pytest
+from support.builders import make_card
 
 from hbuilder.domain.card import GateCondition
 from hbuilder.domain.gates import GatePredicate, RunState, predicate_from_condition
 from hbuilder.domain.schema import validate_skill_slot
-
-from support.builders import make_card
 
 
 def _agg():
@@ -43,9 +42,9 @@ def _agg():
     [
         # LTE: fires only when LIFE is AT OR BELOW the threshold.
         ("lte", 1000, 950, False),  # <-- the trap: perfect play must NOT fire it
-        ("lte", 950, 950, True),    # boundary is inclusive
-        ("lte", 500, 700, True),    # comfortably below
-        ("lte", 701, 700, False),   # one above
+        ("lte", 950, 950, True),  # boundary is inclusive
+        ("lte", 500, 700, True),  # comfortably below
+        ("lte", 701, 700, False),  # one above
         # GTE: unchanged behaviour, fires at or above.
         ("gte", 1000, 950, True),
         ("gte", 949, 950, False),
@@ -53,9 +52,7 @@ def _agg():
     ],
 )
 def test_run_state_operator_direction(operator, life, threshold, should_fire):
-    predicate = GatePredicate(
-        dimension="run_state", value="life", threshold=threshold, operator=operator
-    )
+    predicate = GatePredicate(dimension="run_state", value="life", threshold=threshold, operator=operator)
     resolution = predicate.resolve(_agg(), RunState(life=life, combo=100))
     assert resolution.fired is should_fire, (
         f"a LIFE {operator} gate with threshold {threshold} against "
@@ -73,9 +70,7 @@ def test_operator_defaults_to_gte():
 
 
 def test_predicate_from_condition_carries_operator():
-    condition = GateCondition(
-        kind="run_state", target="life", count=950, operator="lte"
-    )
+    condition = GateCondition(kind="run_state", target="life", count=950, operator="lte")
     predicate = predicate_from_condition(condition)
     assert predicate.operator == "lte"
     assert predicate.resolve(_agg(), RunState(life=1000, combo=100)).fired is False

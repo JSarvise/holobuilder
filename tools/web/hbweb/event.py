@@ -17,10 +17,9 @@ import threading
 import time
 from urllib.parse import parse_qs, urlparse
 
-from hbuilder.inputs import _LoadFailure, load_inputs
-
 import cutoffs_poller
 
+from hbuilder.inputs import _LoadFailure, load_inputs
 from hbweb import basis, config, jobs, songs
 
 
@@ -37,10 +36,10 @@ CUTOFFS_SYNC_LOCK = threading.Lock()
 # interval and =0 turns it off. With the VPS tracker configured it PULLS the tracker's
 # reads instead of logging the same guest accounts in from here: two readers on one
 # guest would keep ending each other's session.
-CUTOFFS_POLL_SCRIPT = (config.CUTOFFS_PULL_SCRIPT if tracker_configured()
-                       else config.CUTOFFS_SYNC_SCRIPT)
+CUTOFFS_POLL_SCRIPT = config.CUTOFFS_PULL_SCRIPT if tracker_configured() else config.CUTOFFS_SYNC_SCRIPT
 CUTOFFS_POLLER = cutoffs_poller.CutoffsPoller(
-    cutoffs_poller.ScriptRunner(CUTOFFS_POLL_SCRIPT, config.REPO_ROOT), CUTOFFS_SYNC_LOCK)
+    cutoffs_poller.ScriptRunner(CUTOFFS_POLL_SCRIPT, config.REPO_ROOT), CUTOFFS_SYNC_LOCK
+)
 
 # The top 100 is read ON DEMAND, only while someone is looking at it: each
 # GET /api/event/top renews a viewer's lease on the VPS tracker for that region (at most once
@@ -58,7 +57,7 @@ def kick_top_watch(region: str, kind: str | None = None) -> bool:
         return False
     now = time.time()
     with _TOP_WATCH_MU:
-        key = f"{region}|{kind or ''}"   # a song's board holds its own lease
+        key = f"{region}|{kind or ''}"  # a song's board holds its own lease
         if now - _TOP_WATCH_AT.get(key, 0.0) < TOP_WATCH_EVERY_S:
             return False
         _TOP_WATCH_AT[key] = now
@@ -68,10 +67,20 @@ def kick_top_watch(region: str, kind: str | None = None) -> bool:
         if not CUTOFFS_SYNC_LOCK.acquire(timeout=90):
             return
         try:
-            subprocess.run([sys.executable, "-u", str(config.CUTOFFS_PULL_SCRIPT), "--watch", region,
-                            *(["--kind", kind] if kind else [])],
-                           cwd=str(config.REPO_ROOT), capture_output=True, timeout=120,
-                           env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-u",
+                    str(config.CUTOFFS_PULL_SCRIPT),
+                    "--watch",
+                    region,
+                    *(["--kind", kind] if kind else []),
+                ],
+                cwd=str(config.REPO_ROOT),
+                capture_output=True,
+                timeout=120,
+                env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+            )
         except (OSError, subprocess.SubprocessError) as exc:
             print(f"  [top-watch] {region}: {type(exc).__name__}: {exc}", flush=True)
         finally:
@@ -82,9 +91,13 @@ def kick_top_watch(region: str, kind: str | None = None) -> bool:
 
 
 def event_unavailable(exc: Exception) -> dict:
-    return {"available": False, "error": (
-        f"no current event: {exc}. The refresh writes tools/recon/proxy/dumps/"
-        "marathon_bonus.json (Event/ListEventInfo); run tools/refresh/refresh_all.py.")}
+    return {
+        "available": False,
+        "error": (
+            f"no current event: {exc}. The refresh writes tools/recon/proxy/dumps/"
+            "marathon_bonus.json (Event/ListEventInfo); run tools/refresh/refresh_all.py."
+        ),
+    }
 
 
 def chr_names(cards) -> dict[str, str]:
@@ -116,18 +129,29 @@ def serve_event(h) -> None:
     except _LoadFailure as exc:
         h.reply_json(500, {"error": f"could not load the catalogue: {exc}"})
         return
-    collection = ((config.read_json(config.COLLECTION_PATH) or {}).get("cards") or {})
+    collection = (config.read_json(config.COLLECTION_PATH) or {}).get("cards") or {}
     titles, singers = songs.song_labels()
     try:
         meta = config.read_json(config.EVENT_META_PATH)
     except (OSError, ValueError):  # a torn event_meta.json costs the title, not the page
         meta = None
-    h.reply_json(200, event_mode.event_payload(
-        raw, event, open_keys=keys, cards_by_id={c.id: c for c in cards},
-        owned_ids=[c.id for c in owned], collection=collection, titles=titles,
-        chr_names=chr_names(cards), meta=meta,
-        art_dir=config.EVENT_ART_DIR, singers=singers,
-        music_meta={str(d.get("id")): d for d in songs.music_rows() if d.get("id")}))
+    h.reply_json(
+        200,
+        event_mode.event_payload(
+            raw,
+            event,
+            open_keys=keys,
+            cards_by_id={c.id: c for c in cards},
+            owned_ids=[c.id for c in owned],
+            collection=collection,
+            titles=titles,
+            chr_names=chr_names(cards),
+            meta=meta,
+            art_dir=config.EVENT_ART_DIR,
+            singers=singers,
+            music_meta={str(d.get("id")): d for d in songs.music_rows() if d.get("id")},
+        ),
+    )
 
 
 def serve_event_songs(h) -> None:
@@ -151,13 +175,23 @@ def serve_event_songs(h) -> None:
     try:
         # `event`: one chapter (a Spotlight event's chapters each have their own bonuses)
         _raw, event, _keys = event_mode.load_event_bundle(
-            config.EVENT_BONUS_PATH, (query.get("event") or [None])[0] or None)
+            config.EVENT_BONUS_PATH, (query.get("event") or [None])[0] or None
+        )
     except (OSError, ValueError, KeyError, event_mode.mar.SchemaError):  # the ranking stands without an event
         event = None
     titles, singers = songs.song_labels()
-    h.reply_json(200, event_mode.songs_payload(
-        songs.music_rows(), titles=titles, singers=singers, boosts=boosts, event=event,
-        charted=songs.chart_note_counts(difficulty), difficulty=difficulty))
+    h.reply_json(
+        200,
+        event_mode.songs_payload(
+            songs.music_rows(),
+            titles=titles,
+            singers=singers,
+            boosts=boosts,
+            event=event,
+            charted=songs.chart_note_counts(difficulty),
+            difficulty=difficulty,
+        ),
+    )
 
 
 def event_points(h) -> None:
@@ -189,7 +223,8 @@ def start_event_run(h) -> None:
         opts = event_mode.parse_event_body(body)
         # Highlight is a pool, not one song: the difficulty alone is checked here
         opts["difficulty"] = basis.parse_difficulty(
-            body, "" if event_mode.is_highlight(opts["song"]) else opts["song"])
+            body, "" if event_mode.is_highlight(opts["song"]) else opts["song"]
+        )
     except event_mode.EventRequestError as exc:
         h.reply_json(400, {"error": str(exc)})
         return
@@ -200,8 +235,7 @@ def start_event_run(h) -> None:
         h.reply_json(503, event_unavailable(FileNotFoundError(str(config.EVENT_BONUS_PATH))))
         return
     job = jobs.launch(jobs.run_event_job, opts, "event")
-    h.reply_json(202, {"job_id": job.job_id, "plan": [dict(s) for s in jobs.EVENT_STAGES],
-                       "opts": opts})
+    h.reply_json(202, {"job_id": job.job_id, "plan": [dict(s) for s in jobs.EVENT_STAGES], "opts": opts})
 
 
 def _region_of(h, query) -> str | None:
@@ -218,8 +252,9 @@ def _region_of(h, query) -> str | None:
 def _grades():
     import cutoffs_view  # noqa: PLC0415
 
-    return cutoffs_view.load_grades(config.read_json(config.CUTOFFS_GRADE_PATH),
-                                    config.read_json(config.CUTOFFS_GRADE_LANG_PATH))
+    return cutoffs_view.load_grades(
+        config.read_json(config.CUTOFFS_GRADE_PATH), config.read_json(config.CUTOFFS_GRADE_LANG_PATH)
+    )
 
 
 def serve_event_cutoffs(h) -> None:
@@ -236,9 +271,13 @@ def serve_event_cutoffs(h) -> None:
     grades = _grades()
     try:
         view = cutoffs_view.build_view(
-            config.CUTOFFS_STORE_DIR, region, now=int(time.time() * 1000),
+            config.CUTOFFS_STORE_DIR,
+            region,
+            now=int(time.time() * 1000),
             chapter_id=(query.get("chapter") or [None])[0] or None,
-            kind=(query.get("kind") or [None])[0] or None, grades=grades)
+            kind=(query.get("kind") or [None])[0] or None,
+            grades=grades,
+        )
     except LookupError as exc:
         h.reply_json(503, {"available": False, "region": region, "error": str(exc)})
         return
@@ -257,8 +296,13 @@ def serve_event_tracker(h) -> None:
     if not tracker_configured():
         h.reply_json(200, {"configured": False, "open": False, "stale": []})
         return
-    h.reply_json(200, {"configured": True, **tracker_health.health(
-        config.CUTOFFS_STORE_DIR, config.EVENT_META_PATH, time.time())})
+    h.reply_json(
+        200,
+        {
+            "configured": True,
+            **tracker_health.health(config.CUTOFFS_STORE_DIR, config.EVENT_META_PATH, time.time()),
+        },
+    )
 
 
 def serve_event_top(h) -> None:
@@ -276,20 +320,24 @@ def serve_event_top(h) -> None:
     uid = (query.get("uid") or [None])[0] or None
     live = tracker_configured()
     kind = (query.get("kind") or [None])[0] or None
-    if kind is not None and not (kind in ("points", "total") or (
-            kind.startswith("music:") and kind[6:].replace("_", "").isalnum())):
+    if kind is not None and not (
+        kind in ("points", "total") or (kind.startswith("music:") and kind[6:].replace("_", "").isalnum())
+    ):
         h.reply_json(400, {"error": "kind must be points, total or music:<id>"})
         return
     if live and not uid:
         kick_top_watch(region, kind)
     try:
         view = top_view.build_top(
-            config.CUTOFFS_STORE_DIR, region, now=int(time.time() * 1000),
-            chapter_id=(query.get("chapter") or [None])[0] or None, uid=uid,
-            kind=kind)
+            config.CUTOFFS_STORE_DIR,
+            region,
+            now=int(time.time() * 1000),
+            chapter_id=(query.get("chapter") or [None])[0] or None,
+            uid=uid,
+            kind=kind,
+        )
     except LookupError as exc:
-        h.reply_json(503, {"available": False, "region": region, "error": str(exc),
-                           "watching": live})
+        h.reply_json(503, {"available": False, "region": region, "error": str(exc), "watching": live})
         return
     except (OSError, ValueError) as exc:
         h.reply_json(500, {"error": f"{type(exc).__name__}: {exc}"})
@@ -312,6 +360,7 @@ def serve_event_history(h) -> None:
     doc = None
     try:
         import event_history  # noqa: PLC0415
+
         doc = event_history.build()[0]
     except Exception:  # noqa: BLE001 -- the stored history still answers
         doc = None

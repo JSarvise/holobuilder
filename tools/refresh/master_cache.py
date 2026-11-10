@@ -11,11 +11,17 @@
 #
 # Usage:  python master_cache.py <Table> ["SELECT ..."]
 #         python master_cache.py --list
-import hashlib, json, os, shutil, sys, tempfile
+import hashlib
+import json
+import os
+import shutil
+import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 from master_db import MasterDB, decode_record  # noqa: E402
 
@@ -39,13 +45,13 @@ def can_decrypt() -> bool:
         lib = paths.sqlcipher_library()
     except FileNotFoundError:
         return False
-    return os.path.isfile(lib) if os.path.dirname(lib) else True   # a bare name: the loader's search
+    return os.path.isfile(lib) if os.path.dirname(lib) else True  # a bare name: the loader's search
 
 
 def _game_cache_path(table):
     key = hashlib.md5(table.encode()).hexdigest().upper()
     if paths.no_game() or not os.path.isdir(CACHE):
-        return None                                # no game on this PC
+        return None  # no game on this PC
     for name in os.listdir(CACHE):
         if name.split("_")[0] == key:
             return os.path.join(CACHE, name)
@@ -64,7 +70,7 @@ def _decrypts(path, seed_hex):
     fd, tmp = tempfile.mkstemp(prefix="hbmaster_probe_", suffix=".db")
     os.close(fd)
     try:
-        shutil.copy(path, tmp)          # a copy failure raises, as it always did
+        shutil.copy(path, tmp)  # a copy failure raises, as it always did
         db = None
         try:
             db = MasterDB(tmp, seed_hex)
@@ -135,9 +141,11 @@ def cached_path(table, index=None):
             # under today's seed is still evidence of what the last version shipped.
             try:
                 os.replace(candidates[0], candidates[0] + ".stale")
-                print(f"  master_cache: {table}: refetched copy is stale for this master "
-                      f"version -- parked as {os.path.basename(candidates[0])}.stale",
-                      file=sys.stderr)
+                print(
+                    f"  master_cache: {table}: refetched copy is stale for this master "
+                    f"version -- parked as {os.path.basename(candidates[0])}.stale",
+                    file=sys.stderr,
+                )
             except OSError:
                 pass
     _PICKED[table] = pick
@@ -168,11 +176,15 @@ def _self_heal(table, index):
     if not _refetch_allowed():
         return None
     import master_refetch  # noqa: PLC0415 -- only on the failure path
+
     entry = index.get(table) or {}
     if not entry.get("url"):
         return None
-    print(f"  master_cache: {table}: no local copy decrypts under the current seed "
-          f"-- re-downloading the file the index names", file=sys.stderr)
+    print(
+        f"  master_cache: {table}: no local copy decrypts under the current seed "
+        f"-- re-downloading the file the index names",
+        file=sys.stderr,
+    )
     master_refetch.fetch([table])
     healed = master_refetch.path_for(table)
     # `verified`, not fetch's counter: a body already on disk is reported as "already have"
@@ -209,7 +221,7 @@ def open_table(table, index=None):
     shutil.copy(src, tmp)
     db = MasterDB(tmp, index[table]["seed_hex"])
     try:
-        db.temp_copy = tmp          # `MasterDB.close` removes it
+        db.temp_copy = tmp  # `MasterDB.close` removes it
     except AttributeError:
         pass
     return db
@@ -221,8 +233,7 @@ def sql_table(db, table):
     All 124 `Lang*_Eng` files hold their rows in a table called plain `Lang`, so the obvious
     `SELECT * FROM LangMusic_Eng` fails with `prepare failed`. Resolve it from the file rather
     than assuming."""
-    have = [next(iter(r.values())) for r in
-            db.query("SELECT name FROM sqlite_master WHERE type='table'")]
+    have = [next(iter(r.values())) for r in db.query("SELECT name FROM sqlite_master WHERE type='table'")]
     have = [n.decode() if isinstance(n, bytes) else n for n in have]
     if table in have:
         return table
@@ -242,8 +253,10 @@ def rows(table, sql=None, index=None):
         rec = {}
         for k, v in r.items():
             if k == "data":
-                rec["data"] = {f: [x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-                                   for x in vs] for f, vs in decode_record(v).items()}
+                rec["data"] = {
+                    f: [x.decode("utf-8", "replace") if isinstance(x, bytes) else x for x in vs]
+                    for f, vs in decode_record(v).items()
+                }
             else:
                 rec[k] = v.decode("utf-8", "replace")
         out.append(rec)

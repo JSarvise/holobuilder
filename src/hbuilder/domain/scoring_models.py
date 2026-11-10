@@ -102,9 +102,7 @@ class ActivationRateModel(Protocol):
 # per-instant `normalized_lattice` law needs and the occupancy product has
 # destroyed. They are OPTIONAL trailing elements: the stacking models read
 # indices 0..4 only, so a 5-tuple and a 7-tuple combine to the same number.
-ActiveTerm = tuple[object, float, float, int, bool] | tuple[
-    object, float, float, int, bool, float, float
-]
+ActiveTerm = tuple[object, float, float, int, bool] | tuple[object, float, float, int, bool, float, float]
 
 
 def _term_fields(term: ActiveTerm) -> tuple[object, float, float, int, bool]:
@@ -131,9 +129,7 @@ def _expected_max_group(triples: list[tuple[float, float, bool]]) -> float:
     free = 1.0
     used = 0.0
     total = 0.0
-    for magnitude_rate, occupancy, exclusive in sorted(
-        triples, key=lambda triple: -triple[0]
-    ):
+    for magnitude_rate, occupancy, exclusive in sorted(triples, key=lambda triple: -triple[0]):
         if exclusive:
             # Conditioning on this term being live already rules its bigger
             # exclusive siblings out; only the independent ones can still be
@@ -278,9 +274,7 @@ class ExpectedMaximumActiveSkill:
             # model pools every same-bucket ACTIVE term into ONE independent walk
             # regardless of lattice, which is the shipped, ranking-default rule.
             bucket, magnitude_rate, occupancy, _interval, exclusive = _term_fields(term)
-            buckets.setdefault(bucket, []).append(
-                (magnitude_rate, occupancy, exclusive)
-            )
+            buckets.setdefault(bucket, []).append((magnitude_rate, occupancy, exclusive))
         total = 0.0
         # dict preserves insertion order, so bucket order is first-appearance
         # order — fixed, not hash-dependent, which is what keeps the float
@@ -363,16 +357,13 @@ assert all(key == model.name for key, model in STACKING_MODELS.items()), (
     "STACKING_MODELS key must equal the mapped instance's own name attribute"
 )
 assert all(key == model.name for key, model in ACTIVATION_RATE_MODELS.items()), (
-    "ACTIVATION_RATE_MODELS key must equal the mapped instance's own name "
-    "attribute"
+    "ACTIVATION_RATE_MODELS key must equal the mapped instance's own name attribute"
 )
 assert all(key == model.name for key, model in TARGET_SELECTION_MODELS.items()), (
-    "TARGET_SELECTION_MODELS key must equal the mapped instance's own name "
-    "attribute"
+    "TARGET_SELECTION_MODELS key must equal the mapped instance's own name attribute"
 )
 assert all(key == model.name for key, model in ACTIVE_STACKING_MODELS.items()), (
-    "ACTIVE_STACKING_MODELS key must equal the mapped instance's own name "
-    "attribute"
+    "ACTIVE_STACKING_MODELS key must equal the mapped instance's own name attribute"
 )
 assert DEFAULT_ACTIVE_STACKING is ACTIVE_STACKING_MODELS[DEFAULT_ACTIVE_STACKING.name], (
     "DEFAULT_ACTIVE_STACKING must be one of the registered instances, so "

@@ -15,6 +15,7 @@ few seconds before giving up; the temp file is removed on failure.
 `write_text` opens the temp file exactly as `Path.write_text` opens its target (text mode,
 `newline=None`), so a file's line endings on disk do not change by switching to it.
 """
+
 from __future__ import annotations
 
 import os
@@ -63,8 +64,9 @@ def write_bytes(path, data: bytes, *, attempts: int = ATTEMPTS) -> None:
     _write(path, data, "wb", attempts)
 
 
-def write_text(path, text: str, encoding: str | None = "utf-8", errors: str | None = None, *,
-               attempts: int = ATTEMPTS) -> None:
+def write_text(
+    path, text: str, encoding: str | None = "utf-8", errors: str | None = None, *, attempts: int = ATTEMPTS
+) -> None:
     """`Path(path).write_text(text, encoding, errors)`, atomically (same newline
     translation as `Path.write_text`)."""
     _write(path, text, "w", attempts, encoding=encoding, errors=errors)

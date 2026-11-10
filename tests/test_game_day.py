@@ -1,4 +1,5 @@
 """hbuilder.game_day: the game day starts at the master's Setting.resetTimingHour, Japan time."""
+
 from __future__ import annotations
 
 import datetime
@@ -10,7 +11,7 @@ from hbuilder import game_day
 
 
 def _utc(*a):
-    return datetime.datetime(*a, tzinfo=datetime.timezone.utc)
+    return datetime.datetime(*a, tzinfo=datetime.UTC)
 
 
 def _ms(d):
@@ -26,7 +27,9 @@ def test_day_starts_at_the_reset_hour_in_japan():
     assert round(game_day.minutes_to_rollover(_utc(2026, 11, 9, 19, 55), 5)) == 5
 
 
-HAND_WRITTEN = re.compile(r"\b0?\d:00 JST|timedelta\(hours=9\)|9 \* HOUR|Date\.UTC\([^)]*,\s*[45],\s*0,\s*0\)")
+HAND_WRITTEN = re.compile(
+    r"\b0?\d:00 JST|timedelta\(hours=9\)|9 \* HOUR|Date\.UTC\([^)]*,\s*[45],\s*0,\s*0\)"
+)
 
 
 def test_no_code_writes_the_reset_hour_by_hand():
@@ -38,8 +41,12 @@ def test_no_code_writes_the_reset_hour_by_hand():
     for top in ("src", "tools"):
         for p in (repo / top).rglob("*"):
             rel = p.relative_to(repo).as_posix()
-            if p.suffix not in (".py", ".js") or any(s in "/" + rel for s in skip) \
-                    or p.name.startswith("test_") or rel == "src/hbuilder/game_day.py":
+            if (
+                p.suffix not in (".py", ".js")
+                or any(s in "/" + rel for s in skip)
+                or p.name.startswith("test_")
+                or rel == "src/hbuilder/game_day.py"
+            ):
                 continue
             for n, line in enumerate(p.read_text("utf-8", errors="replace").splitlines(), 1):
                 if HAND_WRITTEN.search(line):

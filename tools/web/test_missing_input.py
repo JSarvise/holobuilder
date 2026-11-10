@@ -15,10 +15,10 @@ import sys
 import urllib.request
 
 import pytest
+from hbweb import basis, config, jobs
 
 from hbuilder import paths
 from hbuilder.errors import MissingInput
-from hbweb import basis, config, jobs
 
 if str(config.REFRESH_DIR) not in sys.path:
     sys.path.insert(0, str(config.REFRESH_DIR))
@@ -52,8 +52,8 @@ def test_resources_answers_a_missing_board_state_as_unavailable(tmp_path, monkey
     if basis.load_precompute() is None:
         pytest.skip("precompute_optimisations does not import here (requirements.txt)")
     to = _tree_optimise()
-    monkeypatch.setattr(to, "DUMPS", tmp_path)                 # no board_state.json in it
-    monkeypatch.setattr(to, "_prices", lambda: {})             # no game master needed
+    monkeypatch.setattr(to, "DUMPS", tmp_path)  # no board_state.json in it
+    monkeypatch.setattr(to, "_prices", lambda: {})  # no game master needed
     with serve_web() as base:
         with urllib.request.urlopen(base + "/api/resources", timeout=60) as resp:
             status, doc = resp.status, json.loads(resp.read())
@@ -62,9 +62,16 @@ def test_resources_answers_a_missing_board_state_as_unavailable(tmp_path, monkey
     assert "board_state.json" in doc["reason"]
 
 
-_ACCOUNT = all((config.REPO_ROOT / p).exists() for p in (
-    "data/owned.json", "state/collection.json", "tools/recon/proxy/dumps/skilltree.json",
-    "tools/recon/proxy/dumps/board_state.json", "tools/recon/proxy/dumps/card_level_curve.json"))
+_ACCOUNT = all(
+    (config.REPO_ROOT / p).exists()
+    for p in (
+        "data/owned.json",
+        "state/collection.json",
+        "tools/recon/proxy/dumps/skilltree.json",
+        "tools/recon/proxy/dumps/board_state.json",
+        "tools/recon/proxy/dumps/card_level_curve.json",
+    )
+)
 
 
 @pytest.mark.skipif(not _ACCOUNT, reason="needs the account's data (gitignored)")
@@ -72,17 +79,24 @@ def test_a_search_job_reports_a_missing_snapshot_as_an_error_event(tmp_path, mon
     import board_export  # noqa: PLC0415
     import ondemand  # noqa: PLC0415
 
-    for name in ("skilltree.json", "board_state.json"):         # everything but the snapshot
+    for name in ("skilltree.json", "board_state.json"):  # everything but the snapshot
         shutil.copy(paths.DUMPS / name, tmp_path / name)
     monkeypatch.setattr(board_export.to, "DUMPS", tmp_path)
     monkeypatch.setattr(board_export.to, "_prices", lambda: {})
     assumptions = ondemand.parse_assumptions(None)
-    opts = {"song": "m0342", "basis": "account", "difficulty": "EXPERT", "top": 5,
-            "filters": ondemand.Filters(), "assumptions": assumptions}
+    opts = {
+        "song": "m0342",
+        "basis": "account",
+        "difficulty": "EXPERT",
+        "top": 5,
+        "filters": ondemand.Filters(),
+        "assumptions": assumptions,
+    }
     job = jobs.Job(job_id="missing-snapshot")
     # the real account build (`ondemand.Engine`), outside the engine cache
-    jobs.run_search_job(job, opts, engine_for=lambda b, d: ondemand.Engine(
-        b, d, workers=1, assumptions=assumptions))
+    jobs.run_search_job(
+        job, opts, engine_for=lambda b, d: ondemand.Engine(b, d, workers=1, assumptions=assumptions)
+    )
     events = _drain(job)
     kinds = [e["type"] for e in events]
     assert kinds[-2:] == ["error", "end"] and "result" not in kinds

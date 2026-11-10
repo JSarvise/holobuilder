@@ -6,6 +6,7 @@ buys those by their cheapest paths from the centre, within her points, and the b
 gives must be one the game allows: rooted at the centre and connected on the game's
 adjacency. Real dumps; skipped without them.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,6 +36,7 @@ def _inputs():
     except (OSError, ValueError, MissingInput) as exc:
         pytest.skip(f"the real inputs are not available here: {exc!r}")
     import precompute_optimisations as pc
+
     return pc, skilltree, node_master, points
 
 
@@ -68,7 +70,7 @@ def _check(pc, skilltree, node_master, state, points, *, every_target: bool):
         if every_target:
             assert targets <= nodes, (chr_id, sorted(targets - nodes))
         else:
-            assert nodes & (targets - {to.ROOT}), chr_id      # something bought
+            assert nodes & (targets - {to.ROOT}), chr_id  # something bought
 
 
 def test_at_max_level_every_bench_holomem_buys_all_that_reaches_a_team():

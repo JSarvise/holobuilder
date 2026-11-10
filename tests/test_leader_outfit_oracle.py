@@ -61,8 +61,8 @@ import dataclasses
 from pathlib import Path
 
 import pytest
-
 from support.builders import FIXTURES_DIR
+
 from hbuilder.domain.board import load_board
 from hbuilder.domain.loader import load_cards
 from hbuilder.domain.scoring import score_with_breakdown
@@ -89,7 +89,7 @@ MEMBERS = (
     "card-04003-5-uniq-0044-00",  # Ninomae Ina'nis 5*
 )
 
-LEADER_INA = "card-04003-5-uniq-0044-00"   # outfit: Score Support 60 % -> BONUS column
+LEADER_INA = "card-04003-5-uniq-0044-00"  # outfit: Score Support 60 % -> BONUS column
 LEADER_NENE = "card-00031-5-uniq-0025-00"  # outfit: Performance UP 120 % -> POWER column
 
 SERVER_UNIT_SCORE = {LEADER_INA: 901_254, LEADER_NENE: 789_857}

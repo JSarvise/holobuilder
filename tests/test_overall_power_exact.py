@@ -48,6 +48,7 @@ import struct
 from pathlib import Path
 
 import pytest
+from support.builders import make_card, make_scoring_config, make_team
 
 from hbuilder.domain.card import EffectTarget
 from hbuilder.domain.collection import member_power_up
@@ -58,8 +59,6 @@ from hbuilder.domain.scoring import (
     score_fast,
     score_with_breakdown,
 )
-
-from support.builders import make_card, make_scoring_config, make_team
 
 try:
     from hbuilder.domain.schema import Stats
@@ -103,9 +102,7 @@ def test_the_float32_ceiling_kills_the_phantom_point_that_float64_would_ceil_up(
 
     card = make_card("c1", stats=Stats(performance=100, technique=0, sense=0))
     entries, recipients = _one_effect_entries(0.14, "performance", "c1", "PASSIVE")
-    (subtotal,) = _overall_power_stat_subtotals(
-        (card,), entries, make_scoring_config(), recipients
-    )
+    (subtotal,) = _overall_power_stat_subtotals((card,), entries, make_scoring_config(), recipients)
     # MemberParameter (100 + 0 + 0) + the Passive line ceil(_f32(0.14*100)) = 14.
     assert subtotal == 100 + 14
     # And it is genuinely the f32 answer, one below what float64 would have paid.
@@ -116,9 +113,7 @@ def test_a_bare_member_with_no_stat_effect_is_its_integer_member_parameter():
     """No effect -> no ceiling: the subtotal is exactly the summed integer base
     parameters, the MemberParameter line alone."""
     card = make_card("c1", stats=Stats(performance=123, technique=456, sense=78))
-    (subtotal,) = _overall_power_stat_subtotals(
-        (card,), [], make_scoring_config(), []
-    )
+    (subtotal,) = _overall_power_stat_subtotals((card,), [], make_scoring_config(), [])
     assert subtotal == 123 + 456 + 78
     assert subtotal == float(123 + 456 + 78)
 
@@ -138,9 +133,7 @@ def test_two_source_lines_on_the_same_stat_pay_two_ceilings_not_one():
     outfit = (0.05, ("performance",), frozenset({"c1"}), _FIXED_TARGET, "c1", "OUTFIT")
     passive = (0.05, ("performance",), frozenset({"c1"}), _FIXED_TARGET, "c1", "PASSIVE")
     recipients = [frozenset({"c1"}), frozenset({"c1"})]
-    (subtotal,) = _overall_power_stat_subtotals(
-        (card,), [outfit, passive], make_scoring_config(), recipients
-    )
+    (subtotal,) = _overall_power_stat_subtotals((card,), [outfit, passive], make_scoring_config(), recipients)
     assert math.ceil(_f32(0.05 * 101)) == 6
     assert subtotal == 101 + 6 + 6  # two source ceilings
     # The one-ceiling-over-the-sum reading is strictly lower here.
@@ -241,9 +234,9 @@ def test_model_overall_power_is_bit_exact_against_captured_server_rows():
     is computed on the SAME rows to prove the fixes are what moved the number —
     it matched 0 of them.
     """
-    from support import board_reconcile as BR  # (os.chdir(REPO) + sys.path at import)
-
     import dataclasses as dc
+
+    from support import board_reconcile as BR  # (os.chdir(REPO) + sys.path at import)
 
     frozen = json.loads(_COLLECTION.read_text("utf8"))["cards"]
     BR.write_live_collection(frozen, _COLLECTION)
@@ -309,21 +302,14 @@ def test_model_overall_power_is_bit_exact_against_captured_server_rows():
             if round(ds.overall_power) == row["overall_power"]:
                 after_exact += 1
             else:
-                misses.append(
-                    (row.get("family"), round(ds.overall_power) - row["overall_power"])
-                )
+                misses.append((row.get("family"), round(ds.overall_power) - row["overall_power"]))
 
             # BEFORE (float64 stat sum + one-aggregate Member Power-Up).
             old_power_up = member_power_up(
                 [bd.effective_stat_sum + bd.board_power],
                 cfg.account.power_up_permyriad,
             )
-            before = (
-                bd.effective_stat_sum
-                + bd.board_power
-                + (bd.memory_bonus or 0)
-                + (old_power_up or 0)
-            )
+            before = bd.effective_stat_sum + bd.board_power + (bd.memory_bonus or 0) + (old_power_up or 0)
             if round(before) == row["overall_power"]:
                 before_exact += 1
 
@@ -336,8 +322,7 @@ def test_model_overall_power_is_bit_exact_against_captured_server_rows():
     )
     # BEFORE the fixes the model matched essentially none.
     assert before_exact <= applicable // 100, (
-        f"the BEFORE reconstruction should match almost nothing, matched "
-        f"{before_exact}/{applicable}"
+        f"the BEFORE reconstruction should match almost nothing, matched {before_exact}/{applicable}"
     )
     # AFTER the three fixes it is bit-exact on EVERY applicable row.
     rate = after_exact / applicable
@@ -353,10 +338,10 @@ def test_the_residual_is_fully_closed():
     tie-break) every captured deck whose account state matches the capture is
     bit-exact. This pins that there is no remaining bounded-but-nonzero band —
     the worst relative error over all checked decks is exactly 0."""
-    from support import board_reconcile as BR
-
     import dataclasses as dc
     from collections import defaultdict
+
+    from support import board_reconcile as BR
 
     frozen = json.loads(_COLLECTION.read_text("utf8"))["cards"]
     BR.write_live_collection(frozen, _COLLECTION)
@@ -433,8 +418,12 @@ def test_the_ranking_objective_is_bit_identical():
     )
     leader = make_card("lead", type_="Cute", stats=Stats(performance=101, technique=0, sense=0))
     members = [
-        make_card(f"m{i}", type_="Cute", stats=Stats(performance=101, technique=0, sense=0),
-                  passive=stat_up if i == 0 else None)
+        make_card(
+            f"m{i}",
+            type_="Cute",
+            stats=Stats(performance=101, technique=0, sense=0),
+            passive=stat_up if i == 0 else None,
+        )
         for i in range(5)
     ]
     team = make_team([leader, *members])
@@ -504,7 +493,9 @@ def test_slot_order_tie_break_moves_the_display_and_ranking_recipient_together()
         "card-aaa", type_="Cute", stats=Stats(performance=300, technique=50, sense=0)
     )
     emitter = make_card(  # carries the buff; too low a total to be the recipient
-        "card-emit", type_="Cute", stats=Stats(performance=10, technique=10, sense=10),
+        "card-emit",
+        type_="Cute",
+        stats=Stats(performance=10, technique=10, sense=10),
         passive=buff,
     )
     # Two non-Cute fillers so only the three Cute cards are ever candidates.

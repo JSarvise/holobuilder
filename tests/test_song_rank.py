@@ -18,6 +18,13 @@ from pathlib import Path
 
 import pytest
 from support.builders import FIXTURE_CARDS_PATH, make_scoring_config
+from support.song_ranking import (
+    TeamSongScore,
+    assemble_across_charts,
+    rank_across_charts,
+    rank_on_chart,
+    score_teams_on_chart,
+)
 
 from hbuilder.domain.loader import load_cards
 from hbuilder.domain.song import (
@@ -26,13 +33,6 @@ from hbuilder.domain.song import (
     load_charts,
     overall_power_for,
     score_song_detailed,
-)
-from support.song_ranking import (
-    TeamSongScore,
-    assemble_across_charts,
-    rank_across_charts,
-    rank_on_chart,
-    score_teams_on_chart,
 )
 from hbuilder.domain.team import Team
 
@@ -57,8 +57,7 @@ def _chart(music_id="m0001", scale=1):
         difficulty="EXPERT",
         difficulty_level=26,
         live_score_coefficient_permil=4,
-        notes=tuple(ChartNote(time=float(t), perfect_permil=1000 * scale)
-                    for t in range(1, 40)),
+        notes=tuple(ChartNote(time=float(t), perfect_permil=1000 * scale) for t in range(1, 40)),
         special_cues=(5.0, 10.0, 15.0, 20.0, 25.0),
     )
 
@@ -69,10 +68,7 @@ def _teams(cards, n=3):
     That is the only shape the fixture affords — 6 cards means exactly 6
     distinct (leader, members) teams — and it is enough, because what is under
     test is the ranking, not the enumeration."""
-    return [
-        Team(leader=cards[i], members=tuple(c for j, c in enumerate(cards) if j != i))
-        for i in range(n)
-    ]
+    return [Team(leader=cards[i], members=tuple(c for j, c in enumerate(cards) if j != i)) for i in range(n)]
 
 
 # ==========================================================================
@@ -91,7 +87,10 @@ def test_the_ranking_reproduces_score_song_detailed_exactly(cards, cfg):
         # Same deck power as `_score_one` supplies — see the note in
         # `test_score_teams_on_chart_matches_the_reference_scorer_row_by_row`.
         reference = score_song_detailed(
-            tuple(team.members), (team.leader,), chart, cfg,
+            tuple(team.members),
+            (team.leader,),
+            chart,
+            cfg,
             deck_power=overall_power_for(tuple(team.members), team.leader, cfg),
         )[0]
         row = by_leader[team.leader.id]
@@ -174,7 +173,10 @@ def test_score_teams_on_chart_matches_the_reference_scorer_row_by_row(cards, cfg
         # a reference call that let it default would compare two different
         # questions and read as drift.
         reference = score_song_detailed(
-            tuple(team.members), (team.leader,), chart, cfg,
+            tuple(team.members),
+            (team.leader,),
+            chart,
+            cfg,
             deck_power=overall_power_for(tuple(team.members), team.leader, cfg),
         )[0]
         assert row.music_id == chart.music_id
@@ -231,9 +233,7 @@ def test_assemble_refuses_a_matrix_that_does_not_match_its_charts(cards, cfg):
         assemble_across_charts(teams, charts, short_row)
 
 
-def test_the_serial_progress_cadence_is_per_evaluation_and_reaches_the_total(
-    cards, cfg
-):
+def test_the_serial_progress_cadence_is_per_evaluation_and_reaches_the_total(cards, cfg):
     """`rank_across_charts` promises `(done, total)` per evaluation; the
     parallel path promises the same endpoints at chart cadence. The serial
     contract is pinned here so a change to it is a decision, not a drift."""
@@ -311,8 +311,9 @@ def test_score_team_orders_is_every_order_of_the_same_scorer(cards, cfg):
             assert next(o for o, v in totals.items() if v == best) == tuple(got.member_order)
             plain = score_song_detailed(tuple(team.members), (team.leader,), chart, cfg)[0]
             seen: dict = {}
-            recorded = score_song_detailed(tuple(team.members), (team.leader,), chart, cfg,
-                                           order_totals=seen)[0]
+            recorded = score_song_detailed(
+                tuple(team.members), (team.leader,), chart, cfg, order_totals=seen
+            )[0]
             assert recorded == plain and len(seen) == 120
 
 

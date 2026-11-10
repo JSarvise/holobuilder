@@ -12,6 +12,7 @@ some of a branch) are the sensitive ones: their rates are sums of unequal terms.
 
 Uses the real dumps (skilltree + master + charts, gitignored) and SKIPS when they are absent.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,6 @@ import subprocess
 import sys
 
 import pytest
-
 from hbweb import config
 
 SEEDS = ("0", "1", "2")
@@ -90,8 +90,13 @@ print(json.dumps(out, sort_keys=True))
 
 def _start(seed: str) -> subprocess.Popen:
     env = dict(os.environ, PYTHONHASHSEED=seed, PYTHONUTF8="1")
-    return subprocess.Popen([sys.executable, "-c", PROBE, json.dumps(sys.path)], env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return subprocess.Popen(
+        [sys.executable, "-c", PROBE, json.dumps(sys.path)],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
 
 def _result(proc: subprocess.Popen) -> dict:
@@ -101,10 +106,13 @@ def _result(proc: subprocess.Popen) -> dict:
 
 
 def test_the_leaf_gives_the_same_floats_whatever_the_hash_seed():
-    if (not config.read_json(config.SKILLTREE_PATH) or not config.read_json(config.NODE_MASTER_PATH)
-            or not config.CHARTS_PATH.exists()):
+    if (
+        not config.read_json(config.SKILLTREE_PATH)
+        or not config.read_json(config.NODE_MASTER_PATH)
+        or not config.CHARTS_PATH.exists()
+    ):
         pytest.skip("skilltree/master/charts dumps absent (gitignored)")
-    started = [(seed, _start(seed)) for seed in SEEDS]        # side by side
+    started = [(seed, _start(seed)) for seed in SEEDS]  # side by side
     runs = {seed: _result(proc) for seed, proc in started}
     first = runs[SEEDS[0]]
     assert first and all(v["scores"] for v in first.values())

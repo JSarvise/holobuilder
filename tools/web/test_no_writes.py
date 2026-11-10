@@ -151,10 +151,14 @@ def _web_files() -> list[Path]:
     # Test modules are not the server either: they build fixtures in pytest's tmp_path.
     # `kernel/cbuild.py` is the C compiler step: it writes the kernels' libraries next to
     # their sources (build products, gitignored), never data.
-    return sorted(p for p in WEB_ROOT.rglob("*.py")
-                  if p.resolve() != _SELF and "wasmdemo" not in p.parts
-                  and p.resolve() != WEB_ROOT / "kernel" / "cbuild.py"
-                  and not p.name.startswith("test_"))
+    return sorted(
+        p
+        for p in WEB_ROOT.rglob("*.py")
+        if p.resolve() != _SELF
+        and "wasmdemo" not in p.parts
+        and p.resolve() != WEB_ROOT / "kernel" / "cbuild.py"
+        and not p.name.startswith("test_")
+    )
 
 
 def _parse(path: Path) -> ast.Module:
@@ -168,9 +172,7 @@ def _parse(path: Path) -> ast.Module:
 def _docstring_ids(tree: ast.Module) -> set[int]:
     ids: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(
-            node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        ):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             body = node.body
             if (
                 body
@@ -219,7 +221,11 @@ def _is_tainted(node: ast.AST | None, tainted: set[str], docstring_ids: set[int]
     if node is None:
         return False
     if isinstance(node, ast.Constant):
-        return isinstance(node.value, str) and id(node) not in docstring_ids and node.value in PROTECTED_BASENAMES
+        return (
+            isinstance(node.value, str)
+            and id(node) not in docstring_ids
+            and node.value in PROTECTED_BASENAMES
+        )
     if isinstance(node, ast.Name):
         return node.id in tainted
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
@@ -235,24 +241,18 @@ def _is_tainted(node: ast.AST | None, tainted: set[str], docstring_ids: set[int]
         name = _call_name(node)
         if name not in PATH_PRESERVING:
             return False
-        if isinstance(node.func, ast.Attribute) and _is_tainted(
-            node.func.value, tainted, docstring_ids
-        ):
+        if isinstance(node.func, ast.Attribute) and _is_tainted(node.func.value, tainted, docstring_ids):
             return True
         return any(
             _is_tainted(arg, tainted, docstring_ids)
             for arg in list(node.args) + [kw.value for kw in node.keywords]
         )
     if isinstance(node, (ast.JoinedStr, ast.FormattedValue)):
-        return any(
-            _is_tainted(sub, tainted, docstring_ids)
-            for sub in ast.iter_child_nodes(node)
-        )
+        return any(_is_tainted(sub, tainted, docstring_ids) for sub in ast.iter_child_nodes(node))
     return False
 
 
-def _tainted_names(tree: ast.Module, docstring_ids: set[int],
-                   seed: frozenset[str] = frozenset()) -> set[str]:
+def _tainted_names(tree: ast.Module, docstring_ids: set[int], seed: frozenset[str] = frozenset()) -> set[str]:
     """Names bound to a protected path, to a fixed point so a chain of
     rebindings is followed. `seed`: the names other modules of the package
     bind to one (`_package_tainted`), so reading them across modules keeps
@@ -370,9 +370,14 @@ def _rooted_at_write_sink(node: ast.AST) -> bool:
 
 def _write_sink_writes(tree: ast.AST) -> list[int]:
     """Lines of the filesystem mutations rooted at the write sink."""
-    return [node.lineno for node in ast.walk(tree)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-            and node.func.attr in FS_MUTATORS and _rooted_at_write_sink(node.func.value)]
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in FS_MUTATORS
+        and _rooted_at_write_sink(node.func.value)
+    ]
 
 
 def _write_offenders(tree: ast.AST) -> list[str]:
@@ -390,9 +395,7 @@ def _write_offenders(tree: ast.AST) -> list[str]:
         root = func.value
         while isinstance(root, ast.Attribute):
             root = root.value
-        offenders.append(
-            f"line {node.lineno}: {getattr(root, 'id', type(root).__name__)}.{func.attr}(...)"
-        )
+        offenders.append(f"line {node.lineno}: {getattr(root, 'id', type(root).__name__)}.{func.attr}(...)")
     return offenders
 
 
@@ -409,8 +412,7 @@ def test_every_write_targets_the_one_allowed_path(path: Path) -> None:
     without anyone having had to add it to a blocklist first."""
     offenders = _write_offenders(_parse(path))
     assert not offenders, (
-        f"{path.name}: {offenders} — the only writable path in tools/web/ "
-        f"is {WRITE_SINK_NAME}"
+        f"{path.name}: {offenders} — the only writable path in tools/web/ is {WRITE_SINK_NAME}"
     )
 
 
@@ -435,7 +437,9 @@ def test_the_write_sink_is_one_file_written_from_one_module() -> None:
     assert WRITE_SINK_HOME in [p for p, _ in binders], [p.name for p, _ in binders]
     for path, node in binders:
         assert ast.unparse(node.value) == "paths.STATE / 'collection.json'", (
-            path.name, ast.unparse(node.value))
+            path.name,
+            ast.unparse(node.value),
+        )
     assert writers == [WRITE_SINK_WRITER], [p.name for p in writers]
 
 
@@ -502,20 +506,18 @@ def test_guard_actually_catches_a_write(tmp_path: Path) -> None:
         return found
 
     # Check 1: the path laundered through a module constant and a join.
-    assert offenders_for(
-        'P = ROOT / "data" / "cards.json"\njson.dump(obj, P)\n', "sink"
-    ) == ["dump"]
+    assert offenders_for('P = ROOT / "data" / "cards.json"\njson.dump(obj, P)\n', "sink") == ["dump"]
     # Check 2: a mutator method on the tainted constant.
-    assert offenders_for(
-        'P = ROOT / "data" / "owned.json"\nP.write_text("{}")\n', "mutator"
-    ) == ["write_text"]
+    assert offenders_for('P = ROOT / "data" / "owned.json"\nP.write_text("{}")\n', "mutator") == [
+        "write_text"
+    ]
     # Checks 1 and 2 across modules: a protected name another module binds,
     # read here as an attribute.
     seed = frozenset({"CARDS_PATH"})
-    assert offenders_for('json.dump(obj, config.CARDS_PATH)\n', "sink", seed) == ["dump"]
+    assert offenders_for("json.dump(obj, config.CARDS_PATH)\n", "sink", seed) == ["dump"]
     assert offenders_for('config.CARDS_PATH.write_text("{}")\n', "mutator", seed) == ["write_text"]
-    assert offenders_for('x = config.CARDS_PATH\nx.unlink()\n', "mutator", seed) == ["unlink"]
-    assert offenders_for('load_inputs(config.CARDS_PATH, config.OWNED_PATH)\n', "sink", seed) == []
+    assert offenders_for("x = config.CARDS_PATH\nx.unlink()\n", "mutator", seed) == ["unlink"]
+    assert offenders_for("load_inputs(config.CARDS_PATH, config.OWNED_PATH)\n", "sink", seed) == []
     # Check 3: any write-mode open anywhere in the package.
     assert offenders_for('open(somewhere, "w")\n', "open") == ["w"]
 
@@ -523,13 +525,11 @@ def test_guard_actually_catches_a_write(tmp_path: Path) -> None:
     # one that rejects nothing.
     assert _write_offenders(ast.parse('SOMEWHERE_ELSE.write_text("x")\n'))
     assert _write_offenders(ast.parse('p = Path("x")\np.unlink()\n'))
-    assert _write_offenders(ast.parse('OUT_PATH.parent.mkdir()\n'))
+    assert _write_offenders(ast.parse("OUT_PATH.parent.mkdir()\n"))
     assert not _write_offenders(ast.parse(f'{WRITE_SINK_NAME}.write_text("x")\n'))
-    assert not _write_offenders(
-        ast.parse(f'{WRITE_SINK_NAME}.parent.mkdir(parents=True, exist_ok=True)\n')
-    )
+    assert not _write_offenders(ast.parse(f"{WRITE_SINK_NAME}.parent.mkdir(parents=True, exist_ok=True)\n"))
     assert not _write_offenders(ast.parse(f'config.{WRITE_SINK_NAME}.write_text("x")\n'))
-    assert not _write_offenders(ast.parse(f'config.{WRITE_SINK_NAME}.parent.mkdir()\n'))
+    assert not _write_offenders(ast.parse(f"config.{WRITE_SINK_NAME}.parent.mkdir()\n"))
     assert _write_offenders(ast.parse('config.OTHER_PATH.write_text("x")\n'))
     assert _write_offenders(ast.parse(f'other.{WRITE_SINK_NAME}.write_text("x")\n'))
     assert _write_offenders(ast.parse(f'config.parent.{WRITE_SINK_NAME}.write_text("x")\n'))

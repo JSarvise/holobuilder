@@ -19,6 +19,7 @@ NOT here, on purpose:
 Paths are relative to the repo root, '/'-separated. Patterns are fnmatch globs where '*' also
 crosses '/', so 'dumps/live2d/models/*' takes every file under it.
 """
+
 from __future__ import annotations
 
 import fnmatch
@@ -31,10 +32,18 @@ D = paths.DUMPS_REL + "/"
 
 SYNC: list[str] = [
     # solver and pages
-    D + "charts.json", D + "charts_all.json", D + "cards_enriched.json", D + "songs.json",
-    D + "skill_ladder.json", D + "skilltree.json", D + "master_SkillTreeNode.json",
-    D + "master_index.json", D + "card_level_curve.json", D + "card_caps.json",
-    D + "music_coef.json", D + "lattice_charts.json",
+    D + "charts.json",
+    D + "charts_all.json",
+    D + "cards_enriched.json",
+    D + "songs.json",
+    D + "skill_ladder.json",
+    D + "skilltree.json",
+    D + "master_SkillTreeNode.json",
+    D + "master_index.json",
+    D + "card_level_curve.json",
+    D + "card_caps.json",
+    D + "music_coef.json",
+    D + "lattice_charts.json",
     # the game client's version (publish.py reads the publisher's install): the app's login
     # sends it, having no install to read it from
     D + "client_version.json",
@@ -44,26 +53,53 @@ SYNC: list[str] = [
     "data/cards.json",
     # the open event (global, not the account's): bonus tables, names, past events
     # the event archive, not event_history.json: that one holds the publisher's own results
-    D + "marathon_bonus.json", D + "event_meta.json", D + "event_archive.json",
+    D + "marathon_bonus.json",
+    D + "event_meta.json",
+    D + "event_archive.json",
     D + "event_finals.json",
     D + "event_art/*",
     # the master exports the runtime reads by name
-    *(D + f"holodori/main_{t}.json" for t in (
-        "Card", "CardLevel", "LangItem_Eng", "LangMarathonRankingGrade_Eng", "LangMusic_Eng",
-        "Live", "LiveDeckEvaluationRank", "LiveNote", "LiveScoreEvaluationRank",
-        "MarathonRankingGrade", "Music", "Poster", "Setting", "SkillTreeEffectValueLimit",
-        "SkillTreeNode", "CharacterLevel")),
+    *(
+        D + f"holodori/main_{t}.json"
+        for t in (
+            "Card",
+            "CardLevel",
+            "LangItem_Eng",
+            "LangMarathonRankingGrade_Eng",
+            "LangMusic_Eng",
+            "Live",
+            "LiveDeckEvaluationRank",
+            "LiveNote",
+            "LiveScoreEvaluationRank",
+            "MarathonRankingGrade",
+            "Music",
+            "Poster",
+            "Setting",
+            "SkillTreeEffectValueLimit",
+            "SkillTreeNode",
+            "CharacterLevel",
+        )
+    ),
     # small art every page draws, and the indexes the pages list
-    D + "card_chrome/*", D + "ui_official/*", D + "member_icons/*", D + "item_icons/*",
-    D + "song_jackets/*", D + "park_export/*",
-    D + "skill_icons/index.json", D + "skill_icons/img_skill_icon_*",
-    D + "skill_icons/mdl_map*", D + "skill_icons/img_card_vert_*",
+    D + "card_chrome/*",
+    D + "ui_official/*",
+    D + "member_icons/*",
+    D + "item_icons/*",
+    D + "song_jackets/*",
+    D + "park_export/*",
+    D + "skill_icons/index.json",
+    D + "skill_icons/img_skill_icon_*",
+    D + "skill_icons/mdl_map*",
+    D + "skill_icons/img_card_vert_*",
     # (not the Cubism Core: each PC downloads it from Live2D itself, hbweb.static.live2d_core)
-    D + "live2d/index.json", D + "chibi/index.json",
+    D + "live2d/index.json",
+    D + "chibi/index.json",
 ]
 
 LAZY: list[str] = [
-    D + "live2d/models/*", D + "live2d/motions/*", D + "live2d/expressions/*",
+    D + "live2d/models/*",
+    D + "live2d/motions/*",
+    D + "live2d/expressions/*",
     D + "chibi/models/*",
     D + "card_images/*",
     "tools/explorer/cards_explorer_art/*",
@@ -75,7 +111,13 @@ LAZY: list[str] = [
 
 # Never published, whatever a pattern above matches: the account, and files being written.
 EXCLUDE: list[str] = [
-    "*.tmp", "*.bak", "*.stale", "*.log", "*.err", "*.out", "*/.*",
+    "*.tmp",
+    "*.bak",
+    "*.stale",
+    "*.log",
+    "*.err",
+    "*.out",
+    "*/.*",
 ]
 
 
@@ -99,7 +141,7 @@ def _roots(patterns: list[str]) -> set[str]:
     out = set()
     for p in patterns:
         if "*" not in p:
-            out.add(p)                                   # one file: no walk at all
+            out.add(p)  # one file: no walk at all
         else:
             out.add(p.split("*", 1)[0].rsplit("/", 1)[0])
     return out

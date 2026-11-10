@@ -9,6 +9,7 @@ Bytes are written with `\n` (Windows `write_text` would re-translate newlines).
 A multi-draw gives every card the same `draw_time` (epoch ms) and a card drawn twice appears as two identical lines. Dedupe is
 therefore a multiset comparison inside each (draw_time, gacha_name) group.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,7 +25,7 @@ RATES = "rates.jsonl"
 COUNTERS = "counters.jsonl"
 SNAPSHOTS = "snapshots"
 ART = "art"
-ALIASES = "banner_aliases.json"   # the ONE hand-maintained file here; nothing in this repo writes it
+ALIASES = "banner_aliases.json"  # the ONE hand-maintained file here; nothing in this repo writes it
 
 BANNER_WATCH = ("name", "end_time", "pickup_card_ids")
 
@@ -65,8 +66,9 @@ def resolve_gacha_id(name: str, live_banners: list[dict]) -> str | None:
     return None
 
 
-def new_pulls(server_hist: list[dict], stored: list[dict], live_banners: list[dict],
-              synced_at: int) -> list[dict]:
+def new_pulls(
+    server_hist: list[dict], stored: list[dict], live_banners: list[dict], synced_at: int
+) -> list[dict]:
     have: dict[tuple, Counter] = {}
     for r in stored:
         have.setdefault((r["draw_time"], r["gacha_name"]), Counter())[r["card_id"]] += 1
@@ -78,16 +80,31 @@ def new_pulls(server_hist: list[dict], stored: list[dict], live_banners: list[di
         missing = cnt - have.get((dt, name), Counter())
         gid = resolve_gacha_id(name, live_banners)
         for card_id, n in sorted(missing.items()):
-            rows.extend({"draw_time": dt, "gacha_name": name, "gacha_id": gid,
-                         "card_id": card_id, "first_seen": synced_at} for _ in range(n))
+            rows.extend(
+                {
+                    "draw_time": dt,
+                    "gacha_name": name,
+                    "gacha_id": gid,
+                    "card_id": card_id,
+                    "first_seen": synced_at,
+                }
+                for _ in range(n)
+            )
     return rows
 
 
 def _banner_row(b: dict, synced_at: int) -> dict:
-    return {"gacha_id": b.get("gacha_id"), "name": b.get("name"), "type": b.get("type"),
-            "start_time": b.get("start_time"), "end_time": b.get("end_time"),
-            "pickup_card_ids": list(b.get("pickup_card_ids") or []),
-            "icon_asset_id": b.get("icon_asset_id"), "seen_at": synced_at, "raw": b}
+    return {
+        "gacha_id": b.get("gacha_id"),
+        "name": b.get("name"),
+        "type": b.get("type"),
+        "start_time": b.get("start_time"),
+        "end_time": b.get("end_time"),
+        "pickup_card_ids": list(b.get("pickup_card_ids") or []),
+        "icon_asset_id": b.get("icon_asset_id"),
+        "seen_at": synced_at,
+        "raw": b,
+    }
 
 
 def banner_rows(live_banners: list[dict], stored: list[dict], synced_at: int) -> list[dict]:

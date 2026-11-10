@@ -6,14 +6,15 @@ no pool: the plan itself is stubbed.
 
     python -m pytest tools/web/test_materials_plan.py
 """
+
 from __future__ import annotations
 
 import threading
 from types import SimpleNamespace
 
+import materials_plan
 import pytest
 
-import materials_plan
 from hbuilder.solver import parallel_refine as pr
 
 _REAL_STAMP = materials_plan._plan_stamp
@@ -65,31 +66,31 @@ def test_a_cancel_starts_no_queued_plan_and_stops_the_running_ones():
     pool = _Pool(processes=1, cancel=cancel, stop_after=2)
     got = [r[0] for r in materials_plan.dispatch(pool, _items(6), cancel)]
     assert len(pool.submitted) == 2 and len(got) <= 2
-    assert pool.stopped == [7]                      # a running plan stops before its next MILP
+    assert pool.stopped == [7]  # a running plan stops before its next MILP
 
 
 def test_a_plan_of_a_stopped_generation_returns_without_solving(monkeypatch):
     monkeypatch.setattr(pr, "_STOP", SimpleNamespace(value=7))
-    monkeypatch.setattr(materials_plan, "plan_for",
-                        lambda *a, **k: pytest.fail("a stopped plan was solved"))
-    out = materials_plan.plan_and_score((3, "card-00001-5-a-0000-00", ("m",), "m0020", None, {},
-                                         None, 7))
+    monkeypatch.setattr(materials_plan, "plan_for", lambda *a, **k: pytest.fail("a stopped plan was solved"))
+    out = materials_plan.plan_and_score((3, "card-00001-5-a-0000-00", ("m",), "m0020", None, {}, None, 7))
     assert out[0] == 3 and out[1] is None and "cancelled" in out[3]
-    assert not pr.stopped(8)                        # the next search's plans run
+    assert not pr.stopped(8)  # the next search's plans run
 
 
 def test_a_carried_plan_is_used_and_not_solved_again(monkeypatch):
     import board_plan_solver
 
-    monkeypatch.setattr(board_plan_solver, "solve_team_board",
-                        lambda **k: pytest.fail("a carried plan was solved again"))
+    monkeypatch.setattr(
+        board_plan_solver, "solve_team_board", lambda **k: pytest.fail("a carried plan was solved again")
+    )
     plan = ({"chr-00001": {"nodes": []}}, {}, {"chr-00001": {"nodes": []}})
     carried = (("stamp",), plan, False)
     monkeypatch.setattr(pr, "_CTX", SimpleNamespace(), raising=False)
     monkeypatch.setattr(pr, "evaluate", lambda *a, **k: 7.0)
     monkeypatch.setattr(materials_plan.dataclasses, "replace", lambda ctx, **k: ctx)
-    out = materials_plan.plan_and_score((0, "card-00001-5-a-0000-00", ("m",), "m0020", None, {},
-                                         carried, None))
+    out = materials_plan.plan_and_score(
+        (0, "card-00001-5-a-0000-00", ("m",), "m0020", None, {}, carried, None)
+    )
     assert out[1] == 7.0 and out[2] == plan[0]
 
 
@@ -98,19 +99,24 @@ def test_a_plan_judged_while_solved_keeps_its_score_and_bench(monkeypatch):
 
     whole = {"chr-00001": {"nodes": ["R-001"]}, "chr-00009": {"nodes": ["G-001"]}}
     benches: list = []
-    monkeypatch.setattr(materials_plan, "bench_from_plan",
-                        lambda solved, team: benches.append(solved) or {"bench": len(benches)})
+    monkeypatch.setattr(
+        materials_plan,
+        "bench_from_plan",
+        lambda solved, team: benches.append(solved) or {"bench": len(benches)},
+    )
 
     def solve(**k):
-        k["judge"](whole)                  # the planner rates its candidate with the judge
+        k["judge"](whole)  # the planner rates its candidate with the judge
         return whole
+
     monkeypatch.setattr(board_plan_solver, "solve_team_board", solve)
     monkeypatch.setattr(pr, "_CTX", SimpleNamespace(), raising=False)
     evaluations: list = []
     monkeypatch.setattr(pr, "evaluate", lambda *a, **k: evaluations.append(a) or 9.0)
     monkeypatch.setattr(materials_plan.dataclasses, "replace", lambda ctx, **k: ctx)
-    out = materials_plan.plan_and_score((0, "card-00001-5-a-0000-00", ("card-00002-5-b-0000-00",),
-                                         "m0020", None, {}, None, None))
+    out = materials_plan.plan_and_score(
+        (0, "card-00001-5-a-0000-00", ("card-00002-5-b-0000-00",), "m0020", None, {}, None, None)
+    )
     # one evaluation (the judge's), one bench built: the row's score and bench are the judged ones
     assert out[1] == 9.0 and len(evaluations) == 1 and len(benches) == 1
     assert out[2] == {"chr-00001": {"nodes": ["R-001"]}}
@@ -118,6 +124,7 @@ def test_a_plan_judged_while_solved_keeps_its_score_and_bench(monkeypatch):
 
 class _OneWorker:
     """A one-worker `RefinePool`: `dispatch` runs the tasks here with these helpers."""
+
     _pool = None
     ctx = _by_id = _tree_for = _budget_for = None
 
@@ -132,25 +139,33 @@ def test_refine_rows_keeps_the_first_plan_unless_a_candidate_beats_it(monkeypatc
         seen.append((index, candidate, item[5]))
         planned = ({"chr-1": candidate}, {}, {"chr-1": candidate})
         return index, candidate, scores[(index, candidate)], planned, candidate == "in_board"
+
     monkeypatch.setattr(materials_plan, "refine_and_score", task)
-    rows = [(0, "L0", ("m",), "m0020", None, {"o": 1}, first, 100.0),
-            (1, "L1", ("m",), "m0020", None, {"o": 1}, first, 50.0)]
+    rows = [
+        (0, "L0", ("m",), "m0020", None, {"o": 1}, first, 100.0),
+        (1, "L1", ("m",), "m0020", None, {"o": 1}, first, 50.0),
+    ]
     out = materials_plan.refine_rows(_OneWorker(), rows)
-    assert sorted((i, c) for i, c, _o in seen) == [(0, "bare"), (0, "in_board"),
-                                                 (1, "bare"), (1, "in_board")]
-    assert all(o == {"o": 1} for *_x, o in seen)              # the row's own plan options
+    assert sorted((i, c) for i, c, _o in seen) == [(0, "bare"), (0, "in_board"), (1, "bare"), (1, "in_board")]
+    assert all(o == {"o": 1} for *_x, o in seen)  # the row's own plan options
     # row 0: a tie keeps the first plan; row 1: the tie between the two goes to the earlier
     assert list(out) == [1]
     score, state, held = out[1]
-    assert score == 60.0 and state == {"chr-1": "bare"} and held == (("stamp",), (
-        {"chr-1": "bare"}, {}, {"chr-1": "bare"}), False)
+    assert (
+        score == 60.0
+        and state == {"chr-1": "bare"}
+        and held == (("stamp",), ({"chr-1": "bare"}, {}, {"chr-1": "bare"}), False)
+    )
 
 
 def test_off_a_song_only_the_in_board_candidate_is_tried(monkeypatch):
     first = (("stamp",), ({}, {}, {}), False, {})
     seen: list = []
-    monkeypatch.setattr(materials_plan, "refine_and_score",
-                        lambda item, local: seen.append(item[-1]) or (item[0], item[-1], None, None, False))
+    monkeypatch.setattr(
+        materials_plan,
+        "refine_and_score",
+        lambda item, local: seen.append(item[-1]) or (item[0], item[-1], None, None, False),
+    )
     assert materials_plan.refine_rows(_OneWorker(), [(0, "L", ("m",), None, None, {}, first, 1.0)]) == {}
     assert seen == ["in_board"]
 
@@ -158,8 +173,9 @@ def test_off_a_song_only_the_in_board_candidate_is_tried(monkeypatch):
 def test_a_team_asked_in_another_member_order_gets_its_held_plan(monkeypatch):
     import board_plan_solver
 
-    monkeypatch.setattr(board_plan_solver, "solve_team_board",
-                        lambda **k: pytest.fail("the held plan was solved again"))
+    monkeypatch.setattr(
+        board_plan_solver, "solve_team_board", lambda **k: pytest.fail("the held plan was solved again")
+    )
     plan = ({"chr-00001": {"nodes": ["R-001"]}}, {}, {"chr-00001": {"nodes": ["R-001"]}})
     materials_plan._hold(("card-1", ("card-2", "card-3"), "m0020", "{}"), (("stamp",), plan, False))
     # the row detail asks in the row's slot order
@@ -186,11 +202,14 @@ def test_one_worker_plans_in_this_process_with_the_pools_own_helpers(monkeypatch
     monkeypatch.setattr(materials_plan, "plan_for", lambda *a, **k: plan)
     monkeypatch.setattr(pr, "_CTX", None, raising=False)
     monkeypatch.setattr(materials_plan.dataclasses, "replace", lambda ctx, **k: (ctx, k))
-    monkeypatch.setattr(pr, "evaluate",
-                        lambda ctx, by_id, tree_for, budget_for, team, **k: seen.append(
-                            (ctx, by_id, tree_for, budget_for, team)) or 5.0)
-    pool = SimpleNamespace(_pool=None, ctx="leaf", _by_id={"id": 1}, _tree_for="trees",
-                           _budget_for="budgets")
+    monkeypatch.setattr(
+        pr,
+        "evaluate",
+        lambda ctx, by_id, tree_for, budget_for, team, **k: (
+            seen.append((ctx, by_id, tree_for, budget_for, team)) or 5.0
+        ),
+    )
+    pool = SimpleNamespace(_pool=None, ctx="leaf", _by_id={"id": 1}, _tree_for="trees", _budget_for="budgets")
     got = list(materials_plan.dispatch(pool, _items(3)))
     assert [r[0] for r in got] == [0, 1, 2] and all(r[1] == 5.0 for r in got)
     (ctx, kw), by_id, tree_for, budget_for, _team = seen[0]
@@ -200,8 +219,11 @@ def test_one_worker_plans_in_this_process_with_the_pools_own_helpers(monkeypatch
 
 def test_one_worker_stops_on_cancel_between_plans(monkeypatch):
     cancel = threading.Event()
-    monkeypatch.setattr(materials_plan, "plan_and_score",
-                        lambda item, local=None: cancel.set() or (item[0], 1.0, None, None, None))
+    monkeypatch.setattr(
+        materials_plan,
+        "plan_and_score",
+        lambda item, local=None: cancel.set() or (item[0], 1.0, None, None, None),
+    )
     pool = SimpleNamespace(_pool=None, ctx=None, _by_id={}, _tree_for=None, _budget_for=None)
     assert [r[0] for r in materials_plan.dispatch(pool, _items(4), cancel)] == [0]
 
@@ -218,6 +240,7 @@ def test_plan_optimal_reads_the_held_plans_time_limit_flag():
 def test_a_system_exit_in_a_plan_is_a_row_note(monkeypatch):
     def boom(*_a, **_k):
         raise SystemExit("missing dumps/board_state.json")
+
     monkeypatch.setattr(materials_plan, "plan_for", boom)
     out = materials_plan.plan_and_score((1, "card-00001-5-a-0000-00", ("m",), "m0020", None, {}))
     assert out[1] is None and out[3].startswith("SystemExit")
@@ -225,12 +248,29 @@ def test_a_system_exit_in_a_plan_is_a_row_note(monkeypatch):
 
 # ---------------------------------------------------------------- a held plan is never stale
 # every file the planner or the bench reads: a refresh that rewrites any of them re-plans
-ACCOUNT_FILES = ["data/cards.json", "data/owned.json", "state/collection.json", "config.json",
-                 *(f"tools/recon/proxy/dumps/{n}" for n in (
-                     "board_state.json", "inventory.json", "card_params.json",
-                     "account_snapshot_main.json", "card_level_curve.json", "card_caps.json",
-                     "skilltree.json", "master_SkillTreeNode.json", "charts.json",
-                     "skill_ladder.json", "master_index.json", "master_refetched/SkillTreeNode.db"))]
+ACCOUNT_FILES = [
+    "data/cards.json",
+    "data/owned.json",
+    "state/collection.json",
+    "config.json",
+    *(
+        f"tools/recon/proxy/dumps/{n}"
+        for n in (
+            "board_state.json",
+            "inventory.json",
+            "card_params.json",
+            "account_snapshot_main.json",
+            "card_level_curve.json",
+            "card_caps.json",
+            "skilltree.json",
+            "master_SkillTreeNode.json",
+            "charts.json",
+            "skill_ladder.json",
+            "master_index.json",
+            "master_refetched/SkillTreeNode.db",
+        )
+    ),
+]
 
 
 def test_every_file_a_plan_is_made_from_is_in_its_stamp(monkeypatch, tmp_path):
@@ -245,10 +285,10 @@ def test_every_file_a_plan_is_made_from_is_in_its_stamp(monkeypatch, tmp_path):
     for rel in ACCOUNT_FILES:
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("{}", encoding="utf-8")
-        os.utime(tmp_path / rel, ns=(10 ** 18, 10 ** 18))
+        os.utime(tmp_path / rel, ns=(10**18, 10**18))
     before = materials_plan._plan_stamp()
     for k, rel in enumerate(ACCOUNT_FILES, 1):
-        later = 10 ** 18 + k * 10 ** 9                  # a refresh rewrote it, k seconds later
+        later = 10**18 + k * 10**9  # a refresh rewrote it, k seconds later
         os.utime(tmp_path / rel, ns=(later, later))
         now = materials_plan._plan_stamp()
         assert now != before, f"{rel} is not in the plan's stamp"
@@ -263,6 +303,7 @@ def _counting_solver(monkeypatch):
     def solve(**k):
         solved.append(k)
         return {"chr-00001": {"nodes": [f"R-{len(solved):03d}"]}}
+
     monkeypatch.setattr(board_plan_solver, "solve_team_board", solve)
     monkeypatch.setattr(materials_plan, "bench_from_plan", lambda solved_, team: {})
     return solved
@@ -273,26 +314,44 @@ def test_a_held_plan_is_planned_again_after_a_refresh(monkeypatch):
     stamp = ["files as they were"]
     monkeypatch.setattr(materials_plan, "_plan_stamp", lambda: tuple(stamp))
     first = materials_plan.plan_for("card-00001-5-a-0000-00", ["card-00002-5-b-0000-00"], "m0020", {})
-    assert materials_plan.plan_for("card-00001-5-a-0000-00", ["card-00002-5-b-0000-00"],
-                                   "m0020", {}) is first and len(solved) == 1
+    assert (
+        materials_plan.plan_for("card-00001-5-a-0000-00", ["card-00002-5-b-0000-00"], "m0020", {}) is first
+        and len(solved) == 1
+    )
     stamp[0] = "a refresh rewrote the inventory"
     again = materials_plan.plan_for("card-00001-5-a-0000-00", ["card-00002-5-b-0000-00"], "m0020", {})
     assert len(solved) == 2 and again is not first
     # nor is the old one served to a row in another member order, or as the plan's flag
-    assert materials_plan.held_plan("card-00001-5-a-0000-00", ["card-00002-5-b-0000-00"],
-                                    "m0020", {})[1] is again
+    assert (
+        materials_plan.held_plan("card-00001-5-a-0000-00", ["card-00002-5-b-0000-00"], "m0020", {})[1]
+        is again
+    )
 
 
 def _judged(level="account", difficulty="EXPERT", auto=False, **opts_over):
     import ondemand
 
-    raw = {"level": level, "bloom": "account", "keep_higher": False, "sp_training": "account",
-           "all_invited": False, "no_refund": False, "branches": "GBRY", "targets": [],
-           "boards": "plan", "max_points": False, "infinite": False, "max_resets": None,
-           "reset_min_gain": 0.01}
+    raw = {
+        "level": level,
+        "bloom": "account",
+        "keep_higher": False,
+        "sp_training": "account",
+        "all_invited": False,
+        "no_refund": False,
+        "branches": "GBRY",
+        "targets": [],
+        "boards": "plan",
+        "max_points": False,
+        "infinite": False,
+        "max_resets": None,
+        "reset_min_gain": 0.01,
+    }
     a = ondemand.parse_assumptions(raw)
-    leaf = SimpleNamespace(cfg=SimpleNamespace(platform="mobile", song_auto=auto,
-                                               run_state=SimpleNamespace(combo=0 if auto else None)))
+    leaf = SimpleNamespace(
+        cfg=SimpleNamespace(
+            platform="mobile", song_auto=auto, run_state=SimpleNamespace(combo=0 if auto else None)
+        )
+    )
     return materials_plan.judged_opts({**a.plan_opts(), **opts_over}, a, difficulty, leaf)
 
 
@@ -302,34 +361,42 @@ def test_a_change_of_settings_plans_again_and_nothing_else_does(monkeypatch):
 
     def plan(members=team, song="m0020", **kw):
         return materials_plan.plan_for(lead, members, song, _judged(**kw), judge=lambda *a: 1.0)
+
     base = plan()
     assert plan() is base and plan(members=team[::-1]) is base and len(solved) == 1
     # every lever that changes the plan or the leaf that picks it: a plan of its own
-    for change in ({"song": "m0021"}, {"resources": "infinite"}, {"branches": "GR"},
-                   {"max_resets": 0}, {"level": "max"}, {"difficulty": "MASTER"},
-                   {"auto": True}):
+    for change in (
+        {"song": "m0021"},
+        {"resources": "infinite"},
+        {"branches": "GR"},
+        {"max_resets": 0},
+        {"level": "max"},
+        {"difficulty": "MASTER"},
+        {"auto": True},
+    ):
         n = len(solved)
         assert plan(**change) is not base, change
         assert len(solved) == n + 1, change
-    assert plan() is base and len(solved) == 8                 # the first is still held
+    assert plan() is base and len(solved) == 8  # the first is still held
 
 
-def test_the_first_plan_is_shared_by_every_judge_and_a_caller_without_one_gets_the_latest(
-        monkeypatch):
+def test_the_first_plan_is_shared_by_every_judge_and_a_caller_without_one_gets_the_latest(monkeypatch):
     solved = _counting_solver(monkeypatch)
     lead, team = "card-00001-5-a-0000-00", ["card-00002-5-b-0000-00"]
     first = materials_plan.plan_for(lead, team, "m0020", materials_plan.first_opts(_judged()))
-    assert materials_plan.plan_for(lead, team, "m0020",
-                                   materials_plan.first_opts(_judged(level="max"))) is first
-    assert len(solved) == 1                                   # no judge picks the first plan
+    assert (
+        materials_plan.plan_for(lead, team, "m0020", materials_plan.first_opts(_judged(level="max"))) is first
+    )
+    assert len(solved) == 1  # no judge picks the first plan
     # a judged request is never served the first plan by itself: only a search that kept it
     # for its row holds it under its judge (`remember`), and then that row opens on it
     judged = materials_plan.plan_for(lead, team, "m0020", _judged(), judge=lambda *a: 1.0)
     assert judged is not first and len(solved) == 2
-    materials_plan.remember(lead, tuple(team), "m0020", _judged(level="max"),
-                            (("stamp",), first, False, {}))
-    assert materials_plan.plan_for(lead, team, "m0020", _judged(level="max"),
-                                   judge=lambda *a: 1.0) is first and len(solved) == 2
+    materials_plan.remember(lead, tuple(team), "m0020", _judged(level="max"), (("stamp",), first, False, {}))
+    assert (
+        materials_plan.plan_for(lead, team, "m0020", _judged(level="max"), judge=lambda *a: 1.0) is first
+        and len(solved) == 2
+    )
     # the account board plan for the row on screen (no judge): the team's latest plan
     plain = {k: v for k, v in _judged().items() if k != "judge"}
     assert materials_plan.plan_for(lead, team, "m0020", plain) is first and len(solved) == 2
@@ -361,12 +428,14 @@ class _ThreadPool:
             out = fn(item)
             self.log.append(("done", kind, item[0]))
             callback(out)
+
         threading.Timer(self.delay(kind, item), run).start()
 
 
 def _fake_tasks(monkeypatch, values, scores):
     """`plan_and_score` -> `values[index]` (None: the wallet cannot fund it), with a first plan
     that carries Act levels; `refine_and_score` -> `scores[(index, candidate)]`."""
+
     def plan(item, local=None):
         index = item[0]
         v = values[index]
@@ -377,6 +446,7 @@ def _fake_tasks(monkeypatch, values, scores):
         index, candidate = item[0], item[7]
         planned = ({"chr": candidate}, {}, {"chr": candidate})
         return index, candidate, scores[(index, candidate)], planned, False
+
     monkeypatch.setattr(materials_plan, "plan_and_score", plan)
     monkeypatch.setattr(materials_plan, "refine_and_score", refine)
 
@@ -392,6 +462,7 @@ def _sequential(values, scores, items, shown, opts):
 
 def test_overlapped_replan_gives_the_two_phase_answer(monkeypatch):
     import random
+
     rng = random.Random(7)
     for trial in range(6):
         n = rng.randint(4, 9)
@@ -403,8 +474,8 @@ def test_overlapped_replan_gives_the_two_phase_answer(monkeypatch):
         pool = _ThreadPool(rng.randint(1, 4), lambda kind, item: rng.random() * 0.02)
         planned = []
         out = materials_plan.plan_and_refine(
-            pool, items, opts={"o": 1}, shown=shown, rank=lambda k, v: (-v, k),
-            on_plan=planned.append)
+            pool, items, opts={"o": 1}, shown=shown, rank=lambda k, v: (-v, k), on_plan=planned.append
+        )
         assert sorted(r[0] for r in planned) == list(range(n))
         assert out == _sequential(values, scores, items, shown, {"o": 1}), trial
 
@@ -417,13 +488,20 @@ def test_a_row_sure_to_be_shown_is_refined_while_the_last_plans_run(monkeypatch)
     values = [100.0, 90.0, 10.0, 200.0, 150.0, 120.0]
     scores = {(k, c): 1.0 for k in range(6) for c in ("bare", "in_board")}
     _fake_tasks(monkeypatch, values, scores)
-    pool = _ThreadPool(4, lambda kind, item: 0.3 + 0.2 * (item[0] - 3)
-                       if kind == "plan" and item[0] >= 3 else 0.01)
+    pool = _ThreadPool(
+        4, lambda kind, item: 0.3 + 0.2 * (item[0] - 3) if kind == "plan" and item[0] >= 3 else 0.01
+    )
     seen = []
-    materials_plan.plan_and_refine(pool, _items(6), opts={}, shown=4, rank=lambda k, v: (-v, k),
-                                   progress=lambda d, n: seen.append((d, n)))
+    materials_plan.plan_and_refine(
+        pool,
+        _items(6),
+        opts={},
+        shown=4,
+        rank=lambda k, v: (-v, k),
+        progress=lambda d, n: seen.append((d, n)),
+    )
     first_slow = pool.log.index(("done", "plan", 3))
     assert {e[2] for e in pool.log[:first_slow] if e[:2] == ("done", "refine")} == {0}
     refined = {e[2] for e in pool.log if e[:2] == ("submit", "refine")}
-    assert refined == {0, 3, 4, 5}                         # the four shown, never row 1
-    assert seen[-1] == (14, 14)                             # 6 plans + 4 rows x 2 candidates
+    assert refined == {0, 3, 4, 5}  # the four shown, never row 1
+    assert seen[-1] == (14, 14)  # 6 plans + 4 rows x 2 candidates

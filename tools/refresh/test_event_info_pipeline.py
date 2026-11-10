@@ -4,6 +4,7 @@
 dumps/event_info_live.bin; `marathon_bonus.py` reads it like a capture and lists the groups that
 are open now; `refresh_all.py` runs both on every refresh.
 """
+
 from __future__ import annotations
 
 import sys
@@ -47,16 +48,46 @@ def test_song_bonus_rows_of_different_songs_sharing_a_number_are_all_kept(monkey
     import marathon_bonus as mb
 
     gid = "music_score_bonus-marathon_event-normal-008-chapter-01"
-    rows = [{"group_id": gid, "music_id": "m0369", "number": 1, "card_id": "card-00007-5-uniq-0096-00", "permil": 100},
-            {"group_id": gid, "music_id": "m0369", "number": 2, "card_id": "card-03007-5-uniq-0100-00", "permil": 100},
-            {"group_id": gid, "music_id": "m0551", "number": 1, "card_id": "card-00007-5-uniq-0096-00", "permil": 100},
-            {"group_id": gid, "music_id": "m0371", "number": 1, "card_id": "card-06005-5-uniq-0097-00", "permil": 100}]
+    rows = [
+        {
+            "group_id": gid,
+            "music_id": "m0369",
+            "number": 1,
+            "card_id": "card-00007-5-uniq-0096-00",
+            "permil": 100,
+        },
+        {
+            "group_id": gid,
+            "music_id": "m0369",
+            "number": 2,
+            "card_id": "card-03007-5-uniq-0100-00",
+            "permil": 100,
+        },
+        {
+            "group_id": gid,
+            "music_id": "m0551",
+            "number": 1,
+            "card_id": "card-00007-5-uniq-0096-00",
+            "permil": 100,
+        },
+        {
+            "group_id": gid,
+            "music_id": "m0371",
+            "number": 1,
+            "card_id": "card-06005-5-uniq-0097-00",
+            "permil": 100,
+        },
+    ]
     monkeypatch.setattr(mb, "_plaintexts", lambda _p: [("/rpc.api.Event/ListEventInfo", b"", "exact")] * 2)
     monkeypatch.setattr(mb, "groups", lambda _pt: {(gid, "music"): list(rows)})
     monkeypatch.setattr(mb, "COLLISIONS", [])
     got = mb.collect(["a", "b"])[(gid, "music")]["rows"]
     assert sorted((r["music_id"], r["number"]) for r in got) == [
-        ("m0369", 1), ("m0369", 2), ("m0371", 1), ("m0551", 1)]
+        ("m0369", 1),
+        ("m0369", 2),
+        ("m0371", 1),
+        ("m0551", 1),
+    ]
     assert mb.COLLISIONS == []
 
 
@@ -64,8 +95,10 @@ def test_two_different_rows_under_one_key_are_reported_not_swallowed(monkeypatch
     import marathon_bonus as mb
 
     gid = "live_marathon_score_bonus-x"
-    rows = [{"group_id": gid, "number": 1, "card_id": "card-1", "permil": 300},
-            {"group_id": gid, "number": 1, "card_id": "card-2", "permil": 300}]
+    rows = [
+        {"group_id": gid, "number": 1, "card_id": "card-1", "permil": 300},
+        {"group_id": gid, "number": 1, "card_id": "card-2", "permil": 300},
+    ]
     monkeypatch.setattr(mb, "_plaintexts", lambda _p: [("/rpc.api.Event/ListEventInfo", b"", "exact")])
     monkeypatch.setattr(mb, "groups", lambda _pt: {(gid, "live"): list(rows)})
     monkeypatch.setattr(mb, "COLLISIONS", [])

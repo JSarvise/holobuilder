@@ -43,8 +43,7 @@ def _chart(music_id="m0001", difficulty="EXPERT", **over):
 def _document(**charts):
     return {
         "schema_version": "charts-1",
-        "charts": {ChartLibrary.key(c["music_id"], c["difficulty"]): c
-                   for c in charts.values()},
+        "charts": {ChartLibrary.key(c["music_id"], c["difficulty"]): c for c in charts.values()},
     }
 
 
@@ -59,9 +58,7 @@ def test_a_chart_round_trips_into_a_scorable_SongChart():
     chart = library.get("m0001")
     assert chart is not None
     assert chart.difficulty == "EXPERT"
-    assert chart.notes == (
-        ChartNote(1.0, 1000), ChartNote(2.0, 1000), ChartNote(3.5, 500)
-    )
+    assert chart.notes == (ChartNote(1.0, 1000), ChartNote(2.0, 1000), ChartNote(3.5, 500))
     assert chart.special_cues == (1.5, 2.5, 3.0, 3.2, 3.4)
 
 
@@ -77,11 +74,13 @@ def test_difficulty_is_case_insensitive_on_the_way_in_and_out():
 def test_at_returns_only_the_asked_difficulty_in_music_id_order():
     """EXPERT is the default because the ranking mode is always Expert; a mode
     that averaged four difficulties would answer a question nobody asked."""
-    library = charts_from_mapping(_document(
-        b=_chart("m0002", "EXPERT"),
-        a=_chart("m0001", "EXPERT"),
-        c=_chart("m0001", "HARD"),
-    ))
+    library = charts_from_mapping(
+        _document(
+            b=_chart("m0002", "EXPERT"),
+            a=_chart("m0001", "EXPERT"),
+            c=_chart("m0001", "HARD"),
+        )
+    )
     assert [c.music_id for c in library.at()] == ["m0001", "m0002"]
     assert [c.music_id for c in library.at("HARD")] == ["m0001"]
     assert library.music_ids == ("m0001", "m0002")
@@ -178,6 +177,7 @@ def test_the_real_library_is_scorable_end_to_end():
         pytest.skip("dumps/ is gitignored; run build_charts.py to produce charts.json")
 
     from support.builders import FIXTURE_CARDS_PATH, make_scoring_config
+
     from hbuilder.domain.loader import load_cards
     from hbuilder.domain.song import score_song
 
@@ -205,10 +205,14 @@ _DIFFICULTIES = ("EASY", "NORMAL", "HARD", "EXPERT")
 
 
 def test_one_song_at_four_difficulties_stays_four_separately_addressable_charts():
-    library = charts_from_mapping(_document(**{
-        d: _chart(difficulty=d, difficulty_level=level, notes=[[1.0, 1000]] * (i + 1))
-        for i, (d, level) in enumerate(zip(_DIFFICULTIES, (5, 12, 19, 26)))
-    }))
+    library = charts_from_mapping(
+        _document(
+            **{
+                d: _chart(difficulty=d, difficulty_level=level, notes=[[1.0, 1000]] * (i + 1))
+                for i, (d, level) in enumerate(zip(_DIFFICULTIES, (5, 12, 19, 26)))
+            }
+        )
+    )
     assert len(library) == 4
     assert library.music_ids == ("m0001",)
     for i, d in enumerate(_DIFFICULTIES):
@@ -224,10 +228,15 @@ def test_at_a_difficulty_never_mixes_difficulties():
     made it return four charts per song, "best across every song" would silently
     become "best across every chart" — the same song counted four times, and
     weighted towards whatever difficulty is easiest to score."""
-    library = charts_from_mapping(_document(**{
-        f"{song}{d}": _chart(music_id=song, difficulty=d)
-        for song in ("m0001", "m0002") for d in _DIFFICULTIES
-    }))
+    library = charts_from_mapping(
+        _document(
+            **{
+                f"{song}{d}": _chart(music_id=song, difficulty=d)
+                for song in ("m0001", "m0002")
+                for d in _DIFFICULTIES
+            }
+        )
+    )
     assert len(library) == 8
     for d in _DIFFICULTIES:
         at = library.at(d)
@@ -293,9 +302,7 @@ def test_the_all_difficulty_library_agrees_with_the_ranking_library_on_expert():
 
 
 def test_the_loader_reads_the_songs_cast():
-    library = charts_from_mapping(
-        _document(a=_chart(singers=["chr-04003"], singer_type="solo"))
-    )
+    library = charts_from_mapping(_document(a=_chart(singers=["chr-04003"], singer_type="solo")))
     chart = library.get("m0001")
     assert chart.singers == ("chr-04003",)
     assert chart.singer_type == "solo"
@@ -319,16 +326,12 @@ def test_a_half_filled_cast_is_refused_by_the_loader():
         charts_from_mapping(_document(a=_chart(singers=["chr-04003"])))
     # A FUWAMOCO duo `solo` is a COHERENT cast (two singers, attested to sum both
     # boards under one cap), so the loader accepts it rather than refusing.
-    lib = charts_from_mapping(
-        _document(a=_chart(singers=["chr-04016", "chr-04017"], singer_type="solo"))
-    )
+    lib = charts_from_mapping(_document(a=_chart(singers=["chr-04016", "chr-04017"], singer_type="solo")))
     assert list(lib.at("EXPERT"))[0].singers == ("chr-04016", "chr-04017")
     # Three singers under `solo`, however, is still an incoherent cast.
     with pytest.raises(SongError):
         charts_from_mapping(
-            _document(a=_chart(
-                singers=["chr-04016", "chr-04017", "chr-00015"], singer_type="solo"
-            ))
+            _document(a=_chart(singers=["chr-04016", "chr-04017", "chr-00015"], singer_type="solo"))
         )
 
 
@@ -368,20 +371,30 @@ def test_the_real_chart_library_carries_the_casts_it_can_represent():
 
 
 def test_select_returns_the_named_songs_at_the_named_difficulty():
-    library = charts_from_mapping(_document(**{
-        f"{song}{d}": _chart(music_id=song, difficulty=d)
-        for song in ("m0001", "m0002", "m0003") for d in ("EASY", "EXPERT")
-    }))
+    library = charts_from_mapping(
+        _document(
+            **{
+                f"{song}{d}": _chart(music_id=song, difficulty=d)
+                for song in ("m0001", "m0002", "m0003")
+                for d in ("EASY", "EXPERT")
+            }
+        )
+    )
     picked = library.select(("m0003", "m0001"), "EASY")
     assert [c.music_id for c in picked] == ["m0001", "m0003"]
     assert {c.difficulty for c in picked} == {"EASY"}
 
 
 def test_select_with_no_songs_named_is_every_song_at_that_difficulty():
-    library = charts_from_mapping(_document(**{
-        f"{song}{d}": _chart(music_id=song, difficulty=d)
-        for song in ("m0001", "m0002") for d in ("EASY", "EXPERT")
-    }))
+    library = charts_from_mapping(
+        _document(
+            **{
+                f"{song}{d}": _chart(music_id=song, difficulty=d)
+                for song in ("m0001", "m0002")
+                for d in ("EASY", "EXPERT")
+            }
+        )
+    )
     assert library.select(None, "EASY") == library.at("EASY")
     assert library.select((), "EXPERT") == library.at("EXPERT")
 
@@ -392,9 +405,7 @@ def test_select_REFUSES_a_song_the_library_cannot_serve():
     output to say so. The message names the song AND the difficulty, because
     "m0303 is not here" and "m0303 has no EASY chart" are different problems
     with different fixes (typo vs `build_charts.py --all-out`)."""
-    library = charts_from_mapping(_document(
-        a=_chart(music_id="m0001", difficulty="EXPERT")
-    ))
+    library = charts_from_mapping(_document(a=_chart(music_id="m0001", difficulty="EXPERT")))
     with pytest.raises(SongError) as absent:
         library.select(("m0001", "m9999"), "EXPERT")
     assert "m9999" in str(absent.value)
@@ -407,9 +418,7 @@ def test_select_REFUSES_a_song_the_library_cannot_serve():
 def test_select_names_every_missing_song_at_once():
     """A caller fixing a typo'd list should not have to re-run five times to
     discover five typos."""
-    library = charts_from_mapping(_document(
-        a=_chart(music_id="m0001", difficulty="EXPERT")
-    ))
+    library = charts_from_mapping(_document(a=_chart(music_id="m0001", difficulty="EXPERT")))
     with pytest.raises(SongError) as exc:
         library.select(("m0002", "m0003", "m0004"), "EXPERT")
     for missing in ("m0002", "m0003", "m0004"):
@@ -419,10 +428,12 @@ def test_select_names_every_missing_song_at_once():
 def test_select_collapses_a_repeated_song_rather_than_double_weighting_it():
     """A mean over a list that names one song twice would weight it double —
     silently, and only for whoever wrote the list that way."""
-    library = charts_from_mapping(_document(
-        a=_chart(music_id="m0001", difficulty="EXPERT"),
-        b=_chart(music_id="m0002", difficulty="EXPERT"),
-    ))
+    library = charts_from_mapping(
+        _document(
+            a=_chart(music_id="m0001", difficulty="EXPERT"),
+            b=_chart(music_id="m0002", difficulty="EXPERT"),
+        )
+    )
     picked = library.select(("m0001", "m0002", "m0001"), "EXPERT")
     assert [c.music_id for c in picked] == ["m0001", "m0002"]
 

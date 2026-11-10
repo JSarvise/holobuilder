@@ -13,12 +13,19 @@ wanted path_ids at a time, not per lookup.
 
     python resolve_images.py <bundle> <NombreDelGameObject> [<mas nombres>...]
 """
-import os, sys, struct, warnings, collections
+
+import collections
+import os
+import struct
+import sys
+import warnings
+
 warnings.filterwarnings("ignore")
-import UnityPy
+import UnityPy  # noqa: E402
+
 UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
 
-from pathlib import Path
+from pathlib import Path  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
@@ -41,7 +48,7 @@ for o in objs:
     by_pid.setdefault(id(o.assets_file), {})[o.path_id] = o
 
 # node name -> [(component type, [(ext_path, path_id) or (None, local path_id)], ...)]
-pending = collections.defaultdict(list)          # (ext_basename, path_id) -> [(node, off)]
+pending = collections.defaultdict(list)  # (ext_basename, path_id) -> [(node, off)]
 local_hits = collections.defaultdict(list)
 found_nodes = []
 
@@ -59,7 +66,7 @@ for o in objs:
     externals = [getattr(e, "path", "") for e in (getattr(sf, "externals", None) or [])]
     local = by_pid[id(sf)]
     found_nodes.append(nm)
-    for c in (getattr(d, "m_Component", None) or []):
+    for c in getattr(d, "m_Component", None) or []:
         cp = getattr(c, "component", c)
         co = local.get(getattr(cp, "path_id", None))
         if co is None or co.type.name != "MonoBehaviour":

@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 import pytest
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 import hbuilder.domain.scoring as scoring_module
 from hbuilder.domain.scoring import score_fast
@@ -22,8 +23,6 @@ from hbuilder.domain.scoring_models import (
     AdditiveStacking,
     MultiplicativeRateUp,
 )
-
-from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 # --- Stacking model: combine ------------------------------------------------
 
@@ -69,9 +68,7 @@ def test_activation_rate_models_registry_maps_multiplicative_by_name():
 
 
 def test_multiplicative_rate_up_never_divides_by_one_hundred():
-    source = Path(scoring_module.__file__).parent.joinpath(
-        "scoring_models.py"
-    ).read_text(encoding="utf-8")
+    source = Path(scoring_module.__file__).parent.joinpath("scoring_models.py").read_text(encoding="utf-8")
     assert not re.search(r"/\s*100", source)
 
 
@@ -132,15 +129,11 @@ def _four_combo_team():
     )
     passive_member_a = make_card(
         "member_passive_a",
-        passive=make_skill(
-            "PASSIVE", family="score_support", effect_type="score", magnitude=10.0
-        ),
+        passive=make_skill("PASSIVE", family="score_support", effect_type="score", magnitude=10.0),
     )
     passive_member_b = make_card(
         "member_passive_b",
-        passive=make_skill(
-            "PASSIVE", family="score_support", effect_type="score", magnitude=14.0
-        ),
+        passive=make_skill("PASSIVE", family="score_support", effect_type="score", magnitude=14.0),
     )
     plain_member_a = make_card("member_plain_a")
     outfit = make_card("outfit_01")
@@ -168,15 +161,11 @@ def _four_combo_team_with_stat_pool():
     base = _four_combo_team()
     stat_a = make_card(
         "member_stat_a",
-        passive=make_skill(
-            "PASSIVE", family="stat_up", effect_type="performance", magnitude=10.0
-        ),
+        passive=make_skill("PASSIVE", family="stat_up", effect_type="performance", magnitude=10.0),
     )
     stat_b = make_card(
         "member_stat_b",
-        passive=make_skill(
-            "PASSIVE", family="stat_up", effect_type="performance", magnitude=14.0
-        ),
+        passive=make_skill("PASSIVE", family="stat_up", effect_type="performance", magnitude=14.0),
     )
     return make_team([base.leader, *base.members[:3], stat_a, stat_b])
 
@@ -257,5 +246,3 @@ def test_four_combo_additive_stacking_with_multiplicative_activation_rate():
     assert total == pytest.approx(_expected_total("additive", "multiplicative"))
     assert total == pytest.approx(_MULTIPLICATIVE_TOTAL)
     assert total != pytest.approx(_STEADY_STATE_MULTIPLICATIVE_TOTAL)
-
-

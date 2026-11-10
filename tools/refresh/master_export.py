@@ -16,6 +16,7 @@ Usage:
     python master_export.py SkillTreeNode
     python master_export.py SkillTreeNode SkillTreeEffect
 """
+
 from __future__ import annotations
 
 import json
@@ -24,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
 import master_cache as mc  # noqa: E402

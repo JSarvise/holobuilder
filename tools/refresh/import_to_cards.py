@@ -37,8 +37,11 @@
 # ACTIVE/SPECIAL the game states nothing and `all` fills a genuine void.
 #
 # Usage: python import_to_cards.py [--diff]
-import argparse, difflib, json, os, sys
-
+import argparse
+import difflib
+import json
+import os
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
@@ -53,21 +56,38 @@ CARDS_JSON = str(paths.DATA / "cards.json")
 TYPE_BY_ATTRIBUTE = {1: "Cute", 2: "Pure", 3: "Happy"}
 # schema.GENERATIONS names, keyed by the Character master's English generation label.
 GENERATIONS_BY_MASTER = {
-    "hololive 0th Generation": ["0期生"], "hololive 1st Generation": ["1期生"],
-    "hololive 2nd Generation": ["2期生"], "hololive Gamers": ["ゲーマーズ"],
+    "hololive 0th Generation": ["0期生"],
+    "hololive 1st Generation": ["1期生"],
+    "hololive 2nd Generation": ["2期生"],
+    "hololive Gamers": ["ゲーマーズ"],
     "hololive 1st Generation / Gamers": ["1期生", "ゲーマーズ"],
-    "hololive 3rd Generation": ["3期生"], "hololive 4th Generation": ["4期生"],
-    "hololive 5th Generation": ["5期生"], "hololive holoX": ["holoX"],
-    "hololive ID 1st Generation": ["ID1"], "hololive ID 2nd Generation": ["ID2"],
-    "hololive ID 3rd Generation": ["ID3"], "hololive EN Myth": ["Myth"],
-    "hololive EN Promise": ["Promise"], "hololive EN Advent": ["Advent"],
+    "hololive 3rd Generation": ["3期生"],
+    "hololive 4th Generation": ["4期生"],
+    "hololive 5th Generation": ["5期生"],
+    "hololive holoX": ["holoX"],
+    "hololive ID 1st Generation": ["ID1"],
+    "hololive ID 2nd Generation": ["ID2"],
+    "hololive ID 3rd Generation": ["ID3"],
+    "hololive EN Myth": ["Myth"],
+    "hololive EN Promise": ["Promise"],
+    "hololive EN Advent": ["Advent"],
     "DEV_IS ReGLOSS": ["ReGLOSS"],
 }
 GENERATION_BY_GROUP = {
-    "grp-gen_0": "0期生", "grp-gen_1": "1期生", "grp-gen_2": "2期生", "grp-gamers": "ゲーマーズ",
-    "grp-gen_3": "3期生", "grp-gen_4": "4期生", "grp-gen_5": "5期生", "grp-holox": "holoX",
-    "grp-indonesia-gen_1": "ID1", "grp-indonesia-gen_2": "ID2", "grp-indonesia-gen_3": "ID3",
-    "grp-myth": "Myth", "grp-promise": "Promise", "grp-advent": "Advent",
+    "grp-gen_0": "0期生",
+    "grp-gen_1": "1期生",
+    "grp-gen_2": "2期生",
+    "grp-gamers": "ゲーマーズ",
+    "grp-gen_3": "3期生",
+    "grp-gen_4": "4期生",
+    "grp-gen_5": "5期生",
+    "grp-holox": "holoX",
+    "grp-indonesia-gen_1": "ID1",
+    "grp-indonesia-gen_2": "ID2",
+    "grp-indonesia-gen_3": "ID3",
+    "grp-myth": "Myth",
+    "grp-promise": "Promise",
+    "grp-advent": "Advent",
     "grp-regloss": "ReGLOSS",
 }
 RARITY_BY_CODE = {"nrml": "3★", "cmmn": "4★", "uniq": "5★"}
@@ -103,11 +123,13 @@ def _condition(gate):
             cond["operator"] = gate["operator"]
         return cond
     if gate["kind"] == "type":
-        return {"kind": "type", "target": TYPE_BY_ATTRIBUTE[int(gate["target"].rsplit("_", 1)[1])],
-                "count": gate["count"]}
+        return {
+            "kind": "type",
+            "target": TYPE_BY_ATTRIBUTE[int(gate["target"].rsplit("_", 1)[1])],
+            "count": gate["count"],
+        }
     if gate["kind"] == "generation":
-        return {"kind": "generation", "target": GENERATION_BY_GROUP[gate["target"]],
-                "count": gate["count"]}
+        return {"kind": "generation", "target": GENERATION_BY_GROUP[gate["target"]], "count": gate["count"]}
     raise ValueError(f"unmapped gate {gate!r}")
 
 
@@ -195,7 +217,9 @@ def _costume_slot(costume, loss, card_id):
     return {
         "family": family,
         "effect_type": effect_type,
-        "duration": None, "interval": None, "probability_tier": None,
+        "duration": None,
+        "interval": None,
+        "probability_tier": None,
         "magnitude": sk["effect"]["magnitude_permil"] / 10,
         "condition": _condition(sk["gate"]),
         "target": _target(sk["effect"].get("target"), loss, card_id, "COSTUME"),
@@ -241,9 +265,7 @@ def _slot(kind, sk, loss, card_id):
         else:
             # Rider: a second, DIFFERENT family in the same slot (SPECIAL
             # carries activation-rate / judgement / life-recovery riders).
-            rider = _rider_payload(
-                dict(cond_effect, gate=conditional["gate"]), loss, card_id, kind
-            )
+            rider = _rider_payload(dict(cond_effect, gate=conditional["gate"]), loss, card_id, kind)
 
     family, effect_type = FAMILY_BY_EFFECT[principal["effect"]]  # every effect maps; never None
 
@@ -274,7 +296,8 @@ def _slot(kind, sk, loss, card_id):
         "interval": (sk["cooldown_ms"] / 1000) if kind == "ACTIVE" else None,
         "probability_tier": sk["probability_tier"] if kind == "ACTIVE" else None,
         # on-disk magnitude is percentage points (scoring._as_rate divides by 100)
-        "magnitude": principal["magnitude_permil"] / 10 if principal["magnitude_permil"] is not None
+        "magnitude": principal["magnitude_permil"] / 10
+        if principal["magnitude_permil"] is not None
         else None,
         "condition": condition,
         "target": target,
@@ -305,17 +328,27 @@ def to_records(cards):
             "title": title,
             "costume_name": costume_name,
             "stats": {k: sm[k] for k in ("performance", "technique", "sense")} if sm else None,
-            "skills": {k: _slot(k, c["skills"][k], loss, c["id"])
-                       for k in ("SPECIAL", "ACTIVE", "PASSIVE")},
+            "skills": {k: _slot(k, c["skills"][k], loss, c["id"]) for k in ("SPECIAL", "ACTIVE", "PASSIVE")},
             "costume_skill": _costume_slot(costume, loss, c["id"]),
         }
         valid.append(record)
-        review.append({**record, "_extracted": {
-            "stats_current_grpc": c["stats"], "stat_ratio_permil": c["stat_ratio_permil"],
-            "stats_max_at": sm["at"] if sm else None, "name_key": c["name_key"],
-            "descriptions": c.get("descriptions"),
-            "chr_id": c["chr_id"], "rarity_code": c["rarity"], "attribute": c["attribute"],
-            "costume": c.get("costume"), "skills": c["skills"]}})
+        review.append(
+            {
+                **record,
+                "_extracted": {
+                    "stats_current_grpc": c["stats"],
+                    "stat_ratio_permil": c["stat_ratio_permil"],
+                    "stats_max_at": sm["at"] if sm else None,
+                    "name_key": c["name_key"],
+                    "descriptions": c.get("descriptions"),
+                    "chr_id": c["chr_id"],
+                    "rarity_code": c["rarity"],
+                    "attribute": c["attribute"],
+                    "costume": c.get("costume"),
+                    "skills": c["skills"],
+                },
+            }
+        )
     return valid, review, loss
 
 
@@ -385,17 +418,25 @@ def _write_merge_diff(draft_doc):
             existing_doc = json.load(fh)
     else:
         existing_doc = {"schema_version": SCHEMA_VERSION, "cards": []}
-    existing_text = json.dumps(existing_doc, indent=2, ensure_ascii=False, sort_keys=True).splitlines(keepends=True)
+    existing_text = json.dumps(existing_doc, indent=2, ensure_ascii=False, sort_keys=True).splitlines(
+        keepends=True
+    )
     draft_text = json.dumps(draft_doc, indent=2, ensure_ascii=False, sort_keys=True).splitlines(keepends=True)
-    diff_lines = list(difflib.unified_diff(
-        existing_text, draft_text,
-        fromfile="data/cards.json", tofile="dumps/cards_import_draft.json",
-    ))
+    diff_lines = list(
+        difflib.unified_diff(
+            existing_text,
+            draft_text,
+            fromfile="data/cards.json",
+            tofile="dumps/cards_import_draft.json",
+        )
+    )
     diff_path = os.path.join(DUMPS, "cards_merge_proposal.diff")
     with open(diff_path, "w", encoding="utf-8") as fh:
         fh.writelines(diff_lines)
-    print(f"\n{len(diff_lines)} diff lines -> dumps/cards_merge_proposal.diff "
-          f"(reviewable proposal; data/cards.json was read, never written)")
+    print(
+        f"\n{len(diff_lines)} diff lines -> dumps/cards_merge_proposal.diff "
+        f"(reviewable proposal; data/cards.json was read, never written)"
+    )
 
 
 def main():
@@ -406,12 +447,13 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Map dumps/cards_enriched.json onto the domain's cards.json schema. "
-                    "Writes only to dumps/ -- never data/cards.json."
+        "Writes only to dumps/ -- never data/cards.json."
     )
     parser.add_argument(
-        "--diff", action="store_true",
+        "--diff",
+        action="store_true",
         help="Also write dumps/cards_merge_proposal.diff, a unified diff of data/cards.json "
-             "against the schema-valid draft (reads data/cards.json, never writes it).",
+        "against the schema-valid draft (reads data/cards.json, never writes it).",
     )
     args = parser.parse_args()
 
@@ -437,10 +479,14 @@ def main():
     print("  gap 2  second family in one slot dropped        : 0 slots (closed: rider, plan 05/06)")
     print("  gap 3  all_parameter_up slot dropped entirely   : 0 slots (closed: all_stats, plan 04)")
     print("  gap 4  effect target_max dropped                : 0 slots (closed: target, plan 01/03)")
-    print(f"  --     target unparseable/unmapped              : "
-          f"{len(loss['target_unmapped'])} slots (D-32/T-03.1-25 diagnostic)")
-    print(f"  --     costume_name empty                       : "
-          f"{len(loss['costume_name_unknown'])} cards (expected 0 -- every card has an outfit)")
+    print(
+        f"  --     target unparseable/unmapped              : "
+        f"{len(loss['target_unmapped'])} slots (D-32/T-03.1-25 diagnostic)"
+    )
+    print(
+        f"  --     costume_name empty                       : "
+        f"{len(loss['costume_name_unknown'])} cards (expected 0 -- every card has an outfit)"
+    )
     with_costume = sum(1 for r in valid if r["costume_skill"])
     print(f"  --     costume_skill populated                  : {with_costume}/{len(valid)} cards")
 
@@ -450,18 +496,21 @@ def main():
     with open(os.path.join(DUMPS, "skill_ladder.json"), "w", encoding="utf-8") as fh:
         json.dump(ladder_doc, fh, indent=2, ensure_ascii=False, sort_keys=True)
     rungs = sum(len(k) for c in ladder_doc["cards"].values() for k in c.values())
-    print(f"\n{len(ladder_doc['cards'])} cards, {rungs} slot-levels -> "
-          f"dumps/skill_ladder.json (bloom down-level)")
+    print(
+        f"\n{len(ladder_doc['cards'])} cards, {rungs} slot-levels -> "
+        f"dumps/skill_ladder.json (bloom down-level)"
+    )
     if ladder_missing:
-        print(f"  ⚠ {len(ladder_missing)} cards carry no skills_by_level -- re-run "
-              f"build_cards_dataset.py: {ladder_missing[:3]}")
+        print(
+            f"  ⚠ {len(ladder_missing)} cards carry no skills_by_level -- re-run "
+            f"build_cards_dataset.py: {ladder_missing[:3]}"
+        )
         errors = errors + ladder_missing
     disagreements = _check_ladder_against_catalogue(ladder_doc)
     if disagreements is None:
         print("  self-check SKIPPED: no data/cards.json to check level 2 against")
     else:
-        print(f"  self-check: level 2 vs data/cards.json -- "
-              f"{len(disagreements)} disagreements (expected 0)")
+        print(f"  self-check: level 2 vs data/cards.json -- {len(disagreements)} disagreements (expected 0)")
         for d in disagreements[:10]:
             print("   ", d)
         errors = errors + disagreements

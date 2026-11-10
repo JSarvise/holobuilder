@@ -29,8 +29,8 @@ differs.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from hbuilder.domain.card import (
     Card,
@@ -104,7 +104,7 @@ class GatePredicate:
     # non-run_state gate at `>=`.
     operator: str = "gte"
 
-    def resolve(self, agg: TeamAggregates, run_state: RunState) -> "GateResolution":
+    def resolve(self, agg: TeamAggregates, run_state: RunState) -> GateResolution:
         if self.dimension == "type":
             actual = agg.type_count(self.value)
         elif self.dimension == "generation":
@@ -298,10 +298,13 @@ def resolve_card_set_gates(cards: tuple[Card, ...], run_state: RunState) -> Card
                 _card_gate_tables.clear()
             table = (card, _gate_probes(card), {})
             _card_gate_tables[id(card)] = table
-        reading = (run_state, *[
-            (type_counts if dimension == "type" else generation_counts).get(value, 0)
-            for dimension, value in table[1]
-        ])
+        reading = (
+            run_state,
+            *[
+                (type_counts if dimension == "type" else generation_counts).get(value, 0)
+                for dimension, value in table[1]
+            ],
+        )
         resolved = table[2].get(reading)
         if resolved is None:
             normal_resolved: list[ResolvedSkill] = []
@@ -310,15 +313,12 @@ def resolve_card_set_gates(cards: tuple[Card, ...], run_state: RunState) -> Card
                 if skill is None:
                     continue
                 normal_resolved.append(
-                    _resolve_one_skill(
-                        card.id, card.member, slot_kind, "normal", skill, agg, run_state
-                    )
+                    _resolve_one_skill(card.id, card.member, slot_kind, "normal", skill, agg, run_state)
                 )
             costume = None
             if card.costume_skill is not None:
                 costume = _resolve_one_skill(
-                    card.id, card.member, "costume", "costume", card.costume_skill,
-                    agg, run_state
+                    card.id, card.member, "costume", "costume", card.costume_skill, agg, run_state
                 )
             resolved = (tuple(normal_resolved), costume)
             table[2][reading] = resolved
@@ -349,8 +349,7 @@ def resolve_leader_costume(
     if leader.costume_skill is None:
         return None
     return _resolve_one_skill(
-        leader.id, leader.member, "costume", "costume", leader.costume_skill,
-        aggregates, run_state
+        leader.id, leader.member, "costume", "costume", leader.costume_skill, aggregates, run_state
     )
 
 
@@ -389,8 +388,7 @@ def resolve_leader_costume_skills(
     if rider_slot is None:
         return (principal,)
     rider = _resolve_one_skill(
-        leader.id, leader.member, "costume", COSTUME_RIDER_SOURCE, rider_slot,
-        aggregates, run_state
+        leader.id, leader.member, "costume", COSTUME_RIDER_SOURCE, rider_slot, aggregates, run_state
     )
     return (principal, rider)
 
@@ -413,9 +411,7 @@ def resolve_team_gates(team: Team, run_state: RunState) -> tuple[ResolvedSkill, 
     arrive through the member loop below, exactly once."""
     card_set_gates = resolve_card_set_gates(team.members, run_state)
     resolved: list[ResolvedSkill] = []
-    resolved.extend(
-        resolve_leader_costume_skills(team.leader, card_set_gates.aggregates, run_state)
-    )
+    resolved.extend(resolve_leader_costume_skills(team.leader, card_set_gates.aggregates, run_state))
     for member in team.members:
         resolved.extend(card_set_gates.normal_by_card_id[member.id])
     return tuple(resolved)

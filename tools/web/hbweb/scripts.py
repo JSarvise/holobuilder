@@ -13,8 +13,7 @@ from pathlib import Path
 from hbweb import config
 
 
-def run_recon_script(h, script: Path, tag: str,
-                     args: list[str] | None = None) -> tuple[int, str] | None:
+def run_recon_script(h, script: Path, tag: str, args: list[str] | None = None) -> tuple[int, str] | None:
     """Run a recon-side script as a subprocess, echoing each line of its output to this
     server's console AS IT ARRIVES (the operator watches the console; a captured pipe
     would leave it blank for minutes) and collecting it for the reply.
@@ -34,9 +33,16 @@ def run_recon_script(h, script: Path, tag: str,
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     try:
         process = subprocess.Popen(  # noqa: S603
-            [sys.executable, "-u", str(script), *(args or [])], cwd=str(config.REPO_ROOT), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
-            encoding="utf-8", errors="replace")
+            [sys.executable, "-u", str(script), *(args or [])],
+            cwd=str(config.REPO_ROOT),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            encoding="utf-8",
+            errors="replace",
+        )
     except OSError as exc:
         h.reply_json(500, {"error": f"could not start {script.name}: {exc}"})
         return None
@@ -47,8 +53,7 @@ def run_recon_script(h, script: Path, tag: str,
         except UnicodeEncodeError:
             # This server's OWN console may be cp1252. Echoing is a convenience;
             # letting it raise would abort the request and lose the exit code.
-            print(f"  [{tag}] {line.rstrip().encode('ascii', 'replace').decode('ascii')}",
-                  flush=True)
+            print(f"  [{tag}] {line.rstrip().encode('ascii', 'replace').decode('ascii')}", flush=True)
         captured.append(line)
     code = process.wait()
     print(f"--- {script.name} finished, exit {code} ---\n", flush=True)

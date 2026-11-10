@@ -35,19 +35,19 @@ import re
 import sys
 import time
 import urllib.request
-
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 import master_cache  # noqa: E402
 
 CACHE = str(paths.HOLODORI)
-PROTO_BASE = ("https://raw.githubusercontent.com/HolodoriDB/holodori-app-protos/"
-              "main/global/protobufs/entity/master/")
-DB_BASE = ("https://raw.githubusercontent.com/HolodoriDB/holodori-db-eng-diff/"
-           "main/")
+PROTO_BASE = (
+    "https://raw.githubusercontent.com/HolodoriDB/holodori-app-protos/main/global/protobufs/entity/master/"
+)
+DB_BASE = "https://raw.githubusercontent.com/HolodoriDB/holodori-db-eng-diff/main/"
 UA = "hololive-builder-recon/1.0 (personal cross-validation; contact via repo)"
 _last = [0.0]
 
@@ -66,8 +66,9 @@ def _camel(name):
 def fetch(url, refresh=False):
     """GET with a permanent on-disk cache and a 1 req/sec floor. Returns text or None on 404."""
     os.makedirs(CACHE, exist_ok=True)
-    path = os.path.join(CACHE, re.sub(r"[^A-Za-z0-9._-]", "_", url.rsplit("/", 2)[-2] + "_" +
-                                      url.rsplit("/", 1)[-1]))
+    path = os.path.join(
+        CACHE, re.sub(r"[^A-Za-z0-9._-]", "_", url.rsplit("/", 2)[-2] + "_" + url.rsplit("/", 1)[-1])
+    )
     if os.path.exists(path) and not refresh:
         text = open(path, encoding="utf-8").read()
         return None if text == "\0404" else text
@@ -90,8 +91,7 @@ def fetch(url, refresh=False):
 
 FIELD = re.compile(r"^\s*(?:repeated\s+)?([.\w]+)\s+(\w+)\s*=\s*(\d+)\s*[;\[]")
 ENUM_VAL = re.compile(r"^\s*(\w+)\s*=\s*(\d+)\s*[;\[]")
-ENUM_BASE = ("https://raw.githubusercontent.com/HolodoriDB/holodori-app-protos/"
-             "main/global/protobufs/enums/")
+ENUM_BASE = "https://raw.githubusercontent.com/HolodoriDB/holodori-app-protos/main/global/protobufs/enums/"
 
 
 def proto_fields(table, refresh=False):
@@ -155,7 +155,7 @@ def our_rows(table):
     # keep going (Condition currently fails the SQLCipher hmac on page 1).
     try:
         return master_cache.rows(table)
-    except Exception as e:                                   # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         return f"{type(e).__name__}: {e}"
 
 
@@ -207,10 +207,12 @@ def names(table, refresh=False):
     if isinstance(ours, list):
         for r in ours:
             seen.update(int(k) for k in r["data"])
-    print(f"{table}  --  {len(fields)} fields in their proto, "
-          f"{len(seen)} distinct field numbers in our {len(ours) if isinstance(ours, list) else 0} rows")
+    print(
+        f"{table}  --  {len(fields)} fields in their proto, "
+        f"{len(seen)} distinct field numbers in our {len(ours) if isinstance(ours, list) else 0} rows"
+    )
     for num in sorted(set(fields) | seen):
-        mark = " " if num in seen else "."      # '.' = declared but never populated in the local copy
+        mark = " " if num in seen else "."  # '.' = declared but never populated in the local copy
         name, typ = fields.get(num, ("?", "?"))
         extra = "" if num in fields else "   <-- NOT IN THEIR PROTO"
         print(f"  {mark}{num:5}  {name:52} {typ}{extra}")
@@ -218,8 +220,11 @@ def names(table, refresh=False):
 
 
 def _key(d):
-    return json.dumps(sorted((k, [_norm(x) for x in (v if isinstance(v, list) else [v])])
-                             for k, v in d.items()), ensure_ascii=False, sort_keys=True)
+    return json.dumps(
+        sorted((k, [_norm(x) for x in (v if isinstance(v, list) else [v])]) for k, v in d.items()),
+        ensure_ascii=False,
+        sort_keys=True,
+    )
 
 
 def check(table, refresh=False, quiet=False):
@@ -247,9 +252,12 @@ def check(table, refresh=False, quiet=False):
                 if da.get(k) != db.get(k):
                     line = f"    {k:44} ours {str(da.get(k))[:60]:62} theirs {str(db.get(k))[:60]}"
                     # console encodings vary; a diff line must never kill the run
-                    sys.stdout.write(line.encode(sys.stdout.encoding or "utf-8",
-                                                 "replace").decode(sys.stdout.encoding or
-                                                                   "utf-8") + "\n")
+                    sys.stdout.write(
+                        line.encode(sys.stdout.encoding or "utf-8", "replace").decode(
+                            sys.stdout.encoding or "utf-8"
+                        )
+                        + "\n"
+                    )
             print("    --")
     return "DIFFER", f"{len(bad)}/{len(ours)} rows differ"
 
@@ -283,14 +291,15 @@ def main():
         for t in args:
             rows = their_rows(t, refresh=True)
             if rows is None:
-                print(f"{t:36} NOT-PUBLISHED"); bad = 1
+                print(f"{t:36} NOT-PUBLISHED")
+                bad = 1
             else:
                 print(f"{t:36} {len(rows)} rows -> dumps/holodori/main_{t}.json")
         return bad
     if "--check-all" in sys.argv:
         worst = 0
         counts = {}
-        for t in (args or tables()):
+        for t in args or tables():
             verdict, detail = check(t, refresh, quiet=True)
             counts[verdict] = counts.get(verdict, 0) + 1
             if verdict not in ("EXACT", "NOT-CACHED", "NOT-PUBLISHED", "NO-PROTO"):
@@ -298,7 +307,10 @@ def main():
             print(f"{t:40} {verdict:14} {detail}")
         print("\n" + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
         return worst
-    print(__doc__ or "usage: holodori_sync.py --names|--check <Table> | --check-all | --tables | --fetch <Table>...")
+    print(
+        __doc__
+        or "usage: holodori_sync.py --names|--check <Table> | --check-all | --tables | --fetch <Table>..."
+    )
     return 2
 
 

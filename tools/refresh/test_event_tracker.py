@@ -1,5 +1,6 @@
 """event_tracker.py (the 24/7 reader) and tracker_pull.py (its local side). No network: protobuf
 messages are built here, the tracker's API is a dict, sockets are faked."""
+
 from __future__ import annotations
 
 import json
@@ -27,8 +28,10 @@ def ld(fn: int, b: bytes | str) -> bytes:
 
 
 def top_response() -> bytes:
-    row = lambda r, s, uid, name: ld(4, vint(1, r) + vint(2, s)  # noqa: E731
-                                     + ld(3, ld(1, uid) + ld(2, ld(1, name) + vint(2, 80))))
+    row = lambda r, s, uid, name: ld(
+        4,
+        vint(1, r) + vint(2, s) + ld(3, ld(1, uid) + ld(2, ld(1, name) + vint(2, 80))),
+    )
     return ld(1, vint(1, 0) + row(2, 900, "BBBB", "ぺこ") + row(1, 1000, "AAAA", "Ann"))
 
 
@@ -39,12 +42,15 @@ def test_parse_top_keeps_rank_score_id_and_name_in_rank_order():
 def _content_store(root: Path, version: str) -> Path:
     """A content store as tools/app/publish.py lays it out: manifest + sha-named objects."""
     import hashlib
+
     body = json.dumps({"version": version, "source": "publisher's install"}).encode()
     sha = hashlib.sha256(body).hexdigest()
     (root / "objects" / sha[:2]).mkdir(parents=True)
     (root / "objects" / sha[:2] / sha).write_bytes(body)
-    (root / "manifest.json").write_text(json.dumps(
-        {"files": {et.CLIENT_VERSION_REL: {"sha256": sha, "size": len(body), "kind": "sync"}}}), "utf8")
+    (root / "manifest.json").write_text(
+        json.dumps({"files": {et.CLIENT_VERSION_REL: {"sha256": sha, "size": len(body), "kind": "sync"}}}),
+        "utf8",
+    )
     return root
 
 
@@ -67,6 +73,7 @@ class _Login(et.Region):
 
     def rpc(self, path, body=b"", *, auth=True, mv=True):
         import os
+
         self.calls.append(path)
         if path == "/rpc.api.Master/Get" and os.environ.get("HOLODREAMS_APP_VERSION") != self.accepts:
             raise et.GameError(path, "3", "OUTDATED_APP", "2004")
@@ -98,7 +105,7 @@ def test_a_refusal_with_nothing_newer_published_stays_an_error(tmp_path, monkeyp
     region = _Login(tmp_path / "store", accepts="1.2.200")
     with pytest.raises(et.GameError, match="OUTDATED_APP"):
         region.call("/rpc.api.Event/ListEventInfo")
-    assert region.calls == ["/rpc.api.Master/Get"]       # no blind retries
+    assert region.calls == ["/rpc.api.Master/Get"]  # no blind retries
 
 
 def test_top_board_is_not_on_the_whitelist_by_prefix():
@@ -133,8 +140,9 @@ def test_proxy_is_only_for_api_hosts(monkeypatch):
 
 
 def rec(at: int, kind: str = "points") -> bytes:
-    return json.dumps({"captured_at": at, "kind": kind, "region": "us",
-                       "chapter_id": "c1", "borders": []}).encode()
+    return json.dumps(
+        {"captured_at": at, "kind": kind, "region": "us", "chapter_id": "c1", "borders": []}
+    ).encode()
 
 
 def test_merge_lines_skips_reads_the_store_already_has(tmp_path):
@@ -154,26 +162,29 @@ def test_merge_meta_takes_only_a_newer_read(tmp_path):
 
 
 def test_pull_fetches_from_the_last_offset_and_waits_for_a_torn_line(tmp_path):
-    remote = {"us/c1.jsonl": rec(1) + b"\n" + rec(2)[:10],      # second line still being written
-              "status.json": b'{"regions": []}'}
+    remote = {
+        "us/c1.jsonl": rec(1) + b"\n" + rec(2)[:10],  # second line still being written
+        "status.json": b'{"regions": []}',
+    }
     asked = []
 
     def get(route, **q):
         if route == "/files":
-            return json.dumps({"files": [{"path": p, "size": len(b), "mtime": 1}
-                                         for p, b in remote.items()]}).encode()
+            return json.dumps(
+                {"files": [{"path": p, "size": len(b), "mtime": 1} for p, b in remote.items()]}
+            ).encode()
         asked.append((q["path"], int(q.get("offset", 0))))
-        return remote[q["path"]][int(q.get("offset", 0)):]
+        return remote[q["path"]][int(q.get("offset", 0)) :]
 
     store = tmp_path / "cutoffs"
     assert tp.pull(get, store)["appended"] == 1
     remote["us/c1.jsonl"] = rec(1) + b"\n" + rec(2) + b"\n"
     assert tp.pull(get, store)["appended"] == 1
     first = len(rec(1)) + 1
-    assert ("us/c1.jsonl", first) in asked                        # resumed, not re-read
+    assert ("us/c1.jsonl", first) in asked  # resumed, not re-read
     assert len((store / "us" / "c1.jsonl").read_bytes().splitlines()) == 2
     assert (store / "tracker_status.json").is_file()
-    assert tp.pull(get, store)["appended"] == 0                   # nothing new, nothing fetched
+    assert tp.pull(get, store)["appended"] == 0  # nothing new, nothing fetched
 
 
 def test_api_serves_files_inside_the_store_only(tmp_path):
@@ -212,18 +223,18 @@ def test_top_is_dense_only_while_watched():
     assert g.top_every(0) == 1800
     g.watch(100, 300)
     assert g.top_every(150) == 120 and g.top_every(399) == 120
-    assert g.top_every(401) == 1800                     # the lease ran out: background again
-    assert _Plain({"top": 0, "top_watch": 120}).top_every(0) == 0   # as/jp: nothing unwatched
+    assert g.top_every(401) == 1800  # the lease ran out: background again
+    assert _Plain({"top": 0, "top_watch": 120}).top_every(0) == 0  # as/jp: nothing unwatched
 
 
 def test_a_new_viewer_gets_a_board_now_and_a_lease_is_capped():
     g = _Plain({"top": 1800, "top_watch": 120})
-    g.next_top = 1500                                  # the background read is far away
+    g.next_top = 1500  # the background read is far away
     g.watch(100, 10**6)
     assert g.next_top == 100 and g.wake == 100
     assert g.watch_until == 100 + et.WATCH_MAX_S
     g.next_top = 200
-    g.watch(150, 300)                                  # a renewal does not force an extra read
+    g.watch(150, 300)  # a renewal does not force an extra read
     assert g.next_top == 200
 
 
@@ -241,6 +252,7 @@ def test_watch_waits_for_the_read_it_triggers():
             return json.dumps({"regions": [{"region": "us", "top_reads": 2}]}).encode()
 
     import time as _t
+
     sleep = _t.sleep
     _t.sleep = lambda s: None
     try:
@@ -251,11 +263,13 @@ def test_watch_waits_for_the_read_it_triggers():
 
 def test_the_event_list_is_reread_at_the_next_date_it_lists():
     ms = 1000
-    listed = [{"chapter_id": "c1", "start_time": 100 * ms, "reveal_time": 500 * ms},
-              {"chapter_id": "c2", "start_time": 900 * ms, "chapter_end_time": 1200 * ms}]
-    assert et.next_boundary(listed, 50) == 105          # c1 starts
-    assert et.next_boundary(listed, 200) == 505         # c1's final read
-    assert et.next_boundary(listed, 600) == 905         # c2 starts
+    listed = [
+        {"chapter_id": "c1", "start_time": 100 * ms, "reveal_time": 500 * ms},
+        {"chapter_id": "c2", "start_time": 900 * ms, "chapter_end_time": 1200 * ms},
+    ]
+    assert et.next_boundary(listed, 50) == 105  # c1 starts
+    assert et.next_boundary(listed, 200) == 505  # c1's final read
+    assert et.next_boundary(listed, 600) == 905  # c2 starts
     assert et.next_boundary(listed, 2000) == float("inf")
 
 
@@ -280,30 +294,36 @@ def _region(chan, wake):
 def test_keepalive_pings_only_a_quiet_connection_with_a_read_due_soon():
     now = 1000.0
     c = _Chan()
-    _region(c, now + 200).keepalive(now)                 # quiet since 0, read in 200 s: ping
+    _region(c, now + 200).keepalive(now)  # quiet since 0, read in 200 s: ping
     assert c.pinged == 1
     c.used_at = now - 5
-    _region(c, now + 200).keepalive(now)                 # used 5 s ago: no ping
+    _region(c, now + 200).keepalive(now)  # used 5 s ago: no ping
     assert c.pinged == 1
     c.used_at = 0.0
-    _region(c, now + et.KEEPALIVE_AHEAD + 1).keepalive(now)   # nothing due soon: let it close
+    _region(c, now + et.KEEPALIVE_AHEAD + 1).keepalive(now)  # nothing due soon: let it close
     assert c.pinged == 1
     dead = _Chan(ok=False)
     g = _region(dead, now + 100)
     g.keepalive(now)
     assert g.stat["ping_fails"] == 1 and dead.sock is None
-    _region(dead, now + 100).keepalive(now)              # no connection: nothing to ping
+    _region(dead, now + 100).keepalive(now)  # no connection: nothing to ping
     assert dead.pinged == 1
 
 
 def test_an_ended_chapters_song_board_is_read_until_its_final(tmp_path):
     # an ended, still-listed chapter stays on the top list until each kind's board
     # (Event Pt and every song) has a final read
-    ch = {"chapter_id": "c1", "start_time": 1, "chapter_end_time": 100,
-          "tiers": {"points": [{"rank": 100}], "total": [], "music": {"m1": [{"rank": 100}]}}}
+    ch = {
+        "chapter_id": "c1",
+        "start_time": 1,
+        "chapter_end_time": 100,
+        "tiers": {"points": [{"rank": 100}], "total": [], "music": {"m1": [{"rank": 100}]}},
+    }
     d = tmp_path / "us"
     d.mkdir()
-    (d / "c1.top.jsonl").write_text(json.dumps({"captured_at": 9, "final": True, "kind": "points", "rows": []}) + "\n")
+    (d / "c1.top.jsonl").write_text(
+        json.dumps({"captured_at": 9, "final": True, "kind": "points", "rows": []}) + "\n"
+    )
     assert et.top_chapters([ch], [], tmp_path, "us", 500) == [ch]
     with (d / "c1.top.jsonl").open("a") as fh:
         fh.write(json.dumps({"captured_at": 10, "final": True, "kind": "music:m1", "rows": []}) + "\n")
@@ -314,7 +334,13 @@ def test_a_song_board_is_read_only_under_its_own_lease():
     # the song top 100 is served like the Event Pt one, only when asked for;
     # watching the Event Pt board must not read every song's board too
     g = et.Region.__new__(et.Region)
-    g.plan, g.watch_until, g.song_watch, g.next_top, g.wake = {"top": 0, "top_watch": 300}, 0.0, {}, 1e18, 1e18
+    g.plan, g.watch_until, g.song_watch, g.next_top, g.wake = (
+        {"top": 0, "top_watch": 300},
+        0.0,
+        {},
+        1e18,
+        1e18,
+    )
     g.stat = {}
     g.watch(100.0, 600)
     assert g.kind_watched("points", 101) and not g.kind_watched("music:m1", 101)
@@ -327,12 +353,14 @@ def test_maintenance_is_a_short_fixed_wait_not_a_growing_backoff():
     class _C:
         def close(self):
             pass
+
     g = object.__new__(et.Region)
     g.region, g.chan, g.wake, g.backoff, g.stat = "us", _C(), 0.0, 480, {}
     g.events_at, g.next_boundary = 0.0, 0.0
 
     def refused(now):
         raise et.GameError("/rpc.api.Event/ListEventInfo", "3", "IN_MAINTENANCE", "2006")
+
     g.refresh_events = refused
     g.tick(1000.0)
     assert g.wake == 1000.0 + et.MAINTENANCE_RETRY and g.backoff == 480
@@ -342,8 +370,12 @@ def test_maintenance_is_a_short_fixed_wait_not_a_growing_backoff():
 
 
 def test_a_border_read_records_its_time_for_the_stale_tracker_warning(tmp_path, monkeypatch):
-    ch = {"chapter_id": "c1", "start_time": 1, "chapter_end_time": 10**15,
-          "tiers": {"points": [{"rank": 100}], "total": [], "music": {}}}
+    ch = {
+        "chapter_id": "c1",
+        "start_time": 1,
+        "chapter_end_time": 10**15,
+        "tiers": {"points": [{"rank": 100}], "total": [], "music": {}},
+    }
     region = _Plain({})
     region.region, region.store, region.chapters, region.stat = "us", tmp_path, [ch], {"reads": 0}
     monkeypatch.setattr(region, "call", lambda rpc, body=b"": b"", raising=False)

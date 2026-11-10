@@ -75,6 +75,7 @@ def _removed_note(key: str, value: object) -> str:
     reason = REMOVED_MODELS.get((key, value)) if isinstance(value, str) else None
     return f" ({value!r} was removed: {reason})" if reason else ""
 
+
 # A fixed normalization denominator, not a config key. It makes
 # SPECIAL's `fires * duration / reference_run_seconds` commensurable with
 # ACTIVE's `duration / interval` — both formulas produce "fraction of the
@@ -275,28 +276,18 @@ def validate_scoring_config(doc: object) -> list[str]:
         else:
             for tier_name in PROBABILITY_TIERS:
                 if tier_name not in tiers:
-                    errors.append(
-                        f"probability_tiers: missing required tier "
-                        f"'{tier_name}'"
-                    )
+                    errors.append(f"probability_tiers: missing required tier '{tier_name}'")
                     continue
                 value = tiers[tier_name]
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    errors.append(
-                        f"probability_tiers: tier '{tier_name}' must be a "
-                        f"number, got {value!r}"
-                    )
+                    errors.append(f"probability_tiers: tier '{tier_name}' must be a number, got {value!r}")
                 elif not (0.0 <= value <= 1.0):
                     errors.append(
-                        f"probability_tiers: tier '{tier_name}' must be "
-                        f"between 0.0 and 1.0, got {value!r}"
+                        f"probability_tiers: tier '{tier_name}' must be between 0.0 and 1.0, got {value!r}"
                     )
             for tier_name in tiers:
                 if tier_name not in PROBABILITY_TIERS:
-                    errors.append(
-                        f"probability_tiers: {tier_name!r} is not one of "
-                        f"{list(PROBABILITY_TIERS)}"
-                    )
+                    errors.append(f"probability_tiers: {tier_name!r} is not one of {list(PROBABILITY_TIERS)}")
 
     if "family_weights" in doc:
         weights = doc["family_weights"]
@@ -305,16 +296,12 @@ def validate_scoring_config(doc: object) -> list[str]:
         else:
             for family_name in SKILL_FAMILIES:
                 if family_name not in weights:
-                    errors.append(
-                        f"family_weights: missing required family "
-                        f"'{family_name}'"
-                    )
+                    errors.append(f"family_weights: missing required family '{family_name}'")
                     continue
                 value = weights[family_name]
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
                     errors.append(
-                        f"family_weights: family '{family_name}' weight "
-                        f"must be a number, got {value!r}"
+                        f"family_weights: family '{family_name}' weight must be a number, got {value!r}"
                     )
                 elif family_name == "activation_rate_up" and value != 0.0:
                     # This family's entire contribution is
@@ -336,15 +323,11 @@ def validate_scoring_config(doc: object) -> list[str]:
                     # hand-edited `judgment_enhancement: -0.5` validates
                     # clean without this check.
                     errors.append(
-                        f"family_weights: family '{family_name}' weight "
-                        f"must be non-negative, got {value!r}"
+                        f"family_weights: family '{family_name}' weight must be non-negative, got {value!r}"
                     )
             for family_name in weights:
                 if family_name not in SKILL_FAMILIES:
-                    errors.append(
-                        f"family_weights: {family_name!r} is not one of "
-                        f"{list(SKILL_FAMILIES)}"
-                    )
+                    errors.append(f"family_weights: {family_name!r} is not one of {list(SKILL_FAMILIES)}")
 
     if "special" in doc:
         special = doc["special"]
@@ -355,15 +338,9 @@ def validate_scoring_config(doc: object) -> list[str]:
         else:
             value = special["expected_fires_per_run"]
             if isinstance(value, bool) or not isinstance(value, (int, float)):
-                errors.append(
-                    f"special.expected_fires_per_run: must be a number, "
-                    f"got {value!r}"
-                )
+                errors.append(f"special.expected_fires_per_run: must be a number, got {value!r}")
             elif value < 0:
-                errors.append(
-                    f"special.expected_fires_per_run: must be non-negative, "
-                    f"got {value!r}"
-                )
+                errors.append(f"special.expected_fires_per_run: must be non-negative, got {value!r}")
 
     if "model" in doc:
         model = doc["model"]
@@ -422,15 +399,11 @@ def validate_scoring_config(doc: object) -> list[str]:
         else:
             for dimension in RUN_STATE_DIMENSIONS:
                 if dimension not in run_state_doc:
-                    errors.append(
-                        f"assumed_run_state: missing required dimension "
-                        f"'{dimension}'"
-                    )
+                    errors.append(f"assumed_run_state: missing required dimension '{dimension}'")
             for dimension, value in run_state_doc.items():
                 if dimension not in RUN_STATE_DIMENSIONS:
                     errors.append(
-                        f"assumed_run_state: {dimension!r} is not one of "
-                        f"{list(RUN_STATE_DIMENSIONS)}"
+                        f"assumed_run_state: {dimension!r} is not one of {list(RUN_STATE_DIMENSIONS)}"
                     )
                 # `bool` is a subclass of `int`, so it must be rejected
                 # explicitly — otherwise legacy boolean `true`/`false`
@@ -595,9 +568,7 @@ def _config_from_merged(merged: dict, provenance: dict) -> ScoringConfig:
         activation_rate_model=ACTIVATION_RATE_MODELS[merged["model"]["activation_rate"]],
         # .get for back-compat: a "model" block predating this key reads "finite".
         active_uptime_model=merged["model"].get("active_uptime", "finite"),
-        target_selection_model=TARGET_SELECTION_MODELS[
-            merged["target_selection"]["strategy"]
-        ],
+        target_selection_model=TARGET_SELECTION_MODELS[merged["target_selection"]["strategy"]],
         target_under_supply=merged["target_selection"]["under_supply"],
         run_state=run_state_from_record(merged["assumed_run_state"]),
         provenance=provenance,
@@ -621,7 +592,7 @@ def load_scoring_config(path: Path = DEFAULT_CONFIG_PATH) -> ScoringConfig:
     `DEFAULT_CONFIG` (which would let a defaulted value be reported with
     `"file"` provenance)."""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             doc = json.load(fh)
     except FileNotFoundError:
         provenance = {key: "default" for key in _TOP_LEVEL_KEYS}

@@ -9,6 +9,7 @@ exactly.
 
     python tools/web/kernel/cdvar.py --build      # compile the shared library
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -19,8 +20,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "cdvar.c"
-INCLUDED = HERE / "notewalk.c"          # cdvar.c includes it: a change there rebuilds this
-if str(HERE) not in sys.path:          # loaded by file path in a worker too
+INCLUDED = HERE / "notewalk.c"  # cdvar.c includes it: a change there rebuilds this
+if str(HERE) not in sys.path:  # loaded by file path in a worker too
     sys.path.insert(0, str(HERE))
 import cbuild  # noqa: E402
 
@@ -50,14 +51,33 @@ def load():
             lib = ctypes.CDLL(str(build()))
             lib.hd_cdvar.restype = ctypes.c_double
             lib.hd_cdvar.argtypes = [
-                ctypes.c_int, _F64, _F64, ctypes.c_double,
-                ctypes.c_double, ctypes.c_double, _F64, ctypes.c_int, ctypes.c_double,
-                ctypes.c_int, _I32, _F64,
-                ctypes.c_int, _I32, _F64,
-                _I32, _F64,
-                ctypes.c_int, _I32, _F64,
-                ctypes.c_int, _I32, ctypes.c_int, _I32,
-                ctypes.c_int, _F64, _F64,
+                ctypes.c_int,
+                _F64,
+                _F64,
+                ctypes.c_double,
+                ctypes.c_double,
+                ctypes.c_double,
+                _F64,
+                ctypes.c_int,
+                ctypes.c_double,
+                ctypes.c_int,
+                _I32,
+                _F64,
+                ctypes.c_int,
+                _I32,
+                _F64,
+                _I32,
+                _F64,
+                ctypes.c_int,
+                _I32,
+                _F64,
+                ctypes.c_int,
+                _I32,
+                ctypes.c_int,
+                _I32,
+                ctypes.c_int,
+                _F64,
+                _F64,
             ]
             _lib = lib
     return _lib
@@ -75,8 +95,12 @@ def _chart_arrays(times, note_weights):
         prefix = [0.0]
         for w in note_weights:
             prefix.append(prefix[-1] + w)
-        hit = (times, note_weights, (ctypes.c_double * len(times))(*times),
-               (ctypes.c_double * len(prefix))(*prefix))
+        hit = (
+            times,
+            note_weights,
+            (ctypes.c_double * len(times))(*times),
+            (ctypes.c_double * len(prefix))(*prefix),
+        )
         if len(_chart_cache) > 512:
             _chart_cache.clear()
         _chart_cache[key] = hit
@@ -100,14 +124,34 @@ def screen(spec: dict) -> list[float] | None:
     out = (ctypes.c_double * max(1, count))()
     rates = spec["score_rates"]
     lib.hd_cdvar(
-        len(spec["times"]), times, prefix, spec["song_seconds"],
-        spec["constant"], CEIL_BIAS, _doubles(rates), len(rates), spec["skill_effect_up"],
-        len(spec["fixed_d"]) // 2, _ints(spec["fixed_i"]), _doubles(spec["fixed_d"]),
-        len(spec["active_d"]) // 7, _ints(spec["active_i"]), _doubles(spec["active_d"]),
-        _ints(spec["rider_host"]), _doubles(spec["rider_q"]),
-        len(spec["host_d"]) // 10, _ints(spec["host_i"]), _doubles(spec["host_d"]),
-        len(spec["order"]) // 2, _ints(spec["order"]), len(spec["costume"]), _ints(spec["costume"]),
-        count, _doubles(spec["cd"]), out)
+        len(spec["times"]),
+        times,
+        prefix,
+        spec["song_seconds"],
+        spec["constant"],
+        CEIL_BIAS,
+        _doubles(rates),
+        len(rates),
+        spec["skill_effect_up"],
+        len(spec["fixed_d"]) // 2,
+        _ints(spec["fixed_i"]),
+        _doubles(spec["fixed_d"]),
+        len(spec["active_d"]) // 7,
+        _ints(spec["active_i"]),
+        _doubles(spec["active_d"]),
+        _ints(spec["rider_host"]),
+        _doubles(spec["rider_q"]),
+        len(spec["host_d"]) // 10,
+        _ints(spec["host_i"]),
+        _doubles(spec["host_d"]),
+        len(spec["order"]) // 2,
+        _ints(spec["order"]),
+        len(spec["costume"]),
+        _ints(spec["costume"]),
+        count,
+        _doubles(spec["cd"]),
+        out,
+    )
     values = list(out[:count])
     if any(math.isnan(v) for v in values):
         return None
@@ -123,8 +167,7 @@ def enable() -> bool:
     try:
         load()
     except Exception as exc:  # noqa: BLE001 - no compiler, a failed build
-        print(f"cooldown-screen kernel unavailable ({exc!r}); variants are scored exactly",
-              file=sys.stderr)
+        print(f"cooldown-screen kernel unavailable ({exc!r}); variants are scored exactly", file=sys.stderr)
         return False
     from hbuilder.domain import song
 

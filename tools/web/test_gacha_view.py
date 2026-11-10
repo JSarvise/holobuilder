@@ -7,25 +7,81 @@ call, even one aimed at pytest's own `tmp_path`. The art-detection test below us
 tiny in-memory path-like double instead of touching disk, the same pattern
 `test_park_route.py` documents for this package.
 """
+
 from __future__ import annotations
+
 import gacha_view as gv
 
 CARDS = {"card-00001-5-x": {"rarity": "5★"}, "card-00002-3-x": {"rarity": "3★"}}
 STORE = {
-    "banners": [{"gacha_id": "gacha-a", "name": "A", "type": 1, "start_time": 1700000000,
-                 "end_time": 1700900000, "pickup_card_ids": ["card-00001-5-x"], "seen_at": 5, "raw": {}}],
-    "pulls": [
-        {"draw_time": 1700000000000, "gacha_name": "A", "gacha_id": "gacha-a", "card_id": "card-00001-5-x", "first_seen": 5},
-        {"draw_time": 1700000000000, "gacha_name": "A", "gacha_id": "gacha-a", "card_id": "card-00002-3-x", "first_seen": 5},
-        {"draw_time": 1700000000000, "gacha_name": "A", "gacha_id": "gacha-a", "card_id": "card-00002-3-x", "first_seen": 5},
-        {"draw_time": 1600000000000, "gacha_name": "Old", "gacha_id": None, "card_id": "card-00009-4-x", "first_seen": 5},
+    "banners": [
+        {
+            "gacha_id": "gacha-a",
+            "name": "A",
+            "type": 1,
+            "start_time": 1700000000,
+            "end_time": 1700900000,
+            "pickup_card_ids": ["card-00001-5-x"],
+            "seen_at": 5,
+            "raw": {},
+        }
     ],
-    "rates": [{"gacha_id": "gacha-a", "synced_at": 5, "normal": {"normal": [
-        {"rarity": 5, "ppm": 500000, "cards": [{"card_id": "card-00001-5-x", "ppm": 100000, "is_rate_up": 1}]},
-        {"rarity": 4, "ppm": 1000000, "cards": []},
-        {"rarity": 3, "ppm": 8500000, "cards": []}]}, "card_select": {"error": "x"}}],
-    "counters": [{"gacha_id": "gacha-a", "synced_at": 5, "gacha_point": {"gacha_point_id": "gp", "quantity": 7},
-                  "buttons": [{"id": "b", "drawn_count": 2, "limit_count": 0}]}],
+    "pulls": [
+        {
+            "draw_time": 1700000000000,
+            "gacha_name": "A",
+            "gacha_id": "gacha-a",
+            "card_id": "card-00001-5-x",
+            "first_seen": 5,
+        },
+        {
+            "draw_time": 1700000000000,
+            "gacha_name": "A",
+            "gacha_id": "gacha-a",
+            "card_id": "card-00002-3-x",
+            "first_seen": 5,
+        },
+        {
+            "draw_time": 1700000000000,
+            "gacha_name": "A",
+            "gacha_id": "gacha-a",
+            "card_id": "card-00002-3-x",
+            "first_seen": 5,
+        },
+        {
+            "draw_time": 1600000000000,
+            "gacha_name": "Old",
+            "gacha_id": None,
+            "card_id": "card-00009-4-x",
+            "first_seen": 5,
+        },
+    ],
+    "rates": [
+        {
+            "gacha_id": "gacha-a",
+            "synced_at": 5,
+            "normal": {
+                "normal": [
+                    {
+                        "rarity": 5,
+                        "ppm": 500000,
+                        "cards": [{"card_id": "card-00001-5-x", "ppm": 100000, "is_rate_up": 1}],
+                    },
+                    {"rarity": 4, "ppm": 1000000, "cards": []},
+                    {"rarity": 3, "ppm": 8500000, "cards": []},
+                ]
+            },
+            "card_select": {"error": "x"},
+        }
+    ],
+    "counters": [
+        {
+            "gacha_id": "gacha-a",
+            "synced_at": 5,
+            "gacha_point": {"gacha_point_id": "gp", "quantity": 7},
+            "buttons": [{"id": "b", "drawn_count": 2, "limit_count": 0}],
+        }
+    ],
 }
 
 
@@ -62,7 +118,7 @@ class _FakeArtDir:
 def test_totals_and_rarity_fallback(tmp_path):
     v = gv.build_view(STORE, CARDS, tmp_path)
     assert v["totals"]["pulls"] == 4
-    assert v["totals"]["by_rarity"] == {"5★": 1, "4★": 1, "3★": 2}   # 4★ from the id digit
+    assert v["totals"]["by_rarity"] == {"5★": 1, "4★": 1, "3★": 2}  # 4★ from the id digit
     assert v["last_sync"] == 5
 
 
@@ -77,10 +133,20 @@ def test_pulls_since_last_five_star(tmp_path):
     # "the cards after it in the same group".
     store2 = dict(STORE)
     store2["pulls"] = STORE["pulls"] + [
-        {"draw_time": 1700000100000, "gacha_name": "A", "gacha_id": "gacha-a",
-         "card_id": "card-00002-3-x", "first_seen": 6},
-        {"draw_time": 1700000200000, "gacha_name": "A", "gacha_id": "gacha-a",
-         "card_id": "card-00002-3-x", "first_seen": 6},
+        {
+            "draw_time": 1700000100000,
+            "gacha_name": "A",
+            "gacha_id": "gacha-a",
+            "card_id": "card-00002-3-x",
+            "first_seen": 6,
+        },
+        {
+            "draw_time": 1700000200000,
+            "gacha_name": "A",
+            "gacha_id": "gacha-a",
+            "card_id": "card-00002-3-x",
+            "first_seen": 6,
+        },
     ]
     v2 = gv.build_view(store2, CARDS, tmp_path)
     assert v2["banners"][0]["pulls_since_last_5"] == 2
@@ -96,7 +162,11 @@ def test_banner_cards_counts_pickups_and_expected():
     art_dir = _FakeArtDir({"banner.png"})
     v = gv.build_view(STORE, CARDS, art_dir)
     b = v["banners"][0]
-    assert b["pulls"] == 3 and b["has_rates"] is True and b["art"] == {"banner": True, "logo": False, "icon": False}
+    assert (
+        b["pulls"] == 3
+        and b["has_rates"] is True
+        and b["art"] == {"banner": True, "logo": False, "icon": False}
+    )
     assert b["art_ext"] == {"banner": "png", "logo": None, "icon": None}
     cards = {c["card_id"]: c for c in b["cards"]}
     assert cards["card-00002-3-x"]["count"] == 2
@@ -107,9 +177,22 @@ def test_banner_cards_counts_pickups_and_expected():
 
 def test_unidentified_and_timeline(tmp_path):
     v = gv.build_view(STORE, CARDS, tmp_path)
-    assert v["unidentified"] == [{"gacha_name": "Old", "pulls": 1, "by_rarity": {"4★": 1},
-                                 "cards": [{"card_id": "card-00009-4-x", "count": 1, "rarity": "4★",
-                                            "is_pickup": False, "rate_ppm": None}]}]
+    assert v["unidentified"] == [
+        {
+            "gacha_name": "Old",
+            "pulls": 1,
+            "by_rarity": {"4★": 1},
+            "cards": [
+                {
+                    "card_id": "card-00009-4-x",
+                    "count": 1,
+                    "rarity": "4★",
+                    "is_pickup": False,
+                    "rate_ppm": None,
+                }
+            ],
+        }
+    ]
     days = {t["day"]: t for t in v["timeline"]}
     assert days["2023-11-14"]["pulls"] == 3 and days["2023-11-14"]["five_star"] == 1
     # expected only from banners WITH a table; the unidentified pull contributes nothing
@@ -118,8 +201,14 @@ def test_unidentified_and_timeline(tmp_path):
 
 def test_load_store_reads_missing_dir_as_empty(tmp_path):
     s = gv.load_store(tmp_path / "nope")
-    assert s == {"pulls": [], "banners": [], "rates": [], "counters": [],
-                 "aliases": {}, "aliases_error": None}
+    assert s == {
+        "pulls": [],
+        "banners": [],
+        "rates": [],
+        "counters": [],
+        "aliases": {},
+        "aliases_error": None,
+    }
 
 
 # -- Task 11: aliases, kinds, exclusions, 9+1 expected, tutorial ------------------
@@ -129,10 +218,13 @@ ALIASES = {
     "Sunny Summer Vacay Gacha": {"gacha_id": "gacha-pickup-normal-260728", "kind": "pickup"},
     "★5 Guaranteed Ticket Gacha": {"gacha_id": "gacha-common-ticket_r5-001", "kind": "ticket"},
 }
-_NORMAL = {"normal": [
-    {"rarity": 5, "ppm": 500000, "cards": []},
-    {"rarity": 4, "ppm": 1000000, "cards": []},
-    {"rarity": 3, "ppm": 8500000, "cards": []}]}
+_NORMAL = {
+    "normal": [
+        {"rarity": 5, "ppm": 500000, "cards": []},
+        {"rarity": 4, "ppm": 1000000, "cards": []},
+        {"rarity": 3, "ppm": 8500000, "cards": []},
+    ]
+}
 _FIXED = [{"rarity": 5, "ppm": 10000000, "cards": []}]
 
 STORE_ALIAS = {
@@ -140,11 +232,22 @@ STORE_ALIAS = {
     "banners": STORE["banners"],
     "rates": STORE["rates"],
     "counters": STORE["counters"],
-    "pulls": STORE["pulls"] + [
-        {"draw_time": 1650000000000, "gacha_name": "★5 Guaranteed Ticket Gacha", "gacha_id": None,
-         "card_id": "card-00001-5-x", "first_seen": 5},
-        {"draw_time": 1660000000000, "gacha_name": "Sunny Summer Vacay Gacha", "gacha_id": None,
-         "card_id": "card-00002-3-x", "first_seen": 5},
+    "pulls": STORE["pulls"]
+    + [
+        {
+            "draw_time": 1650000000000,
+            "gacha_name": "★5 Guaranteed Ticket Gacha",
+            "gacha_id": None,
+            "card_id": "card-00001-5-x",
+            "first_seen": 5,
+        },
+        {
+            "draw_time": 1660000000000,
+            "gacha_name": "Sunny Summer Vacay Gacha",
+            "gacha_id": None,
+            "card_id": "card-00002-3-x",
+            "first_seen": 5,
+        },
     ],
 }
 
@@ -156,7 +259,7 @@ def _by_id(view):
 def test_alias_pulls_become_banners_not_unidentified(tmp_path):
     v = gv.build_view(STORE_ALIAS, CARDS, tmp_path)
     names = {u["gacha_name"] for u in v["unidentified"]}
-    assert names == {"Old"}                      # only the truly unknown one is left
+    assert names == {"Old"}  # only the truly unknown one is left
     bs = _by_id(v)
     tk = bs["gacha-common-ticket_r5-001"]
     assert tk["name"] == "★5 Guaranteed Ticket Gacha" and tk["is_alias"] is True
@@ -170,12 +273,12 @@ def test_alias_pulls_become_banners_not_unidentified(tmp_path):
 def test_comparison_excludes_ticket_pulls(tmp_path):
     v = gv.build_view(STORE_ALIAS, CARDS, tmp_path)
     c = v["comparison"]
-    assert c["covered_pulls"] == 3                       # only gacha-a has rates and is not excluded
+    assert c["covered_pulls"] == 3  # only gacha-a has rates and is not excluded
     assert c["observed_by_rarity"] == {"5★": 1, "3★": 2}
     assert abs(c["expected_by_rarity"]["5★"] - 0.15) < 1e-9
     assert c["excluded_pulls"] == 1
     assert c["excluded"] == [{"gacha_name": "★5 Guaranteed Ticket Gacha", "kind": "ticket", "pulls": 1}]
-    assert v["expected_by_rarity"] == c["expected_by_rarity"]   # back-compat alias
+    assert v["expected_by_rarity"] == c["expected_by_rarity"]  # back-compat alias
     # every pull is accounted for: the rate-less alias banner (1) + the still-unidentified one (1)
     assert c["uncovered_pulls"] == 2
     assert c["covered_pulls"] + c["excluded_pulls"] + c["uncovered_pulls"] == v["totals"]["pulls"]
@@ -186,14 +289,35 @@ def test_alias_kind_is_not_inherited_by_a_namesake_with_another_id(tmp_path):
     kind -- inheriting `ticket` from a namesake would silently drop its pulls from the
     comparison."""
     store = dict(STORE_ALIAS)
-    store["banners"] = [{"gacha_id": "gacha-pickup-normal-260901", "name": "★5 Guaranteed Ticket Gacha",
-                         "type": 1, "start_time": 1700000000, "end_time": 1700900000,
-                         "pickup_card_ids": [], "seen_at": 5, "raw": {}}]
-    store["rates"] = [{"gacha_id": "gacha-pickup-normal-260901", "synced_at": 5,
-                       "normal": {"normal": _NORMAL["normal"]}, "card_select": {}}]
-    store["pulls"] = [{"draw_time": 1700000000000, "gacha_name": "★5 Guaranteed Ticket Gacha",
-                       "gacha_id": "gacha-pickup-normal-260901", "card_id": "card-00001-5-x",
-                       "first_seen": 5}]
+    store["banners"] = [
+        {
+            "gacha_id": "gacha-pickup-normal-260901",
+            "name": "★5 Guaranteed Ticket Gacha",
+            "type": 1,
+            "start_time": 1700000000,
+            "end_time": 1700900000,
+            "pickup_card_ids": [],
+            "seen_at": 5,
+            "raw": {},
+        }
+    ]
+    store["rates"] = [
+        {
+            "gacha_id": "gacha-pickup-normal-260901",
+            "synced_at": 5,
+            "normal": {"normal": _NORMAL["normal"]},
+            "card_select": {},
+        }
+    ]
+    store["pulls"] = [
+        {
+            "draw_time": 1700000000000,
+            "gacha_name": "★5 Guaranteed Ticket Gacha",
+            "gacha_id": "gacha-pickup-normal-260901",
+            "card_id": "card-00001-5-x",
+            "first_seen": 5,
+        }
+    ]
     v = gv.build_view(store, CARDS, tmp_path)
     b = _by_id(v)["gacha-pickup-normal-260901"]
     assert b["kind"] == "pickup" and b["excluded_from_rates"] is False and b["is_alias"] is False
@@ -203,13 +327,37 @@ def test_alias_kind_is_not_inherited_by_a_namesake_with_another_id(tmp_path):
 def _ten_pull_store(n, fixed):
     return {
         "aliases": {},
-        "banners": [{"gacha_id": "gacha-fixed-260807", "name": "F", "type": 1, "start_time": 1,
-                     "end_time": 2, "pickup_card_ids": [], "seen_at": 5, "raw": {}}],
+        "banners": [
+            {
+                "gacha_id": "gacha-fixed-260807",
+                "name": "F",
+                "type": 1,
+                "start_time": 1,
+                "end_time": 2,
+                "pickup_card_ids": [],
+                "seen_at": 5,
+                "raw": {},
+            }
+        ],
         "counters": [],
-        "rates": [{"gacha_id": "gacha-fixed-260807", "synced_at": 5,
-                   "normal": {"normal": _NORMAL["normal"], "fixed": fixed}, "card_select": {}}],
-        "pulls": [{"draw_time": 1700000000000, "gacha_name": "F", "gacha_id": "gacha-fixed-260807",
-                   "card_id": "card-00002-3-x", "first_seen": 5} for _ in range(n)],
+        "rates": [
+            {
+                "gacha_id": "gacha-fixed-260807",
+                "synced_at": 5,
+                "normal": {"normal": _NORMAL["normal"], "fixed": fixed},
+                "card_select": {},
+            }
+        ],
+        "pulls": [
+            {
+                "draw_time": 1700000000000,
+                "gacha_name": "F",
+                "gacha_id": "gacha-fixed-260807",
+                "card_id": "card-00002-3-x",
+                "first_seen": 5,
+            }
+            for _ in range(n)
+        ],
     }
 
 
@@ -217,7 +365,7 @@ def test_ten_pull_expected_uses_the_fixed_slot_table(tmp_path):
     v = gv.build_view(_ten_pull_store(10, _FIXED), CARDS, tmp_path)
     b = v["banners"][0]
     assert b["kind"] == "fixed" and b["excluded_from_rates"] is False
-    assert abs(b["expected_by_rarity"]["5★"] - 1.45) < 1e-9    # 9 x 5% + 1 x 100%
+    assert abs(b["expected_by_rarity"]["5★"] - 1.45) < 1e-9  # 9 x 5% + 1 x 100%
     assert abs(b["expected_by_rarity"]["3★"] - 9 * 0.85) < 1e-9
 
 
@@ -231,12 +379,14 @@ def test_empty_fixed_table_falls_back_to_normal_only(tmp_path):
     assert abs(v["banners"][0]["expected_by_rarity"]["5★"] - 0.5) < 1e-9
 
 
-SNAPSHOT = {"cards": [
-    {"card_id": "card-00031-5-uniq", "acquired": 1000000},          # earliest -> tutorial
-    {"card_id": "card-00002-3-x", "acquired": 1000000},             # tracked in pulls -> absent
-    {"card_id": "card-00050-4-y", "acquired": 1300000},             # +300s -> still tutorial
-    {"card_id": "card-00060-3-z", "acquired": 9000000},             # far later
-]}
+SNAPSHOT = {
+    "cards": [
+        {"card_id": "card-00031-5-uniq", "acquired": 1000000},  # earliest -> tutorial
+        {"card_id": "card-00002-3-x", "acquired": 1000000},  # tracked in pulls -> absent
+        {"card_id": "card-00050-4-y", "acquired": 1300000},  # +300s -> still tutorial
+        {"card_id": "card-00060-3-z", "acquired": 9000000},  # far later
+    ]
+}
 
 
 def test_tutorial_block_lists_owned_cards_never_pulled(tmp_path):
@@ -251,9 +401,11 @@ def test_null_acquired_card_does_not_move_the_tutorial_origin(tmp_path):
     """One `acquired: null` must not collapse the origin to 0 -- that would un-flag the real
     first batch and flag the null card instead. Unknown stays unknown (`is_tutorial: None`)."""
     snap = {"cards": SNAPSHOT["cards"] + [{"card_id": "card-00070-4-nul", "acquired": None}]}
-    rows = {r["card_id"]: r for r in gv.build_view(STORE_ALIAS, CARDS, tmp_path,
-                                                   snapshot=snap)["tutorial"]["owned_not_tracked"]}
-    assert rows["card-00031-5-uniq"]["is_tutorial"] is True     # still the first batch
+    rows = {
+        r["card_id"]: r
+        for r in gv.build_view(STORE_ALIAS, CARDS, tmp_path, snapshot=snap)["tutorial"]["owned_not_tracked"]
+    }
+    assert rows["card-00031-5-uniq"]["is_tutorial"] is True  # still the first batch
     assert rows["card-00050-4-y"]["is_tutorial"] is True
     assert rows["card-00060-3-z"]["is_tutorial"] is False
     assert rows["card-00070-4-nul"]["acquired"] is None
@@ -289,7 +441,7 @@ def test_parse_aliases_drops_the_doc_key_and_names_a_broken_file():
 
 
 def test_read_aliases_reports_a_malformed_or_unreadable_file():
-    assert gv._read_aliases(_FakeAliasPath(None)) == ({}, None)     # absent is not an error
+    assert gv._read_aliases(_FakeAliasPath(None)) == ({}, None)  # absent is not an error
     doc, err = gv._read_aliases(_FakeAliasPath('{"Old": {'))
     assert doc == {} and err and "JSONDecodeError" in err
     doc, err = gv._read_aliases(_FakeAliasPath(None, exc=OSError("denied")))

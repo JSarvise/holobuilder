@@ -14,6 +14,7 @@ For each oracle deck it:
 Reads only gitignored data already on disk. Writes only a scratch collection
 doc under the OS temp dir. Does not touch tracked src or the oracle.
 """
+
 from __future__ import annotations
 
 import bisect
@@ -36,18 +37,19 @@ os.chdir(REPO)
 sys.path.insert(0, str(REFRESH))
 sys.path.insert(0, str(REPO / "src"))
 
-import build_board  # noqa: E402
-import master_cache  # noqa: E402
-from hbuilder.inputs import apply_collection, default_paths  # noqa: E402
-from hbuilder.domain.board import board_from_mapping  # noqa: E402
-from hbuilder.domain.loader import load_cards, load_owned  # noqa: E402
-from hbuilder.domain.scoring_config import load_scoring_config  # noqa: E402
-from hbuilder.domain.scoring import score_with_breakdown  # noqa: E402
-from hbuilder.domain.team import Team  # noqa: E402
-
 # Scratch for the derived live collection: the OS temp dir, so the path is
 # valid on any machine.
 import tempfile  # noqa: E402
+
+import build_board  # noqa: E402
+import master_cache  # noqa: E402
+
+from hbuilder.domain.board import board_from_mapping  # noqa: E402
+from hbuilder.domain.loader import load_cards, load_owned  # noqa: E402
+from hbuilder.domain.scoring import score_with_breakdown  # noqa: E402
+from hbuilder.domain.scoring_config import load_scoring_config  # noqa: E402
+from hbuilder.domain.team import Team  # noqa: E402
+from hbuilder.inputs import apply_collection, default_paths  # noqa: E402
 
 SCRATCH = Path(tempfile.gettempdir()) / "hololive-builder-reconcile"
 SCRATCH.mkdir(parents=True, exist_ok=True)
@@ -212,15 +214,13 @@ def build_board_model(board_state_path=None, collection_path=None):
     multipliers underneath it. Same instant, same basis: pass BOTH fixtures, or
     neither.
     """
-    state = _load(Path(board_state_path) if board_state_path
-                  else DUMPS / "board_state.json")
+    state = _load(Path(board_state_path) if board_state_path else DUMPS / "board_state.json")
     document, _report, problems = build_board.build(
         state,
         _load(DUMPS / "skilltree.json"),
         _load(DUMPS / "master_SkillTreeNode.json"),
         level=None,
-        collection=_load(Path(collection_path) if collection_path
-                         else REPO / "state" / "collection.json"),
+        collection=_load(Path(collection_path) if collection_path else REPO / "state" / "collection.json"),
         caps_by_rarity=_load(DUMPS / "card_caps.json"),
     )
     if problems:
@@ -264,8 +264,10 @@ def main() -> int:
     board = build_board_model()
     cfg = dataclasses.replace(cfg, board=board)
 
-    print(f"# cards restated from live snapshot: {applied} "
-          f"(unresolved exp->level: {len(unresolved)})", file=sys.stderr)
+    print(
+        f"# cards restated from live snapshot: {applied} (unresolved exp->level: {len(unresolved)})",
+        file=sys.stderr,
+    )
 
     rows = []
     skipped = []
@@ -292,28 +294,35 @@ def main() -> int:
         server = ev["power"][SERVER_BOARD_KEY]
         resid = our - server
         pct = (resid / server * 100.0) if server else float("nan")
-        rows.append({
-            "idx": idx,
-            "leader_char": leader_char,
-            "leader_card": leader_card.id,
-            "how": how,
-            "server": server,
-            "our": our,
-            "resid": resid,
-            "pct": pct,
-            "members": member_ids,
-        })
+        rows.append(
+            {
+                "idx": idx,
+                "leader_char": leader_char,
+                "leader_card": leader_card.id,
+                "how": how,
+                "server": server,
+                "our": our,
+                "resid": resid,
+                "pct": pct,
+                "members": member_ids,
+            }
+        )
 
-    print(json.dumps({"rows": rows, "skipped": skipped,
-                      "unresolved_levels": unresolved}, indent=1))
+    print(json.dumps({"rows": rows, "skipped": skipped, "unresolved_levels": unresolved}, indent=1))
 
     # console summary
-    print("\n idx  leader_char  leader_card                    how              "
-          "server      our     resid   resid%", file=sys.stderr)
+    print(
+        "\n idx  leader_char  leader_card                    how              "
+        "server      our     resid   resid%",
+        file=sys.stderr,
+    )
     for r in rows:
-        print(f" {r['idx']:>3}  {r['leader_char']:<11}  {r['leader_card']:<28}  "
-              f"{r['how']:<16} {r['server']:>7}  {r['our']:>9.2f}  "
-              f"{r['resid']:>8.2f}  {r['pct']:>7.3f}%", file=sys.stderr)
+        print(
+            f" {r['idx']:>3}  {r['leader_char']:<11}  {r['leader_card']:<28}  "
+            f"{r['how']:<16} {r['server']:>7}  {r['our']:>9.2f}  "
+            f"{r['resid']:>8.2f}  {r['pct']:>7.3f}%",
+            file=sys.stderr,
+        )
     if rows:
         resids = [r["resid"] for r in rows]
         pcts = [r["pct"] for r in rows]
@@ -324,11 +333,16 @@ def main() -> int:
         medp = sorted(pcts)[n // 2]
         worst = max(rows, key=lambda r: abs(r["pct"]))
         print(f"\n decks scored: {n}  skipped: {len(skipped)}", file=sys.stderr)
-        print(f" residual  mean {mean:.3f}  median {med:.3f}  "
-              f"range [{min(resids):.2f}, {max(resids):.2f}]", file=sys.stderr)
-        print(f" residual% mean {meanp:.4f}%  median {medp:.4f}%  "
-              f"worst deck idx {worst['idx']} {worst['pct']:.4f}% "
-              f"(server {worst['server']}, our {worst['our']:.2f})", file=sys.stderr)
+        print(
+            f" residual  mean {mean:.3f}  median {med:.3f}  range [{min(resids):.2f}, {max(resids):.2f}]",
+            file=sys.stderr,
+        )
+        print(
+            f" residual% mean {meanp:.4f}%  median {medp:.4f}%  "
+            f"worst deck idx {worst['idx']} {worst['pct']:.4f}% "
+            f"(server {worst['server']}, our {worst['our']:.2f})",
+            file=sys.stderr,
+        )
         exact = sum(1 for r in resids if abs(r) < 0.5)
         print(f" exact (|resid|<0.5): {exact}/{n}", file=sys.stderr)
     for idx, why in skipped:

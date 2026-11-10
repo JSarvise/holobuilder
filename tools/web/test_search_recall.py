@@ -12,15 +12,16 @@ Each case is a full search on the engine's worker pool (a few minutes), so the m
 
     python -m pytest tools/web/test_search_recall.py -m recall
 """
+
 from __future__ import annotations
 
 import shutil
 import sys
 from pathlib import Path
 
+import ondemand
 import pytest
 
-import ondemand
 from hbuilder import paths
 
 KERNELS = Path(__file__).resolve().parent / "kernel"
@@ -30,14 +31,23 @@ if str(KERNELS) not in sys.path:
 pytestmark = [
     pytest.mark.recall,
     pytest.mark.skipif(shutil.which("gcc") is None, reason="no gcc to build the screen"),
-    pytest.mark.skipif(not all((paths.DUMPS / p).exists() for p in (
-        "charts.json", "charts_all.json", "holodori/main_Poster.json")),
-        reason="needs the catalogue's derived data (dumps/, gitignored)"),
+    pytest.mark.skipif(
+        not all(
+            (paths.DUMPS / p).exists()
+            for p in ("charts.json", "charts_all.json", "holodori/main_Poster.json")
+        ),
+        reason="needs the catalogue's derived data (dumps/, gitignored)",
+    ),
 ]
 
-LEADER = "card-00022-5-uniq-0063-00"                   # Shirogane Noel / Soleil Kiss
-MEMBERS = ("card-00006-5-uniq-0007-00", "card-00007-5-uniq-0008-00", "card-00021-5-uniq-0017-00",
-           "card-00022-5-uniq-0063-00", "card-03005-5-uniq-0084-00")
+LEADER = "card-00022-5-uniq-0063-00"  # Shirogane Noel / Soleil Kiss
+MEMBERS = (
+    "card-00006-5-uniq-0007-00",
+    "card-00007-5-uniq-0008-00",
+    "card-00021-5-uniq-0017-00",
+    "card-00022-5-uniq-0063-00",
+    "card-03005-5-uniq-0084-00",
+)
 
 
 @pytest.fixture
@@ -46,9 +56,11 @@ def kernels(monkeypatch):
     (bit-identical to the Python path), switched off again after the test."""
     from hbuilder.domain import board_plan, song
 
-    for module, attr, env in ((song, "NOTE_WALK_KERNEL", song.NOTE_WALK_KERNEL_ENV),
-                              (board_plan, "CONNECT_KERNEL", board_plan.CONNECT_KERNEL_ENV),
-                              (board_plan, "BOARD_KERNEL", board_plan.BOARD_KERNEL_ENV)):
+    for module, attr, env in (
+        (song, "NOTE_WALK_KERNEL", song.NOTE_WALK_KERNEL_ENV),
+        (board_plan, "CONNECT_KERNEL", board_plan.CONNECT_KERNEL_ENV),
+        (board_plan, "BOARD_KERNEL", board_plan.BOARD_KERNEL_ENV),
+    ):
         monkeypatch.setattr(module, attr, getattr(module, attr))
         monkeypatch.setenv(env, "")
     import connect
@@ -74,4 +86,5 @@ def test_in_general_maxed_serves_at_least_noel_soleil_kiss(kernels, levels):
         eng.close()
     assert served["best"] >= reference_value, (
         f"served {served['leader_name']} + {served['member_names']} {served['best']:,.0f} "
-        f"< Noel / Soleil Kiss {reference_value:,.0f}")
+        f"< Noel / Soleil Kiss {reference_value:,.0f}"
+    )

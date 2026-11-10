@@ -64,16 +64,15 @@ from pathlib import Path
 
 import pytest
 
-from hbuilder.inputs import apply_collection, default_paths
-from hbuilder.domain.loader import load_cards, load_owned
 from hbuilder.domain import scoring
+from hbuilder.domain.loader import load_cards, load_owned
 from hbuilder.domain.scoring import score_with_breakdown
 from hbuilder.domain.scoring_config import load_scoring_config
 from hbuilder.domain.team import Team, TeamError
+from hbuilder.inputs import apply_collection, default_paths
 
 _REPO = Path(__file__).resolve().parents[1]
 _ORACLE = _REPO / "tools" / "recon" / "proxy" / "dumps" / "deck_oracle.json"
-
 
 
 @pytest.fixture(autouse=True)
@@ -160,9 +159,7 @@ def _our_bonus_permil(row, catalogue, owned, cfg, tmp_path):
         json.dumps({"card_default": "unknown", "cards": row["levels"]}),
         encoding="utf-8",
     )
-    cards, _basis = apply_collection(
-        catalogue, str(capture), owned_ids=[c.id for c in owned]
-    )
+    cards, _basis = apply_collection(catalogue, str(capture), owned_ids=[c.id for c in owned])
     by_id = {card.id: card for card in cards}
     if any(cid not in by_id for cid in ids):
         return None
@@ -198,9 +195,7 @@ def test_our_score_bonus_agrees_with_the_games_own(tmp_path):
             continue
         measured.append((index, wire, ours, (ours - wire) / wire))
 
-    assert len(measured) >= 5, (
-        f"expected the skills-only captures, got {len(measured)}"
-    )
+    assert len(measured) >= 5, f"expected the skills-only captures, got {len(measured)}"
 
     outside = [
         (index, wire, round(ours, 1), round(100 * gap, 2))
@@ -254,8 +249,7 @@ def test_the_score_bonus_gap_is_not_a_uniform_scale(tmp_path):
     cfg = load_scoring_config(_REPO / "config.json")
 
     rows = json.loads(_ORACLE.read_text(encoding="utf-8"))
-    contrast = [r for r in rows if _is_contrast(r)
-                and r.get("score_bonus_permil") and r.get("levels")]
+    contrast = [r for r in rows if _is_contrast(r) and r.get("score_bonus_permil") and r.get("levels")]
     gaps = []
     for row in contrast:
         ours = _our_bonus_permil(row, catalogue, owned, cfg, tmp_path)

@@ -21,7 +21,6 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from hbuilder import paths
-
 from hbweb import config
 
 sys.path.insert(0, str(paths.APP_DIR))
@@ -30,7 +29,7 @@ import content_store as _content_store  # noqa: E402
 CONTENT = _content_store.ContentStore()
 LIVE2D_CORE_URL = "https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"
 
-PAGE_RE = re.compile(r"/[a-z][a-z-]{0,40}")   # a redesign page: /<name> -> static/<name>.html
+PAGE_RE = re.compile(r"/[a-z][a-z-]{0,40}")  # a redesign page: /<name> -> static/<name>.html
 _ART_NAME_RE = re.compile(r"^card-[0-9A-Za-z_-]+\.webp$")
 # A music id is `m` + digits in every chart on disk; this allowlist is also the
 # path-traversal guard for the jacket route (no dots, no slashes).
@@ -53,9 +52,14 @@ _UI_NAME_RE = re.compile(r"^[a-z_]+/[a-z0-9_-]+\.(png|webp)$")
 _LIVE2D_PATH_RE = re.compile(
     r"^(models/[0-9]{5}-[a-z]+-[0-9]{4}-[0-9]{2}/[a-z0-9_]+\.(json|moc3|webp|png)"
     r"|motions/live2d_mot_[a-z0-9_-]+\.motion3\.json"
-    r"|expressions/live2d_exp_[a-z0-9_-]+\.exp3\.json)$")
-_LIVE2D_TYPES = {"json": "application/json", "moc3": "application/octet-stream",
-                 "webp": "image/webp", "png": "image/png"}
+    r"|expressions/live2d_exp_[a-z0-9_-]+\.exp3\.json)$"
+)
+_LIVE2D_TYPES = {
+    "json": "application/json",
+    "moc3": "application/octet-stream",
+    "webp": "image/webp",
+    "png": "image/png",
+}
 _CHIBI_PATH_RE = re.compile(r"^models/sdcos-[0-9]{5}-[a-z]+-[0-9]{4}-[0-9]{2}\.glb$")
 _CARD_ART_FAMILIES = {"full": "img_card_full", "vert": "img_card_vert", "thumb": "img_card_thumb"}
 _NOT_FOUND = b"not found"
@@ -75,7 +79,7 @@ def asset(base: Path, path: Path) -> Path | bytes | None:
     try:
         rel = path.relative_to(config.REPO_ROOT).as_posix()
     except ValueError:
-        return None                       # outside this checkout (another --art-dir): local only
+        return None  # outside this checkout (another --art-dir): local only
     return CONTENT.lazy(rel)
 
 
@@ -118,7 +122,9 @@ def scaled_art(path, width: int) -> bytes | None:
     if width > 0:
         try:
             import io  # noqa: PLC0415
+
             from PIL import Image  # noqa: PLC0415 — Pillow is in requirements.txt
+
             with Image.open(io.BytesIO(raw)) as im:
                 if im.width > width:
                     height = max(1, round(im.height * width / im.width))
@@ -212,19 +218,33 @@ def serve_live2d_index(h) -> None:
     models: {asset: {model, motion, expression}}}`: which leader cards have a
     converted Live2D figure, so the page never asks for one that is not there."""
     index = config.read_json(config.LIVE2D_DIR / "index.json") or {}
-    models = {a: {"model": f"/live2d/{m['model']}", "motion": m.get("motion"),
-                  "expression": m.get("expression")}
-              for a, m in (index.get("models") or {}).items()}
+    models = {
+        a: {"model": f"/live2d/{m['model']}", "motion": m.get("motion"), "expression": m.get("expression")}
+        for a, m in (index.get("models") or {}).items()
+    }
     core = bool(models) and live2d_core()
-    h.reply_json(200, {"available": core, "core": core, "by_card": index.get("by_card") or {},
-                       "models": models, "written": index.get("written")})
+    h.reply_json(
+        200,
+        {
+            "available": core,
+            "core": core,
+            "by_card": index.get("by_card") or {},
+            "models": models,
+            "written": index.get("written"),
+        },
+    )
 
 
 def serve_live2d_core(h) -> None:
     """`GET /live2d/core.js`: the Cubism Core runtime, fetched once per PC."""
     live2d_core()
-    _send_asset(h, config.LIVE2D_CORE.parent, config.LIVE2D_CORE,
-                "text/javascript; charset=utf-8", b"no such live2d file")
+    _send_asset(
+        h,
+        config.LIVE2D_CORE.parent,
+        config.LIVE2D_CORE,
+        "text/javascript; charset=utf-8",
+        b"no such live2d file",
+    )
 
 
 def serve_live2d_file(h, rel: str) -> None:
@@ -232,8 +252,13 @@ def serve_live2d_file(h, rel: str) -> None:
     if not _LIVE2D_PATH_RE.match(rel):
         h.reply(400, b"bad live2d path", _TEXT)
         return
-    _send_asset(h, config.LIVE2D_DIR, config.LIVE2D_DIR / rel,
-                _LIVE2D_TYPES[rel.rsplit(".", 1)[1]], b"no such live2d file")
+    _send_asset(
+        h,
+        config.LIVE2D_DIR,
+        config.LIVE2D_DIR / rel,
+        _LIVE2D_TYPES[rel.rsplit(".", 1)[1]],
+        b"no such live2d file",
+    )
 
 
 def serve_chibi_index(h) -> None:
@@ -241,9 +266,11 @@ def serve_chibi_index(h) -> None:
     model}}}`: the converted 3D chibis, so the page only ever asks for one that exists."""
     chibi_dir = config.CHIBI_DIR
     index = config.read_json(chibi_dir / "index.json") or {}
-    outfits = {k: {**{f: v.get(f) for f in ("chr", "name", "typ")}, "model": f"/chibi/{v['model']}"}
-               for k, v in (index.get("outfits") or {}).items()
-               if v.get("model") and asset_known(chibi_dir, chibi_dir / v["model"])}
+    outfits = {
+        k: {**{f: v.get(f) for f in ("chr", "name", "typ")}, "model": f"/chibi/{v['model']}"}
+        for k, v in (index.get("outfits") or {}).items()
+        if v.get("model") and asset_known(chibi_dir, chibi_dir / v["model"])
+    }
     h.reply_json(200, {"available": bool(outfits), "outfits": outfits})
 
 
@@ -252,8 +279,7 @@ def serve_chibi_file(h, rel: str) -> None:
     if not _CHIBI_PATH_RE.match(rel):
         h.reply(400, b"bad chibi path", _TEXT)
         return
-    _send_asset(h, config.CHIBI_DIR, config.CHIBI_DIR / rel, "model/gltf-binary",
-                b"no such chibi file")
+    _send_asset(h, config.CHIBI_DIR, config.CHIBI_DIR / rel, "model/gltf-binary", b"no such chibi file")
 
 
 def _send_asset(h, base: Path, path: Path, ctype: str, missing: bytes) -> None:
@@ -335,7 +361,7 @@ def serve_cardart(h, rest: str) -> None:
     if not _ART_NAME_RE.match(card_id + ".webp"):
         h.reply(400, b"bad card id", _TEXT)
         return
-    key = card_id[len("card-"):] if card_id.startswith("card-") else card_id
+    key = card_id[len("card-") :] if card_id.startswith("card-") else card_id
     images = config.CARD_IMAGES_DIR
     got = asset(images, images / f"{_CARD_ART_FAMILIES[family]}_{key}.webp")
     if got is None:
@@ -344,8 +370,7 @@ def serve_cardart(h, rest: str) -> None:
         # explorer art dir (`card_art_sync.py`: `<id>.webp` is the same
         # `img_card_vert`, `<id>.sq.webp` the same thumb), so look there too.
         art_dir = Path(h.art_dir)
-        got = asset(art_dir, art_dir / (
-            f"{card_id}.sq.webp" if family == "thumb" else f"{card_id}.webp"))
+        got = asset(art_dir, art_dir / (f"{card_id}.sq.webp" if family == "thumb" else f"{card_id}.webp"))
         if got is None:
             h.reply(404, b"no card art", _TEXT)
             return
@@ -374,7 +399,7 @@ def serve_itemicon(h, key: str) -> None:
     if mapped:
         candidates.append(icons / f"{mapped}.webp")
     if key.startswith("item-"):
-        candidates.append(icons / f"img_item_thumb_{key[len('item-'):].replace('_', '-')}.webp")
+        candidates.append(icons / f"img_item_thumb_{key[len('item-') :].replace('_', '-')}.webp")
     for path in candidates:
         body = _served_file(icons, path)
         if body is not None:
@@ -448,8 +473,7 @@ def serve_ui_sprite(h, name: str) -> None:
     if body is None:
         h.reply(404, b"no ui sprite", _TEXT)
         return
-    h.reply(200, body, "image/webp" if name.endswith(".webp") else "image/png",
-            cache="max-age=86400")
+    h.reply(200, body, "image/webp" if name.endswith(".webp") else "image/png", cache="max-age=86400")
 
 
 def serve_font(h) -> None:

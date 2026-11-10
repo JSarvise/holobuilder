@@ -10,21 +10,22 @@ is injected. `ctypes` is stdlib; the only build requirement is a C compiler
 Compiled with `cbuild.py`'s flags, so the result is bit-identical to the Python it
 replaces, on Windows and Linux alike.
 """
+
 from __future__ import annotations
 
 import ctypes
-import threading
 import sys
+import threading
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "notewalk.c"
-if str(HERE) not in sys.path:          # loaded by file path in a worker too
+if str(HERE) not in sys.path:  # loaded by file path in a worker too
     sys.path.insert(0, str(HERE))
 import cbuild  # noqa: E402
 
 LIBRARY = cbuild.library(HERE, "notewalk")
-MAX_TERMS = 64          # 64-bit live masks (riders add ~10 terms a team)
+MAX_TERMS = 64  # 64-bit live masks (riders add ~10 terms a team)
 SLOTS = 5
 
 
@@ -59,20 +60,32 @@ def load():
         for walk_fn in (lib.hd_walk, lib.hd_walk_general):
             walk_fn.restype = ctypes.c_double
             walk_fn.argtypes = [
-                ctypes.c_int, ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_uint64),
+                ctypes.c_int,
+                ctypes.POINTER(ctypes.c_double),
+                ctypes.POINTER(ctypes.c_uint64),
                 ctypes.c_double,
-                ctypes.POINTER(Term), ctypes.c_int,
-                ctypes.POINTER(ctypes.c_double), ctypes.c_int, ctypes.c_double,
-                ctypes.c_int, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32),
-                ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32),
-                ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_uint64),
+                ctypes.POINTER(Term),
+                ctypes.c_int,
+                ctypes.POINTER(ctypes.c_double),
+                ctypes.c_int,
+                ctypes.c_double,
+                ctypes.c_int,
+                ctypes.POINTER(ctypes.c_int32),
+                ctypes.POINTER(ctypes.c_int32),
+                ctypes.POINTER(ctypes.c_int32),
+                ctypes.POINTER(ctypes.c_int32),
+                ctypes.POINTER(ctypes.c_double),
+                ctypes.POINTER(ctypes.c_uint64),
             ]
         lib.hd_bits_fill.restype = None
         lib.hd_bits_fill.argtypes = [ctypes.POINTER(ctypes.c_uint64), ctypes.c_int, ctypes.c_uint64]
         lib.hd_bits_or.restype = None
         lib.hd_bits_or.argtypes = [
-            ctypes.POINTER(ctypes.c_uint64), ctypes.c_int, ctypes.c_uint64,
-            ctypes.c_int, ctypes.POINTER(ctypes.c_int32),
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_int,
+            ctypes.c_uint64,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int32),
         ]
         _lib = lib
     return _lib
@@ -138,8 +151,11 @@ def _weights(note_weights):
     if work is None:
         if len(mine) > 512:
             mine.clear()
-        work = mine[count] = ((ctypes.c_double * count)(), (ctypes.c_uint64 * count)(),
-                              (ctypes.c_uint64 * count)())
+        work = mine[count] = (
+            (ctypes.c_double * count)(),
+            (ctypes.c_uint64 * count)(),
+            (ctypes.c_uint64 * count)(),
+        )
     return (hit[0], hit[1], *work)
 
 
@@ -160,8 +176,19 @@ def _ranges(ranges):
     return hit
 
 
-def walk(note_weights, liveness, constant, terms, score_rates, skill_effect_up,
-         special_terms, cover_range, member_ids, cfg, general=False):
+def walk(
+    note_weights,
+    liveness,
+    constant,
+    terms,
+    score_rates,
+    skill_effect_up,
+    special_terms,
+    cover_range,
+    member_ids,
+    cfg,
+    general=False,
+):
     """The separable fast path of `score_song_detailed`: `(total, permutation)`,
     or `None` to make the caller run its own Python (a configuration or a team
     this kernel does not express). Never an approximation. `general`: the
@@ -197,9 +224,22 @@ def walk(note_weights, liveness, constant, terms, score_rates, skill_effect_up,
     cover = (ctypes.c_int32 * max(1, len(flat)))(*flat)
     permutation = (ctypes.c_int32 * SLOTS)()
     total = (lib.hd_walk_general if general else lib.hd_walk)(
-        count, weights, bits, constant, packed, len(terms), rates, len(score_rates),
-        skill_effect_up, special_count, special_bit, special_member, cover,
-        permutation, base, extra,
+        count,
+        weights,
+        bits,
+        constant,
+        packed,
+        len(terms),
+        rates,
+        len(score_rates),
+        skill_effect_up,
+        special_count,
+        special_bit,
+        special_member,
+        cover,
+        permutation,
+        base,
+        extra,
     )
     return total, tuple(permutation)
 

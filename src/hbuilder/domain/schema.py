@@ -104,9 +104,7 @@ RIDER_KINDS: tuple[str, ...] = (SECOND_EFFECT_ABSENT_KIND, "rider")
 # check), so both `magnitude` and `condition` are structurally absent for
 # it, never null. A populated override requires both.
 NOT_APPLICABLE_OVERRIDE_FIELDS_BY_OVERRIDE_KIND: dict[str, frozenset[str]] = {
-    SECOND_EFFECT_ABSENT_KIND: frozenset(
-        {"magnitude", "condition", "family", "effect_type"}
-    ),
+    SECOND_EFFECT_ABSENT_KIND: frozenset({"magnitude", "condition", "family", "effect_type"}),
     "override": frozenset(),
 }
 
@@ -123,9 +121,7 @@ assert set(NOT_APPLICABLE_OVERRIDE_FIELDS_BY_OVERRIDE_KIND) == set(OVERRIDE_KIND
 # every one of its five fields is structurally absent, never null. A
 # populated rider requires all five.
 NOT_APPLICABLE_RIDER_FIELDS_BY_RIDER_KIND: dict[str, frozenset[str]] = {
-    SECOND_EFFECT_ABSENT_KIND: frozenset(
-        {"family", "effect_type", "magnitude", "condition", "target"}
-    ),
+    SECOND_EFFECT_ABSENT_KIND: frozenset({"family", "effect_type", "magnitude", "condition", "target"}),
     "rider": frozenset(),
 }
 
@@ -371,8 +367,7 @@ def validate_document(doc: object) -> list[str]:
         errors.append("schema_version: missing required key")
     elif doc["schema_version"] != SCHEMA_VERSION:
         errors.append(
-            f"schema_version: unsupported value {doc['schema_version']!r}, "
-            f"expected {SCHEMA_VERSION!r}"
+            f"schema_version: unsupported value {doc['schema_version']!r}, expected {SCHEMA_VERSION!r}"
         )
 
     if "cards" not in doc:
@@ -394,8 +389,7 @@ def validate_owned_document(doc: object) -> list[str]:
         errors.append("schema_version: missing required key")
     elif doc["schema_version"] != SCHEMA_VERSION:
         errors.append(
-            f"schema_version: unsupported value {doc['schema_version']!r}, "
-            f"expected {SCHEMA_VERSION!r}"
+            f"schema_version: unsupported value {doc['schema_version']!r}, expected {SCHEMA_VERSION!r}"
         )
 
     if "owned" not in doc:
@@ -426,18 +420,12 @@ def validate_skill_slot(record: object, card_id: str, slot_kind: str) -> list[st
     if record is None:
         return []
     if not isinstance(record, dict):
-        return [
-            f"skills.{slot_kind}: card '{card_id}' {slot_kind} slot must be a "
-            f"JSON object or null"
-        ]
+        return [f"skills.{slot_kind}: card '{card_id}' {slot_kind} slot must be a JSON object or null"]
 
     errors: list[str] = []
     for field in _SKILL_SLOT_REQUIRED_FIELDS:
         if field not in record:
-            errors.append(
-                f"{field}: card '{card_id}' {slot_kind} slot is missing "
-                f"required field '{field}'"
-            )
+            errors.append(f"{field}: card '{card_id}' {slot_kind} slot is missing required field '{field}'")
 
     not_applicable = NOT_APPLICABLE_FIELDS_BY_SLOT_KIND.get(slot_kind, frozenset())
 
@@ -492,8 +480,7 @@ def validate_skill_slot(record: object, card_id: str, slot_kind: str) -> list[st
             )
         elif value < 0:
             errors.append(
-                f"{field}: card '{card_id}' {slot_kind} slot {field} must be "
-                f"non-negative, got {value}"
+                f"{field}: card '{card_id}' {slot_kind} slot {field} must be non-negative, got {value}"
             )
         elif field == "interval" and value == 0:
             errors.append(
@@ -554,10 +541,7 @@ def _validate_condition(
         # it is never scrutinized as if it were a populated gate.
         pass
     elif not isinstance(condition, dict):
-        errors.append(
-            f"{field}: card '{card_id}' {slot_kind} slot {field} "
-            f"must be a JSON object or null"
-        )
+        errors.append(f"{field}: card '{card_id}' {slot_kind} slot {field} must be a JSON object or null")
     else:
         kind = condition.get("kind")
         allowed_kinds = (*CONDITION_KINDS, UNGATED_CONDITION_KIND)
@@ -618,10 +602,7 @@ def _validate_condition(
 
             count = condition.get("count")
             if "count" not in condition:
-                errors.append(
-                    f"{field}.count: card '{card_id}' {slot_kind} slot "
-                    f"{field}.count is missing"
-                )
+                errors.append(f"{field}.count: card '{card_id}' {slot_kind} slot {field}.count is missing")
             elif isinstance(count, bool) or not isinstance(count, int) or count < 1:
                 errors.append(
                     f"{field}.count: card '{card_id}' {slot_kind} slot "
@@ -661,9 +642,7 @@ def _validate_condition(
     return errors
 
 
-def _validate_target(
-    target: object, card_id: str, slot_kind: str, *, field: str = "target"
-) -> list[str]:
+def _validate_target(target: object, card_id: str, slot_kind: str, *, field: str = "target") -> list[str]:
     """The effect-target validation rule, a sibling of
     `_validate_condition` rather than a variant of it — `condition` and
     `target` are structurally independent clauses (a slot can carry a
@@ -682,10 +661,7 @@ def _validate_target(
     if target is None:
         pass
     elif not isinstance(target, dict):
-        errors.append(
-            f"{field}: card '{card_id}' {slot_kind} slot {field} must be a "
-            f"JSON object or null"
-        )
+        errors.append(f"{field}: card '{card_id}' {slot_kind} slot {field} must be a JSON object or null")
     else:
         kind = target.get("kind")
         if "kind" not in target or kind not in TARGET_KINDS:
@@ -732,8 +708,7 @@ def _validate_target(
                 count = target.get("count")
                 if "count" not in target:
                     errors.append(
-                        f"{field}.count: card '{card_id}' {slot_kind} slot "
-                        f"{field}.count is missing"
+                        f"{field}.count: card '{card_id}' {slot_kind} slot {field}.count is missing"
                     )
                 elif (
                     isinstance(count, bool)
@@ -774,10 +749,7 @@ def _validate_override(override: object, card_id: str, slot_kind: str) -> list[s
     if override is None:
         pass
     elif not isinstance(override, dict):
-        errors.append(
-            f"override: card '{card_id}' {slot_kind} slot override must be "
-            f"a JSON object or null"
-        )
+        errors.append(f"override: card '{card_id}' {slot_kind} slot override must be a JSON object or null")
     else:
         kind = override.get("kind")
         if "kind" not in override or kind not in OVERRIDE_KINDS:
@@ -826,8 +798,7 @@ def _validate_override(override: object, card_id: str, slot_kind: str) -> list[s
                 magnitude = override.get("magnitude")
                 if "magnitude" not in override:
                     errors.append(
-                        f"override.magnitude: card '{card_id}' {slot_kind} "
-                        f"slot override.magnitude is missing"
+                        f"override.magnitude: card '{card_id}' {slot_kind} slot override.magnitude is missing"
                     )
                 elif (
                     magnitude is None
@@ -851,14 +822,12 @@ def _validate_override(override: object, card_id: str, slot_kind: str) -> list[s
 
                 if "condition" not in override:
                     errors.append(
-                        f"override.condition: card '{card_id}' {slot_kind} "
-                        f"slot override.condition is missing"
+                        f"override.condition: card '{card_id}' {slot_kind} slot override.condition is missing"
                     )
                 else:
                     condition = override["condition"]
                     if condition is None or (
-                        isinstance(condition, dict)
-                        and condition.get("kind") == UNGATED_CONDITION_KIND
+                        isinstance(condition, dict) and condition.get("kind") == UNGATED_CONDITION_KIND
                     ):
                         errors.append(
                             f"override.condition: card '{card_id}' "
@@ -898,10 +867,7 @@ def _validate_rider(rider: object, card_id: str, slot_kind: str) -> list[str]:
     if rider is None:
         pass
     elif not isinstance(rider, dict):
-        errors.append(
-            f"rider: card '{card_id}' {slot_kind} slot rider must be a "
-            f"JSON object or null"
-        )
+        errors.append(f"rider: card '{card_id}' {slot_kind} slot rider must be a JSON object or null")
     else:
         kind = rider.get("kind")
         if "kind" not in rider or kind not in RIDER_KINDS:
@@ -938,8 +904,7 @@ def _validate_rider(rider: object, card_id: str, slot_kind: str) -> list[str]:
                 effect_type = rider.get("effect_type")
                 if "effect_type" not in rider:
                     errors.append(
-                        f"rider.effect_type: card '{card_id}' {slot_kind} "
-                        f"slot rider.effect_type is missing"
+                        f"rider.effect_type: card '{card_id}' {slot_kind} slot rider.effect_type is missing"
                     )
                 elif family in EFFECT_TYPES_BY_FAMILY:
                     accepted = EFFECT_TYPES_BY_FAMILY[family]
@@ -954,8 +919,7 @@ def _validate_rider(rider: object, card_id: str, slot_kind: str) -> list[str]:
                 magnitude = rider.get("magnitude")
                 if "magnitude" not in rider:
                     errors.append(
-                        f"rider.magnitude: card '{card_id}' {slot_kind} "
-                        f"slot rider.magnitude is missing"
+                        f"rider.magnitude: card '{card_id}' {slot_kind} slot rider.magnitude is missing"
                     )
                 elif (
                     magnitude is None
@@ -976,8 +940,7 @@ def _validate_rider(rider: object, card_id: str, slot_kind: str) -> list[str]:
 
                 if "condition" not in rider:
                     errors.append(
-                        f"rider.condition: card '{card_id}' {slot_kind} "
-                        f"slot rider.condition is missing"
+                        f"rider.condition: card '{card_id}' {slot_kind} slot rider.condition is missing"
                     )
                 else:
                     errors.extend(
@@ -990,10 +953,7 @@ def _validate_rider(rider: object, card_id: str, slot_kind: str) -> list[str]:
                     )
 
                 if "target" not in rider:
-                    errors.append(
-                        f"rider.target: card '{card_id}' {slot_kind} slot "
-                        f"rider.target is missing"
-                    )
+                    errors.append(f"rider.target: card '{card_id}' {slot_kind} slot rider.target is missing")
                 else:
                     errors.extend(
                         _validate_target(
@@ -1022,9 +982,7 @@ def validate_card(record: object, index: int) -> list[str]:
 
     for field in _CARD_REQUIRED_FIELDS:
         if field not in record:
-            errors.append(
-                f"{field}: card '{card_id}' is missing required field '{field}'"
-            )
+            errors.append(f"{field}: card '{card_id}' is missing required field '{field}'")
 
     if "id" in record:
         if not isinstance(record["id"], str) or not record["id"]:
@@ -1063,8 +1021,7 @@ def validate_card(record: object, index: int) -> list[str]:
     if "type" in record:
         if record["type"] not in CARD_TYPES:
             errors.append(
-                f"type: card '{card_id}' type {record['type']!r} is not one of "
-                f"{sorted(CARD_TYPES)}"
+                f"type: card '{card_id}' type {record['type']!r} is not one of {sorted(CARD_TYPES)}"
             )
 
     if "rarity" in record:
@@ -1082,17 +1039,9 @@ def validate_card(record: object, index: int) -> list[str]:
         else:
             for stat_name in STAT_NAMES:
                 if stat_name not in stats:
-                    errors.append(
-                        f"stats.{stat_name}: card '{card_id}' stats is missing "
-                        f"'{stat_name}'"
-                    )
-                elif not isinstance(stats[stat_name], int) or isinstance(
-                    stats[stat_name], bool
-                ):
-                    errors.append(
-                        f"stats.{stat_name}: card '{card_id}' stats.{stat_name} "
-                        f"must be an int"
-                    )
+                    errors.append(f"stats.{stat_name}: card '{card_id}' stats is missing '{stat_name}'")
+                elif not isinstance(stats[stat_name], int) or isinstance(stats[stat_name], bool):
+                    errors.append(f"stats.{stat_name}: card '{card_id}' stats.{stat_name} must be an int")
 
     if "skills" in record:
         skills = record["skills"]
@@ -1105,13 +1054,9 @@ def validate_card(record: object, index: int) -> list[str]:
             )
         else:
             for slot_kind in SKILL_SLOT_KINDS:
-                errors.extend(
-                    validate_skill_slot(skills[slot_kind], card_id, slot_kind)
-                )
+                errors.extend(validate_skill_slot(skills[slot_kind], card_id, slot_kind))
 
     if "costume_skill" in record:
-        errors.extend(
-            validate_skill_slot(record["costume_skill"], card_id, COSTUME_SLOT_KIND)
-        )
+        errors.extend(validate_skill_slot(record["costume_skill"], card_id, COSTUME_SLOT_KIND))
 
     return errors

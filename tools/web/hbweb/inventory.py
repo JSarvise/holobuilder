@@ -35,36 +35,79 @@ def account_currencies() -> list:
     attrs = (("attribute_1", "Cute"), ("attribute_2", "Pure"), ("attribute_3", "Happy"))
     for key, label in attrs:  # grade -1 = Beads
         iid = f"item-card_limit_break-{key}-1"
-        rows.append({"name": f"{label} Beads", "held": q(iid), "note": "Member Training",
-                     "item_id": iid, "group": "beads"})
+        rows.append(
+            {
+                "name": f"{label} Beads",
+                "held": q(iid),
+                "note": "Member Training",
+                "item_id": iid,
+                "group": "beads",
+            }
+        )
     for key, label in attrs:  # grade -2 = Crystals
         iid = f"item-card_limit_break-{key}-2"
-        rows.append({"name": f"{label} Crystals", "held": q(iid), "note": "Member Training",
-                     "item_id": iid, "group": "crystals"})
+        rows.append(
+            {
+                "name": f"{label} Crystals",
+                "held": q(iid),
+                "note": "Member Training",
+                "item_id": iid,
+                "group": "crystals",
+            }
+        )
 
     # Selectable bundles. box asset is `...-box-<01 beads|02 crystals>-<01 S|02 M|03 L>`.
     sizes = (("10", "S", 10, "01"), ("100", "M", 100, "02"), ("300", "L", 300, "03"))
-    bundles = (("attribute_1", "Beads Bundle", "beads", "01"),
-               ("attribute_2", "A Jar of Crystals", "crystals", "02"))
+    bundles = (
+        ("attribute_1", "Beads Bundle", "beads", "01"),
+        ("attribute_2", "A Jar of Crystals", "crystals", "02"),
+    )
     for attr_key, base_name, grants, box_attr in bundles:
         for suffix, size, grant, box_tier in sizes:
             iid = f"item-selectable_reward_box-item-card_limit_break-{attr_key}-{suffix}"
             held = q(iid)
             if not held:
                 continue  # the game hides a bundle you don't hold
-            rows.append({
-                "name": f"{base_name} {size}", "held": held,
-                "note": f"grants {grant} {grants}", "item_id": iid, "group": "bundle",
-                "icon": f"img_item_thumb_selectable-limit-break-attribute-box-{box_attr}-{box_tier}",
-                "grant_each": grant, "grant_kind": grants,
-            })
+            rows.append(
+                {
+                    "name": f"{base_name} {size}",
+                    "held": held,
+                    "note": f"grants {grant} {grants}",
+                    "item_id": iid,
+                    "group": "bundle",
+                    "icon": f"img_item_thumb_selectable-limit-break-attribute-box-{box_attr}-{box_tier}",
+                    "grant_each": grant,
+                    "grant_kind": grants,
+                }
+            )
 
-    rows.append({"name": "Hololium", "held": q("item-card_limit_break-cmn-sr"),
-                 "note": "Member Training", "item_id": "item-card_limit_break-cmn-sr", "group": "other"})
-    rows.append({"name": "Lesson Pt", "held": q("item-card_level_up"),
-                 "note": "level up a Member", "item_id": "item-card_level_up", "group": "other"})
-    rows.append({"name": "Hologold", "held": q("item-gold"),
-                 "note": "various", "item_id": "item-gold", "group": "other"})
+    rows.append(
+        {
+            "name": "Hololium",
+            "held": q("item-card_limit_break-cmn-sr"),
+            "note": "Member Training",
+            "item_id": "item-card_limit_break-cmn-sr",
+            "group": "other",
+        }
+    )
+    rows.append(
+        {
+            "name": "Lesson Pt",
+            "held": q("item-card_level_up"),
+            "note": "level up a Member",
+            "item_id": "item-card_level_up",
+            "group": "other",
+        }
+    )
+    rows.append(
+        {
+            "name": "Hologold",
+            "held": q("item-gold"),
+            "note": "various",
+            "item_id": "item-gold",
+            "group": "other",
+        }
+    )
     return rows
 
 
@@ -98,9 +141,14 @@ def account_items() -> dict:
             continue
         if held <= 0:
             continue  # the game hides an item you don't hold
-        items.append({"item_id": item_id, "held": held,
-                      "name": lang.get(f"la-{item_id}-name"),
-                      "description": lang.get(f"la-{item_id}-description")})
+        items.append(
+            {
+                "item_id": item_id,
+                "held": held,
+                "name": lang.get(f"la-{item_id}-name"),
+                "description": lang.get(f"la-{item_id}-description"),
+            }
+        )
     names = {}
     for card in (config.read_json(config.CARDS_PATH) or {}).get("cards", []):
         parts = str(card.get("id", "")).split("-")
@@ -111,11 +159,15 @@ def account_items() -> dict:
         pid = str(row.get("point_id", ""))
         chr_id = pid.split("skill_tree_point-", 1)[-1] if pid.startswith("skill_tree_point-") else None
         if chr_id:
-            points.append({"chr": chr_id, "name": names.get(chr_id),
-                           "unspent": int(row.get("quantity") or 0)})
-    return {"items": items, "holomem_points": points,
-            "inventory_captured_at": inv.get("_captured_at"),
-            "inventory_source": inv.get("_source")}
+            points.append(
+                {"chr": chr_id, "name": names.get(chr_id), "unspent": int(row.get("quantity") or 0)}
+            )
+    return {
+        "items": items,
+        "holomem_points": points,
+        "inventory_captured_at": inv.get("_captured_at"),
+        "inventory_source": inv.get("_source"),
+    }
 
 
 def serve_resources(h) -> None:
@@ -124,9 +176,16 @@ def serve_resources(h) -> None:
     and every held item with the holomems' unspent board points."""
     precompute = basis.load_precompute()
     if precompute is None:
-        h.reply_json(200, {"available": False, "reason": (
-            "could not import the recon tools (they need the packages of "
-            "requirements.txt; setup.cmd or setup.sh installs them).")})
+        h.reply_json(
+            200,
+            {
+                "available": False,
+                "reason": (
+                    "could not import the recon tools (they need the packages of "
+                    "requirements.txt; setup.cmd or setup.sh installs them)."
+                ),
+            },
+        )
         return
     to = precompute.to
     try:
@@ -136,8 +195,7 @@ def serve_resources(h) -> None:
         balance, source = to.balance_from_disk()
         balance = balance or {}
     except Exception as exc:  # noqa: BLE001 — report as a first-class absence
-        h.reply_json(200, {"available": False,
-                           "reason": f"board/inventory capture unavailable: {exc}"})
+        h.reply_json(200, {"available": False, "reason": f"board/inventory capture unavailable: {exc}"})
         return
 
     # Iterate CURRENCIES (not the dicts' own keys) so all 8 cube/hexa lines

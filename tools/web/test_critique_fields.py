@@ -3,6 +3,7 @@ cache's GLOBAL `ranking[]` and per-leader `alternatives[]`, the run-score
 quantiles on the first rows, `plan_cost` / `song_est_as_is` on a row detail,
 and `eta_s` / `best_so_far` on a job's progress events. Synthetic inputs only;
 no network, no account files."""
+
 from __future__ import annotations
 
 import shutil
@@ -18,8 +19,8 @@ for extra in (HERE, HERE / "kernel", HERE.parents[1] / "src", HERE.parent / "ref
         sys.path.insert(0, str(extra))
 
 import event_mode  # noqa: E402
-import row_detail  # noqa: E402
 import leaf_inputs  # noqa: E402
+import row_detail  # noqa: E402
 from job_progress import JobProgress  # noqa: E402
 
 
@@ -33,13 +34,31 @@ def _card(i, member=None):
 def _found_rows():
     """Two leaders: A's 2nd and 3rd sets beat B's best."""
     a, b = _card(100, "LeadA"), _card(101, "LeadB")
-    return [
-        {"leader": a, "status": "searched", "best": 100.0, "members": (0, 1, 2, 3, 4),
-         "ranking": [(100.0, (0, 1, 2, 3, 4)), (99.0, (0, 1, 2, 3, 5)), (98.0, (0, 1, 2, 3, 6)),
-                     (10.0, (0, 1, 2, 3, 7))]},
-        {"leader": b, "status": "triage", "best": 97.0, "members": (1, 2, 3, 4, 5),
-         "ranking": [(97.0, (1, 2, 3, 4, 5)), (50.0, (2, 3, 4, 5, 6))]},
-    ], a, b
+    return (
+        [
+            {
+                "leader": a,
+                "status": "searched",
+                "best": 100.0,
+                "members": (0, 1, 2, 3, 4),
+                "ranking": [
+                    (100.0, (0, 1, 2, 3, 4)),
+                    (99.0, (0, 1, 2, 3, 5)),
+                    (98.0, (0, 1, 2, 3, 6)),
+                    (10.0, (0, 1, 2, 3, 7)),
+                ],
+            },
+            {
+                "leader": b,
+                "status": "triage",
+                "best": 97.0,
+                "members": (1, 2, 3, 4, 5),
+                "ranking": [(97.0, (1, 2, 3, 4, 5)), (50.0, (2, 3, 4, 5, 6))],
+            },
+        ],
+        a,
+        b,
+    )
 
 
 def test_the_global_ranking_merges_every_leaders_sets_best_first():
@@ -48,7 +67,11 @@ def test_the_global_ranking_merges_every_leaders_sets_best_first():
     pool_ids = [c.id for c in reps]
     got = leaf_inputs.global_ranking(rows, pool_ids, reps, lambda c: c.member, [b], size=4)
     assert [(r["leader"], r["best"]) for r in got] == [
-        ("card-100", 100.0), ("card-100", 99.0), ("card-100", 98.0), ("card-101", 97.0)]
+        ("card-100", 100.0),
+        ("card-100", 99.0),
+        ("card-100", 98.0),
+        ("card-101", 97.0),
+    ]
     assert got[1]["members"] == ["card-0", "card-1", "card-2", "card-3", "card-5"]
     assert got[3]["sings"] is True and got[3]["status"] == "triage"
     assert got[0]["member_names"] == ["Chr0", "Chr1", "Chr2", "Chr3", "Chr4"]
@@ -75,13 +98,15 @@ def test_refine_scores_a_team_once_across_the_ranking_and_the_rows(monkeypatch):
             return [1000.0 + k for k in range(len(teams))]
 
     by_id = {k: k for k in ("L", "a", "b", "c", "d", "e", "f")}
-    ranking = [{"leader": "L", "members": list("abcde"), "best": 990.0},
-               {"leader": "L", "members": list("abcdf"), "best": 980.0}]
+    ranking = [
+        {"leader": "L", "members": list("abcde"), "best": 990.0},
+        {"leader": "L", "members": list("abcdf"), "best": 980.0},
+    ]
     rows = [{"leader": "L", "members": list("edcba"), "best": 990.0}]
     known: dict = {}
     assert leaf_inputs._refine_rows(ranking, (0,), Pool(), by_id, known=known) == 2
     assert leaf_inputs._refine_rows(rows, (0,), Pool(), by_id, known=known) == 1
-    assert calls == [2]                                # the row reused the ranking's score
+    assert calls == [2]  # the row reused the ranking's score
     assert rows[0]["best"] == 1000.0 and rows[0]["best_plain"] == 990.0 and rows[0]["refined"]
 
 
@@ -94,9 +119,18 @@ def test_slot_orders_write_order_and_quantiles_and_develop_a_team_once(monkeypat
     def leaf_detail(built, team, *, refine, panel, chart, want_distribution):
         seen.append(team)
         assert want_distribution and panel is False
-        return {"member_order": ["e", "d", "c", "b", "a"], "song_max": 120.0,
-                "distribution": {"available": True, "p10": 90, "p50": 100, "p90": 110,
-                                 "expected_total": 100.5, "verified": True}}
+        return {
+            "member_order": ["e", "d", "c", "b", "a"],
+            "song_max": 120.0,
+            "distribution": {
+                "available": True,
+                "p10": 90,
+                "p50": 100,
+                "p90": 110,
+                "expected_total": 100.5,
+                "verified": True,
+            },
+        }
 
     monkeypatch.setattr(row_detail, "leaf_detail", leaf_detail)
     built = {"by_id": {k: k for k in ("L", "a", "b", "c", "d", "e")}}
@@ -134,8 +168,17 @@ def test_search_song_rows_all_carry_a_ranking_led_by_their_own_set():
     of = t2._leader_score(cards, score)
     base = SimpleNamespace(id="bare", member="Nobody", gate=None, flat=1.0, gated=1.0, sings=1.0)
     result = t2.two_stage.search_song(
-        cards, leaders, lambda leader, sets: [of(leader, s) for s in sets], base_leader=base,
-        gate_of=lambda l: l.gate, initial=800, step=300, triage_top=80, tier=30, max_searched=3)
+        cards,
+        leaders,
+        lambda leader, sets: [of(leader, s) for s in sets],
+        base_leader=base,
+        gate_of=lambda l: l.gate,
+        initial=800,
+        step=300,
+        triage_top=80,
+        tier=30,
+        max_searched=3,
+    )
     assert {r["status"] for r in result["rows"]} == {"searched", "triage"}
     for row in result["rows"]:
         ranking = row["ranking"]
@@ -147,16 +190,26 @@ def test_search_song_rows_all_carry_a_ranking_led_by_their_own_set():
 # ---------------------------------------------------------------------------
 # plan_cost (row_detail)
 # ---------------------------------------------------------------------------
-PRICES = {"G-001": {"points": 2, "green": 30}, "G-002": {"points": 3, "green": 40, "greenhex": 1},
-          "R-001": {"points": 5, "red": 20}, "Y-001": {"points": 1, "yellow": 5}}
+PRICES = {
+    "G-001": {"points": 2, "green": 30},
+    "G-002": {"points": 3, "green": 40, "greenhex": 1},
+    "R-001": {"points": 5, "red": 20},
+    "Y-001": {"points": 1, "yellow": 5},
+}
 
 
 def test_plan_cost_counts_buys_resets_refunds_and_the_shortfall():
     planned = {"chr-1": {"nodes": ["S-001", "G-001", "G-002"]}, "chr-2": {"nodes": ["Y-001"]}}
     current = {"chr-1": ["S-001", "R-001", "G-001"], "chr-2": []}
-    got = row_detail.plan_cost(planned, current, PRICES,
-                               wallet={"green": 10, "yellow": 100}, hologold=5000,
-                               unspent_points={"chr-1": 0, "chr-2": 0}, names={"chr-1": "A"})
+    got = row_detail.plan_cost(
+        planned,
+        current,
+        PRICES,
+        wallet={"green": 10, "yellow": 100},
+        hologold=5000,
+        unspent_points={"chr-1": 0, "chr-2": 0},
+        names={"chr-1": "A"},
+    )
     one, two = got["per_character"]
     assert one["buy"] == ["G-002"] and one["reset"] == ["R-001"] and one["name"] == "A"
     assert (one["points_needed"], one["points_refunded"], one["points_shortfall"]) == (3, 5, 0)
@@ -176,8 +229,14 @@ def test_plan_cost_never_reads_an_unmeasured_wallet_as_zero():
 
 
 def test_an_affordable_plan_says_so():
-    got = row_detail.plan_cost({"chr-1": {"nodes": ["G-001"]}}, {"chr-1": []}, PRICES,
-                               wallet={"green": 30}, hologold=0, unspent_points={"chr-1": 2})
+    got = row_detail.plan_cost(
+        {"chr-1": {"nodes": ["G-001"]}},
+        {"chr-1": []},
+        PRICES,
+        wallet={"green": 30},
+        hologold=0,
+        unspent_points={"chr-1": 2},
+    )
     assert got["shortfall"] == {} and got["affordable"] is True
 
 
@@ -204,18 +263,35 @@ def test_eta_comes_from_the_rate_and_the_best_so_far_is_kept():
     jp = JobProgress(out.append, clock=clock)
     jp({"type": "stage", "stage": "develop", "state": "active", "total": 4})
     clock.t = 2.0
-    jp({"type": "progress", "stage": "develop", "done": 1, "total": 4, "team": list("Labcde"),
-        "optimised_us": 50, "song_est": 2_000_000})
+    jp(
+        {
+            "type": "progress",
+            "stage": "develop",
+            "done": 1,
+            "total": 4,
+            "team": list("Labcde"),
+            "optimised_us": 50,
+            "song_est": 2_000_000,
+        }
+    )
     clock.t = 4.0
-    jp({"type": "progress", "stage": "develop", "done": 2, "total": 4, "team": list("Mabcde"),
-        "song_est": 1_900_000})
+    jp(
+        {
+            "type": "progress",
+            "stage": "develop",
+            "done": 2,
+            "total": 4,
+            "team": list("Mabcde"),
+            "song_est": 1_900_000,
+        }
+    )
     first, second = out[1], out[2]
     assert first["eta_s"] == 6.0 and first["eta_basis"] == "rate"
     assert second["eta_s"] == 4.0 and second["elapsed_s"] == 4.0
     assert second["best_so_far"]["cards"] == list("Labcde")
     assert second["best_so_far"]["value"] == 2_000_000 and second["best_so_far"]["metric"] == "song_est"
     assert second["best_so_far"]["provisional"] is True
-    assert "eta_s" not in out[0]                     # only progress events are enriched
+    assert "eta_s" not in out[0]  # only progress events are enriched
 
 
 def test_eta_is_null_without_a_measure_and_uses_a_projection_when_given():
@@ -242,13 +318,24 @@ def test_eta_is_null_without_a_measure_and_uses_a_projection_when_given():
 def test_a_ready_best_so_far_is_carried_and_a_new_metric_replaces_the_old():
     out = []
     jp = JobProgress(out.append, clock=Clock())
-    jp({"type": "progress", "stage": "score_search", "evaluated": 1,
-        "best_so_far": {"cards": ["a"], "value": 5.0, "metric": "score"}})
-    jp({"type": "progress", "stage": "score_search", "evaluated": 2,
-        "best_so_far": {"cards": ["b"], "value": 4.0, "metric": "score"}})
+    jp(
+        {
+            "type": "progress",
+            "stage": "score_search",
+            "evaluated": 1,
+            "best_so_far": {"cards": ["a"], "value": 5.0, "metric": "score"},
+        }
+    )
+    jp(
+        {
+            "type": "progress",
+            "stage": "score_search",
+            "evaluated": 2,
+            "best_so_far": {"cards": ["b"], "value": 4.0, "metric": "score"},
+        }
+    )
     assert out[-1]["best_so_far"]["cards"] == ["a"]
-    jp({"type": "progress", "stage": "develop", "done": 1, "total": 2, "team": ["c"],
-        "optimised_us": 3})
+    jp({"type": "progress", "stage": "develop", "done": 1, "total": 2, "team": ["c"], "optimised_us": 3})
     assert out[-1]["best_so_far"]["cards"] == ["c"] and out[-1]["best_so_far"]["metric"] == "unit_score"
 
 

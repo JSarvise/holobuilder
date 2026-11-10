@@ -24,6 +24,7 @@ the server is off; the series simply has a hole there, which the pace model tole
 the last read and the oldest read inside its window) and a template only needs a read within
 an hour of the chapter end.
 """
+
 from __future__ import annotations
 
 import os
@@ -31,15 +32,15 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 DEFAULT_INTERVAL_MIN = 5
 MIN_INTERVAL_MIN = 1
 MAX_INTERVAL_MIN = 24 * 60
 MAX_BACKOFF_MIN = 60
-IDLE_INTERVAL_MIN = 60          # no chapter open: look again in an hour
-REQUESTS_PER_CYCLE = 12         # 3 regions x (Master/Get, Auth/Login, ListEventInfo, Grade)
+IDLE_INTERVAL_MIN = 60  # no chapter open: look again in an hour
+REQUESTS_PER_CYCLE = 12  # 3 regions x (Master/Get, Auth/Login, ListEventInfo, Grade)
 
 
 def build_args() -> list[str]:
@@ -56,8 +57,11 @@ def parse_output(stdout: str) -> tuple[int | None, list[str]]:
                 appended = int(line.split()[1])
             except (IndexError, ValueError):
                 appended = None
-    failed = [line.split("]", 1)[0].lstrip("[") for line in stdout.splitlines()
-              if line.startswith("[") and "] FAILED:" in line]
+    failed = [
+        line.split("]", 1)[0].lstrip("[")
+        for line in stdout.splitlines()
+        if line.startswith("[") and "] FAILED:" in line
+    ]
     return appended, failed
 
 
@@ -77,8 +81,14 @@ class CutoffsPoller:
     `runner()` returns (returncode, stdout) or raises; it is injected so tests never spawn a
     process or touch the network. `lock` is the manual sync's lock (shared, never queued)."""
 
-    def __init__(self, runner: Callable[[], tuple[int, str]], lock: threading.Lock, *,
-                 interval_min: int = DEFAULT_INTERVAL_MIN, clock: Callable[[], float] = time.time):
+    def __init__(
+        self,
+        runner: Callable[[], tuple[int, str]],
+        lock: threading.Lock,
+        *,
+        interval_min: int = DEFAULT_INTERVAL_MIN,
+        clock: Callable[[], float] = time.time,
+    ):
         self._runner = runner
         self._lock = lock
         self._clock = clock
@@ -87,7 +97,7 @@ class CutoffsPoller:
         self._thread: threading.Thread | None = None
         self.enabled = False
         self.interval_min = clamp_interval(interval_min)
-        self.failures = 0           # consecutive all-failed cycles (drives the back-off)
+        self.failures = 0  # consecutive all-failed cycles (drives the back-off)
         self.cycles = 0
         self.skipped = 0
         self.last_started: float | None = None
@@ -101,8 +111,7 @@ class CutoffsPoller:
     # -------------------------------------------------------------- policy (pure)
     def next_delay_min(self) -> int:
         if self.failures:
-            return min(self.interval_min * (2 ** self.failures), max(MAX_BACKOFF_MIN,
-                                                                    self.interval_min))
+            return min(self.interval_min * (2**self.failures), max(MAX_BACKOFF_MIN, self.interval_min))
         if self.last_appended == 0 and not self.last_failed_regions:
             return max(self.interval_min, IDLE_INTERVAL_MIN)
         return self.interval_min
@@ -120,7 +129,7 @@ class CutoffsPoller:
                 appended, failed = parse_output(out)
                 err = None
                 if code != 0 and not appended:
-                    err = (f"exit {code}; failed: {', '.join(failed) or 'unknown'}")
+                    err = f"exit {code}; failed: {', '.join(failed) or 'unknown'}"
             except Exception as exc:  # noqa: BLE001  a poller must survive any one cycle
                 appended, failed, err = None, [], f"{type(exc).__name__}: {exc}"
             self.cycles += 1
@@ -133,9 +142,8 @@ class CutoffsPoller:
             else:
                 self.failures = 0
                 self.last_ok = self.last_finished
-                self.last_error = (f"partial: {', '.join(failed)} failed" if failed else None)
-            return {"skipped": False, "appended": appended, "failed_regions": failed,
-                    "error": err}
+                self.last_error = f"partial: {', '.join(failed)} failed" if failed else None
+            return {"skipped": False, "appended": appended, "failed_regions": failed, "error": err}
         finally:
             self._lock.release()
 
@@ -160,7 +168,7 @@ class CutoffsPoller:
         elif enabled is False:
             self.stop(wait=False)
         elif interval_min is not None and self.enabled:
-            self._wake.set()        # a shorter interval applies now, not after the old wait
+            self._wake.set()  # a shorter interval applies now, not after the old wait
         return self.status()
 
     def start(self) -> None:
@@ -170,8 +178,7 @@ class CutoffsPoller:
                 return
             self.failures = 0
             self._wake.clear()
-            self._thread = threading.Thread(target=self._loop, name="cutoffs-poller",
-                                            daemon=True)
+            self._thread = threading.Thread(target=self._loop, name="cutoffs-poller", daemon=True)
             self._thread.start()
 
     def stop(self, *, wait: bool = True, timeout: float = 20.0) -> None:
@@ -224,9 +231,15 @@ class ScriptRunner:
     def __call__(self) -> tuple[int, str]:
         env = dict(os.environ, PYTHONIOENCODING="utf-8")
         self._proc = subprocess.Popen(  # noqa: S603
-            [sys.executable, "-u", str(self.script), *build_args()], cwd=str(self.cwd), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-            errors="replace")
+            [sys.executable, "-u", str(self.script), *build_args()],
+            cwd=str(self.cwd),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         try:
             out, _ = self._proc.communicate(timeout=self.timeout_s)
         except subprocess.TimeoutExpired:
@@ -238,8 +251,7 @@ class ScriptRunner:
             self._proc = None
         for line in (out or "").splitlines():
             if line.startswith(("[", "cutoffs:")):
-                print(f"  [cutoffs-poll] {line.encode('ascii', 'replace').decode('ascii')}",
-                      flush=True)
+                print(f"  [cutoffs-poll] {line.encode('ascii', 'replace').decode('ascii')}", flush=True)
         return code, out or ""
 
     def stop(self) -> None:

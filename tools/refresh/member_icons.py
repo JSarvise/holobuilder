@@ -34,6 +34,7 @@ warnings.filterwarnings("ignore")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import run_cli  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 DUMPS = paths.DUMPS
 OUT = DUMPS / "member_icons"
@@ -66,8 +67,11 @@ def build(family: str = DEFAULT_FAMILY) -> tuple[int, list[tuple[str, str]]]:
     name_to_md5 = {name: md5 for md5, name in _catalog_by_md5().items()}
 
     # One walk of the ~11 GB cache, opening ONLY target files (basename == md5).
-    wanted = {name_to_md5[icon_name(m["chr"], family)]
-              for m in members if icon_name(m["chr"], family) in name_to_md5}
+    wanted = {
+        name_to_md5[icon_name(m["chr"], family)]
+        for m in members
+        if icon_name(m["chr"], family) in name_to_md5
+    }
     located: dict[str, str] = {}
     for root, _dirs, files in os.walk(paths.octo_cache()):
         for filename in files:
@@ -107,8 +111,11 @@ def build(family: str = DEFAULT_FAMILY) -> tuple[int, list[tuple[str, str]]]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--family", default=DEFAULT_FAMILY,
-                    help="asset family prefix (e.g. img_chr_icon_sd_ for the chibi drop-in)")
+    ap.add_argument(
+        "--family",
+        default=DEFAULT_FAMILY,
+        help="asset family prefix (e.g. img_chr_icon_sd_ for the chibi drop-in)",
+    )
     args = ap.parse_args()
     ok, misses = build(args.family)
     print(f"{ok}/{ok + len(misses)} icons -> {OUT}", file=sys.stderr)

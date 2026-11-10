@@ -22,6 +22,14 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from support.builders import (
+    FIXTURE_CARDS_PATH,
+    make_card,
+    make_scoring_config,
+    make_skill,
+    make_team,
+)
+from support.team_reference import effective_skill_instances
 
 import hbuilder.domain.scoring as scoring_module
 from hbuilder.domain.card import EffectTarget, GateCondition, SlotOverride, SlotRider, Stats
@@ -40,9 +48,6 @@ from hbuilder.domain.scoring_models import ACTIVATION_RATE_MODELS, STACKING_MODE
 from hbuilder.domain.team import build_team
 from hbuilder.domain.unknown import UNKNOWN
 
-from support.builders import FIXTURE_CARDS_PATH, make_card, make_scoring_config, make_skill, make_team
-from support.team_reference import effective_skill_instances
-
 _FIXTURE_MEMBER_IDS = ["fubuki_01", "mio_01", "matsuri_01", "polka_01", "lamy_01"]
 
 
@@ -55,9 +60,7 @@ def _shipped_fixture_team():
 
 
 def test_ungated_active_skill_produces_applied_contribution_with_nonzero_rate_and_unset_gate_fields():
-    skill = make_skill(
-        "ACTIVE", duration=10.0, interval=10.0, probability_tier="Medium", magnitude=25.0
-    )
+    skill = make_skill("ACTIVE", duration=10.0, interval=10.0, probability_tier="Medium", magnitude=25.0)
     leader = make_card("leader_ungated", active=skill)
     members = [make_card(f"m_ungated_{i}") for i in range(5)]
     team = make_team([*members, leader])
@@ -123,9 +126,7 @@ def test_gate_at_exact_threshold_produces_applied_state_with_actual_count_equal_
 
 
 def test_skill_with_unknown_magnitude_produces_data_missing_state_naming_the_field():
-    skill = make_skill(
-        "ACTIVE", duration=10.0, interval=10.0, probability_tier="Medium", magnitude=UNKNOWN
-    )
+    skill = make_skill("ACTIVE", duration=10.0, interval=10.0, probability_tier="Medium", magnitude=UNKNOWN)
     leader = make_card("leader_unknown_mag", active=skill)
     members = [make_card(f"m_unknown_{i}") for i in range(5)]
     team = make_team([*members, leader])
@@ -244,8 +245,7 @@ def test_every_contribution_state_is_one_of_the_declared_contribution_states():
 
     breakdown = score_with_breakdown(team, cfg)
 
-    assert all(c.state in {"applied", "gate_not_met", "data_missing"}
-               for c in breakdown.contributions)
+    assert all(c.state in {"applied", "gate_not_met", "data_missing"} for c in breakdown.contributions)
 
 
 def test_skill_contribution_and_score_breakdown_carry_the_full_declared_field_set():
@@ -326,9 +326,7 @@ def test_skill_contribution_and_score_breakdown_carry_the_full_declared_field_se
 
 def test_targeted_stat_up_contribution_reports_target_kind_and_ascending_target_card_ids():
     target = EffectTarget(kind="type", value="Cute", count=2)
-    skill = make_skill(
-        "PASSIVE", family="stat_up", effect_type="performance", magnitude=10.0, target=target
-    )
+    skill = make_skill("PASSIVE", family="stat_up", effect_type="performance", magnitude=10.0, target=target)
     leader = make_card(
         "target_leader",
         type_="Cute",
@@ -378,9 +376,7 @@ def test_team_wide_target_stat_contribution_reports_whole_team_marker_and_lists_
 
 
 def test_data_missing_target_contribution_reports_none_for_both_target_fields():
-    skill = make_skill(
-        "PASSIVE", family="stat_up", effect_type="performance", magnitude=10.0, target=UNKNOWN
-    )
+    skill = make_skill("PASSIVE", family="stat_up", effect_type="performance", magnitude=10.0, target=UNKNOWN)
     leader = make_card("unknown_target_leader", passive=skill)
     members = [make_card(f"unknown_target_member_{i}") for i in range(5)]
     team = make_team([*members, leader])
@@ -460,9 +456,7 @@ def test_gate_not_met_stat_contribution_carries_no_target_fields():
 
     breakdown = score_with_breakdown(team, cfg)
     contribution = next(
-        c
-        for c in breakdown.contributions
-        if c.card_id == "gate_short_leader" and c.slot_kind == "PASSIVE"
+        c for c in breakdown.contributions if c.card_id == "gate_short_leader" and c.slot_kind == "PASSIVE"
     )
 
     assert contribution.state == "gate_not_met"
@@ -494,9 +488,7 @@ def _override_team(skill, *, pure_count: int):
     outfit slot is Happy and outside the five for the same reason."""
     carrier = make_card("override_attrib_leader", type_="Happy", active=skill)
     types = ["Pure"] * pure_count + ["Cute"] * (4 - pure_count)
-    members = [carrier] + [
-        make_card(f"override_attrib_member_{i}", type_=types[i]) for i in range(4)
-    ]
+    members = [carrier] + [make_card(f"override_attrib_member_{i}", type_=types[i]) for i in range(4)]
     return make_team([make_card("override_outfit", type_="Happy"), *members])
 
 
@@ -506,9 +498,7 @@ def test_override_fired_is_true_when_the_override_gate_fired():
     cfg = make_scoring_config()
 
     breakdown = score_with_breakdown(team, cfg)
-    contribution = next(
-        c for c in breakdown.contributions if c.card_id == "override_attrib_leader"
-    )
+    contribution = next(c for c in breakdown.contributions if c.card_id == "override_attrib_leader")
 
     assert contribution.override_fired is True
 
@@ -519,24 +509,18 @@ def test_override_fired_is_false_when_the_override_gate_did_not_fire():
     cfg = make_scoring_config()
 
     breakdown = score_with_breakdown(team, cfg)
-    contribution = next(
-        c for c in breakdown.contributions if c.card_id == "override_attrib_leader"
-    )
+    contribution = next(c for c in breakdown.contributions if c.card_id == "override_attrib_leader")
 
     assert contribution.override_fired is False
 
 
 def test_override_fired_is_none_when_the_slot_carries_no_override():
-    skill = make_skill(
-        "ACTIVE", duration=20.0, interval=20.0, probability_tier="Medium", magnitude=35.0
-    )
+    skill = make_skill("ACTIVE", duration=20.0, interval=20.0, probability_tier="Medium", magnitude=35.0)
     team = _override_team(skill, pure_count=2)
     cfg = make_scoring_config()
 
     breakdown = score_with_breakdown(team, cfg)
-    contribution = next(
-        c for c in breakdown.contributions if c.card_id == "override_attrib_leader"
-    )
+    contribution = next(c for c in breakdown.contributions if c.card_id == "override_attrib_leader")
 
     assert contribution.override_fired is None
 
@@ -570,9 +554,7 @@ def test_rider_fields_are_populated_when_the_slot_carries_a_rider():
     cfg = make_scoring_config()
 
     breakdown = score_with_breakdown(team, cfg)
-    contribution = next(
-        c for c in breakdown.contributions if c.card_id == "rider_attrib_leader"
-    )
+    contribution = next(c for c in breakdown.contributions if c.card_id == "rider_attrib_leader")
 
     assert contribution.rider_family == "activation_rate_up"
     assert contribution.rider_effect_type == "activation_rate"
@@ -585,9 +567,7 @@ def test_rider_fields_are_all_none_when_the_slot_carries_no_rider():
     cfg = make_scoring_config()
 
     breakdown = score_with_breakdown(team, cfg)
-    contribution = next(
-        c for c in breakdown.contributions if c.card_id == "rider_attrib_leader"
-    )
+    contribution = next(c for c in breakdown.contributions if c.card_id == "rider_attrib_leader")
 
     assert contribution.rider_family is None
     assert contribution.rider_effect_type is None
@@ -646,9 +626,7 @@ def test_fast_and_breakdown_totals_agree_for_a_team_carrying_all_three_attributi
     )
     applied_skill = make_skill("PASSIVE", family="score_support", effect_type="score", magnitude=10.0)
 
-    leader = make_card(
-        "mixed_leader", type_="Pure", passive=gate_not_met_skill, active=data_missing_skill
-    )
+    leader = make_card("mixed_leader", type_="Pure", passive=gate_not_met_skill, active=data_missing_skill)
     member_applied = make_card("mixed_member_applied", type_="Pure", passive=applied_skill)
     fillers = [make_card(f"mixed_filler_{i}", type_="Pure") for i in range(3)]
     # The mixed carrier is a MEMBER so all three states are actually emitted;
@@ -664,7 +642,9 @@ def test_fast_and_breakdown_totals_agree_for_a_team_carrying_all_three_attributi
 
 def test_fast_and_breakdown_totals_agree_when_run_state_flips_a_gate_off_and_the_total_changes():
     condition = GateCondition(kind="run_state", target="combo", count=100)
-    skill = make_skill("PASSIVE", family="score_support", effect_type="score", magnitude=30.0, condition=condition)
+    skill = make_skill(
+        "PASSIVE", family="score_support", effect_type="score", magnitude=30.0, condition=condition
+    )
     leader = make_card("runstate_leader", passive=skill)
     # A `score_support` skill multiplies the ACTIVE pool, so the team
     # needs an ACTIVE score contribution for flipping its gate to move the
@@ -687,7 +667,7 @@ def test_fast_and_breakdown_totals_agree_when_run_state_flips_a_gate_off_and_the
                 probability_tier="Medium",
                 magnitude=20.0,
             ),
-        )
+        ),
     ] + [make_card(f"runstate_member_{i}") for i in range(2, 5)]
     team = make_team([*members, leader])
 
@@ -732,9 +712,7 @@ def test_breakdown_score_pool_contributions_recombine_to_combined_score_rate():
     score_up = [
         c
         for c in breakdown.contributions
-        if c.pool == "score"
-        and c.effect_type == "score"
-        and c.slot_kind in ("ACTIVE", "SPECIAL")
+        if c.pool == "score" and c.effect_type == "score" and c.slot_kind in ("ACTIVE", "SPECIAL")
     ]
     # The SPECIAL collapse: a SPECIAL Score UP is a `ScoreUpBoostSkillEffect`,
     # so the boost population is the support rows PLUS every SPECIAL Score UP,
@@ -745,18 +723,12 @@ def test_breakdown_score_pool_contributions_recombine_to_combined_score_rate():
     # `B`: max per bucket over the boost rows, then the two maxima added. A row's
     # own `weighted_rate` is already `magnitude x occupancy`, and the fixture has
     # at most one live row per bucket, so the rates can be maximised directly.
-    boost = max(
-        (c.weighted_rate for c in boost_rows if c.slot_kind != "SPECIAL"), default=0.0
-    ) + max(
+    boost = max((c.weighted_rate for c in boost_rows if c.slot_kind != "SPECIAL"), default=0.0) + max(
         (c.weighted_rate for c in boost_rows if c.slot_kind == "SPECIAL"), default=0.0
     )
     assert boost == pytest.approx(breakdown.combined_support_rate)
 
-    other = [
-        c.weighted_rate
-        for c in breakdown.contributions
-        if c.pool == "score" and c not in score_up
-    ]
+    other = [c.weighted_rate for c in breakdown.contributions if c.pool == "score" and c not in score_up]
     pool = sum(c.weighted_rate * (1.0 + boost) for c in ratio_rows)
     recombined = cfg.stacking_model.combine([*other, pool])
 

@@ -6,6 +6,7 @@ that differs in the last bit can flip a near-tie, score other teams and serve an
 answer. `ReferenceLeaderModel` below is the plain-loop model verbatim; the numpy model must
 give the same coefficients (`==`) and the same leader order on every set.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -105,14 +106,19 @@ GENERATIONS = ["Myth", "3rd", "holoX", "ReGLOSS", "ID1"]
 
 def _world(seed: int, count: int = 40, holomems: int = 24):
     rng = random.Random(seed)
-    cards = [SimpleNamespace(
-        id=f"card-{i:03d}", member=f"Chr{i % holomems}", type=rng.choice(TYPES),
-        generations=frozenset(rng.sample(GENERATIONS, rng.choice([1, 1, 2]))),
-        gate=rng.choice([None, None, ("type", rng.choice(TYPES), 3),
-                         ("generation", rng.choice(GENERATIONS), 2)]))
-        for i in range(count)]
-    legal = [s for s in itertools.combinations(range(count), 5)
-             if len({cards[i].member for i in s}) == 5]
+    cards = [
+        SimpleNamespace(
+            id=f"card-{i:03d}",
+            member=f"Chr{i % holomems}",
+            type=rng.choice(TYPES),
+            generations=frozenset(rng.sample(GENERATIONS, rng.choice([1, 1, 2]))),
+            gate=rng.choice(
+                [None, None, ("type", rng.choice(TYPES), 3), ("generation", rng.choice(GENERATIONS), 2)]
+            ),
+        )
+        for i in range(count)
+    ]
+    legal = [s for s in itertools.combinations(range(count), 5) if len({cards[i].member for i in s}) == 5]
     return rng, cards, legal
 
 
@@ -143,8 +149,13 @@ def test_a_set_mean_is_cpythons_compensated_sum():
     import numpy as np
 
     rng = random.Random(7)
-    groups = [[rng.choice([1e16, 1.0, -1e16, 0.1, -0.3, 3.7e-5, rng.uniform(-20, 20)])
-               for _ in range(rng.randint(1, 40))] for _ in range(300)]
+    groups = [
+        [
+            rng.choice([1e16, 1.0, -1e16, 0.1, -0.3, 3.7e-5, rng.uniform(-20, 20)])
+            for _ in range(rng.randint(1, 40))
+        ]
+        for _ in range(300)
+    ]
     values = np.array([x for g in groups for x in g])
     lens = np.array([len(g) for g in groups])
     starts = np.concatenate(([0], np.cumsum(lens)[:-1]))

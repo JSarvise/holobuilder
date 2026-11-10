@@ -1,4 +1,5 @@
 """installer: what an update keeps and where a run works. No window, no network, no registry."""
+
 from __future__ import annotations
 
 import sys
@@ -10,13 +11,22 @@ import installer as ins  # noqa: E402
 
 def test_an_update_keeps_this_pcs_data_and_nothing_else(tmp_path):
     old, new = tmp_path / "old", tmp_path / "new"
-    for rel in ("app/state/app_settings.json", "app/tools/recon/proxy/dumps/charts.json",
-                "app/data/owned.json", "app/data/gacha/pulls.jsonl", "app/tools/app/launcher.py"):
+    for rel in (
+        "app/state/app_settings.json",
+        "app/tools/recon/proxy/dumps/charts.json",
+        "app/data/owned.json",
+        "app/data/gacha/pulls.jsonl",
+        "app/tools/app/launcher.py",
+    ):
         (old / rel).parent.mkdir(parents=True, exist_ok=True)
         (old / rel).write_text("x")
     moves = {src.relative_to(old).as_posix(): dst for src, dst in ins.preserve_moves(old, new)}
-    assert set(moves) == {"app/state", "app/tools/recon/proxy/dumps", "app/data/owned.json",
-                          "app/data/gacha"}                      # the code is never carried over
+    assert set(moves) == {
+        "app/state",
+        "app/tools/recon/proxy/dumps",
+        "app/data/owned.json",
+        "app/data/gacha",
+    }  # the code is never carried over
     assert moves["app/state"] == new / "app" / "state"
 
 
@@ -24,7 +34,7 @@ def test_the_folder_is_never_guessed_when_one_is_given(tmp_path, monkeypatch):
     # an update with the registry entry missing must not fall back to the default folder
     assert ins.install_dir(str(tmp_path)) == tmp_path
     monkeypatch.setattr(ins, "registered_dir", lambda: None)
-    assert ins.install_dir(None) == ins.DEFAULT_DIR              # not frozen, nothing registered
+    assert ins.install_dir(None) == ins.DEFAULT_DIR  # not frozen, nothing registered
 
 
 def test_powershell_quoting_survives_apostrophes():

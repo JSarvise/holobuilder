@@ -23,8 +23,7 @@ _DUMPS = _REFRESH.parents[1] / "tools" / "recon" / "proxy" / "dumps"
 
 
 @pytest.mark.skipif(
-    not (_DUMPS / "skilltree.json").exists()
-    or not (_DUMPS / "master_SkillTreeNode.json").exists(),
+    not (_DUMPS / "skilltree.json").exists() or not (_DUMPS / "master_SkillTreeNode.json").exists(),
     reason="dumps/ is gitignored account data",
 )
 def test_budget_is_361_at_max_and_real_at_current():
@@ -38,12 +37,16 @@ def test_budget_is_361_at_max_and_real_at_current():
     node_pts = prices[node]["points"]
 
     def _doc(granted):
-        return {"characters": [{
-            "chr": "chr-00012", "name": "Test",
-            "points": {"granted": granted, "spent_on_owned": 36, "unspent": 47},
-            "plan": {"optimised_nodes": [node], "to_buy": [node],
-                     "to_sell": [], "slots": {}},
-        }]}
+        return {
+            "characters": [
+                {
+                    "chr": "chr-00012",
+                    "name": "Test",
+                    "points": {"granted": granted, "spent_on_owned": 36, "unspent": 47},
+                    "plan": {"optimised_nodes": [node], "to_buy": [node], "to_sell": [], "slots": {}},
+                }
+            ]
+        }
 
     # MAX: the budget is the level-50 grant (361), NOT the real level's 83.
     at_max = _doc(83)

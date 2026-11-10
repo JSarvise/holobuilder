@@ -148,10 +148,10 @@ from __future__ import annotations
 import dataclasses
 import math
 import struct
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
 
-from .card import Card, SkillSlot, SKILL_SLOT_KINDS, skill_slot_from_record
+from .card import SKILL_SLOT_KINDS, Card, SkillSlot, skill_slot_from_record
 
 __all__ = [
     "MAX",
@@ -247,9 +247,7 @@ def overstated_skills(bloom: int | None) -> tuple[str, ...]:
     if bloom is None:
         return ()
     return tuple(
-        kind
-        for kind, step in sorted(SKILL_BLOOM_STEP.items(), key=lambda kv: kv[1])
-        if bloom < step
+        kind for kind, step in sorted(SKILL_BLOOM_STEP.items(), key=lambda kv: kv[1]) if bloom < step
     )
 
 
@@ -315,8 +313,7 @@ def skill_ladder_from_mapping(
     version = raw.get("schema_version")
     if version != SKILL_LADDER_SCHEMA_VERSION:
         raise CollectionError(
-            f"skill ladder schema_version {version!r}, expected "
-            f"{SKILL_LADDER_SCHEMA_VERSION}"
+            f"skill ladder schema_version {version!r}, expected {SKILL_LADDER_SCHEMA_VERSION}"
         )
     cards = raw.get("cards") or {}
     if not isinstance(cards, Mapping):
@@ -365,10 +362,7 @@ def restate_card_skills(
         replacement = (ladder.get(kind) or {}).get(level)
         if replacement is None:
             # Reported, never guessed.
-            notes.append(
-                f"{kind}: no level-{level} row exported, left at level "
-                f"{CARDS_JSON_SKILL_LEVEL}"
-            )
+            notes.append(f"{kind}: no level-{level} row exported, left at level {CARDS_JSON_SKILL_LEVEL}")
             continue
         slots[index] = replacement
         notes.append(f"{kind} {CARDS_JSON_SKILL_LEVEL}->{level}")
@@ -597,18 +591,14 @@ def resolve_card_state(
         # break. Mirrors how `level`/`bloom` accept "max" below. `None` when there
         # is no card_caps.json — the same first-class unknown those two report.
         limit_break = (
-            len(caps.level_by_limit_break) - 1
-            if caps is not None and caps.level_by_limit_break
-            else None
+            len(caps.level_by_limit_break) - 1 if caps is not None and caps.level_by_limit_break else None
         )
     elif limit_break is not None:
         limit_break = _coerce_int(limit_break, "limit_break", card_id, warnings)
         if limit_break is not None and caps is not None:
             span = len(caps.level_by_limit_break) - 1
             if not 0 <= limit_break <= span:
-                warnings.append(
-                    f"{card_id}: limit_break {limit_break} outside 0..{span}, clamped"
-                )
+                warnings.append(f"{card_id}: limit_break {limit_break} outside 0..{span}, clamped")
                 limit_break = max(0, min(limit_break, span))
 
     level_cap = level_cap_for(caps, limit_break)
@@ -630,13 +620,9 @@ def resolve_card_state(
                 level = 1
             elif level_cap is not None and level > level_cap:
                 where = (
-                    f" at limit_break {limit_break}"
-                    if limit_break is not None
-                    else " at maximum limit break"
+                    f" at limit_break {limit_break}" if limit_break is not None else " at maximum limit break"
                 )
-                warnings.append(
-                    f"{card_id}: level {level} exceeds the cap {level_cap}{where}, clamped"
-                )
+                warnings.append(f"{card_id}: level {level} exceeds the cap {level_cap}{where}, clamped")
                 level = level_cap
 
     bloom = resolved.get("bloom")
@@ -654,9 +640,7 @@ def resolve_card_state(
                 warnings.append(f"{card_id}: bloom {bloom} below 0, raised to 0")
                 bloom = 0
             elif max_bloom is not None and bloom > max_bloom:
-                warnings.append(
-                    f"{card_id}: bloom {bloom} exceeds the maximum {max_bloom}, clamped"
-                )
+                warnings.append(f"{card_id}: bloom {bloom} exceeds the maximum {max_bloom}, clamped")
                 bloom = max_bloom
 
     behind = overstated_skills(bloom)
@@ -712,9 +696,7 @@ class StatBasis:
     # `CardLevel` field 5 by (group, level) — the Member Power-Up ladder. Empty
     # when the curve export predates it, which `max_member_power_up_permyriad`
     # reports as `None` rather than as a zero ceiling.
-    power_up_permyriad: Mapping[str, Mapping[int, int]] = field(
-        default_factory=dict
-    )
+    power_up_permyriad: Mapping[str, Mapping[int, int]] = field(default_factory=dict)
 
     def level_multiplier(self, card_id: str, level: int | None) -> int | None:
         """The multiplier at `level` for this card's group, or `None`.
@@ -746,9 +728,7 @@ class StatBasis:
         # module-level `bloom_multiplier`, and for the same reason.
         return _f32(_F32_ONE + _f32(_f32(array[bloom]) / _F32_THOUSAND))
 
-    def stats_at(
-        self, card_id: str, level: int | None, bloom: int | None
-    ) -> tuple[int, int, int] | None:
+    def stats_at(self, card_id: str, level: int | None, bloom: int | None) -> tuple[int, int, int] | None:
         """`(performance, technique, sense)` at that level and bloom, or `None` if anything
         needed is absent. Never a partial answer — see `effective_stats`."""
         entry = self.cards.get(card_id)
@@ -767,9 +747,7 @@ def stat_basis_from_mapping(raw: Mapping) -> StatBasis:
     The file stores level keys as JSON strings (JSON object keys are always strings); they are
     converted to `int` here, once, rather than at every lookup."""
     if not isinstance(raw, Mapping):
-        raise CollectionError(
-            f"card_level_curve must be an object, got {type(raw).__name__}"
-        )
+        raise CollectionError(f"card_level_curve must be an object, got {type(raw).__name__}")
 
     level_mult: dict[str, dict[int, int]] = {}
     for group, levels in (raw.get("level_mult") or {}).items():
@@ -861,10 +839,15 @@ def collection_stats(
     and `CardState.scorable`.
     """
     if basis is None:
-        return {}, CollectionReport((), tuple(card_ids), (), (
-            "no card_level_curve.json — run tools/refresh/card_level_curve.py; "
-            "every card keeps data/cards.json's stats",
-        ))
+        return {}, CollectionReport(
+            (),
+            tuple(card_ids),
+            (),
+            (
+                "no card_level_curve.json — run tools/refresh/card_level_curve.py; "
+                "every card keeps data/cards.json's stats",
+            ),
+        )
 
     entries = (document or {}).get("cards") or {}
     default = (document or {}).get("card_default", UNKNOWN)
@@ -879,9 +862,7 @@ def collection_stats(
     known = set(basis.cards)
     for card_id in entries:
         if card_id not in known:
-            warnings.append(
-                f"the collection names a card that is not in the dataset: {card_id}"
-            )
+            warnings.append(f"the collection names a card that is not in the dataset: {card_id}")
 
     for card_id in card_ids:
         entry = basis.cards.get(card_id)
@@ -1038,9 +1019,7 @@ def account_bonuses_from_mapping(document: Mapping | None) -> AccountBonuses:
         # Refused rather than clamped. A level outside the ladder is a typo, and
         # silently pulling 500 down to 50 would unlock the whole board on a
         # mistake -- the one direction where being wrong is invisible.
-        raise CollectionError(
-            f"player.level must be {PLAYER_LEVEL_MIN}..{PLAYER_LEVEL_MAX}, got {level}"
-        )
+        raise CollectionError(f"player.level must be {PLAYER_LEVEL_MIN}..{PLAYER_LEVEL_MAX}, got {level}")
 
     # `"auto"` is checked BEFORE `read`, which would otherwise refuse it as a
     # non-number. Absent is deliberately NOT auto: absent has always meant
@@ -1158,9 +1137,7 @@ def derived_member_power_up_permyriad(
         total += contribution
         upper += contribution
         counted += 1
-    return DerivedMemberPowerUp(
-        permyriad=total, upper=upper, counted=counted, skipped=tuple(skipped)
-    )
+    return DerivedMemberPowerUp(permyriad=total, upper=upper, counted=counted, skipped=tuple(skipped))
 
 
 def maxed_account_bonuses(basis: StatBasis | None, posters: int | None = None) -> AccountBonuses:
@@ -1228,9 +1205,7 @@ def memory_bonus(member_parameter_total: float, permil: int | None) -> int | Non
     return math.ceil(round(member_parameter_total * permil / 1000, 6))
 
 
-def memory_bonus_per_stat(
-    per_member_stats: Sequence[tuple[int, int, int]], permil: int | None
-) -> int | None:
+def memory_bonus_per_stat(per_member_stats: Sequence[tuple[int, int, int]], permil: int | None) -> int | None:
     """The Memory Bonus summand of Overall Power, BIT-EXACT — or `None` if unset.
 
     This is the exact form the whole-deck `memory_bonus` above only approximates.
@@ -1264,9 +1239,7 @@ def memory_bonus_per_stat(
     return total
 
 
-def member_power_up(
-    per_member_bases: Sequence[float], permyriad: int | None
-) -> int | None:
+def member_power_up(per_member_bases: Sequence[float], permyriad: int | None) -> int | None:
     """The Member Power-Up summand of Overall Power, or `None` if unset.
 
     Exact, not an approximation — the ceiling is per member slot and that is the
@@ -1299,9 +1272,7 @@ def member_power_up(
     structural reading inside the admissible band [4, 6]."""
     if permyriad is None:
         return None
-    return sum(
-        math.ceil(round(base * permyriad / 10000, 6)) for base in per_member_bases
-    )
+    return sum(math.ceil(round(base * permyriad / 10000, 6)) for base in per_member_bases)
 
 
 def caps_by_rarity_from_mapping(raw: Mapping) -> dict[str, CardLevelCaps]:

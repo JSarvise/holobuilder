@@ -5,6 +5,7 @@ each as a LONG_RELAY (100 permil) in `GetNotesPerfectCoefficientSum`, although t
 judged. Two independent checks: holodori.best's chart scale, computed by their own tool from
 the raw `.sus` files, and one note read off a real run's score popup (m0528 EXPERT, note 1:
 +1301). Real-data cases SKIP without the gitignored chart library."""
+
 from __future__ import annotations
 
 import math
@@ -19,15 +20,14 @@ CHARTS = Path(__file__).resolve().parents[1] / "tools" / "recon" / "proxy" / "du
 
 def _chart(hidden: int) -> SongChart:
     notes = (ChartNote(1.0, 1000), ChartNote(2.0, 1000, flick=True), ChartNote(3.0, 100))
-    return SongChart("m9001", "EXPERT", 26, 1100, notes, (10.0, 20.0, 30.0, 40.0, 50.0),
-                     hidden_points=hidden)
+    return SongChart("m9001", "EXPERT", 26, 1100, notes, (10.0, 20.0, 30.0, 40.0, 50.0), hidden_points=hidden)
 
 
 def test_each_hidden_point_weighs_a_tick_in_the_divisor():
     assert HIDDEN_POINT_PERMIL == 100
     assert _chart(0).notes_perfect_coefficient_sum("mobile") == 2.15
-    assert _chart(7).notes_perfect_coefficient_sum("mobile") == 2.85      # + 7 x 0.1
-    assert _chart(7).notes_perfect_coefficient_sum("pc") == 2.80          # same on both columns
+    assert _chart(7).notes_perfect_coefficient_sum("mobile") == 2.85  # + 7 x 0.1
+    assert _chart(7).notes_perfect_coefficient_sum("pc") == 2.80  # same on both columns
 
 
 @pytest.fixture(scope="module")
@@ -39,13 +39,14 @@ def library():
 
 def _scale(chart: SongChart) -> float:
     """sum of w(1 + combo) over the notes / the divisor: the chart's combo scale."""
-    num = sum(n.perfect_permil_for("mobile") / 1000 * (1 + chart.combo_coefficient(i + 1))
-              for i, n in enumerate(chart.notes))
+    num = sum(
+        n.perfect_permil_for("mobile") / 1000 * (1 + chart.combo_coefficient(i + 1))
+        for i, n in enumerate(chart.notes)
+    )
     return num / chart.notes_perfect_coefficient_sum("mobile")
 
 
-@pytest.mark.parametrize("music, expected", [("m0001", 1.025913), ("m0334", 1.026039),
-                                             ("m0155", 1.023345)])
+@pytest.mark.parametrize("music, expected", [("m0001", 1.025913), ("m0334", 1.026039), ("m0155", 1.023345)])
 def test_the_chart_scale_matches_an_independent_reading(library, music, expected):
     chart = library.get(music, "EXPERT")
     assert chart.hidden_points > 0

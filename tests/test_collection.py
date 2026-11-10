@@ -15,36 +15,36 @@ import math
 from pathlib import Path
 
 import pytest
-
 from support.builders import make_card, make_scoring_config, make_team
-from hbuilder.inputs import default_paths
+
 from hbuilder.domain.collection import (
-    MAX,
     FULLY_SCORABLE_BLOOM,
+    MAX,
+    MEMBER_POWER_UP_CAP_PERMYRIAD,
+    MEMORY_BONUS_MAX_POSTERS,
+    PLAYER_LEVEL_MAX,
     SKILL_BLOOM_STEP,
-    connect_bonus_level,
-    overstated_skills,
     UNKNOWN,
+    AccountBonuses,
     CardLevelCaps,
     CollectionError,
-    bloom_multiplier,
-    effective_stats,
     _f32,
-    resolve_card_state,
-    stat_basis_from_mapping,
-    collection_stats,
-    caps_by_rarity_from_mapping,
-    MEMORY_BONUS_MAX_POSTERS,
-    MEMBER_POWER_UP_CAP_PERMYRIAD,
-    PLAYER_LEVEL_MAX,
-    memory_bonus_permil,
-    max_member_power_up_permyriad,
-    AccountBonuses,
     account_bonuses_from_mapping,
+    bloom_multiplier,
+    caps_by_rarity_from_mapping,
+    collection_stats,
+    connect_bonus_level,
+    effective_stats,
+    max_member_power_up_permyriad,
+    member_power_up,
     memory_bonus,
     memory_bonus_per_stat,
-    member_power_up,
+    memory_bonus_permil,
+    overstated_skills,
+    resolve_card_state,
+    stat_basis_from_mapping,
 )
+from hbuilder.inputs import default_paths
 
 _REPO = Path(__file__).resolve().parents[1]
 _CAPS_FILE = _REPO / "tools" / "recon" / "proxy" / "dumps" / "card_caps.json"
@@ -70,9 +70,7 @@ def test_max_with_limit_break_zero_is_forty_not_eighty():
     """The check the original self-test existed for. `max` is not "the biggest
     number in the table" — it is the biggest number THIS card can reach, and on
     a 5* at limit break 0 that is 40."""
-    state = resolve_card_state(
-        "c", {"level": MAX, "limit_break": 0}, UNKNOWN, FIVE_STAR
-    )
+    state = resolve_card_state("c", {"level": MAX, "limit_break": 0}, UNKNOWN, FIVE_STAR)
     assert state.level == 40
     assert state.level_cap == 40
 
@@ -324,9 +322,7 @@ def test_effective_stats_returns_none_on_any_missing_input():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not _ENRICHED.exists(), reason="dumps/cards_enriched.json is gitignored account data"
-)
+@pytest.mark.skipif(not _ENRICHED.exists(), reason="dumps/cards_enriched.json is gitignored account data")
 def test_the_formula_is_consistent_with_every_cards_stats_max():
     """The formula against 167 real cards, WITHOUT knowing the level multiplier.
 
@@ -398,9 +394,7 @@ def test_the_formula_is_consistent_with_every_cards_stats_max():
                 # (00021/04014/06004, ratio 278 at k = 20,070) sit on it.
                 if math.ceil(_f32(_f32(float(m)) * _f32(bloom_mult))) != t:
                     continue
-                spans.append(
-                    (1000 * (m - 1) / ratio[index], 1000 * m / ratio[index])
-                )
+                spans.append((1000 * (m - 1) / ratio[index], 1000 * m / ratio[index]))
             per_stat.append(spans)
 
         # Intersect the three unions.
@@ -435,9 +429,7 @@ def test_the_formula_is_consistent_with_every_cards_stats_max():
     )
 
 
-@pytest.mark.skipif(
-    not _CAPS_FILE.exists(), reason="dumps/card_caps.json is gitignored account data"
-)
+@pytest.mark.skipif(not _CAPS_FILE.exists(), reason="dumps/card_caps.json is gitignored account data")
 def test_caps_by_rarity_joins_the_two_real_tables():
     """`card_caps.json` keys level caps by rarity AND attribute but bloom by
     rarity ALONE. This pins the join against the real file, because a join that
@@ -456,9 +448,7 @@ def test_caps_by_rarity_joins_the_two_real_tables():
         assert len(entry.bloom_mult_permil) == 6
 
 
-@pytest.mark.skipif(
-    not _CAPS_FILE.exists(), reason="dumps/card_caps.json is gitignored account data"
-)
+@pytest.mark.skipif(not _CAPS_FILE.exists(), reason="dumps/card_caps.json is gitignored account data")
 def test_the_real_five_star_caps_match_the_fixture_used_above():
     """The fixture at the top of this file is written out rather than loaded,
     so it can drift from the real data it claims to model. This is the tie."""
@@ -486,9 +476,7 @@ def _basis():
     not _CURVE.exists(),
     reason="dumps/card_level_curve.json is gitignored; run tools/refresh/card_level_curve.py",
 )
-@pytest.mark.skipif(
-    not _ENRICHED.exists(), reason="dumps/cards_enriched.json is gitignored account data"
-)
+@pytest.mark.skipif(not _ENRICHED.exists(), reason="dumps/cards_enriched.json is gitignored account data")
 def test_stat_basis_reproduces_every_cards_stats_max_exactly():
     """The acceptance the interval test above can only approximate, made EXACT.
 
@@ -518,9 +506,7 @@ def test_stat_basis_reproduces_every_cards_stats_max_exactly():
             mismatches.append((card_id, got, want))
 
     assert checked >= 150, f"expected the full roster, only checked {checked}"
-    assert not mismatches, (
-        f"{len(mismatches)} of {checked} cards disagree with stats_max: {mismatches[:5]}"
-    )
+    assert not mismatches, f"{len(mismatches)} of {checked} cards disagree with stats_max: {mismatches[:5]}"
 
 
 def _max_bloom_of(basis, card_id):
@@ -694,8 +680,7 @@ def test_a_max_collection_reproduces_data_cards_json_exactly():
     mismatches = [
         (c["id"], stats[c["id"]], (c["stats"]["performance"], c["stats"]["technique"], c["stats"]["sense"]))
         for c in cards
-        if stats.get(c["id"])
-        != (c["stats"]["performance"], c["stats"]["technique"], c["stats"]["sense"])
+        if stats.get(c["id"]) != (c["stats"]["performance"], c["stats"]["technique"], c["stats"]["sense"])
     ]
     assert not mismatches, f"{len(mismatches)} of {len(ids)} differ: {mismatches[:5]}"
 
@@ -712,14 +697,12 @@ def test_a_lower_level_collection_actually_lowers_the_stats():
     ids = [c["id"] for c in cards]
 
     maxed, _ = collection_stats(ids, {"card_default": MAX, "cards": {}}, caps, basis)
-    low, _ = collection_stats(
-        ids, {"card_default": {"level": 10, "bloom": 1}, "cards": {}}, caps, basis
-    )
+    low, _ = collection_stats(ids, {"card_default": {"level": 10, "bloom": 1}, "cards": {}}, caps, basis)
 
     assert low and len(low) == len(maxed)
-    assert all(
-        all(a < b for a, b in zip(low[cid], maxed[cid])) for cid in low
-    ), "a level-10 collection did not come out strictly below a maxed one"
+    assert all(all(a < b for a, b in zip(low[cid], maxed[cid])) for cid in low), (
+        "a level-10 collection did not come out strictly below a maxed one"
+    )
 
 
 @pytest.mark.skipif(not _CURVE.exists(), reason="dumps/card_level_curve.json is gitignored")
@@ -883,9 +866,7 @@ def test_player_level_parses_and_unset_is_not_level_one():
     assert account_bonuses_from_mapping({"player": {"posters": 22}}).level is None
     assert account_bonuses_from_mapping({"player": {"level": 1}}).level == 1
     assert account_bonuses_from_mapping({"player": {"level": 30}}).level == 30
-    assert account_bonuses_from_mapping({"player": {"level": PLAYER_LEVEL_MAX}}).level == (
-        PLAYER_LEVEL_MAX
-    )
+    assert account_bonuses_from_mapping({"player": {"level": PLAYER_LEVEL_MAX}}).level == (PLAYER_LEVEL_MAX)
 
 
 def test_a_player_level_off_the_ladder_is_refused_not_clamped():
@@ -960,9 +941,7 @@ def _feasible_permyriads(rows, keys):
     return out
 
 
-@pytest.mark.skipif(
-    not _ORACLE.exists(), reason="dumps/ is gitignored account data"
-)
+@pytest.mark.skipif(not _ORACLE.exists(), reason="dumps/ is gitignored account data")
 def test_member_power_up_base_includes_the_outfit_skill_line():
     """⛔ The base is `MemberParameter + PassiveSkill + Outfit + HolomemBoard` —
     the OUTFIT is easy to leave out. The call site passes `effective_stat_sum`,
@@ -1004,9 +983,7 @@ def test_member_power_up_base_includes_the_outfit_skill_line():
     # on every row that HAS an outfit line it needs a different P, and on four
     # rows no integer P works at all. It survives only where the outfit is zero,
     # which is why the wrong base is easy to miss.
-    contradicted = [
-        index for index, s in enumerate(without_outfit) if not (s & {39, 41})
-    ]
+    contradicted = [index for index, s in enumerate(without_outfit) if not (s & {39, 41})]
     assert len(contradicted) >= 10, (
         "dropping the Outfit line should contradict the account's own P on "
         f"real rows; it only did on {contradicted}"
@@ -1024,7 +1001,7 @@ def _demo_team():
 
 
 def test_an_unset_account_leaves_both_terms_none_not_zero():
-    """"Not modelled" and "modelled and worth nothing" are different claims and
+    """ "Not modelled" and "modelled and worth nothing" are different claims and
     the breakdown must be able to say which. `None` is the shipped default."""
     from hbuilder.domain.scoring import score_with_breakdown
 
@@ -1044,26 +1021,20 @@ def test_setting_the_account_fills_both_terms_and_moves_no_score():
 
     team = _demo_team()
     plain = make_scoring_config()
-    withacct = dc.replace(
-        plain, account=AccountBonuses(posters=22, power_up_permyriad=35)
-    )
+    withacct = dc.replace(plain, account=AccountBonuses(posters=22, power_up_permyriad=35))
 
     before = score_with_breakdown(team, plain)
     after = score_with_breakdown(team, withacct)
 
     assert after.total_score == before.total_score, (
-        "supplying an account scalar moved the score — these two terms are "
-        "reported, never summed into it"
+        "supplying an account scalar moved the score — these two terms are reported, never summed into it"
     )
     assert after.memory_bonus is not None and after.memory_bonus > 0
     assert after.member_power_up is not None and after.member_power_up > 0
     # And they are the documented forms over the documented bases. Memory is
     # the BIT-EXACT per-member per-stat form (`memory_bonus_per_stat`), fed each
     # member's `Card.stats` — the same decomposition the scoring path passes it.
-    per_member = [
-        (m.stats.performance, m.stats.technique, m.stats.sense)
-        for m in team.members
-    ]
+    per_member = [(m.stats.performance, m.stats.technique, m.stats.sense) for m in team.members]
     assert after.memory_bonus == memory_bonus_per_stat(per_member, 44)
     # The exact form is at or above the whole-deck approximation, which only
     # ever runs low.
@@ -1074,10 +1045,7 @@ def test_setting_the_account_fills_both_terms_and_moves_no_score():
     # subtotal). This demo team is five 300-stat members with no stat skills
     # and no board, so each member base is 300. HAND-COMPUTED:
     #   5 x ceil(300 * 35 / 10000) = 5 x ceil(1.05) = 5 x 2 = 10.
-    per_member_bases = [
-        float(m.stats.performance + m.stats.technique + m.stats.sense)
-        for m in team.members
-    ]
+    per_member_bases = [float(m.stats.performance + m.stats.technique + m.stats.sense) for m in team.members]
     assert after.member_power_up == member_power_up(per_member_bases, 35) == 10
     # The one-aggregate form is strictly lower:
     #   ceil(1500 * 35 / 10000) = ceil(5.25) = 6.
@@ -1092,9 +1060,7 @@ def test_a_zero_account_is_reported_as_zero_not_as_absent():
 
     from hbuilder.domain.scoring import score_with_breakdown
 
-    zeroed = dc.replace(
-        make_scoring_config(), account=AccountBonuses(posters=0, power_up_permyriad=0)
-    )
+    zeroed = dc.replace(make_scoring_config(), account=AccountBonuses(posters=0, power_up_permyriad=0))
     breakdown = score_with_breakdown(_demo_team(), zeroed)
 
     assert breakdown.memory_bonus == 0

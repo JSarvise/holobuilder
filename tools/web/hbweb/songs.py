@@ -7,7 +7,8 @@ absence costs the page its titles or filters and never a number.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import parse_qs
 
 import certificate as cert_mod
@@ -87,8 +88,9 @@ def difficulties_listing() -> dict[str, Any]:
         "charts": {d: len(present[d]) for d in cert_mod.DIFFICULTIES if d in present},
     }
     expert = set(present.get("EXPERT") or ())
-    missing = {d: sorted(expert - set(ids)) for d, ids in present.items()
-               if d != "EXPERT" and expert - set(ids)}
+    missing = {
+        d: sorted(expert - set(ids)) for d, ids in present.items() if d != "EXPERT" and expert - set(ids)
+    }
     if missing:
         out["missing"] = missing
     return out
@@ -118,8 +120,9 @@ def _character_names() -> dict[str, str]:
     return names
 
 
-def _song_row(chart: Mapping, difficulty: str, titles: Mapping, singers: Mapping,
-              music: Mapping, names: Mapping) -> dict[str, Any]:
+def _song_row(
+    chart: Mapping, difficulty: str, titles: Mapping, singers: Mapping, music: Mapping, names: Mapping
+) -> dict[str, Any]:
     """One song of the listing: what makes its chart score differently, and its labels."""
     music_id = str(chart.get("music_id") or "")
     cues = list(chart.get("special_cues") or [])
@@ -137,21 +140,14 @@ def _song_row(chart: Mapping, difficulty: str, titles: Mapping, singers: Mapping
         "difficulty_level": chart.get("difficulty_level"),
         "notes": len(chart.get("notes") or []),
         "special_cues": cues,
-        "singer_type": SINGER_TYPES.get(
-            str(row.get("musicSingerType") or "").rpartition("_")[2], ""
-        ),
-        "category": CATEGORIES.get(
-            str(row.get("categoryType") or "").rpartition("_")[2], ""
-        ),
+        "singer_type": SINGER_TYPES.get(str(row.get("musicSingerType") or "").rpartition("_")[2], ""),
+        "category": CATEGORIES.get(str(row.get("categoryType") or "").rpartition("_")[2], ""),
         "seconds": row.get("playingSeconds"),
         # when the song entered the game (Music.startTime, epoch ms; the
         # launch songs all carry the launch date) -- the picker's sort
         "release": int(row.get("startTime") or 0) or None,
         "character_ids": character_ids,
-        "characters": [
-            {"id": chr_id, "name": names.get(chr_id, chr_id)}
-            for chr_id in character_ids
-        ],
+        "characters": [{"id": chr_id, "name": names.get(chr_id, chr_id)} for chr_id in character_ids],
     }
 
 
@@ -206,9 +202,11 @@ def serve_songs(h) -> None:
     titles, singers = song_labels()
     music = _music_by_id()
     names = _character_names()
-    songs = [_song_row(charts[key] or {}, difficulty, titles, singers, music, names)
-             for key in sorted(charts)
-             if str((charts[key] or {}).get("difficulty") or "").upper() == difficulty]
+    songs = [
+        _song_row(charts[key] or {}, difficulty, titles, singers, music, names)
+        for key in sorted(charts)
+        if str((charts[key] or {}).get("difficulty") or "").upper() == difficulty
+    ]
 
     h.reply_json(
         200,

@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import functools
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from hbuilder.domain.collection import (
     FULLY_SCORABLE_BLOOM,
@@ -28,7 +29,6 @@ from hbuilder.domain.collection import (
     stat_basis_from_mapping,
 )
 from hbuilder.inputs import _LoadFailure, apply_collection, load_inputs
-
 from hbweb import board, config, static
 
 # `data/cards.json` carries generation names MIXED: `Advent` and `ReGLOSS` in
@@ -37,10 +37,16 @@ from hbweb import board, config, static
 # English, not a translation. The two sets are the same 15 groups, so
 # this is a bijection and not a guess:
 _GEN_ALIAS = {
-    "0期生": "Gen 0", "1期生": "Gen 1", "2期生": "Gen 2",
-    "3期生": "Gen 3", "4期生": "Gen 4", "5期生": "Gen 5",
+    "0期生": "Gen 0",
+    "1期生": "Gen 1",
+    "2期生": "Gen 2",
+    "3期生": "Gen 3",
+    "4期生": "Gen 4",
+    "5期生": "Gen 5",
     "ゲーマーズ": "GAMERS",
-    "ID1": "ID Gen 1", "ID2": "ID Gen 2", "ID3": "ID Gen 3",
+    "ID1": "ID Gen 1",
+    "ID2": "ID Gen 2",
+    "ID3": "ID Gen 3",
     # Advent · Myth · Promise · ReGLOSS · holoX already match by name.
 }
 
@@ -116,8 +122,9 @@ def _rarity_of(basis, card_id: str) -> str | None:
     return group.partition("rarity_")[2].split("-", 1)[0] or None
 
 
-def _editor_card(card: Mapping, state, entry_caps, *, owned_ids: set, trial_ids: set,
-                 ladder_cards: Mapping, art_dir: Path) -> dict[str, Any]:
+def _editor_card(
+    card: Mapping, state, entry_caps, *, owned_ids: set, trial_ids: set, ladder_cards: Mapping, art_dir: Path
+) -> dict[str, Any]:
     """One card of the editor: its face, the account's state and its bounds."""
     card_id = card["id"]
     return {
@@ -158,9 +165,7 @@ def _editor_card(card: Mapping, state, entry_caps, *, owned_ids: set, trial_ids:
         # the editor shows each skill at the level THIS bloom bought
         # (level 1 below the step, level 2 at/above) — the game's value.
         "skill_ladder": ladder_cards.get(card_id) or {},
-        "level_caps_by_limit_break": (
-            list(entry_caps.level_by_limit_break) if entry_caps else []
-        ),
+        "level_caps_by_limit_break": (list(entry_caps.level_by_limit_break) if entry_caps else []),
     }
 
 
@@ -197,9 +202,17 @@ def serve_collection(h) -> None:
         rarity = _rarity_of(basis, card_id)
         entry_caps = (caps or {}).get(rarity) if rarity else None
         state = resolve_card_state(card_id, entries.get(card_id), default, entry_caps)
-        cards.append(_editor_card(card, state, entry_caps, owned_ids=owned_ids,
-                                  trial_ids=trial_ids, ladder_cards=ladder_cards,
-                                  art_dir=h.art_dir))
+        cards.append(
+            _editor_card(
+                card,
+                state,
+                entry_caps,
+                owned_ids=owned_ids,
+                trial_ids=trial_ids,
+                ladder_cards=ladder_cards,
+                art_dir=h.art_dir,
+            )
+        )
 
     h.reply_json(
         200,
@@ -228,9 +241,7 @@ def serve_collection(h) -> None:
             # the page has to name it in a sentence and the alternative is
             # the page inventing the number, which goes stale the moment a
             # card ships.
-            "power_up_reachable_roster_size": (
-                len(basis.cards) if basis is not None else None
-            ),
+            "power_up_reachable_roster_size": (len(basis.cards) if basis is not None else None),
         },
     )
 
@@ -252,16 +263,20 @@ def serve_card_states(h) -> None:
     trial_ids = set(document.get("trial") or [])
     if isinstance(body.get("assumptions"), dict):
         import ondemand  # noqa: PLC0415
+
         try:
             a = ondemand.parse_assumptions(body["assumptions"])
         except (TypeError, ValueError) as exc:
             h.reply_json(400, {"error": f"assumptions: {exc}"})
             return
         document = _override_collection_levels(
-            document, None if a.level == "account" else a.level,
+            document,
+            None if a.level == "account" else a.level,
             None if a.bloom == "account" else a.bloom,
-            keep_higher_level=a.keep_higher, keep_higher_bloom=a.keep_higher,
-            assume_limit_break=None if a.sp_training == "account" else a.sp_training)
+            keep_higher_level=a.keep_higher,
+            keep_higher_bloom=a.keep_higher,
+            assume_limit_break=None if a.sp_training == "account" else a.sp_training,
+        )
     curve, caps_raw = config.read_json(config.CURVE_PATH), config.read_json(config.CAPS_PATH)
     basis = stat_basis_from_mapping(curve) if curve else None
     caps = caps_by_rarity_from_mapping(caps_raw) if caps_raw else None
@@ -269,11 +284,16 @@ def serve_card_states(h) -> None:
     states = {}
     for card_id in ids:
         rarity = _rarity_of(basis, card_id)
-        st = resolve_card_state(card_id, entries.get(card_id), default,
-                                (caps or {}).get(rarity) if rarity else None)
-        states[card_id] = {"level": st.level, "bloom": st.bloom, "limit_break": st.limit_break,
-                           "owned": card_id in owned_ids,
-                           "trial": card_id in trial_ids and card_id not in owned_ids}
+        st = resolve_card_state(
+            card_id, entries.get(card_id), default, (caps or {}).get(rarity) if rarity else None
+        )
+        states[card_id] = {
+            "level": st.level,
+            "bloom": st.bloom,
+            "limit_break": st.limit_break,
+            "owned": card_id in owned_ids,
+            "trial": card_id in trial_ids and card_id not in owned_ids,
+        }
     h.reply_json(200, {"states": states})
 
 
@@ -288,9 +308,7 @@ def save_collection(h) -> None:
     except (ValueError, UnicodeDecodeError) as exc:
         h.reply_json(400, {"error": f"malformed JSON: {exc}"})
         return
-    if not isinstance(document, dict) or not isinstance(
-        document.get("cards", {}), dict
-    ):
+    if not isinstance(document, dict) or not isinstance(document.get("cards", {}), dict):
         h.reply_json(400, {"error": "a collection document must be an object with a 'cards' object"})
         return
 

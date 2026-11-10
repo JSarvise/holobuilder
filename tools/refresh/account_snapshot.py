@@ -49,30 +49,31 @@ Wire format (`frame`, `unframe`, `seal`, `unseal` below):
     envelope    [hdr:2 LE][compress:1][keylen:1][nonce][AES-128-CBC(PKCS7)],  hdr == keylen+2
     key = MD5(SEED), IV = MD5(SEED || nonce)
 """
+
 from __future__ import annotations
 
 import argparse
 import base64
+import datetime
 import hashlib
 import json
-import atomic_io
 import os
 import re
 import socket
 import ssl
 import struct
-import datetime
-import time
 import sys
+import time
 import uuid
 import zlib
 from pathlib import Path
 
-from Crypto.Cipher import AES
+import atomic_io
 import h2.config
 import h2.connection
 import h2.events
 import h2.exceptions
+from Crypto.Cipher import AES
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
@@ -84,7 +85,8 @@ CRED_FILE = STATE / "account_credential.json"
 PROTO_DIR = paths.PROTOBUFS  # vendored from symphytum-server (MIT); see its README
 
 import game_keys  # noqa: E402
-SEED = game_keys.grpc_seed(required=False)          # None: looked up when used
+
+SEED = game_keys.grpc_seed(required=False)  # None: looked up when used
 
 
 def _seed(seed: bytes | None = None) -> bytes:
@@ -92,6 +94,7 @@ def _seed(seed: bytes | None = None) -> bytes:
     if seed is not None:
         return seed
     return SEED if SEED is not None else game_keys.grpc_seed()
+
 
 # Read-only, enforced here rather than by the account.
 #
@@ -139,46 +142,48 @@ def _seed(seed: bytes | None = None) -> bytes:
 #   server-evaluated 5-card deck lists (max-power and max-score-rating) and persists NOTHING — no
 #   `number` write slot, unlike SaveDeck. A pure read despite taking a rich request, exactly like
 #   GetDraftDeckInfo. Its mutating siblings (SaveDeck) stay OFF the list. Exact literal, never a prefix.
-ALLOWED = frozenset({
-    "/rpc.api.Master/Get",
-    "/rpc.api.Auth/Login",
-    "/rpc.api.User/Get",
-    "/rpc.api.Card/GetParameters",
-    "/rpc.api.Live/GetDeck",
-    "/rpc.api.Live/GetDraftDeckInfo",
-    "/rpc.api.Live/GetDeckCandidateCardParameters",
-    "/rpc.api.Live/ListRecommendCharacterDeck",
-    "/rpc.api.System/GetSystemInfo",  # read-only, unauth, single-method service; server-info probe
-    "/rpc.api.ParkQuest/GetLiveFixedCharacterDeck",  # quest deck evaluation read; exact literal, never a prefix
-    # the open events and their bonus tables. merged.proto:
-    # `rpc ListEventInfo (.google.protobuf.Empty) returns (EventListEventInfoResponse)` -- an
-    # empty request, a pure read. Its sibling ListEventInfoForPortal stays off; exact literal.
-    "/rpc.api.Event/ListEventInfo",
-    # event cutoffs: the ranking BORDERS -- one rank_info per reward-tier boundary, plus the caller's own rank. merged.proto:
-    # `ListMarathonScoreRankingGrade (…{marathon_chapter_id}) returns (…{MarathonScoreRankingResult})`
-    # and the two Score-Challenge twins (total / per song, `{marathon_chapter_id[, music_id]}`).
-    # Pure reads; the Marathon service's one mutator is `ReadTop` (marks the top screen seen) and it
-    # stays OFF, as do the *Top / *AroundSelf lists nothing needs yet. Exact literals, never a prefix.
-    "/rpc.api.Marathon/ListMarathonScoreRankingGrade",
-    "/rpc.api.Marathon/ListTotalMusicHighestScoreRankingGrade",
-    "/rpc.api.Marathon/ListMusicHighestScoreRankingGrade",
-    # the event tracker: the chapter's TOP-100 board. merged.proto: `ListMarathonScoreRankingTop
-    # (…{marathon_chapter_id}) returns (…{MarathonScoreRankingResult})` and its Score-Challenge
-    # twin `ListTotalMusicHighestScoreRankingTop` -- same request as the Grade reads, pure reads.
-    # ReadTop and the *AroundSelf lists stay OFF. Exact literals, never a prefix.
-    "/rpc.api.Marathon/ListMarathonScoreRankingTop",
-    "/rpc.api.Marathon/ListTotalMusicHighestScoreRankingTop",
-    # a chapter's SONG ranking, top 100: merged.proto
-    # `ListMusicHighestScoreRankingTop ({marathon_chapter_id=1, music_id=2})`, the Grade read's
-    # song twin; same result message as the two above. Pure read.
-    "/rpc.api.Marathon/ListMusicHighestScoreRankingTop",
-    # event history: the account's own result per chapter.
-    # merged.proto: `rpc Top (MarathonTopRequest{marathon_id}) returns (MarathonTopResponse{
-    # marathon{chapters[{id, character_id, score, ...}], ...}, ranking_result{chapters[{
-    # marathon_chapter_id, marathon_score_rank, ...}]}})` -- a pure read; the screen-seen mark is
-    # its sibling `ReadTop`, which stays OFF. Exact literal, never a prefix.
-    "/rpc.api.Marathon/Top",
-})
+ALLOWED = frozenset(
+    {
+        "/rpc.api.Master/Get",
+        "/rpc.api.Auth/Login",
+        "/rpc.api.User/Get",
+        "/rpc.api.Card/GetParameters",
+        "/rpc.api.Live/GetDeck",
+        "/rpc.api.Live/GetDraftDeckInfo",
+        "/rpc.api.Live/GetDeckCandidateCardParameters",
+        "/rpc.api.Live/ListRecommendCharacterDeck",
+        "/rpc.api.System/GetSystemInfo",  # read-only, unauth, single-method service; server-info probe
+        "/rpc.api.ParkQuest/GetLiveFixedCharacterDeck",  # quest deck evaluation read; exact literal, never a prefix
+        # the open events and their bonus tables. merged.proto:
+        # `rpc ListEventInfo (.google.protobuf.Empty) returns (EventListEventInfoResponse)` -- an
+        # empty request, a pure read. Its sibling ListEventInfoForPortal stays off; exact literal.
+        "/rpc.api.Event/ListEventInfo",
+        # event cutoffs: the ranking BORDERS -- one rank_info per reward-tier boundary, plus the caller's own rank. merged.proto:
+        # `ListMarathonScoreRankingGrade (…{marathon_chapter_id}) returns (…{MarathonScoreRankingResult})`
+        # and the two Score-Challenge twins (total / per song, `{marathon_chapter_id[, music_id]}`).
+        # Pure reads; the Marathon service's one mutator is `ReadTop` (marks the top screen seen) and it
+        # stays OFF, as do the *Top / *AroundSelf lists nothing needs yet. Exact literals, never a prefix.
+        "/rpc.api.Marathon/ListMarathonScoreRankingGrade",
+        "/rpc.api.Marathon/ListTotalMusicHighestScoreRankingGrade",
+        "/rpc.api.Marathon/ListMusicHighestScoreRankingGrade",
+        # the event tracker: the chapter's TOP-100 board. merged.proto: `ListMarathonScoreRankingTop
+        # (…{marathon_chapter_id}) returns (…{MarathonScoreRankingResult})` and its Score-Challenge
+        # twin `ListTotalMusicHighestScoreRankingTop` -- same request as the Grade reads, pure reads.
+        # ReadTop and the *AroundSelf lists stay OFF. Exact literals, never a prefix.
+        "/rpc.api.Marathon/ListMarathonScoreRankingTop",
+        "/rpc.api.Marathon/ListTotalMusicHighestScoreRankingTop",
+        # a chapter's SONG ranking, top 100: merged.proto
+        # `ListMusicHighestScoreRankingTop ({marathon_chapter_id=1, music_id=2})`, the Grade read's
+        # song twin; same result message as the two above. Pure read.
+        "/rpc.api.Marathon/ListMusicHighestScoreRankingTop",
+        # event history: the account's own result per chapter.
+        # merged.proto: `rpc Top (MarathonTopRequest{marathon_id}) returns (MarathonTopResponse{
+        # marathon{chapters[{id, character_id, score, ...}], ...}, ranking_result{chapters[{
+        # marathon_chapter_id, marathon_score_rank, ...}]}})` -- a pure read; the screen-seen mark is
+        # its sibling `ReadTop`, which stays OFF. Exact literal, never a prefix.
+        "/rpc.api.Marathon/Top",
+    }
+)
 
 # GUEST-ONLY. NOT read-only, therefore NOT in ALLOWED and never reachable for the user's own
 # account:
@@ -195,9 +200,11 @@ ALLOWED = frozenset({
 # project's disposable GUEST accounts (state/ranking_accounts.json) may call
 # it, through `guest_home_login`, which checks the account name and host. Its sibling
 # Home/AgreeRule stays off. Exact literal, never a prefix.
-GUEST_ONLY_ALLOWED = frozenset({
-    "/rpc.api.Home/Login",
-})
+GUEST_ONLY_ALLOWED = frozenset(
+    {
+        "/rpc.api.Home/Login",
+    }
+)
 
 # Fallback only. The real value is fetched from Master/Get at startup, exactly as the client
 # does (t+0.49s in the capture, before it logs in). Kept so the tool still runs if that call
@@ -248,24 +255,52 @@ WIRE_HEADERS = [
 # order is one no real client makes. A header not listed here
 # goes just before the Steam ID.
 CLIENT_ORDER = [
-    "user-agent", "te", "grpc-accept-encoding", "x-app-auth-token", "x-app-master-version",
-    "x-app-request-id", "x-app-version", "x-app-device-name", "x-app-os-version",
-    "x-app-lang-type", "x-app-os-type", "x-app-store-type", "x-app-bundle-id", "x-app-cpu",
-    "x-app-gpu", "x-app-operating-system-family", "x-app-device-type",
-    "x-app-graphics-device-type", "x-app-graphics-device-version",
-    "x-app-graphics-device-vendor-id", "x-app-graphics-device-memory-size",
-    "x-app-graphics-shader-level", "x-app-processor-model", "x-app-processor-count",
-    "x-app-system-memory-size", "x-app-screen-dpi", "x-app-screen-height", "x-app-screen-width",
-    "x-app-steam-id", "grpc-timeout", "content-type",
+    "user-agent",
+    "te",
+    "grpc-accept-encoding",
+    "x-app-auth-token",
+    "x-app-master-version",
+    "x-app-request-id",
+    "x-app-version",
+    "x-app-device-name",
+    "x-app-os-version",
+    "x-app-lang-type",
+    "x-app-os-type",
+    "x-app-store-type",
+    "x-app-bundle-id",
+    "x-app-cpu",
+    "x-app-gpu",
+    "x-app-operating-system-family",
+    "x-app-device-type",
+    "x-app-graphics-device-type",
+    "x-app-graphics-device-version",
+    "x-app-graphics-device-vendor-id",
+    "x-app-graphics-device-memory-size",
+    "x-app-graphics-shader-level",
+    "x-app-processor-model",
+    "x-app-processor-count",
+    "x-app-system-memory-size",
+    "x-app-screen-dpi",
+    "x-app-screen-height",
+    "x-app-screen-width",
+    "x-app-steam-id",
+    "grpc-timeout",
+    "content-type",
 ]
 # What the client leaves out, per call (from the same captures). The two calls before login
 # carry no Steam ID; those two, the login, User/Get and the private-room poll (never called
 # here) carry no request id. Every other call carries both -- a ranking read without a fresh
 # request id is answered from the server's cache. `header_check.py` re-measures this on a capture.
 NO_STEAM_ID = frozenset({"/rpc.api.Master/Get", "/rpc.api.System/GetSystemInfo"})
-NO_REQUEST_ID = frozenset({"/rpc.api.Master/Get", "/rpc.api.System/GetSystemInfo",
-                           "/rpc.api.Auth/Login", "/rpc.api.User/Get",
-                           "/rpc.api.MultiGame/CheckInvitedPrivateRoom"})
+NO_REQUEST_ID = frozenset(
+    {
+        "/rpc.api.Master/Get",
+        "/rpc.api.System/GetSystemInfo",
+        "/rpc.api.Auth/Login",
+        "/rpc.api.User/Get",
+        "/rpc.api.MultiGame/CheckInvitedPrivateRoom",
+    }
+)
 
 
 def client_headers(account: str) -> list[tuple[str, str]]:
@@ -277,8 +312,7 @@ def client_headers(account: str) -> list[tuple[str, str]]:
     """
     if account == "main" and PROFILE_FILE.exists():
         prof = json.loads(PROFILE_FILE.read_text("utf8"))
-        return [(k, v) for k, v in prof.get("headers", {}).items()
-                if k.lower() not in PROFILE_BLOCK]
+        return [(k, v) for k, v in prof.get("headers", {}).items() if k.lower() not in PROFILE_BLOCK]
     return list(GENERIC_HEADERS)
 
 
@@ -311,6 +345,7 @@ def app_version() -> str | None:
         found: set[str] = set()
         try:
             import UnityPy
+
             data = os.path.join(paths.game_root(), "hololive-Dreams_Data", "data.unity3d")
             for obj in UnityPy.load(data).objects:
                 if obj.type.name == "PlayerSettings":
@@ -374,7 +409,7 @@ def fields(b: bytes):
             ln, i = read_varint(b, i)
             if i + ln > len(b):
                 raise ValueError("overrun")
-            yield fn, wt, b[i:i + ln]
+            yield fn, wt, b[i : i + ln]
             i += ln
         elif wt == 5:
             i += 4
@@ -404,7 +439,7 @@ def unseal(msg: bytes, seed: bytes | None = None) -> bytes:
         return b""
     seed = _seed(seed)
     nlen = msg[3]
-    nonce, ct = msg[4:4 + nlen], msg[4 + nlen:]
+    nonce, ct = msg[4 : 4 + nlen], msg[4 + nlen :]
     iv = hashlib.md5(seed + nonce).digest()
     pt = AES.new(hashlib.md5(seed).digest(), AES.MODE_CBC, iv).decrypt(ct)
     n = pt[-1]
@@ -420,8 +455,8 @@ def frame(payload: bytes) -> bytes:
 def unframe(data: bytes):
     pos = 0
     while pos + 5 <= len(data):
-        ln = struct.unpack(">I", data[pos + 1:pos + 5])[0]
-        yield data[pos + 5:pos + 5 + ln]
+        ln = struct.unpack(">I", data[pos + 1 : pos + 5])[0]
+        yield data[pos + 5 : pos + 5 + ln]
         pos += 5 + ln
 
 
@@ -444,8 +479,15 @@ def guest_home_login(account: str, host: str, token: str, ident, master_version:
     DATE_CHANGED (see GUEST_ONLY_ALLOWED). Refuses the user's own account outright."""
     if account == "main" or not _guest_ok(account, host):
         raise PermissionError(f"Home/Login is guest-only; refused for account {account!r}")
-    rh, tr, _data = call(host, "/rpc.api.Home/Login", frame(b""), token=token, ident=ident,
-                         master_version=master_version, _guest_account=account)
+    rh, tr, _data = call(
+        host,
+        "/rpc.api.Home/Login",
+        frame(b""),
+        token=token,
+        ident=ident,
+        master_version=master_version,
+        _guest_account=account,
+    )
     st = tr.get("grpc-status", rh.get("grpc-status"))
     if st not in (None, "0"):
         raise RuntimeError(f"Home/Login rejected: grpc-status {st} {tr.get('grpc-message', '')}")
@@ -507,7 +549,7 @@ def _request_headers(host: str, path: str, *, token: str | None, ident, master_v
         hdrs = [(k, v) for k, v in hdrs if k.lower() != "x-app-steam-id"]
     rank = {k: i for i, k in enumerate(CLIENT_ORDER)}
     unknown = rank["x-app-steam-id"] - 0.5
-    hdrs.sort(key=lambda kv: rank.get(kv[0].lower(), unknown))      # stable: unknowns keep theirs
+    hdrs.sort(key=lambda kv: rank.get(kv[0].lower(), unknown))  # stable: unknowns keep theirs
     return [(":method", "POST"), (":scheme", "https"), (":authority", host), (":path", path)] + hdrs
 
 
@@ -566,7 +608,7 @@ class Channel:
     def __init__(self, host: str, *, timeout: float = 30, guest_account: str | None = None):
         self.host, self.timeout, self.guest_account = host, timeout, guest_account
         self.sock = self.conn = None
-        self.used_at = 0.0        # last call or ping on the open connection (time.time())
+        self.used_at = 0.0  # last call or ping on the open connection (time.time())
 
     def ping(self, timeout: float = 10) -> bool:
         """An HTTP/2 PING on the open connection, waiting for its ACK. False (and the
@@ -583,8 +625,7 @@ class Channel:
                 chunk = self.sock.recv(65536)
                 if not chunk:
                     raise ConnectionError("closed")
-                acked = any(isinstance(ev, h2.events.PingAckReceived)
-                            for ev in self.conn.receive_data(chunk))
+                acked = any(isinstance(ev, h2.events.PingAckReceived) for ev in self.conn.receive_data(chunk))
                 out = self.conn.data_to_send()
                 if out:
                     self.sock.sendall(out)
@@ -604,8 +645,15 @@ class Channel:
                 pass
         self.sock = self.conn = None
 
-    def call(self, path: str, body: bytes, *, token: str | None = None, ident=None,
-             master_version: str | None = None):
+    def call(
+        self,
+        path: str,
+        body: bytes,
+        *,
+        token: str | None = None,
+        ident=None,
+        master_version: str | None = None,
+    ):
         _check_allowed(path, self.host, self.guest_account)
         for attempt in (0, 1):
             fresh = self.sock is None
@@ -613,8 +661,12 @@ class Channel:
                 if fresh:
                     self.sock, self.conn = _open_h2(self.host, self.timeout)
                 sid = self.conn.get_next_available_stream_id()
-                self.conn.send_headers(sid, _request_headers(
-                    self.host, path, token=token, ident=ident, master_version=master_version))
+                self.conn.send_headers(
+                    sid,
+                    _request_headers(
+                        self.host, path, token=token, ident=ident, master_version=master_version
+                    ),
+                )
                 self.conn.send_data(sid, body, end_stream=True)
                 self.sock.sendall(self.conn.data_to_send())
                 out = _exchange(self.sock, self.conn, sid)
@@ -627,9 +679,17 @@ class Channel:
         raise AssertionError("unreachable")
 
 
-def call(host: str, path: str, body: bytes, *, token: str | None = None,
-         ident: list[tuple[str, str]] | None = None, master_version: str | None = None,
-         timeout: int = 30, _guest_account: str | None = None):
+def call(
+    host: str,
+    path: str,
+    body: bytes,
+    *,
+    token: str | None = None,
+    ident: list[tuple[str, str]] | None = None,
+    master_version: str | None = None,
+    timeout: int = 30,
+    _guest_account: str | None = None,
+):
     _check_allowed(path, host, _guest_account)
 
     ctx = ssl.create_default_context()
@@ -720,9 +780,12 @@ def master_get(host: str, ident) -> bytes:
             rh, tr, data = call(host, "/rpc.api.Master/Get", frame(b""), ident=ident)
             st = tr.get("grpc-status", rh.get("grpc-status"))
             if st in (None, "0"):
-                CLIENT_VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)   # a fresh clone
-                atomic_io.write_text(CLIENT_VERSION_FILE, json.dumps(
-                    {"version": current, "source": "accepted on Master/Get"}), "utf8")
+                CLIENT_VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)  # a fresh clone
+                atomic_io.write_text(
+                    CLIENT_VERSION_FILE,
+                    json.dumps({"version": current, "source": "accepted on Master/Get"}),
+                    "utf8",
+                )
             else:
                 if before is None:
                     os.environ.pop("HOLODREAMS_APP_VERSION", None)
@@ -734,7 +797,8 @@ def master_get(host: str, ident) -> bytes:
             raise RuntimeError(
                 f"the game refused client version {app_version() or sent} (OUTDATED_APP): the game "
                 "has updated. On the publisher's PC, run tools/app/publish.py from the updated "
-                "install; the desktop app picks the new version up with its next content sync.")
+                "install; the desktop app picks the new version up with its next content sync."
+            )
         if "IN_MAINTENANCE" in msg:
             raise GameMaintenance(f"Master/Get rejected: grpc-status {st} {msg}")
         raise RuntimeError(f"Master/Get rejected: grpc-status {st} {msg}")
@@ -742,8 +806,13 @@ def master_get(host: str, ident) -> bytes:
 
 
 def login(host: str, credential: bytes, ident, master_version: str) -> str:
-    rh, tr, data = call(host, "/rpc.api.Auth/Login", frame(seal(pb_bytes_field(1, credential))),
-                        ident=ident, master_version=master_version)
+    rh, tr, data = call(
+        host,
+        "/rpc.api.Auth/Login",
+        frame(seal(pb_bytes_field(1, credential))),
+        ident=ident,
+        master_version=master_version,
+    )
     st = tr.get("grpc-status", rh.get("grpc-status"))
     if st not in (None, "0"):
         raise RuntimeError(f"login rejected: grpc-status {st} {tr.get('grpc-message', '')}")
@@ -768,12 +837,17 @@ def refresh_event_info(host: str, token: str, ident, master_version: str) -> Pat
     the optimiser's Event Pt / Event Song Score modes need); `marathon_bonus.py` reads the file
     the same way it reads a capture. The optimiser must always work with the CURRENT event, so
     the refresh fetches it."""
-    rh, tr, data = call(host, "/rpc.api.Event/ListEventInfo", frame(b""), token=token,
-                        ident=ident, master_version=master_version)
+    rh, tr, data = call(
+        host,
+        "/rpc.api.Event/ListEventInfo",
+        frame(b""),
+        token=token,
+        ident=ident,
+        master_version=master_version,
+    )
     st = tr.get("grpc-status", rh.get("grpc-status"))
     if st not in (None, "0"):
-        raise RuntimeError(f"Event/ListEventInfo rejected: grpc-status {st} "
-                           f"{tr.get('grpc-message', '')}")
+        raise RuntimeError(f"Event/ListEventInfo rejected: grpc-status {st} {tr.get('grpc-message', '')}")
     for msg in unframe(data):
         if msg:
             atomic_io.write_bytes(EVENT_INFO_PATH, unseal(msg))
@@ -783,8 +857,9 @@ def refresh_event_info(host: str, token: str, ident, master_version: str) -> Pat
 
 
 def fetch_userdata(host: str, token: str, ident, master_version: str) -> bytes:
-    rh, tr, data = call(host, "/rpc.api.User/Get", frame(b""), token=token,
-                        ident=ident, master_version=master_version)
+    rh, tr, data = call(
+        host, "/rpc.api.User/Get", frame(b""), token=token, ident=ident, master_version=master_version
+    )
     st = tr.get("grpc-status", rh.get("grpc-status"))
     if st not in (None, "0"):
         raise RuntimeError(f"User/Get rejected: grpc-status {st} {tr.get('grpc-message', '')}")
@@ -817,20 +892,26 @@ def write_park_state(blob: bytes, account: str) -> None:
     atomic_io.write_text(DUMPS / name, json.dumps(state, indent=1, ensure_ascii=False), "utf8")
     print(f"park      : {len(state['random'])} areas -> {name}")
     import park_free_chat  # noqa: PLC0415
+
     keep = park_free_chat.catalogue_ids(DUMPS / "park_export" / "park_spots.json")
-    log = park_free_chat.update_log(DUMPS / f"park_free_chat_log{suffix}.json", free_chat,
-                                    state["_captured_at"], keep)
-    print(f"free chat : {len(free_chat['picks'])} sites picked, "
-          f"{sum(1 for c in log['chats'].values() if c['read'])} chats known read "
-          f"-> park_free_chat_log{suffix}.json")
+    log = park_free_chat.update_log(
+        DUMPS / f"park_free_chat_log{suffix}.json", free_chat, state["_captured_at"], keep
+    )
+    print(
+        f"free chat : {len(free_chat['picks'])} sites picked, "
+        f"{sum(1 for c in log['chats'].values() if c['read'])} chats known read "
+        f"-> park_free_chat_log{suffix}.json"
+    )
 
 
 def load_userdata_schema() -> dict[int, str]:
     p = PROTO_DIR / "rpc" / "api" / "common" / "user_data.gen.proto"
     if not p.exists():
         return {}
-    return {int(m.group(2)): m.group(1) for m in
-            re.finditer(r"^\s*(?:repeated\s+)?\S+\s+(\w+)\s*=\s*(\d+);", p.read_text("utf8"), re.M)}
+    return {
+        int(m.group(2)): m.group(1)
+        for m in re.finditer(r"^\s*(?:repeated\s+)?\S+\s+(\w+)\s*=\s*(\d+);", p.read_text("utf8"), re.M)
+    }
 
 
 def locate_userdata(blob: bytes, schema: dict[int, str], depth: int = 0):
@@ -914,8 +995,7 @@ def load_level_curves() -> tuple[dict, dict]:
     cf, lf = holo / "main_Card.json", holo / "main_CardLevel.json"
     if not (cf.exists() and lf.exists()):
         return {}, {}
-    groups = {r["id"]: r["data"]["cardLevelGroupId"]
-              for r in json.loads(cf.read_text("utf8"))}
+    groups = {r["id"]: r["data"]["cardLevelGroupId"] for r in json.loads(cf.read_text("utf8"))}
     curves: dict[str, list[tuple[int, int]]] = {}
     for r in json.loads(lf.read_text("utf8")):
         d = r["data"]
@@ -928,6 +1008,7 @@ def load_level_curves() -> tuple[dict, dict]:
 def resolve_levels(snap: dict) -> int:
     """Annotate each card with `level` derived from exp. Returns how many resolved."""
     import bisect
+
     groups, curves = load_level_curves()
     if not groups:
         return 0
@@ -998,14 +1079,14 @@ def diff_against_collection(snap: dict) -> None:
     lvl = [c["level"] for c in cards if "level" in c]
     if lvl:
         import collections
+
         at1 = sum(1 for v in lvl if v == 1)
         print(f"\n  levels resolved via CardLevel: {len(lvl)}/{len(cards)}")
         print(f"    still level 1                         : {at1:>3} / {len(cards)}")
         print(f"    above level 1                         : {len(lvl) - at1:>3} / {len(cards)}")
         print(f"    highest level owned                   : {max(lvl)}")
         top = collections.Counter(lvl).most_common(3)
-        print("    most common levels                    : "
-              + ", ".join(f"lvl {v} x{n}" for v, n in top))
+        print("    most common levels                    : " + ", ".join(f"lvl {v} x{n}" for v, n in top))
     else:
         print("\n  NOTE: levels not resolved -- dumps/holodori/main_Card.json and")
         print("        main_CardLevel.json are needed to turn exp into a level.")
@@ -1070,12 +1151,17 @@ def refresh_card_params(host: str, token: str, ident, master_version: str) -> No
     technique=4, sense=5 }` -- so the studio's own schema NAMES the fields:
     stat3/4/5 = Performance/Technique/Sense.
     """
-    rh, tr, data = call(host, "/rpc.api.Card/GetParameters", frame(b""), token=token,
-                        ident=ident, master_version=master_version)
+    rh, tr, data = call(
+        host,
+        "/rpc.api.Card/GetParameters",
+        frame(b""),
+        token=token,
+        ident=ident,
+        master_version=master_version,
+    )
     st = tr.get("grpc-status", rh.get("grpc-status"))
     if st not in (None, "0"):
-        raise RuntimeError(f"Card/GetParameters rejected: grpc-status {st} "
-                           f"{tr.get('grpc-message', '')}")
+        raise RuntimeError(f"Card/GetParameters rejected: grpc-status {st} {tr.get('grpc-message', '')}")
     rows = []
     for msg in unframe(data):
         if not msg:
@@ -1092,14 +1178,18 @@ def refresh_card_params(host: str, token: str, ident, master_version: str) -> No
             parts = cid.split("-")
             s3, s4, s5 = int(rec.get(3, 0)), int(rec.get(4, 0)), int(rec.get(5, 0))
             total = int(rec.get(2, 0))
-            rows.append({
-                "id": cid,
-                "card_num": parts[1] if len(parts) > 1 else "",
-                "rarity": parts[3] if len(parts) > 3 else "",
-                "total": total,
-                "stat3": s3, "stat4": s4, "stat5": s5,
-                "total_matches_sum": total == s3 + s4 + s5,
-            })
+            rows.append(
+                {
+                    "id": cid,
+                    "card_num": parts[1] if len(parts) > 1 else "",
+                    "rarity": parts[3] if len(parts) > 3 else "",
+                    "total": total,
+                    "stat3": s3,
+                    "stat4": s4,
+                    "stat5": s5,
+                    "total_matches_sum": total == s3 + s4 + s5,
+                }
+            )
     if not rows:
         raise RuntimeError("Card/GetParameters returned no parameter_infos")
 
@@ -1110,8 +1200,10 @@ def refresh_card_params(host: str, token: str, ident, master_version: str) -> No
     bad = [r["id"] for r in rows if not r["total_matches_sum"]]
     print(f"\ncard params: {out}")
     print(f"            {prev} -> {len(rows)} cards")
-    print(f"            total == stat3+stat4+stat5 for {len(rows) - len(bad)}/{len(rows)}"
-          + (f"  ! mismatches: {bad[:3]}" if bad else ""))
+    print(
+        f"            total == stat3+stat4+stat5 for {len(rows) - len(bad)}/{len(rows)}"
+        + (f"  ! mismatches: {bad[:3]}" if bad else "")
+    )
 
 
 def refresh_board_state(snap: dict) -> None:
@@ -1164,16 +1256,19 @@ def refresh_board_state(snap: dict) -> None:
     if prev and not backup.exists():
         atomic_io.write_text(backup, json.dumps(prev, indent=1, ensure_ascii=False), "utf8")
 
-    atomic_io.write_text(path, json.dumps(dict(sorted(out_doc.items())), indent=1,
-                               ensure_ascii=False), "utf8")
+    atomic_io.write_text(
+        path, json.dumps(dict(sorted(out_doc.items())), indent=1, ensure_ascii=False), "utf8"
+    )
 
     def tot(d, key):
         return sum(len(v.get(key) or ()) for v in d.values())
 
     print(f"\nboard state: {path}")
-    print(f"            characters {len(prev)} -> {len(out_doc)}; "
-          f"nodes {tot(prev, 'nodes')} -> {tot(out_doc, 'nodes')}; "
-          f"slots {tot(prev, 'slots')} -> {tot(out_doc, 'slots')}")
+    print(
+        f"            characters {len(prev)} -> {len(out_doc)}; "
+        f"nodes {tot(prev, 'nodes')} -> {tot(out_doc, 'nodes')}; "
+        f"slots {tot(prev, 'slots')} -> {tot(out_doc, 'slots')}"
+    )
     print("            now run build_board.py to regenerate dumps/board.json")
 
 
@@ -1192,8 +1287,7 @@ def merge_collection(snap: dict) -> None:
     `data/cards.json` is never touched.
     """
     state = STATE / "collection.json"
-    cur = json.loads(state.read_text("utf8")) if state.exists() else {
-        "schema_version": "collection-1"}
+    cur = json.loads(state.read_text("utf8")) if state.exists() else {"schema_version": "collection-1"}
 
     DUMPS.mkdir(exist_ok=True)
     # Once only -- see refresh_board_state. Re-backing-up on every run replaces the pre-tool
@@ -1246,12 +1340,13 @@ def merge_collection(snap: dict) -> None:
     print(f"\nmerged    : {state}")
     if state.exists():
         print(f"            backup -> {backup}")
-    print(f"            cards {before_n} -> {len(entries)}; "
-          f"card_default {before_def!r} -> 'unknown'")
+    print(f"            cards {before_n} -> {len(entries)}; card_default {before_def!r} -> 'unknown'")
     if posters_note:
         print(f"            {posters_note} (the account's own user_poster_list count)")
-    print(f"            preserved untouched: {', '.join(k for k in preserved if k != 'player') or '(nothing else present)'}"
-          + ("; player.level / power_up_permyriad kept" if "player" in preserved else ""))
+    print(
+        f"            preserved untouched: {', '.join(k for k in preserved if k != 'player') or '(nothing else present)'}"
+        + ("; player.level / power_up_permyriad kept" if "player" in preserved else "")
+    )
     print("            data/cards.json and data/owned.json not touched.")
 
 
@@ -1269,17 +1364,26 @@ def import_from_localstore(path: str, host: str = "us.game-hololive-dreams.com")
     16 means the account lives in another region -- rerun with --host jp or --host as.
     """
     raw = Path(path).read_bytes()
-    cred = raw[3:] if raw[:3] == b"\xef\xbb\xbf" else raw           # strip a UTF-8 BOM if present
+    cred = raw[3:] if raw[:3] == b"\xef\xbb\xbf" else raw  # strip a UTF-8 BOM if present
     if not (200 <= len(cred) <= 300):
-        sys.exit(f"unexpected credential length {len(cred)} B (expected ~255) -- refusing to "
-                 f"write a guess; is {path} really the credential file?")
+        sys.exit(
+            f"unexpected credential length {len(cred)} B (expected ~255) -- refusing to "
+            f"write a guess; is {path} really the credential file?"
+        )
     STATE.mkdir(exist_ok=True)
-    atomic_io.write_text(CRED_FILE, json.dumps({
-        "host": host,
-        "credential_b64": base64.b64encode(cred).decode(),
-        "source": f"extracted from game LocalLow {os.path.basename(path)} (BOM-stripped)",
-        "_warning": "This IS the account. Full access, no second factor. state/ is gitignored.",
-    }, indent=1), "utf8")
+    atomic_io.write_text(
+        CRED_FILE,
+        json.dumps(
+            {
+                "host": host,
+                "credential_b64": base64.b64encode(cred).decode(),
+                "source": f"extracted from game LocalLow {os.path.basename(path)} (BOM-stripped)",
+                "_warning": "This IS the account. Full access, no second factor. state/ is gitignored.",
+            },
+            indent=1,
+        ),
+        "utf8",
+    )
     print(f"wrote {CRED_FILE}  (credential {len(cred)} B, host {host}; value not printed)")
 
 
@@ -1314,9 +1418,11 @@ def load_credential(account: str) -> tuple[str, bytes]:
         return os.environ.get("HB_ACCOUNT_HOST", "us.game-hololive-dreams.com"), cred
     if account == "main":
         if not CRED_FILE.exists():
-            raise MissingInput("no account file: set HB_CREDENTIAL_FILE to the game's own account file "
-                               "(refresh.cmd / refresh.sh finds it in the game's LocalLow folder; docs/run-locally.md), "
-                               f"or write {CRED_FILE} with --import-from-localstore")
+            raise MissingInput(
+                "no account file: set HB_CREDENTIAL_FILE to the game's own account file "
+                "(refresh.cmd / refresh.sh finds it in the game's LocalLow folder; docs/run-locally.md), "
+                f"or write {CRED_FILE} with --import-from-localstore"
+            )
         d = json.loads(CRED_FILE.read_text("utf8"))
     else:
         d = json.loads((STATE / "ranking_accounts.json").read_text("utf8"))[account]
@@ -1331,21 +1437,40 @@ def main() -> None:
     ap.add_argument("--account", default="main", help="'main', or a guest region key (us/jp/as)")
     ap.add_argument("--snapshot", action="store_true", help="log in and fetch User/Get")
     ap.add_argument("--diff", action="store_true", help="compare against state/collection.json")
-    ap.add_argument("--import-from-localstore", metavar="FILE",
-                    help="lift the credential from the game's LocalLow store")
-    ap.add_argument("--host", default="us.game-hololive-dreams.com",
-                    help="API region host (us/jp/as .game-hololive-dreams.com)")
+    ap.add_argument(
+        "--import-from-localstore", metavar="FILE", help="lift the credential from the game's LocalLow store"
+    )
+    ap.add_argument(
+        "--host",
+        default="us.game-hololive-dreams.com",
+        help="API region host (us/jp/as .game-hololive-dreams.com)",
+    )
     ap.add_argument("--dry-run", action="store_true", help="print what would be sent; open no socket")
-    ap.add_argument("--propose-collection", action="store_true",
-                    help="write a CANDIDATE collection.json to dumps/ for the owner to review")
-    ap.add_argument("--merge-collection", action="store_true",
-                    help="MERGE cards into state/collection.json (backs up first, keeps 'player')")
-    ap.add_argument("--refresh-events", action="store_true",
-                    help="also fetch Event/ListEventInfo (the open event's bonus tables)")
-    ap.add_argument("--refresh-card-params", action="store_true",
-                    help="re-fetch Card/GetParameters into dumps/card_params.json (mode B input)")
-    ap.add_argument("--refresh-board-state", action="store_true",
-                    help="write dumps/board_state.json from the snapshot (build_board.py input)")
+    ap.add_argument(
+        "--propose-collection",
+        action="store_true",
+        help="write a CANDIDATE collection.json to dumps/ for the owner to review",
+    )
+    ap.add_argument(
+        "--merge-collection",
+        action="store_true",
+        help="MERGE cards into state/collection.json (backs up first, keeps 'player')",
+    )
+    ap.add_argument(
+        "--refresh-events",
+        action="store_true",
+        help="also fetch Event/ListEventInfo (the open event's bonus tables)",
+    )
+    ap.add_argument(
+        "--refresh-card-params",
+        action="store_true",
+        help="re-fetch Card/GetParameters into dumps/card_params.json (mode B input)",
+    )
+    ap.add_argument(
+        "--refresh-board-state",
+        action="store_true",
+        help="write dumps/board_state.json from the snapshot (build_board.py input)",
+    )
     ap.add_argument("--out", default=None, help="where to write the snapshot JSON")
     args = ap.parse_args()
 
@@ -1357,8 +1482,11 @@ def main() -> None:
 
     host, credential = load_credential(args.account)
     ident = client_headers(args.account)
-    profile = "this PC's client profile" if (args.account == "main" and PROFILE_FILE.exists()) \
+    profile = (
+        "this PC's client profile"
+        if (args.account == "main" and PROFILE_FILE.exists())
         else "generic (no store claimed)"
+    )
 
     print(f"host      : {host}")
     print(f"account   : {args.account} (credential {len(credential)} B, not printed)")
@@ -1367,9 +1495,11 @@ def main() -> None:
 
     if args.dry_run:
         print("\n--dry-run: no socket will be opened. Requests that would be sent:")
-        for path, what in (("/rpc.api.Master/Get", "no auth, no master-version"),
-                           ("/rpc.api.Auth/Login", "credential in sealed envelope"),
-                           ("/rpc.api.User/Get", "empty body + auth token")):
+        for path, what in (
+            ("/rpc.api.Master/Get", "no auth, no master-version"),
+            ("/rpc.api.Auth/Login", "credential in sealed envelope"),
+            ("/rpc.api.User/Get", "empty body + auth token"),
+        ):
             print(f"    POST https://{host}{path}   ({what})")
         print("\n  identity headers (values shown; none are secret):")
         for k, v in ident:
@@ -1380,8 +1510,10 @@ def main() -> None:
 
     master_version = fetch_master_version(host, ident)
     stale = master_version != MASTER_VERSION_FALLBACK
-    print(f"master    : {master_version[:16]}...  "
-          f"({'CHANGED since the capture' if stale else 'same as the capture'})")
+    print(
+        f"master    : {master_version[:16]}...  "
+        f"({'CHANGED since the capture' if stale else 'same as the capture'})"
+    )
 
     token = login(host, credential, ident, master_version)
     print(f"login     : OK, token {len(token)} chars (not printed)")
@@ -1391,24 +1523,38 @@ def main() -> None:
     snap = decode_snapshot(blob)
     write_park_state(blob, args.account)
     resolved = resolve_levels(snap)
-    print(f"decoded   : {snap['_collections']} populated user_* collections"
-          + (f"; {resolved} card levels resolved from exp" if resolved else ""))
-    for key in ("cards", "characters", "boards", "board_points", "decks",
-                "deck_positions", "posters", "emblems"):
+    print(
+        f"decoded   : {snap['_collections']} populated user_* collections"
+        + (f"; {resolved} card levels resolved from exp" if resolved else "")
+    )
+    for key in (
+        "cards",
+        "characters",
+        "boards",
+        "board_points",
+        "decks",
+        "deck_positions",
+        "posters",
+        "emblems",
+    ):
         if key in snap:
             print(f"    {len(snap[key]):>4}  {key}")
     if "posters" in snap:
         pc = len(snap["posters"])
-        print(f"    -> poster count = {pc} (drives Memory Bonus; state/collection.json "
-              f"player.posters follows it on --merge-collection)")
+        print(
+            f"    -> poster count = {pc} (drives Memory Bonus; state/collection.json "
+            f"player.posters follows it on --merge-collection)"
+        )
 
     DUMPS.mkdir(exist_ok=True)
     out = Path(args.out) if args.out else DUMPS / f"account_snapshot_{args.account}.json"
     atomic_io.write_text(out, json.dumps(snap, indent=1, ensure_ascii=False), "utf8")
     print(f"written   : {out}")
-    print("            (dumps/ is gitignored; data/cards.json is never written)"
-          if args.merge_collection else
-          "            (dumps/ is gitignored; cards.json and collection.json untouched)")
+    print(
+        "            (dumps/ is gitignored; data/cards.json is never written)"
+        if args.merge_collection
+        else "            (dumps/ is gitignored; cards.json and collection.json untouched)"
+    )
 
     if args.propose_collection:
         propose_collection(snap)
@@ -1436,8 +1582,10 @@ def main() -> None:
     # Diagnosed rather than raised, because a traceback here reads as "the account
     # broke"; each call is still tried, so one that is answered is not lost.
     refused = []
-    for wanted, rpc, read in ((args.refresh_events, "Event/ListEventInfo", refresh_event_info),
-                              (args.refresh_card_params, "Card/GetParameters", refresh_card_params)):
+    for wanted, rpc, read in (
+        (args.refresh_events, "Event/ListEventInfo", refresh_event_info),
+        (args.refresh_card_params, "Card/GetParameters", refresh_card_params),
+    ):
         if not wanted:
             continue
         try:
@@ -1449,7 +1597,7 @@ def main() -> None:
     if refused:
         from hbuilder import game_day  # noqa: PLC0415
 
-        sys.stdout.flush()      # the report above first: a reader of the merged output sees this last
+        sys.stdout.flush()  # the report above first: a reader of the merged output sees this last
         for line in (
             "",
             f"! {' and '.join(refused)} refused: DATE_CHANGED.",

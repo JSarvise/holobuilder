@@ -31,6 +31,7 @@ leader) hedge against what the screen cannot see.
 Every score returned is the exact leaf's; the models only choose what to score.
 No certificate: "best found", with how much was scored in `stats`.
 """
+
 from __future__ import annotations
 
 import heapq
@@ -38,13 +39,12 @@ import itertools
 import math
 import random
 import time
-from typing import Callable, Sequence
+from collections.abc import Callable, Sequence
 
 import numpy as np
-
+import surrogate
 import two_stage
 from two_stage import _fires
-import surrogate
 
 # added to a required card's screen weight (log units) after each fit: far above
 # any fitted weight, so every set holding all required cards outranks every other
@@ -100,10 +100,13 @@ class LeaderModel:
         # the distinct gates, and each leader's (-1: none): a set's gates fire once each
         self._gate_list = list(dict.fromkeys(g for g in self.gates if g is not None))
         index = {g: k for k, g in enumerate(self._gate_list)}
-        self._gate_of = np.array([index[g] if g is not None else -1 for g in self.gates],
-                                 dtype=np.intp)
-        names = {m: k for k, m in enumerate(dict.fromkeys(
-            [c.member for c in self.cards] + [l.member for l in self.leaders]))}
+        self._gate_of = np.array([index[g] if g is not None else -1 for g in self.gates], dtype=np.intp)
+        names = {
+            m: k
+            for k, m in enumerate(
+                dict.fromkeys([c.member for c in self.cards] + [l.member for l in self.leaders])
+            )
+        }
         self._card_name = [names[c.member] for c in self.cards]
         self._leader_name = np.array([names[l.member] for l in self.leaders], dtype=np.intp)
         self._names = len(names)
@@ -193,8 +196,7 @@ class LeaderModel:
 
     def ranked(self, s: tuple[int, ...]) -> list[int]:
         # one entry per distinct gate, then a 0.0 that a leader with no gate (-1) reads
-        fires = np.array([1.0 if _fires(g, self.cards, s) else 0.0 for g in self._gate_list]
-                         + [0.0])
+        fires = np.array([1.0 if _fires(g, self.cards, s) else 0.0 for g in self._gate_list] + [0.0])
         f = fires[self._gate_of]
         present = np.zeros(self._names, dtype=float)
         present[[self._card_name[i] for i in s]] = 1.0
@@ -424,9 +426,15 @@ def search(
     # round 0's sets, now under their predicted best leaders too
     exact_seconds += take([(li, s) for s in list(best_of_set) for li in leaders_for(s)])
     first_best = top(1)
-    record = {"round": 0, "pairs": len(scored), "sets": len(best_of_set),
-              "best": first_best[0][0] if first_best else None,
-              "exact_seconds": exact_seconds, "fit_seconds": fit_seconds, "scan_seconds": 0.0}
+    record = {
+        "round": 0,
+        "pairs": len(scored),
+        "sets": len(best_of_set),
+        "best": first_best[0][0] if first_best else None,
+        "exact_seconds": exact_seconds,
+        "fit_seconds": fit_seconds,
+        "scan_seconds": 0.0,
+    }
     rounds.append(record)
     if on_round:
         on_round(record)
@@ -459,21 +467,31 @@ def search(
         # (a cheap build-around net).
         head, tail = proposed[:step], proposed[step:]
         if diverse and tail:
-            anchors = [set(s) for s in dict.fromkeys(s for _v, _li, s in top(3 * diverse_anchors))][:diverse_anchors]
+            anchors = [set(s) for s in dict.fromkeys(s for _v, _li, s in top(3 * diverse_anchors))][
+                :diverse_anchors
+            ]
             far = [s for s in tail if all(len(a & set(s)) <= diverse_overlap for a in anchors)]
             head += far[: max(1, step * diverse // 100)]
         proposed = head
-        exact_seconds = take([(li, s) for s in proposed for li in leaders_for(s)
-                              if allowed is None or allowed(li, s)])
+        exact_seconds = take(
+            [(li, s) for s in proposed for li in leaders_for(s) if allowed is None or allowed(li, s)]
+        )
         if neighbours:
             exact_seconds += _take_neighbours(top(neighbours), holomems, take, scored, ok)
         now = [(li, s) for _v, li, s in top(stable_top)]
         changed = now != leaders_top
         leaders_top = now
         unchanged = 0 if changed else unchanged + 1
-        record = {"round": number, "pairs": len(scored), "sets": len(best_of_set),
-                  "best": (top(1) or [(None,)])[0][0], "exact_seconds": exact_seconds,
-                  "fit_seconds": fit_seconds, "scan_seconds": scan_seconds, "top_changed": changed}
+        record = {
+            "round": number,
+            "pairs": len(scored),
+            "sets": len(best_of_set),
+            "best": (top(1) or [(None,)])[0][0],
+            "exact_seconds": exact_seconds,
+            "fit_seconds": fit_seconds,
+            "scan_seconds": scan_seconds,
+            "top_changed": changed,
+        }
         rounds.append(record)
         if on_round:
             on_round(record)
@@ -492,7 +510,7 @@ def search(
     # the strongest cards that satisfy the gate. Without this a gated leader can lead only
     # a handful of scored teams, all well below what she reaches once her gate is met --
     # which can be the true #1
-    weight = [float(screen._card[i]) for i in range(len(cards))]      # zeros before any fit
+    weight = [float(screen._card[i]) for i in range(len(cards))]  # zeros before any fit
     repaired_sets: set = set()
     repaired_best: dict = {}
 
@@ -524,8 +542,10 @@ def search(
         left, another card of the same holomem) still reaches the team."""
         best = (top(1) or [(0.0,)])[0][0]
         lead = {li for _v, li, _s in top(neighbours)}
-        near = sorted((r for li, r in repaired_best.items()
-                       if li not in lead and r[0] >= (1.0 - REPAIR_MARGIN) * best), reverse=True)
+        near = sorted(
+            (r for li, r in repaired_best.items() if li not in lead and r[0] >= (1.0 - REPAIR_MARGIN) * best),
+            reverse=True,
+        )
         out = []
         for _v, li, s0 in near[:REPAIR_CLIMB]:
             mine = [(v, l, s) for (l, s), v in scored.items() if l == li and ok(l, s)]
@@ -545,16 +565,19 @@ def search(
         for li, leader in enumerate(leaders):
             gate = model.gates[li]
             tilt = tilt_of(leader)
-            key = (gate if gate is not None and rate[gate] < REGION_HARD_GATE else None,
-                   tuple(tilt) if tilt is not None else None)
+            key = (
+                gate if gate is not None and rate[gate] < REGION_HARD_GATE else None,
+                tuple(tilt) if tilt is not None else None,
+            )
             regions.setdefault(key, []).append(li)
             region_of.append(key)
         seeds = []
         for (gate, tilt), members in regions.items():
             if gate is None and tilt is None:
-                continue                  # the screen's own region: the search above is its seed
-            for s in _region_seed_sets(screen, cards, holomems, gate, tilt, require,
-                                       REGION_SEEDS, REGION_BEAM):
+                continue  # the screen's own region: the search above is its seed
+            for s in _region_seed_sets(
+                screen, cards, holomems, gate, tilt, require, REGION_SEEDS, REGION_BEAM
+            ):
                 li = max(members, key=lambda m: (model.predict(m, s), -m))
                 if ok(li, s):
                     seeds.append((li, s))
@@ -575,8 +598,10 @@ def search(
             key = region_of[li]
             if key not in lead and ok(li, s) and (v, -li, s) > own.get(key, (float("-inf"),)):
                 own[key] = (v, -li, s)
-        return sorted(((v, -nli, s) for v, nli, s in own.values() if v >= (1.0 - REGION_MARGIN) * best),
-                      key=lambda r: (-r[0], r[1], r[2]))
+        return sorted(
+            ((v, -nli, s) for v, nli, s in own.values() if v >= (1.0 - REGION_MARGIN) * best),
+            key=lambda r: (-r[0], r[1], r[2]),
+        )
 
     # then a hill climb: the one-card swaps of the best teams, again, until the
     # best ones stop changing. A single pass reaches teams ONE swap away; the
@@ -609,18 +634,30 @@ def search(
                 polish_seconds += _take_paired_swaps(regional, REGION_PAIR_MOVES, holomems, take, scored, ok)
             polish_seconds += polish_new()
             if not region_of:
-                polish_seconds += repair_gates(list(dict.fromkeys(s for _v, _li, s in top(polish)))[:gate_repair])
+                polish_seconds += repair_gates(
+                    list(dict.fromkeys(s for _v, _li, s in top(polish)))[:gate_repair]
+                )
     return {
         "ranking": top(len(scored)),
         "rounds": rounds,
         "stats": {
-            "stop": stop, "exact_evals": len(scored), "sets": len(best_of_set),
-            "legal_sets": legal, "seconds": time.perf_counter() - started,
-            "polish_seconds": polish_seconds, "k": k, "step": step,
-            "initial_sets": initial_sets, "polish": polish, "neighbours": neighbours,
+            "stop": stop,
+            "exact_evals": len(scored),
+            "sets": len(best_of_set),
+            "legal_sets": legal,
+            "seconds": time.perf_counter() - started,
+            "polish_seconds": polish_seconds,
+            "k": k,
+            "step": step,
+            "initial_sets": initial_sets,
+            "polish": polish,
+            "neighbours": neighbours,
             "climb_rounds": climbed,
-            **({"regions": len(set(region_of)), "region_seeds": seeded, "region_climbs": region_climbs}
-               if region_of else {}),
+            **(
+                {"regions": len(set(region_of)), "region_seeds": seeded, "region_climbs": region_climbs}
+                if region_of
+                else {}
+            ),
         },
     }
 
@@ -692,8 +729,10 @@ def climb(
         if pair_moves:
             _take_paired_swaps(top(1), pair_moves, holomems, take, scored, ok)
         polish_new()
-    return {"ranking": top(len(scored)),
-            "stats": {"evals": len(scored), "rounds": done, "seconds": time.perf_counter() - started}}
+    return {
+        "ranking": top(len(scored)),
+        "stats": {"evals": len(scored), "rounds": done, "seconds": time.perf_counter() - started},
+    }
 
 
 def _region_seed_sets(screen, cards, holomems, gate, tilt, require, count: int, beam: int):
@@ -721,8 +760,11 @@ def _region_seed_sets(screen, cards, holomems, gate, tilt, require, count: int, 
         if short > 0:
             names = {holomems[i] for i in base}
             pool = [i for i in match if i not in base and holomems[i] not in names]
-            ways = [tuple(sorted(base + c)) for c in itertools.combinations(pool, short)
-                    if len({holomems[i] for i in c}) == short]
+            ways = [
+                tuple(sorted(base + c))
+                for c in itertools.combinations(pool, short)
+                if len({holomems[i] for i in c}) == short
+            ]
             if not ways or len(base) + short > 5:
                 return []
             starts = sorted(ways, key=lambda s: (-value(s), s))[:beam]
@@ -832,7 +874,7 @@ def _take_neighbours(best, holomems, take, scored, ok) -> float:
     pairs = []
     for _v, li, members in best:
         for position in range(5):
-            rest = members[:position] + members[position + 1:]
+            rest = members[:position] + members[position + 1 :]
             names = {holomems[i] for i in rest}
             for card in range(count):
                 if card in members or holomems[card] in names:
@@ -843,9 +885,17 @@ def _take_neighbours(best, holomems, take, scored, ok) -> float:
     return take(pairs)
 
 
-def search_song(cards: Sequence, leaders: Sequence, score: Callable, *, always: Sequence = (),
-                gate_of=None, seed: int = 20261016, per_leader: int = 100,
-                **options) -> dict:
+def search_song(
+    cards: Sequence,
+    leaders: Sequence,
+    score: Callable,
+    *,
+    always: Sequence = (),
+    gate_of=None,
+    seed: int = 20261016,
+    per_leader: int = 100,
+    **options,
+) -> dict:
     """`joint_search.search` with `two_stage.search_song`'s interface and result
     shape, so a caller written for that (`event_mode.search_event`) switches
     engines without other change. `score(leader, sets)` -> exact values (an
@@ -877,14 +927,27 @@ def search_song(cards: Sequence, leaders: Sequence, score: Callable, *, always: 
                 out[k] = float(v)
         return out
 
-    found = search(cards, leaders, score_pairs, gate_of=gate_of, seed=seed,
-                   always=[position[id(l)] for l in always if id(l) in position], **options)
+    found = search(
+        cards,
+        leaders,
+        score_pairs,
+        gate_of=gate_of,
+        seed=seed,
+        always=[position[id(l)] for l in always if id(l) in position],
+        **options,
+    )
     rows: dict[int, dict] = {}
     for value, li, s in found["ranking"]:
         row = rows.get(li)
         if row is None:
-            rows[li] = {"position": li, "leader": leaders[li], "status": "searched", "best": value,
-                        "members": s, "ranking": [(value, s)]}
+            rows[li] = {
+                "position": li,
+                "leader": leaders[li],
+                "status": "searched",
+                "best": value,
+                "members": s,
+                "ranking": [(value, s)],
+            }
         elif len(row["ranking"]) < per_leader:
             row["ranking"].append((value, s))
     out = sorted(rows.values(), key=lambda r: (-r["best"], r["position"]))

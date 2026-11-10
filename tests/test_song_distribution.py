@@ -27,7 +27,9 @@ def cfg():
 
 def _chart():
     return SongChart(
-        music_id="m0001", difficulty="EXPERT", difficulty_level=26,
+        music_id="m0001",
+        difficulty="EXPERT",
+        difficulty_level=26,
         live_score_coefficient_permil=4,
         notes=tuple(ChartNote(time=0.5 * t, perfect_permil=1000) for t in range(1, 240)),
         special_cues=(10.0, 30.0, 50.0, 70.0, 90.0),
@@ -41,8 +43,7 @@ def test_the_expectation_is_the_scorers_own_number(cards, cfg, leader_index):
     chart = _chart()
     power = overall_power_for(members, leader, cfg)
     best = score_song_detailed(members, (leader,), chart, cfg, deck_power=power)[0]
-    law = run_score_distribution(members, leader, chart, cfg, best.member_order,
-                                 best.deck_power)
+    law = run_score_distribution(members, leader, chart, cfg, best.member_order, best.deck_power)
     assert law["expected_total"] == best.total_score
     assert law["min"] <= law["p50"] <= law["max"]
     assert law["min"] <= law["mean"] <= law["max"]
@@ -50,7 +51,7 @@ def test_the_expectation_is_the_scorers_own_number(cards, cfg, leader_index):
     # E[ceil] vs ceil(E): the mean differs from the expectation by rounding only
     assert abs(law["mean"] - best.total_score) <= 0.5 * len(chart.notes)
     assert law["exact"] is True
-    assert "law" not in law          # the whole law only on request (`keep_law`)
+    assert "law" not in law  # the whole law only on request (`keep_law`)
 
 
 def test_a_bad_order_is_refused(cards, cfg):
@@ -74,8 +75,7 @@ def test_the_ceiling_is_at_the_rows_own_slot_order(cards, cfg):
     row = score_team_on_chart(team, chart, cfg)
     free = score_team_on_chart(team, chart, dataclasses.replace(cfg, active_all_fire=True))
     assert free.member_order != row.member_order  # the case that would go wrong
-    law = run_score_distribution(team.members, team.leader, chart, cfg, row.member_order,
-                                 row.deck_power)
+    law = run_score_distribution(team.members, team.leader, chart, cfg, row.member_order, row.deck_power)
     assert score_team_ceiling(team, chart, cfg, row.member_order) == law["max"]
     # at the order the free ceiling picked, nothing changes
     assert score_team_ceiling(team, chart, cfg, free.member_order) == free.total_score
@@ -94,8 +94,7 @@ def test_a_binned_law_keeps_the_exact_extremes_and_an_unbiased_body(cards, cfg, 
     power = overall_power_for(members, leader, cfg)
     best = score_song_detailed(members, (leader,), chart, cfg, deck_power=power)[0]
     exact = run_score_distribution(members, leader, chart, cfg, best.member_order, best.deck_power)
-    binned = run_score_distribution(members, leader, chart, cfg, best.member_order, best.deck_power,
-                                    cap=cap)
+    binned = run_score_distribution(members, leader, chart, cfg, best.member_order, best.deck_power, cap=cap)
     assert exact["exact"] is True and binned["exact"] is False
     w = binned["bin_width"]
     assert binned["min"] == exact["min"] and binned["max"] == exact["max"]
@@ -131,8 +130,9 @@ def test_best_of_n_on_a_runs_law(cards, cfg):
     chart = _chart()
     power = overall_power_for(members, leader, cfg)
     best = score_song_detailed(members, (leader,), chart, cfg, deck_power=power)[0]
-    law = run_score_distribution(members, leader, chart, cfg, best.member_order,
-                                 best.deck_power, keep_law=True)
+    law = run_score_distribution(
+        members, leader, chart, cfg, best.member_order, best.deck_power, keep_law=True
+    )
     values = law["law"]
     assert values == sorted(values) and abs(sum(p for _v, p in values) - 1.0) < 1e-9
     assert abs(best_of_n(values, 1)["expected"] - law["mean"]) < 1e-6 * law["mean"]

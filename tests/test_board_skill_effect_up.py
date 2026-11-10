@@ -25,6 +25,8 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+from support.board_reference import resolve
+from support.builders import make_card, make_scoring_config, make_team
 
 from hbuilder.domain.board import (
     BoardEffect,
@@ -32,9 +34,6 @@ from hbuilder.domain.board import (
     BoardNode,
     CharacterBoard,
 )
-from support.board_reference import resolve
-
-from support.builders import make_card, make_scoring_config, make_team
 
 LEADER_SCOPE_PERMIL = 173.0  # Ina'nis' own leader-scope value
 MEMBER_SCOPE_PERMIL = 40.0
@@ -55,9 +54,7 @@ def _model(*effects_by_holomem):
     """`_model(("Ina", effect), ("Nene", effect))` -> a one-node board each."""
     characters = {}
     for index, (holomem, effect) in enumerate(effects_by_holomem):
-        characters[holomem] = CharacterBoard(
-            holomem=holomem, nodes=(BoardNode(f"R-{index:03d}", (effect,)),)
-        )
+        characters[holomem] = CharacterBoard(holomem=holomem, nodes=(BoardNode(f"R-{index:03d}", (effect,)),))
     return BoardModel(characters=characters)
 
 
@@ -77,9 +74,7 @@ def test_a_leader_scope_node_pays_only_under_its_own_leader():
     holomem leads. This is the term worth 173 permil on a team Ina'nis leads."""
     model = _model(("Ina", _skill_effect_up(LEADER_SCOPE_PERMIL, "leader")))
     team = _team(leader_member="Ina")
-    assert model.skill_effect_up_for(
-        team.members, "Ina"
-    ) == pytest.approx(LEADER_SCOPE_PERMIL / 1000.0)
+    assert model.skill_effect_up_for(team.members, "Ina") == pytest.approx(LEADER_SCOPE_PERMIL / 1000.0)
 
 
 def test_a_leader_scope_node_pays_nothing_under_a_different_leader():
@@ -102,9 +97,7 @@ def test_it_is_counted_ONCE_for_the_team_not_once_per_member():
     would multiply this term by five."""
     model = _model(("Ina", _skill_effect_up(LEADER_SCOPE_PERMIL, "leader")))
     team = _team(leader_member="Ina")
-    assert model.skill_effect_up_for(team.members, "Ina") == pytest.approx(
-        LEADER_SCOPE_PERMIL / 1000.0
-    )
+    assert model.skill_effect_up_for(team.members, "Ina") == pytest.approx(LEADER_SCOPE_PERMIL / 1000.0)
 
 
 def test_a_conditional_node_is_excluded():
@@ -201,10 +194,7 @@ def test_it_multiplies_the_active_pool_rather_than_adding_to_the_score_rate():
 
     without = _cfg_with(_model(("Ina", _skill_effect_up(0.0, "leader"))))
     with_it = _cfg_with(_model(("Ina", _skill_effect_up(LEADER_SCOPE_PERMIL, "leader"))))
-    assert (
-        score_with_breakdown(team, with_it).total_score
-        == score_with_breakdown(team, without).total_score
-    )
+    assert score_with_breakdown(team, with_it).total_score == score_with_breakdown(team, without).total_score
 
 
 def test_the_lift_is_exactly_the_attested_multiplier():
@@ -218,9 +208,7 @@ def test_the_lift_is_exactly_the_attested_multiplier():
 
     from hbuilder.domain.scoring import score_with_breakdown
 
-    base = score_with_breakdown(
-        team, _cfg_with(_model(("Ina", _skill_effect_up(0.0, "leader"))))
-    )
+    base = score_with_breakdown(team, _cfg_with(_model(("Ina", _skill_effect_up(0.0, "leader")))))
     lifted = score_with_breakdown(
         team, _cfg_with(_model(("Ina", _skill_effect_up(LEADER_SCOPE_PERMIL, "leader"))))
     )

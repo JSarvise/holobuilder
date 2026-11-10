@@ -24,10 +24,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import atomic_io
 import sys
 import time
 from pathlib import Path
+
+import atomic_io
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
@@ -68,16 +69,13 @@ def items_from_userdata(body: bytes) -> list[dict]:
     schema = snap.load_userdata_schema()
     if not schema:
         raise SystemExit(
-            "UserData schema not found -- inventory_snapshot needs the .proto tree "
-            f"at {snap.PROTO_DIR}"
+            f"UserData schema not found -- inventory_snapshot needs the .proto tree at {snap.PROTO_DIR}"
         )
     level = snap.locate_userdata(body, schema)
     if not level:
         return []
     return [
-        snap.sub(payload, ITEM_SUB)
-        for field, wire, payload in level
-        if wire == 2 and field == ITEM_FIELD
+        snap.sub(payload, ITEM_SUB) for field, wire, payload in level if wire == 2 and field == ITEM_FIELD
     ]
 
 
@@ -104,9 +102,7 @@ def write(items: list[dict], source: str) -> None:
             for row in items
             if row.get("item_id") in SKILL_TREE
         },
-        "items": {
-            str(row.get("item_id")): int(row.get("quantity") or 0) for row in items
-        },
+        "items": {str(row.get("item_id")): int(row.get("quantity") or 0) for row in items},
     }
     DUMPS.mkdir(parents=True, exist_ok=True)
     atomic_io.write_bytes(OUT, json.dumps(document, indent=1, ensure_ascii=False).encode("utf-8"))

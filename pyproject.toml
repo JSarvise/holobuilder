@@ -16,6 +16,24 @@ markers = [
 ]
 addopts = "-m 'not slow and not recall'"
 
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+# the data (~11 GB, linked in), the packaged app and the dated research scripts
+extend-exclude = ["tools/recon/proxy/dumps", "build", "docs/dev/research"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = [
+    "E501",    # the formatter wraps code; long comments, strings and tables stay readable
+    "E701", "E702",   # the formatter splits them
+    "E731",    # small named lambdas used as sort keys and table entries
+    "E741",    # `l` is the game's lane / level in the formulas the code transcribes
+    "B007",    # unpacked loop names that document a tuple's shape
+    "B905",    # zip() over sequences built to the same length
+    "UP031",   # %-formatting kept where it mirrors the game's own format strings
+]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

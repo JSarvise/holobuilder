@@ -64,11 +64,7 @@ def _call_is_filesystem_write(call: ast.Call) -> bool:
             return True
         if func.attr == "open":
             return _open_call_is_write_capable(call)
-        if (
-            func.attr == "dump"
-            and isinstance(func.value, ast.Name)
-            and func.value.id == "json"
-        ):
+        if func.attr == "dump" and isinstance(func.value, ast.Name) and func.value.id == "json":
             return True
     return False
 

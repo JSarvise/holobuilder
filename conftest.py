@@ -17,6 +17,7 @@ XPASS.
 Every session also installs the write guard (tests/support/write_guard.py) before any test module
 is imported: no test may write into your real `state/` or `tools/recon/proxy/dumps/`.
 """
+
 from __future__ import annotations
 
 import sys
@@ -26,7 +27,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(ROOT / "tests"))      # `support`, as the tests themselves import it
+sys.path.insert(0, str(ROOT / "tests"))  # `support`, as the tests themselves import it
 from support import write_guard  # noqa: E402
 
 sys.path.remove(str(ROOT / "tests"))
@@ -37,16 +38,21 @@ HAS_DATA = (DATA / "charts.json").is_file()
 
 # what fails in a clean clone and passes on a PC with the game data
 NEEDS_DATA = {
-    "tests/test_model_version.py", "tests/test_refresh_all_append_guard.py",
+    "tests/test_model_version.py",
+    "tests/test_refresh_all_append_guard.py",
     "tests/test_tree_optimise_scenarios.py",
-    "tools/web/test_board_doc_route.py", "tools/web/test_board_plan_account_route.py",
-    "tools/web/test_compare_route.py", "tools/web/test_difficulty.py",
-    "tools/web/test_event_highlight.py", "tools/web/test_gacha_route.py",
-    "tools/web/test_meta_route.py", "tools/web/test_routes.py",
+    "tools/web/test_board_doc_route.py",
+    "tools/web/test_board_plan_account_route.py",
+    "tools/web/test_compare_route.py",
+    "tools/web/test_difficulty.py",
+    "tools/web/test_event_highlight.py",
+    "tools/web/test_gacha_route.py",
+    "tools/web/test_meta_route.py",
+    "tools/web/test_routes.py",
     "tools/web/test_timeline_route.py",
 }
-_CAPTURE = "tests/fixtures/board_state_2026-08-09_pre_respec.json"   # one account's frozen boards
-_GACHA_ART = "data/gacha/art/gacha-pickup-normal-260807"            # one account's banner art
+_CAPTURE = "tests/fixtures/board_state_2026-08-09_pre_respec.json"  # one account's frozen boards
+_GACHA_ART = "data/gacha/art/gacha-pickup-normal-260807"  # one account's banner art
 NEEDS_MAINTAINER = {
     "tests/test_board_export.py::test_r061_is_locked_behind_r058_at_the_real_cost": _CAPTURE,
     "tests/test_board_landing.py::test_the_real_capture_converts_with_nothing_unresolved": _CAPTURE,
@@ -58,16 +64,12 @@ NEEDS_MAINTAINER = {
 }
 # what reads your own account as a refresh leaves it (your cards, your boards)
 NEEDS_ACCOUNT = {
-    "tools/web/test_leaf_inputs.py::test_the_maxed_basis_scores_every_bench_holomem_on_a_complete_board":
-        "data/owned.json",
-    "tools/web/test_leaf_inputs.py::test_the_maxed_bench_as_a_board_state_is_every_whole_tree_with_its_connect_cards":
-        "data/owned.json",
+    "tools/web/test_leaf_inputs.py::test_the_maxed_basis_scores_every_bench_holomem_on_a_complete_board": "data/owned.json",
+    "tools/web/test_leaf_inputs.py::test_the_maxed_bench_as_a_board_state_is_every_whole_tree_with_its_connect_cards": "data/owned.json",
     "tools/web/test_leaf_inputs.py::test_the_maxed_bench_targets_are_only_what_scores": "data/owned.json",
-    "tools/refresh/test_board_plan_solver_ties.py::test_no_refund_charges_only_new_buys_against_the_inventory":
-        "tools/recon/proxy/dumps/board_state.json",
+    "tools/refresh/test_board_plan_solver_ties.py::test_no_refund_charges_only_new_buys_against_the_inventory": "tools/recon/proxy/dumps/board_state.json",
 }
-KNOWN_FAILING = (
-)
+KNOWN_FAILING = ()
 
 
 class _NeedsData(pytest.Module):
@@ -75,9 +77,12 @@ class _NeedsData(pytest.Module):
     reported as one skipped file with the reason."""
 
     def collect(self):
-        pytest.skip(f"{self.nodeid} needs the game data (tools/recon/proxy/dumps), which this "
-                    "repository does not carry: build it on your own PC first "
-                    "(docs/run-locally.md: refresh.cmd or refresh.sh)", allow_module_level=True)
+        pytest.skip(
+            f"{self.nodeid} needs the game data (tools/recon/proxy/dumps), which this "
+            "repository does not carry: build it on your own PC first "
+            "(docs/run-locally.md: refresh.cmd or refresh.sh)",
+            allow_module_level=True,
+        )
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -93,11 +98,18 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         need = NEEDS_MAINTAINER.get(item.nodeid)
         if need and not (ROOT / need).exists():
-            item.add_marker(pytest.mark.skip(reason=f"needs {need}, which this repository does not "
-                                                    "carry (the maintainer's own captures and notes)"))
+            item.add_marker(
+                pytest.mark.skip(
+                    reason=f"needs {need}, which this repository does not "
+                    "carry (the maintainer's own captures and notes)"
+                )
+            )
         need = NEEDS_ACCOUNT.get(item.nodeid)
         if need and not (ROOT / need).exists():
-            item.add_marker(pytest.mark.skip(reason=f"needs {need}, which a refresh builds from your "
-                                                    "own account (docs/run-locally.md)"))
+            item.add_marker(
+                pytest.mark.skip(
+                    reason=f"needs {need}, which a refresh builds from your own account (docs/run-locally.md)"
+                )
+            )
         if any(item.nodeid.startswith(k) for k in KNOWN_FAILING):
             item.add_marker(pytest.mark.xfail(reason="known failure, tracked upstream", strict=False))

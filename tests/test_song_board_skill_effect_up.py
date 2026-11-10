@@ -30,6 +30,8 @@ that dict feeds `score_bonus_rate` — a different channel, and the one
 from __future__ import annotations
 
 import pytest
+from support.builders import certain_config as cfg
+from support.builders import make_card, make_skill
 
 from hbuilder.domain.board import (
     BoardEffect,
@@ -44,8 +46,6 @@ from hbuilder.domain.song import (
     score_song,
     score_song_detailed,
 )
-
-from support.builders import certain_config as cfg, make_card, make_skill
 
 LEADER_SCOPE_PERMIL = 173.0  # Ina'nis' own
 
@@ -63,11 +63,7 @@ def _skill_effect_up(permil: float, scope: str, *, conditional: bool = False):
 
 def _board(holomem: str, effect: BoardEffect) -> BoardModel:
     return BoardModel(
-        characters={
-            holomem: CharacterBoard(
-                holomem=holomem, nodes=(BoardNode("R-000", (effect,)),)
-            )
-        }
+        characters={holomem: CharacterBoard(holomem=holomem, nodes=(BoardNode("R-000", (effect,)),))}
     )
 
 
@@ -144,9 +140,7 @@ def test_a_leader_scope_board_node_multiplies_the_active_pool():
     board = _board("Ina", _skill_effect_up(LEADER_SCOPE_PERMIL, "leader"))
 
     without = score_song(members, (leader,), chart, cfg(), deck_power=OverallPower.fixed(2000))
-    with_board = score_song(
-        members, (leader,), chart, cfg(board=board), deck_power=OverallPower.fixed(2000)
-    )
+    with_board = score_song(members, (leader,), chart, cfg(board=board), deck_power=OverallPower.fixed(2000))
 
     assert without[0].total_score == 6900
     assert with_board[0].total_score == 7298
@@ -162,7 +156,10 @@ def test_it_pays_only_under_its_own_leader():
     board = _board("Ina", _skill_effect_up(LEADER_SCOPE_PERMIL, "leader"))
 
     result = score_song(
-        members, (make_card("leader", member="Nene"),), chart, cfg(board=board),
+        members,
+        (make_card("leader", member="Nene"),),
+        chart,
+        cfg(board=board),
         deck_power=OverallPower.fixed(2000),
     )
     assert result[0].total_score == 6900
@@ -200,9 +197,7 @@ def test_a_team_with_no_active_score_up_gains_nothing_from_it():
     leader = make_card("leader", member="Ina")
 
     without = score_song(plain, (leader,), chart, cfg(), deck_power=OverallPower.fixed(2000))
-    with_board = score_song(
-        plain, (leader,), chart, cfg(board=board), deck_power=OverallPower.fixed(2000)
-    )
+    with_board = score_song(plain, (leader,), chart, cfg(board=board), deck_power=OverallPower.fixed(2000))
     assert with_board[0].total_score == without[0].total_score == 4600
 
 
@@ -244,9 +239,7 @@ def test_both_drivers_read_the_same_board_term():
 
     _power, _rate, skill_effect_up = _board_bonus(leader, members, cfg(board=board))
     assert skill_effect_up == pytest.approx(LEADER_SCOPE_PERMIL / 1000.0)
-    assert board.skill_effect_up_for(members, "Ina") == pytest.approx(
-        LEADER_SCOPE_PERMIL / 1000.0
-    )
+    assert board.skill_effect_up_for(members, "Ina") == pytest.approx(LEADER_SCOPE_PERMIL / 1000.0)
 
 
 # ---------------------------------------------------------------------------
@@ -297,9 +290,7 @@ def test_a_leader_scope_board_node_adds_its_POWER_to_the_default_deck_power():
     board = _board("Ina", _all_parameter_up(100.0, "leader"))
 
     without = score_song_detailed(members, (leader,), chart, cfg())[0]
-    with_board = score_song_detailed(
-        members, (leader,), chart, cfg(board=board)
-    )[0]
+    with_board = score_song_detailed(members, (leader,), chart, cfg(board=board))[0]
 
     # 100 flat to each of 3 stats on each of 5 members = 1,500 of power.
     assert with_board.deck_power - without.deck_power == pytest.approx(1500.0)
@@ -320,13 +311,10 @@ def test_the_two_scorers_AGREE_on_the_leader_when_a_board_is_present():
     board = _board("Ina", _all_parameter_up(100.0, "leader"))
     chart = _chart()
 
-    per_song = score_song_detailed(
-        members, (boarded, plain), chart, cfg(board=board)
-    )
+    per_song = score_song_detailed(members, (boarded, plain), chart, cfg(board=board))
     by_score = sorted(per_song, key=lambda s: -s.total_score)
 
     assert by_score[0].leader_id == "leader-ina", (
-        "the leader carrying the board must win; if she does not, the power "
-        "term is being discarded again"
+        "the leader carrying the board must win; if she does not, the power term is being discarded again"
     )
     assert by_score[0].deck_power > by_score[1].deck_power

@@ -23,10 +23,9 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 from hbuilder.domain.scoring import score_card_set, score_fast, score_with_breakdown
-
-from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 # the builders' STATS baseline is 300 total per card, so five members are 1500.0.
 BASE_STAT_SUM = 1500.0
@@ -44,9 +43,7 @@ ACTIVE_RATE = (128.8 - 10.0) / 128.8 * 0.46 * 0.50
 
 
 def _cfg(board_by_holomem: dict | None = None):
-    return dataclasses.replace(
-        make_scoring_config(), board_score_bonus=board_by_holomem or {}
-    )
+    return dataclasses.replace(make_scoring_config(), board_score_bonus=board_by_holomem or {})
 
 
 def _scorer(card_id: str = "member_active", *, member: str = "Nene"):
@@ -206,9 +203,7 @@ def test_batch_and_single_paths_stay_bit_identical_with_a_board_bonus():
     per-leader tail because it is member-set-invariant; that hoist must not
     cost bit-identical parity, so this is `==` and never `approx`."""
     outfit = make_card("outfit")
-    members = _members(
-        _scorer("member_active", member="Nene"), make_card("m_b", member="Ina")
-    )
+    members = _members(_scorer("member_active", member="Nene"), make_card("m_b", member="Ina"))
     cfg = _cfg({"Nene": 0.13, "Ina": 0.27})
 
     batch = score_card_set(members, (outfit,), cfg)
@@ -267,9 +262,7 @@ def test_a_solo_song_counts_only_its_one_singer():
     Three holomem with 40 permil each pool to 120, which would read as a cap
     violation against the limit of 100. Per singer it is 40, nowhere near the
     cap."""
-    contribution = _contribution(
-        _board_with({"A": [("solo", 40)], "B": [("solo", 40)], "C": [("solo", 40)]})
-    )
+    contribution = _contribution(_board_with({"A": [("solo", 40)], "B": [("solo", 40)], "C": [("solo", 40)]}))
 
     assert contribution.song_score_bonus["solo"] == pytest.approx(0.120)  # pooled
     assert contribution.song_score_bonus_for(["A"], scope="solo") == pytest.approx(0.040)
@@ -287,13 +280,9 @@ def test_a_group_song_counts_exactly_its_own_singers():
 
 def test_the_cap_is_per_song_and_per_cast_never_account_wide():
     """100 permil, the client's cap. Three singers at 40 each cross it; two do not."""
-    contribution = _contribution(
-        _board_with({n: [("group", 40)] for n in ("A", "B", "C")})
-    )
+    contribution = _contribution(_board_with({n: [("group", 40)] for n in ("A", "B", "C")}))
     assert contribution.song_score_bonus_for(["A", "B"], scope="group") == pytest.approx(0.080)
-    assert contribution.song_score_bonus_for(["A", "B", "C"], scope="group") == pytest.approx(
-        0.100
-    )
+    assert contribution.song_score_bonus_for(["A", "B", "C"], scope="group") == pytest.approx(0.100)
 
 
 def test_song_bonus_accepts_the_games_chr_ids_not_only_names():
@@ -310,15 +299,15 @@ def test_song_bonus_accepts_the_games_chr_ids_not_only_names():
         characters={
             "Oozora Subaru": CharacterBoard(
                 holomem="Oozora Subaru",
-                nodes=(BoardNode(node_id="Y-001",
-                                 effects=(parse_effect_id(_y("solo", 40), branch="Y"),)),),
+                nodes=(BoardNode(node_id="Y-001", effects=(parse_effect_id(_y("solo", 40), branch="Y"),)),),
             )
         },
         name_by_chr={"chr-00012": "Oozora Subaru"},
     )
     assert model.song_score_bonus_for(["Oozora Subaru"], scope="solo") == pytest.approx(0.040)
-    assert model.song_score_bonus_for(["chr-00012"], scope="solo") == pytest.approx(0.040), \
+    assert model.song_score_bonus_for(["chr-00012"], scope="solo") == pytest.approx(0.040), (
         "chr-id singers (charts.json's format) must translate to the board's name key"
+    )
     # an unknown id passes through and simply misses -- never a wrong match
     assert model.song_score_bonus_for(["chr-99999"], scope="solo") == pytest.approx(0.0)
     # a name-only caller with no map is unchanged: the name still works, and a
@@ -337,9 +326,7 @@ def test_the_all_scope_agrees_with_the_pooled_reading_by_construction():
     """A whole-roster song's cast IS every character, so the per-song answer
     and `score_bonus_rate()`'s pooled one must coincide — not by luck, but
     because the two are the same sum over the same set."""
-    contribution = _contribution(
-        _board_with({"A": [("all", 3)], "B": [("all", 4)]})
-    )
+    contribution = _contribution(_board_with({"A": [("all", 3)], "B": [("all", 4)]}))
     assert contribution.score_bonus_rate() == pytest.approx(0.007)
     assert contribution.song_score_bonus_for(["A", "B"], scope="all") == pytest.approx(0.007)
 
@@ -351,8 +338,12 @@ def test_an_absent_breakdown_returns_zero_rather_than_inventing_one():
     from support.board_reference import BoardContribution
 
     bare = BoardContribution(
-        flat_by_card={}, rate_by_card={}, skill_effect_up=0.0,
-        conditional_skill_effect_up=0.0, activation_rate_up={},
-        cooldown_shorten={}, song_score_bonus={"solo": 0.120},
+        flat_by_card={},
+        rate_by_card={},
+        skill_effect_up=0.0,
+        conditional_skill_effect_up=0.0,
+        activation_rate_up={},
+        cooldown_shorten={},
+        song_score_bonus={"solo": 0.120},
     )
     assert bare.song_score_bonus_for(["A"], scope="solo") == 0.0

@@ -24,8 +24,8 @@ import json
 from pathlib import Path
 
 import pytest
-
 from support.builders import make_card
+
 from hbuilder.domain.card import SkillSlot, skill_slot_from_record
 from hbuilder.domain.collection import (
     CARDS_JSON_SKILL_LEVEL,
@@ -168,9 +168,7 @@ def test_ladder_refuses_a_schema_version_it_does_not_know():
 
 
 def _passive_card(card_id="c1", **over):
-    return make_card(
-        card_id, passive=skill_slot_from_record(_slot_record(**over), "PASSIVE")
-    )
+    return make_card(card_id, passive=skill_slot_from_record(_slot_record(**over), "PASSIVE"))
 
 
 def test_a_bloom_0_card_gets_the_level_1_passive():
@@ -274,9 +272,7 @@ def test_apply_collection_down_levels_a_bloom_0_passive(tmp_path):
     solver a 32 % skill on a card the game scores at 24 %."""
     from hbuilder.inputs import apply_collection
 
-    ladder = skill_ladder_from_mapping(
-        json.loads(LADDER_PATH.read_text(encoding="utf-8"))
-    )
+    ladder = skill_ladder_from_mapping(json.loads(LADDER_PATH.read_text(encoding="utf-8")))
     card = make_card(INA, passive=ladder[INA]["PASSIVE"][CARDS_JSON_SKILL_LEVEL])
     assert card.skill("PASSIVE").magnitude == 32.0  # what the catalogue carries
 
@@ -305,9 +301,7 @@ def test_apply_collection_leaves_a_full_bloom_card_alone(tmp_path):
     catalogue's level-2 magnitude is the right one and nothing moves."""
     from hbuilder.inputs import apply_collection
 
-    ladder = skill_ladder_from_mapping(
-        json.loads(LADDER_PATH.read_text(encoding="utf-8"))
-    )
+    ladder = skill_ladder_from_mapping(json.loads(LADDER_PATH.read_text(encoding="utf-8")))
     card = make_card(INA, passive=ladder[INA]["PASSIVE"][CARDS_JSON_SKILL_LEVEL])
     document = tmp_path / "collection.json"
     document.write_text(
@@ -331,9 +325,7 @@ def test_ina_and_lui_passives_read_24_percent_at_level_1():
     """The acceptance case. Both cards are bloom 0 on a real account and the
     game scores their PASSIVE at 24 %, not the 32 % `data/cards.json`
     carries — `32/24 = 1.333`, the observed +32.5 % overstatement."""
-    ladder = skill_ladder_from_mapping(
-        json.loads(LADDER_PATH.read_text(encoding="utf-8"))
-    )
+    ladder = skill_ladder_from_mapping(json.loads(LADDER_PATH.read_text(encoding="utf-8")))
     for card_id in (INA, "card-00036-5-uniq-0029-00"):
         assert ladder[card_id]["PASSIVE"][2].magnitude == 32.0
         assert ladder[card_id]["PASSIVE"][1].magnitude == 24.0

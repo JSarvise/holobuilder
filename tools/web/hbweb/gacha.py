@@ -36,7 +36,7 @@ def parse_sync_summary(stdout: str) -> dict | None:
     for line in stdout.splitlines():
         if line.startswith("SUMMARY "):
             try:
-                last = json.loads(line[len("SUMMARY "):])
+                last = json.loads(line[len("SUMMARY ") :])
             except ValueError:
                 pass
     return last
@@ -49,7 +49,7 @@ def parse_wrote(stdout: str) -> str | None:
     last = None
     for line in stdout.splitlines():
         if line.startswith("WROTE "):
-            last = line[len("WROTE "):].strip() or None
+            last = line[len("WROTE ") :].strip() or None
     return last
 
 
@@ -66,8 +66,16 @@ def serve_gacha(h) -> None:
     for b in view.get("banners") or []:
         for k, e in (b.get("art_ext") or {}).items():
             if e is None and b.get("gacha_id"):
-                e = next((x for x in ART_EXTS if static.asset_known(
-                    config.GACHA_ART_DIR, config.GACHA_ART_DIR / b["gacha_id"] / f"{k}.{x}")), None)
+                e = next(
+                    (
+                        x
+                        for x in ART_EXTS
+                        if static.asset_known(
+                            config.GACHA_ART_DIR, config.GACHA_ART_DIR / b["gacha_id"] / f"{k}.{x}"
+                        )
+                    ),
+                    None,
+                )
                 b["art_ext"][k] = e
                 b.setdefault("art", {})[k] = e is not None
     view["store_dir"] = str(config.GACHA_STORE_DIR)
@@ -78,8 +86,10 @@ def _art_file(h, gacha_id: str, kind: str, wanted: list[str]) -> Path | None:
     """The banner file on disk, else the server's copy as a cached Path. With the app's
     cache off the server's bytes are sent here and the answer is None (nothing left to do)."""
     art_dir = config.GACHA_ART_DIR
-    path = next((p for p in (art_dir / gacha_id / f"{kind}.{e}" for e in wanted)
-                 if p.is_file()), art_dir / gacha_id / f"{kind}.{wanted[0]}")
+    path = next(
+        (p for p in (art_dir / gacha_id / f"{kind}.{e}" for e in wanted) if p.is_file()),
+        art_dir / gacha_id / f"{kind}.{wanted[0]}",
+    )
     if not path.is_file():
         # the desktop app has no game install to extract it from: the server's copy
         for p in (art_dir / gacha_id / f"{kind}.{e}" for e in wanted):
@@ -109,8 +119,10 @@ def serve_gachaart(h, rest: str) -> None:
     path = _art_file(h, parts[0], kind, [ext] if ext else list(ART_EXTS))
     if path is None:
         return
-    if not path.is_file() or (config.GACHA_ART_DIR.resolve() not in path.resolve().parents
-                              and static.CONTENT.store.resolve() not in path.resolve().parents):
+    if not path.is_file() or (
+        config.GACHA_ART_DIR.resolve() not in path.resolve().parents
+        and static.CONTENT.store.resolve() not in path.resolve().parents
+    ):
         h.reply(404, b"no gacha art", "text/plain; charset=utf-8")
         return
     # `?w=N` downscales (LANCZOS -> WEBP, cached) exactly as `/cardart/` does. The
@@ -144,8 +156,7 @@ def gacha_sync(h) -> None:
         if ran is None:
             return
         code, out = ran
-        h.reply_json(200, {"returncode": code, "stdout": out[-20000:],
-                           "summary": parse_sync_summary(out)})
+        h.reply_json(200, {"returncode": code, "stdout": out[-20000:], "summary": parse_sync_summary(out)})
     finally:
         SYNC_LOCK.release()
 
@@ -156,9 +167,9 @@ def sync_after_refresh(h, refresh_code: int) -> dict | None:
     sync is a chance for pulls to age out of that window unrecorded. Same lock as the
     button: if it is mid-sync the refresh reports that instead of queueing behind it.
     None when the sync script could not start (500 already answered)."""
-    if refresh_code == 3:   # refresh_all.EXIT_MAINTENANCE: the game refuses every call, so would this
+    if refresh_code == 3:  # refresh_all.EXIT_MAINTENANCE: the game refuses every call, so would this
         return {"error": "the game is in maintenance; pulls not synced this refresh"}
-    if refresh_code == 4:   # refresh_all.EXIT_NO_KEYS: the API cannot be read on this PC yet
+    if refresh_code == 4:  # refresh_all.EXIT_NO_KEYS: the API cannot be read on this PC yet
         return {"error": "the game client's build constants are not on this PC; pulls not synced"}
     if not SYNC_LOCK.acquire(blocking=False):
         return {"error": "a gacha sync is already running; pulls not synced this refresh"}

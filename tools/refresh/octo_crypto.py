@@ -33,7 +33,7 @@
 
 BUNDLE_MAGIC = b"UnityFS"
 RESOURCE_MAGIC = b"QUAVMAGIC"
-WINDOW = 256                       # bytes of each file that are obfuscated
+WINDOW = 256  # bytes of each file that are obfuscated
 _SEED = 0x7C
 
 
@@ -43,11 +43,11 @@ def keystream(name: str) -> bytes:
     buf = bytearray(2 * n)
     for i, ch in enumerate(name):
         byte = ord(ch) & 0xFF
-        buf[2 * i] = byte                       # name, forwards, on even indices
-        buf[2 * n - 1 - 2 * i] = byte ^ 0xFF    # its complement, backwards, on odd indices
+        buf[2 * i] = byte  # name, forwards, on even indices
+        buf[2 * n - 1 - 2 * i] = byte ^ 0xFF  # its complement, backwards, on odd indices
     acc = _SEED
     for byte in buf:
-        acc = ((acc >> 1) | ((acc & 1) << 7)) ^ byte    # rotate right 1, then XOR in
+        acc = ((acc >> 1) | ((acc & 1) << 7)) ^ byte  # rotate right 1, then XOR in
         acc &= 0xFF
     return bytes(b ^ acc for b in buf)
 
@@ -63,29 +63,29 @@ def _apply(data, name, start):
 
 def decrypt_bundle(data: bytes, name: str) -> bytes:
     """Recover an AssetBundle. Already-plaintext input is returned unchanged."""
-    if data[:len(BUNDLE_MAGIC)] == BUNDLE_MAGIC:
+    if data[: len(BUNDLE_MAGIC)] == BUNDLE_MAGIC:
         return data
     return bytes(_apply(bytearray(data), name, 0))
 
 
 def decrypt_resource(data: bytes, name: str) -> bytes:
     """Recover a resource, stripping the QUAVMAGIC sentinel. Unsentinelled input passes through."""
-    if data[:len(RESOURCE_MAGIC)] != RESOURCE_MAGIC:
+    if data[: len(RESOURCE_MAGIC)] != RESOURCE_MAGIC:
         return data
     out = _apply(bytearray(data), name, len(RESOURCE_MAGIC))
-    return bytes(out[len(RESOURCE_MAGIC):])
+    return bytes(out[len(RESOURCE_MAGIC) :])
 
 
 def encrypt_resource(data: bytes, name: str) -> bytes:
     """Inverse of decrypt_resource: prepend the sentinel and obfuscate the window after it."""
-    if data[:len(RESOURCE_MAGIC)] == RESOURCE_MAGIC:
+    if data[: len(RESOURCE_MAGIC)] == RESOURCE_MAGIC:
         return data
     return bytes(_apply(bytearray(RESOURCE_MAGIC + data), name, len(RESOURCE_MAGIC)))
 
 
 def decrypt(data: bytes, name: str) -> bytes:
     """Decrypt either container shape, chosen by sentinel."""
-    if data[:len(RESOURCE_MAGIC)] == RESOURCE_MAGIC:
+    if data[: len(RESOURCE_MAGIC)] == RESOURCE_MAGIC:
         return decrypt_resource(data, name)
     return decrypt_bundle(data, name)
 
@@ -99,7 +99,12 @@ def decrypt(data: bytes, name: str) -> bytes:
 # work this replaces is to verify artefacts, not counters, so it loads each result through
 # UnityPy and insists on a real Texture2D with real dimensions.
 if __name__ == "__main__":
-    import os, sys, io, glob, warnings, collections
+    import collections
+    import glob
+    import io
+    import os
+    import sys
+    import warnings
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
@@ -112,25 +117,29 @@ if __name__ == "__main__":
 
     import UnityPy
     from UnityPy.exceptions import UnityVersionFallbackWarning
+
     # Card bundles ship with the Unity version string stripped, so the fallback always fires.
     UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
     warnings.simplefilter("ignore", UnityVersionFallbackWarning)
 
     stat, fams, bad = collections.Counter(), collections.Counter(), []
     for path in files:
-        name = os.path.basename(path)[:-len(".bundle")]     # filename IS the asset name
+        name = os.path.basename(path)[: -len(".bundle")]  # filename IS the asset name
         raw = open(path, "rb").read()
-        was_plain = raw[:len(BUNDLE_MAGIC)] == BUNDLE_MAGIC
+        was_plain = raw[: len(BUNDLE_MAGIC)] == BUNDLE_MAGIC
         out = decrypt_bundle(raw, name)
-        if out[:len(BUNDLE_MAGIC)] != BUNDLE_MAGIC:
-            bad.append((name, "no UnityFS magic after decrypt")); continue
+        if out[: len(BUNDLE_MAGIC)] != BUNDLE_MAGIC:
+            bad.append((name, "no UnityFS magic after decrypt"))
+            continue
         try:
             env = UnityPy.load(io.BytesIO(out))
             tex = [o.read() for o in env.objects if o.type.name == "Texture2D"]
         except Exception as exc:
-            bad.append((name, f"{type(exc).__name__}: {exc}"[:70])); continue
+            bad.append((name, f"{type(exc).__name__}: {exc}"[:70]))
+            continue
         if not tex or not tex[0].m_Width:
-            bad.append((name, "no usable Texture2D")); continue
+            bad.append((name, "no usable Texture2D"))
+            continue
         stat["plaintext" if was_plain else "encrypted"] += 1
         fams["_".join(name.split("_")[:3])] += 1
 

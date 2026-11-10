@@ -19,14 +19,16 @@ account's rank, a final over a non-final). Each value carries its `source`. No n
 
     python event_history.py
 """
+
 from __future__ import annotations
 
 import json
 import os
-import atomic_io
 import re
 import sys
 from pathlib import Path
+
+import atomic_io
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
@@ -52,22 +54,32 @@ def _public_chapter(ch: dict) -> dict:
     """A chapter without the account's own results -- its song rankings' too."""
     out = {k: v for k, v in ch.items() if k not in PERSONAL}
     if isinstance(out.get("songs"), dict):
-        out["songs"] = {m: {k: v for k, v in song.items() if k not in PERSONAL}
-                        for m, song in out["songs"].items()}
+        out["songs"] = {
+            m: {k: v for k, v in song.items() if k not in PERSONAL} for m, song in out["songs"].items()
+        }
     return out
 
 
 def archive_of(doc: dict) -> dict:
     """`doc` with every account's own result removed: titles, dates, tiers, final borders."""
-    return {"events": {eid: {**{k: v for k, v in e.items() if k != "chapters"},
-                             "chapters": {cid: _public_chapter(ch)
-                                          for cid, ch in (e.get("chapters") or {}).items()}}
-                       for eid, e in (doc.get("events") or {}).items()}}
+    return {
+        "events": {
+            eid: {
+                **{k: v for k, v in e.items() if k != "chapters"},
+                "chapters": {cid: _public_chapter(ch) for cid, ch in (e.get("chapters") or {}).items()},
+            }
+            for eid, e in (doc.get("events") or {}).items()
+        }
+    }
+
+
 CREDENTIAL_REGION_DEFAULT = "us"
 
-GRADES = ("dream", "diamond", "platinum", "gold", "silver", "bronze")   # best first
-_EMBLEM = re.compile(r"^emblem-(marathon_score_ranking_rank_reward|total_music_highest_score_reward)"
-                     r"-(marathon_event-([a-z]+)-(\d+))-chapter-(\d+)-([a-z]+)$")
+GRADES = ("dream", "diamond", "platinum", "gold", "silver", "bronze")  # best first
+_EMBLEM = re.compile(
+    r"^emblem-(marathon_score_ranking_rank_reward|total_music_highest_score_reward)"
+    r"-(marathon_event-([a-z]+)-(\d+))-chapter-(\d+)-([a-z]+)$"
+)
 EVENT_FIELDS = ("type", "kind_label", "title", "starts_at", "ends_at", "exchange_ends_at", "art")
 
 
@@ -91,8 +103,13 @@ def emblem_results(emblems: list[dict]) -> dict[str, dict]:
         key = f"{cid}|{ranking}"
         prev = out.get(key)
         if prev is None or GRADES.index(m.group(6)) < GRADES.index(prev["grade"]):
-            out[key] = {"chapter_id": cid, "event_id": m.group(2), "ranking": ranking,
-                        "grade": m.group(6), "source": "emblem held (User/Get user_emblem_list)"}
+            out[key] = {
+                "chapter_id": cid,
+                "event_id": m.group(2),
+                "ranking": ranking,
+                "grade": m.group(6),
+                "source": "emblem held (User/Get user_emblem_list)",
+            }
     return out
 
 
@@ -102,16 +119,33 @@ def song_results(recs: list[dict], meta: dict) -> dict[str, dict]:
     music_tiers = (meta.get("tiers") or {}).get("music") or {}
     for mid in sorted({r["kind"][6:] for r in recs if str(r.get("kind", "")).startswith("music:")}):
         mine = [r for r in recs if r.get("kind") == f"music:{mid}"]
-        own = next((r for r in reversed(mine) if r.get("self")
-                    and (r["self"].get("rank") or r["self"].get("out_of_range"))), None)
+        own = next(
+            (
+                r
+                for r in reversed(mine)
+                if r.get("self") and (r["self"].get("rank") or r["self"].get("out_of_range"))
+            ),
+            None,
+        )
         fin = next((r for r in reversed(mine) if r.get("final")), None)
         out[mid] = {
-            "tiers": [{"rank": t.get("end_rank"), "grade_id": t.get("grade_id")} for t in music_tiers.get(mid) or []],
-            "self": ({"rank": own["self"].get("rank"), "score": own["self"].get("score"),
-                      "out_of_range": bool(own["self"].get("out_of_range")),
-                      "captured_at": own["captured_at"], "final": bool(own.get("final"))} if own else None),
-            "final_borders": ({"captured_at": fin["captured_at"], "borders": fin.get("borders") or []}
-                              if fin else None),
+            "tiers": [
+                {"rank": t.get("end_rank"), "grade_id": t.get("grade_id")} for t in music_tiers.get(mid) or []
+            ],
+            "self": (
+                {
+                    "rank": own["self"].get("rank"),
+                    "score": own["self"].get("score"),
+                    "out_of_range": bool(own["self"].get("out_of_range")),
+                    "captured_at": own["captured_at"],
+                    "final": bool(own.get("final")),
+                }
+                if own
+                else None
+            ),
+            "final_borders": (
+                {"captured_at": fin["captured_at"], "borders": fin.get("borders") or []} if fin else None
+            ),
         }
     return out
 
@@ -138,21 +172,47 @@ def cutoff_results(store: Path, region: str) -> dict[str, dict]:
         recs.sort(key=lambda r: r.get("captured_at") or 0)
         ranking = "total" if meta.get("points_ranking_disabled") else "points"
         mine = [r for r in recs if r.get("kind") == ranking]
-        own = next((r for r in reversed(mine) if r.get("self")
-                    and (r["self"].get("rank") or r["self"].get("out_of_range"))), None)
+        own = next(
+            (
+                r
+                for r in reversed(mine)
+                if r.get("self") and (r["self"].get("rank") or r["self"].get("out_of_range"))
+            ),
+            None,
+        )
         fin = next((r for r in reversed(mine) if r.get("final")), None)
         out[cid] = {
-            "event_id": meta.get("event_id"), "number": meta.get("chapter_number"),
-            "ranking": ranking, "region": region,
-            "start_time": meta.get("start_time"), "end_time": meta.get("chapter_end_time"),
-            "tiers": [{"rank": t.get("end_rank"), "grade_id": t.get("grade_id")}
-                      for t in (meta.get("tiers") or {}).get(ranking) or []],
-            "self": ({"rank": own["self"].get("rank"), "score": own["self"].get("score"),
-                      "out_of_range": bool(own["self"].get("out_of_range")),
-                      "captured_at": own["captured_at"], "final": bool(own.get("final")),
-                      "source": "own cutoff read (Marathon *RankingGrade self)"} if own else None),
-            "final_borders": ({"captured_at": fin["captured_at"], "borders": fin.get("borders") or [],
-                               "source": "own cutoff read after the end"} if fin else None),
+            "event_id": meta.get("event_id"),
+            "number": meta.get("chapter_number"),
+            "ranking": ranking,
+            "region": region,
+            "start_time": meta.get("start_time"),
+            "end_time": meta.get("chapter_end_time"),
+            "tiers": [
+                {"rank": t.get("end_rank"), "grade_id": t.get("grade_id")}
+                for t in (meta.get("tiers") or {}).get(ranking) or []
+            ],
+            "self": (
+                {
+                    "rank": own["self"].get("rank"),
+                    "score": own["self"].get("score"),
+                    "out_of_range": bool(own["self"].get("out_of_range")),
+                    "captured_at": own["captured_at"],
+                    "final": bool(own.get("final")),
+                    "source": "own cutoff read (Marathon *RankingGrade self)",
+                }
+                if own
+                else None
+            ),
+            "final_borders": (
+                {
+                    "captured_at": fin["captured_at"],
+                    "borders": fin.get("borders") or [],
+                    "source": "own cutoff read after the end",
+                }
+                if fin
+                else None
+            ),
             # each song ranking of the chapter (one per part of a Spotlight event): its tiers,
             # the account's best read, the final borders
             "songs": song_results(recs, meta),
@@ -168,8 +228,11 @@ def cutoff_results(store: Path, region: str) -> dict[str, dict]:
                 last = rec
         for cid, pts in ((last or {}).get("chapters") or {}).items():
             row = out.setdefault(cid, {"event_id": last.get("event_id"), "region": region})
-            row["event_pt"] = {"value": pts, "captured_at": last.get("captured_at"),
-                               "source": "Marathon/Top (the owner's own Event Pt)"}
+            row["event_pt"] = {
+                "value": pts,
+                "captured_at": last.get("captured_at"),
+                "source": "Marathon/Top (the owner's own Event Pt)",
+            }
     return out
 
 
@@ -181,11 +244,18 @@ def recorded_finals(doc: dict, region: str) -> dict[str, dict]:
         for cid, ch in (ev.get("chapters") or {}).items():
             borders = ((ch.get("regions") or {}).get(region) or {}).get("borders")
             if borders:
-                out[cid] = {"event_id": eid, "ranking": ch.get("ranking"),
-                            "kind_label": ev.get("kind_label"), "holomem": ch.get("holomem"),
-                            "final_borders": {"borders": borders, "source": source,
-                                              "read_at": doc.get("read_at"),
-                                              "updated": ((ch.get("regions") or {}).get(region) or {}).get("updated")}}
+                out[cid] = {
+                    "event_id": eid,
+                    "ranking": ch.get("ranking"),
+                    "kind_label": ev.get("kind_label"),
+                    "holomem": ch.get("holomem"),
+                    "final_borders": {
+                        "borders": borders,
+                        "source": source,
+                        "read_at": doc.get("read_at"),
+                        "updated": ((ch.get("regions") or {}).get(region) or {}).get("updated"),
+                    },
+                }
     return out
 
 
@@ -200,11 +270,14 @@ def past_art(doc: dict, art_dir: Path, ensure=None) -> int:
             continue
         m = re.match(r"marathon_event-(normal|relay)-(\d{3})$", eid)
         if m:
-            todo.append({"event_id": eid, "logo_asset_id": f"img_marathon_event_{m.group(1)}_logo-{m.group(2)}-01"})
+            todo.append(
+                {"event_id": eid, "logo_asset_id": f"img_marathon_event_{m.group(1)}_logo-{m.group(2)}-01"}
+            )
     if not todo:
         return 0
     if ensure is None:
         import event_art  # noqa: PLC0415
+
         ensure = event_art.ensure_art
     got = ensure(todo, art_dir)
     n = 0
@@ -226,9 +299,15 @@ def _better_self(old: dict | None, new: dict | None) -> dict | None:
     return new if (new.get("captured_at") or 0) >= (old.get("captured_at") or 0) else old
 
 
-def merge(history: dict, *, events: list[dict], cutoffs: dict[str, dict],
-          emblems: dict[str, dict], titles: dict[str, str] | None = None,
-          finals: dict[str, dict] | None = None) -> dict:
+def merge(
+    history: dict,
+    *,
+    events: list[dict],
+    cutoffs: dict[str, dict],
+    emblems: dict[str, dict],
+    titles: dict[str, str] | None = None,
+    finals: dict[str, dict] | None = None,
+) -> dict:
     """The new history: `history` with every source folded in, nothing removed."""
     titles = titles or {}
     out = {"events": {k: dict(v) for k, v in (history.get("events") or {}).items()}}
@@ -241,7 +320,7 @@ def merge(history: dict, *, events: list[dict], cutoffs: dict[str, dict],
     def chapter(e: dict, cid: str) -> dict:
         return e["chapters"].setdefault(cid, {"chapter_id": cid})
 
-    for ev in events or []:                      # the listed events: archive their facts
+    for ev in events or []:  # the listed events: archive their facts
         if not ev.get("event_id"):
             continue
         e = event(ev["event_id"])
@@ -251,11 +330,14 @@ def merge(history: dict, *, events: list[dict], cutoffs: dict[str, dict],
         for c in ev.get("chapters") or []:
             if c.get("id"):
                 ch = chapter(e, c["id"])
-                for k, v in (("number", c.get("number")), ("ends_at", c.get("ends_at")),
-                             ("title", c.get("title"))):
+                for k, v in (
+                    ("number", c.get("number")),
+                    ("ends_at", c.get("ends_at")),
+                    ("title", c.get("title")),
+                ):
                     if v not in (None, ""):
                         ch[k] = v
-    for cid, r in cutoffs.items():               # the local reads: its rank, the final borders
+    for cid, r in cutoffs.items():  # the local reads: its rank, the final borders
         if not r.get("event_id"):
             continue
         e = event(r["event_id"])
@@ -265,17 +347,18 @@ def merge(history: dict, *, events: list[dict], cutoffs: dict[str, dict],
                 ch[k] = r[k]
         ch["self"] = _better_self(ch.get("self"), r.get("self"))
         if r.get("event_pt") and ((ch.get("event_pt") or {}).get("captured_at") or 0) <= (
-                r["event_pt"].get("captured_at") or 0):
+            r["event_pt"].get("captured_at") or 0
+        ):
             ch["event_pt"] = r["event_pt"]
         if r.get("final_borders"):
             ch["final_borders"] = r["final_borders"]
-        for mid, song in (r.get("songs") or {}).items():   # a song ranking: newest read wins
+        for mid, song in (r.get("songs") or {}).items():  # a song ranking: newest read wins
             have = ch.setdefault("songs", {}).setdefault(mid, {})
             for k in ("tiers", "final_borders"):
                 if song.get(k):
                     have[k] = song[k]
             have["self"] = _better_self(have.get("self"), song.get("self"))
-    for cid, r in (finals or {}).items():        # recorded finals: only where none was read
+    for cid, r in (finals or {}).items():  # recorded finals: only where none was read
         ch = chapter(event(r["event_id"]), cid)
         if not (ch.get("final_borders") or {}).get("borders") or ch["final_borders"].get("read_at"):
             ch["final_borders"] = r["final_borders"]
@@ -287,11 +370,11 @@ def merge(history: dict, *, events: list[dict], cutoffs: dict[str, dict],
             ch["title"] = r["holomem"]
         if r.get("kind_label") and not out["events"][r["event_id"]].get("kind_label"):
             out["events"][r["event_id"]]["kind_label"] = r["kind_label"]
-    for key, r in emblems.items():               # the emblems: the tier of older events
+    for key, r in emblems.items():  # the emblems: the tier of older events
         e = event(r["event_id"])
         ch = chapter(e, r["chapter_id"])
         ch.setdefault("emblems", {})[r["ranking"]] = {"grade": r["grade"], "source": r["source"]}
-    for eid, e in out["events"].items():         # a title the master knows, for an event never listed
+    for eid, e in out["events"].items():  # a title the master knows, for an event never listed
         if not e.get("title"):
             for cid in sorted(e["chapters"]):
                 if titles.get(cid):
@@ -308,6 +391,7 @@ def build() -> tuple[dict, bool]:
     region = CREDENTIAL_REGION_DEFAULT
     try:
         import account_snapshot as asnap  # noqa: PLC0415
+
         region = asnap.load_credential("main")[0].split(".", 1)[0] or region
     except Exception:  # noqa: BLE001 -- US by default; no credential is not fatal
         pass
@@ -318,6 +402,7 @@ def build() -> tuple[dict, bool]:
     titles = {}
     try:
         import event_art  # noqa: PLC0415
+
         ids = sorted({r["chapter_id"] for r in emblems.values()} | set(cut))
         titles = event_art.chapter_titles(event_art.MASTER_TABLES, ids)
     except Exception:  # noqa: BLE001
@@ -326,11 +411,16 @@ def build() -> tuple[dict, bool]:
     # one copied from elsewhere would carry someone else's results
     app = os.environ.get("HB_APP_MODE") == "1"
     base = archive_of(_load(ARCHIVE, {})) if app else _load(OUT, {})
-    doc = merge(base, events=meta.get("events") or [], cutoffs=cut,
-                emblems=emblems, titles=titles,
-                finals=recorded_finals(_load(FINALS, {}), region))
+    doc = merge(
+        base,
+        events=meta.get("events") or [],
+        cutoffs=cut,
+        emblems=emblems,
+        titles=titles,
+        finals=recorded_finals(_load(FINALS, {}), region),
+    )
     if app:
-        doc["built_for"] = "this account"          # the app's start checks for it
+        doc["built_for"] = "this account"  # the app's start checks for it
     return doc, app
 
 
@@ -344,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 -- never fail the refresh over the history
         print(f"event history: could not build ({type(exc).__name__}: {exc}) -- skipped")
         return 0
-    if not app:                                  # the app has no game catalogue; it gets the files
+    if not app:  # the app has no game catalogue; it gets the files
         try:
             got = past_art(doc, DUMPS / "event_art")
             if got:
@@ -353,7 +443,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"event history: past banners skipped ({type(exc).__name__}: {exc})")
     atomic_io.write_bytes(OUT, json.dumps(doc, indent=1, ensure_ascii=False).encode("utf-8"))
     if not app:
-        atomic_io.write_bytes(ARCHIVE, json.dumps(archive_of(doc), indent=1, ensure_ascii=False).encode("utf-8"))
+        atomic_io.write_bytes(
+            ARCHIVE, json.dumps(archive_of(doc), indent=1, ensure_ascii=False).encode("utf-8")
+        )
     for eid in sorted(doc["events"], reverse=True):
         e = doc["events"][eid]
         bits = []
@@ -367,9 +459,13 @@ def main(argv: list[str] | None = None) -> int:
                 bits.append(f"{ch['event_pt']['value']:,} Event Pt")
             for rk, em in (ch.get("emblems") or {}).items():
                 bits.append(f"{em['grade']} emblem ({rk})")
-        print(f"history {eid}: {e.get('title') or '(no title)'} -- {'; '.join(bits) or 'no result on record'}")
-    print(f"written {OUT} ({len(doc['events'])} events, emblems "
-          f"{'read' if _load(SNAPSHOT, {}).get('emblems') is not None else 'not in the snapshot yet'})")
+        print(
+            f"history {eid}: {e.get('title') or '(no title)'} -- {'; '.join(bits) or 'no result on record'}"
+        )
+    print(
+        f"written {OUT} ({len(doc['events'])} events, emblems "
+        f"{'read' if _load(SNAPSHOT, {}).get('emblems') is not None else 'not in the snapshot yet'})"
+    )
     return 0
 
 

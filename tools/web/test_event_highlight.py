@@ -1,16 +1,17 @@
 """Highlight on the Event goal: a random whole song of the chapter's
 Event Bonus holomems, a 170 s song's length bonus, ranked on the MEAN score
 over the pool's charts. The pool, the request, the leaf context and the Event Pt."""
+
 from __future__ import annotations
 
 import dataclasses
 import json
 from types import SimpleNamespace
 
-import pytest
-
 import event_mode as em
+import pytest
 from hbweb import basis, config, songs
+
 from hbuilder.domain import marathon as mar
 
 
@@ -26,12 +27,12 @@ def _event():
 
 
 MUSIC = [
-    {"id": "m0001", "characterIds": ["chr-00007"]},                  # solo of a holomem
-    {"id": "m0002", "characterIds": ["chr-01000", "chr-03007"]},     # group with one of them
-    {"id": "m0003", "characterIds": ["chr-01000"]},                  # nobody of the event
-    {"id": "m0004", "characterIds": ["chr-09999"]},                  # a CARD row's holomem only
-    {"id": "m0005", "characterIds": ["chr-00007"]},                  # no chart on disk
-    {"id": "m0006"},                                                 # no singers listed
+    {"id": "m0001", "characterIds": ["chr-00007"]},  # solo of a holomem
+    {"id": "m0002", "characterIds": ["chr-01000", "chr-03007"]},  # group with one of them
+    {"id": "m0003", "characterIds": ["chr-01000"]},  # nobody of the event
+    {"id": "m0004", "characterIds": ["chr-09999"]},  # a CARD row's holomem only
+    {"id": "m0005", "characterIds": ["chr-00007"]},  # no chart on disk
+    {"id": "m0006"},  # no singers listed
 ]
 
 
@@ -40,10 +41,11 @@ def test_event_holomems_are_the_character_only_live_rows():
 
 
 def test_pool_takes_every_song_a_holomem_sings_and_nothing_else():
-    pool, skipped = em.highlight_pool(["chr-00007", "chr-03007"], MUSIC,
-                                      charted={"m0001", "m0002", "m0003", "m0004"})
-    assert pool == ["m0001", "m0002"]          # the group song is in; m0003/m0004/m0006 out
-    assert skipped == ["m0005"]                # a pool song without a chart is named
+    pool, skipped = em.highlight_pool(
+        ["chr-00007", "chr-03007"], MUSIC, charted={"m0001", "m0002", "m0003", "m0004"}
+    )
+    assert pool == ["m0001", "m0002"]  # the group song is in; m0003/m0004/m0006 out
+    assert skipped == ["m0005"]  # a pool song without a chart is named
 
 
 def test_pool_without_chart_listing_keeps_every_pool_song():
@@ -79,7 +81,7 @@ def test_the_leaf_scores_exactly_the_pool_charts_a_board_per_chart():
     ctx, charts, lost = em.highlight_context(_Ctx(charts=("solo",)), library, ["m0002", "m0001", "m0009"])
     assert [c.music_id for c in charts] == ["m0002", "m0001"]
     assert ctx.charts == charts and ctx.board_per_chart is True
-    assert lost == ["m0009"]                     # the non-pool m0003 never enters
+    assert lost == ["m0009"]  # the non-pool m0003 never enters
 
 
 @pytest.mark.parametrize("song", ["highlight", "Highlight", " HIGHLIGHT "])
@@ -103,14 +105,31 @@ def test_highlight_bonus_is_a_170_s_songs_length_bonus():
 def test_highlight_event_points_use_the_highlight_bonus_not_the_song_length():
     card = SimpleNamespace(id="card-00007-5-x", member="A", costume_name="c", type="t", rarity="5")
     reps = [card] * 6
-    r = {"leader": card, "members": (0, 1, 2, 3, 4), "score": 1_840_400.4, "live_permil": 1380,
-         "song_permil": 0, "objective": 0.0, "source": "event_search"}
-    row = em.row_payload(1, r, reps=reps, bonus_of=lambda c: (276, 0), card_state=lambda _i: {},
-                         boosts=3, length_permil=em.length_permil_estimate(em.HIGHLIGHT_SECONDS, 3), holopass=True)
-    assert row["event_points"] == mar.event_points(1_840_400, 1380, boosts=3, length_permil=1500,
-                                                   holopass=True)
-    assert row["event_points"] != mar.event_points(1_840_400, 1380, boosts=3, length_permil=1480,
-                                                   holopass=True)
+    r = {
+        "leader": card,
+        "members": (0, 1, 2, 3, 4),
+        "score": 1_840_400.4,
+        "live_permil": 1380,
+        "song_permil": 0,
+        "objective": 0.0,
+        "source": "event_search",
+    }
+    row = em.row_payload(
+        1,
+        r,
+        reps=reps,
+        bonus_of=lambda c: (276, 0),
+        card_state=lambda _i: {},
+        boosts=3,
+        length_permil=em.length_permil_estimate(em.HIGHLIGHT_SECONDS, 3),
+        holopass=True,
+    )
+    assert row["event_points"] == mar.event_points(
+        1_840_400, 1380, boosts=3, length_permil=1500, holopass=True
+    )
+    assert row["event_points"] != mar.event_points(
+        1_840_400, 1380, boosts=3, length_permil=1480, holopass=True
+    )
 
 
 def test_mean_over_the_pool_ranks_the_teams():
@@ -121,6 +140,7 @@ def test_mean_over_the_pool_ranks_the_teams():
     def value(name):
         mean = sum(per_chart[name]) / len(per_chart[name])
         return mar.event_objective(mean, objective="event_points", live_permil=1000, song_permil=0)
+
     assert value("steady") > value("spiky")
 
 
@@ -129,4 +149,4 @@ def test_event_run_route_takes_highlight_and_refuses_its_song_score(monkeypatch)
     body = {"song": "highlight", "objective": "event_points", "difficulty": "HARD"}
     opts = em.parse_event_body(body)
     assert basis.parse_difficulty(body, "") == "HARD"
-    assert json.dumps(opts)                                  # the job echoes its opts
+    assert json.dumps(opts)  # the job echoes its opts

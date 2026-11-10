@@ -105,8 +105,7 @@ def test_the_identity_reproduces_every_capture_EXACTLY():
     answer whatever the data; an intersection is empty when the shape is wrong,
     which is what makes this evidence."""
     residues = [
-        unit - math.ceil(power * (1.0 + permil / 1000.0) * UNIT_SCORE_K)
-        for power, permil, unit in ORACLE
+        unit - math.ceil(power * (1.0 + permil / 1000.0) * UNIT_SCORE_K) for power, permil, unit in ORACLE
     ]
     assert residues == [0] * 10, residues
 
@@ -122,10 +121,7 @@ def test_ceiling_is_the_rule_and_the_others_are_now_refuted():
     constant fitted under a different rule measures the pair, not the rule."""
 
     def residues(rule):
-        return [
-            unit - rule(power * (1.0 + permil / 1000.0) * UNIT_SCORE_K)
-            for power, permil, unit in ORACLE
-        ]
+        return [unit - rule(power * (1.0 + permil / 1000.0) * UNIT_SCORE_K) for power, permil, unit in ORACLE]
 
     assert residues(math.ceil) == [0] * 10
     assert residues(math.floor) == [1] * 10  # uniformly short by one
@@ -231,9 +227,7 @@ def test_an_unsupplied_account_scalar_is_named_not_silently_dropped():
     assert result.missing == ("up_by_poster_collect",)
     assert result.complete is False
 
-    both = deck_screen_unit_score(
-        _breakdown(memory_bonus=None, member_power_up=None)
-    )
+    both = deck_screen_unit_score(_breakdown(memory_bonus=None, member_power_up=None))
     assert both.missing == ("up_by_poster_collect", "card_training_evaluation")
     assert both.complete is False
 

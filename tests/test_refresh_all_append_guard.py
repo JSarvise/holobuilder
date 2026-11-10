@@ -33,9 +33,7 @@ def _record(card_id: str, magnitude: float = 10.0) -> dict:
 
 def _install(tmp_path, monkeypatch, cards: list[dict]) -> Path:
     path = tmp_path / "cards.json"
-    path.write_bytes(
-        json.dumps({"schema_version": "2", "cards": cards}, indent=2).encode("utf-8")
-    )
+    path.write_bytes(json.dumps({"schema_version": "2", "cards": cards}, indent=2).encode("utf-8"))
     monkeypatch.setattr(refresh_all, "APPEND_ONLY", path)
     return path
 
@@ -79,7 +77,7 @@ def test_the_merge_refuses_to_write_a_file_it_did_not_format(tmp_path, monkeypat
     """A 1-line append must never become a whole-file reformat. If the file on
     disk is not byte-identical to this tool's own serialisation, it declines."""
     path = tmp_path / "owned.json"
-    path.write_bytes(b'{"owned":["a"],"schema_version":"2"}')   # compact, not this tool's format
+    path.write_bytes(b'{"owned":["a"],"schema_version":"2"}')  # compact, not this tool's format
     monkeypatch.setattr(refresh_all, "APPEND_ONLY_OWNED", path)
 
     lines, failed = refresh_all.merge_owned("main")
@@ -104,9 +102,7 @@ def test_appending_a_whole_new_card_passes_and_names_it(tmp_path, monkeypatch):
     path = _install(tmp_path, monkeypatch, [_record("a")])
     before = refresh_all.catalogue_records()
     path.write_bytes(
-        json.dumps(
-            {"schema_version": "2", "cards": [_record("a"), _record("b")]}, indent=2
-        ).encode("utf-8")
+        json.dumps({"schema_version": "2", "cards": [_record("a"), _record("b")]}, indent=2).encode("utf-8")
     )
 
     lines, failed = refresh_all.catalogue_guard(before)
@@ -137,9 +133,7 @@ def test_a_modified_existing_card_FAILS_and_names_the_card(tmp_path, monkeypatch
 def test_a_removed_card_FAILS_and_names_the_card(tmp_path, monkeypatch):
     path = _install(tmp_path, monkeypatch, [_record("a"), _record("b")])
     before = refresh_all.catalogue_records()
-    path.write_bytes(
-        json.dumps({"schema_version": "2", "cards": [_record("a")]}, indent=2).encode("utf-8")
-    )
+    path.write_bytes(json.dumps({"schema_version": "2", "cards": [_record("a")]}, indent=2).encode("utf-8"))
 
     lines, failed = refresh_all.catalogue_guard(before)
 
@@ -180,8 +174,11 @@ def test_the_merge_holds_back_a_card_the_catalogue_does_not_have_yet(tmp_path, m
     path.write_bytes(refresh_all._owned_bytes({"owned": ["a"], "schema_version": "2"}))
     monkeypatch.setattr(refresh_all, "APPEND_ONLY_OWNED", path)
     monkeypatch.setattr(refresh_all, "DUMPS", tmp_path)
-    monkeypatch.setattr(refresh_all, "probe_card_params", lambda: SimpleNamespace(
-        exists=True, error=None, ids={"card": {"a", "b", "new-event-card"}}))
+    monkeypatch.setattr(
+        refresh_all,
+        "probe_card_params",
+        lambda: SimpleNamespace(exists=True, error=None, ids={"card": {"a", "b", "new-event-card"}}),
+    )
 
     lines, failed = refresh_all.merge_owned("main")
 

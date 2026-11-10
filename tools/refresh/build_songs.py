@@ -15,11 +15,16 @@ SOURCES (all local; no network):
 
   python build_songs.py [--out PATH] [--quiet]
 """
-import json, os, sys, collections
+
+import collections
+import json
+import os
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 HERE = str(paths.REFRESH_DIR)
 sys.path.insert(0, HERE)
 import master_cache  # noqa: E402
@@ -43,13 +48,16 @@ def iso_utc(ms):
     if not ms:
         return None
     import datetime
-    return datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).isoformat()
+
+    return datetime.datetime.fromtimestamp(ms / 1000, datetime.UTC).isoformat()
 
 
 def rel(path):
     """Relative to the folder holding dumps/, forward slashes — these paths get consumed by a web
     view."""
-    return os.path.relpath(path, os.path.dirname(DUMPS)).replace(os.sep, "/") if os.path.exists(path) else None
+    return (
+        os.path.relpath(path, os.path.dirname(DUMPS)).replace(os.sep, "/") if os.path.exists(path) else None
+    )
 
 
 def g(data, field, default=None):
@@ -74,6 +82,7 @@ def catalog_audio():
     if _CATALOG_AUDIO:
         return _CATALOG_AUDIO
     from master_db import decode_record
+
     path = os.path.join(DUMPS, "octocacheevai_prod.dec")
     if not os.path.exists(path):
         return _CATALOG_AUDIO
@@ -82,7 +91,7 @@ def catalog_audio():
     for blob in list(top.get(2, [])) + list(top.get(3, [])):
         name = decode_record(blob).get(2, [b""])[0].decode()
         if name.startswith("music_short_"):
-            _CATALOG_AUDIO.setdefault(name[len("music_short_"):].rsplit(".", 1)[0], []).append(name)
+            _CATALOG_AUDIO.setdefault(name[len("music_short_") :].rsplit(".", 1)[0], []).append(name)
     return _CATALOG_AUDIO
 
 
@@ -99,10 +108,12 @@ def raw_rows(table):
     tables is a nested protobuf, and replacement characters make it unparseable. Reward decoding
     therefore has to come through here."""
     from master_db import decode_record
+
     db = master_cache.open_table(table)
     try:
-        return [decode_record(r["data"])
-                for r in db.query(f"SELECT * FROM {master_cache.sql_table(db, table)}")]
+        return [
+            decode_record(r["data"]) for r in db.query(f"SELECT * FROM {master_cache.sql_table(db, table)}")
+        ]
     finally:
         db.close()
 
@@ -113,11 +124,14 @@ def _reward(blob):
     Field 1 is the resource type, 2 the resource id (absent for types that need
     none, e.g. 1001 = the Red Diamond currency), 3 the quantity."""
     from master_db import decode_record
+
     r = decode_record(blob)
     rid = r.get(2, [None])[0]
-    return {"resource_type": r.get(1, [None])[0],
-            "resource_id": rid.decode("utf-8", "replace") if isinstance(rid, bytes) else rid,
-            "quantity": r.get(3, [None])[0]}
+    return {
+        "resource_type": r.get(1, [None])[0],
+        "resource_id": rid.decode("utf-8", "replace") if isinstance(rid, bytes) else rid,
+        "quantity": r.get(3, [None])[0],
+    }
 
 
 # LiveEvaluationRankType, as the game defines it
@@ -131,15 +145,21 @@ def global_rewards():
     `MusicDifficultyChart.max_combo_count_reward_threshold` and the chart note counts."""
     out = {}
     for key, table, label in (
-            ("score_rank", "LiveMusicHighestScoreEvaluationRankReward", "evaluation_rank_type"),
-            ("play_count", "LiveMusicClearCountReward", "clear_count"),
-            ("max_combo", "LiveMusicDifficultyMaxComboCountReward", "difficulty_type"),
-            ("full_combo", "LiveMusicFullComboReward", "difficulty_type")):
+        ("score_rank", "LiveMusicHighestScoreEvaluationRankReward", "evaluation_rank_type"),
+        ("play_count", "LiveMusicClearCountReward", "clear_count"),
+        ("max_combo", "LiveMusicDifficultyMaxComboCountReward", "difficulty_type"),
+        ("full_combo", "LiveMusicFullComboReward", "difficulty_type"),
+    ):
         rows = []
         for d in raw_rows(table):
             n = d.get(1, [None])[0]
-            entry = {label: RANK.get(n, n) if label == "evaluation_rank_type"
-                     else DIFFICULTY.get(n, n) if label == "difficulty_type" else n}
+            entry = {
+                label: RANK.get(n, n)
+                if label == "evaluation_rank_type"
+                else DIFFICULTY.get(n, n)
+                if label == "difficulty_type"
+                else n
+            }
             if 1000 in d:
                 entry["reward"] = _reward(d[1000][0])
             rows.append(entry)
@@ -181,10 +201,12 @@ def build():
         release = RELEASE.get(g(d, 24), f"UNKNOWN({g(d, 24)})")
 
         # --- unlock
-        unlock = {"type": release,
-                  "requirement_text": lm.get(g(d, 26, ""), "") or None,
-                  "release_item_quantity": g(d, 25),
-                  "quest_ids": [g(q, 1) for q in quests.get(mid, [])] or None}
+        unlock = {
+            "type": release,
+            "requirement_text": lm.get(g(d, 26, ""), "") or None,
+            "release_item_quantity": g(d, 25),
+            "quest_ids": [g(q, 1) for q in quests.get(mid, [])] or None,
+        }
 
         # --- difficulties, joined to their chart counts and the .sus on disk
         levels = []
@@ -193,17 +215,19 @@ def build():
             asset = g(dd, 4, "")
             ch = charts.get((mid, dt), {})
             sus = os.path.join(CHARTS, asset + ".sus")
-            levels.append({
-                "difficulty": DIFFICULTY.get(dt, f"UNKNOWN({dt})"),
-                "level": g(dd, 3),
-                "chart_asset_id": asset,
-                "full_combo_note_count": g(ch, 3),
-                "normal_note_count": g(ch, 6),
-                "chart_hash": g(ch, 5),
-                # what the "N combo" reward threshold is measured against, per difficulty
-                "max_combo_reward_threshold": g(ch, 4),
-                "chart_file": rel(sus),
-            })
+            levels.append(
+                {
+                    "difficulty": DIFFICULTY.get(dt, f"UNKNOWN({dt})"),
+                    "level": g(dd, 3),
+                    "chart_asset_id": asset,
+                    "full_combo_note_count": g(ch, 3),
+                    "normal_note_count": g(ch, 6),
+                    "chart_hash": g(ch, 5),
+                    # what the "N combo" reward threshold is measured against, per difficulty
+                    "max_combo_reward_threshold": g(ch, 4),
+                    "chart_file": rel(sus),
+                }
+            )
 
         # --- assets on disk. `expected` comes from the catalog, so "complete" is a real
         # claim: most songs keep their waveform in a .awb and only some carry it inline,
@@ -213,46 +237,50 @@ def build():
         webp = os.path.join(JACKETS, jacket_name + ".webp")
         acb = os.path.join(FETCHED, f"music_short_{mid}.acb.bundle")
         awb = os.path.join(FETCHED, f"music_short_{mid}.awb.bundle")
-        songs.append({
-            "id": mid,
-            "title": lm.get(g(d, 2, ""), ""),
-            "title_ruby": lm.get(g(d, 3, ""), ""),
-            "credits": {"lyricist": lm.get(g(d, 7, ""), ""),
-                        "composer": lm.get(g(d, 9, ""), ""),
-                        "arranger": lm.get(g(d, 11, ""), "")},
-            "singer": {
-                "type": SINGER.get(g(d, 100), f"UNKNOWN({g(d, 100)})"),
-                "display_name": lm.get(g(d, 102, ""), "") or None,
-                "character_ids": cids,
-                # SINGER_TYPE_ALL leaves character_ids empty on purpose -- it means everyone,
-                # not nobody. Callers must not render "no performer".
-                "characters": [{"id": c, "name": chars.get(c, "")} for c in cids],
-            },
-            "length_seconds": g(d, 15),
-            "released_at_ms": g(d, 14),
-            "released_at_utc": iso_utc(g(d, 14)),
-            # the client mutes these in streamer mode -- licensed tracks, mostly
-            "streaming_muted": f"music_short_{mid}" in muted,
-            "chorus": {"start_ms": g(d, 104), "end_ms": g(d, 105)},
-            "category": CATEGORY.get(g(d, 16), f"UNKNOWN({g(d, 16)})"),
-            "copyright": g(d, 31),
-            "mv_url": g(d, 29),
-            "mv_count": len(mvs.get(mid, [])) or 0,
-            "live_score_coefficient_permil": g(d, 17),
-            "is_tutorial": bool(g(d, 28)),
-            "unlock": unlock,
-            "difficulties": levels,
-            "assets": {
-                "jacket_asset_id": jacket_name,
-                "jacket_webp": rel(webp),
-                "audio_acb": rel(acb),
-                "audio_awb": rel(awb),
-                "audio_files_expected": expected,
-                "audio_complete": bool(expected) and all(
-                    os.path.exists(os.path.join(FETCHED, n + ".bundle")) for n in expected),
-                "audio_wav": rel(os.path.join(WAVS, mid + ".wav")),
-            },
-        })
+        songs.append(
+            {
+                "id": mid,
+                "title": lm.get(g(d, 2, ""), ""),
+                "title_ruby": lm.get(g(d, 3, ""), ""),
+                "credits": {
+                    "lyricist": lm.get(g(d, 7, ""), ""),
+                    "composer": lm.get(g(d, 9, ""), ""),
+                    "arranger": lm.get(g(d, 11, ""), ""),
+                },
+                "singer": {
+                    "type": SINGER.get(g(d, 100), f"UNKNOWN({g(d, 100)})"),
+                    "display_name": lm.get(g(d, 102, ""), "") or None,
+                    "character_ids": cids,
+                    # SINGER_TYPE_ALL leaves character_ids empty on purpose -- it means everyone,
+                    # not nobody. Callers must not render "no performer".
+                    "characters": [{"id": c, "name": chars.get(c, "")} for c in cids],
+                },
+                "length_seconds": g(d, 15),
+                "released_at_ms": g(d, 14),
+                "released_at_utc": iso_utc(g(d, 14)),
+                # the client mutes these in streamer mode -- licensed tracks, mostly
+                "streaming_muted": f"music_short_{mid}" in muted,
+                "chorus": {"start_ms": g(d, 104), "end_ms": g(d, 105)},
+                "category": CATEGORY.get(g(d, 16), f"UNKNOWN({g(d, 16)})"),
+                "copyright": g(d, 31),
+                "mv_url": g(d, 29),
+                "mv_count": len(mvs.get(mid, [])) or 0,
+                "live_score_coefficient_permil": g(d, 17),
+                "is_tutorial": bool(g(d, 28)),
+                "unlock": unlock,
+                "difficulties": levels,
+                "assets": {
+                    "jacket_asset_id": jacket_name,
+                    "jacket_webp": rel(webp),
+                    "audio_acb": rel(acb),
+                    "audio_awb": rel(awb),
+                    "audio_files_expected": expected,
+                    "audio_complete": bool(expected)
+                    and all(os.path.exists(os.path.join(FETCHED, n + ".bundle")) for n in expected),
+                    "audio_wav": rel(os.path.join(WAVS, mid + ".wav")),
+                },
+            }
+        )
     return songs
 
 
@@ -266,23 +294,34 @@ def coverage(songs):
         # that is how the game credits covers, not a gap here.
         ("credits: lyricist", have(lambda s: s["credits"]["lyricist"])),
         ("credits: composer", have(lambda s: s["credits"]["composer"])),
-        ("credits: arranger (ORIGINAL only)",
-         have(lambda s: s["credits"]["arranger"] or s["category"] == "COVER")),
+        (
+            "credits: arranger (ORIGINAL only)",
+            have(lambda s: s["credits"]["arranger"] or s["category"] == "COVER"),
+        ),
         ("length_seconds", have(lambda s: s["length_seconds"])),
         ("mv_url", have(lambda s: s["mv_url"])),
         ("copyright", have(lambda s: s["copyright"])),
         ("4 difficulties", have(lambda s: len(s["difficulties"]) == 4)),
-        ("every chart .sus on disk", have(lambda s: s["difficulties"]
-                                          and all(d["chart_file"] for d in s["difficulties"]))),
-        ("note counts on all 4", have(lambda s: s["difficulties"]
-                                      and all(d["full_combo_note_count"] for d in s["difficulties"]))),
+        (
+            "every chart .sus on disk",
+            have(lambda s: s["difficulties"] and all(d["chart_file"] for d in s["difficulties"])),
+        ),
+        (
+            "note counts on all 4",
+            have(lambda s: s["difficulties"] and all(d["full_combo_note_count"] for d in s["difficulties"])),
+        ),
         ("jacket rendered", have(lambda s: s["assets"]["jacket_webp"])),
         ("audio complete (all its files)", have(lambda s: s["assets"]["audio_complete"])),
         ("audio decoded to wav", have(lambda s: s["assets"]["audio_wav"])),
         ("released_at", have(lambda s: s["released_at_utc"])),
-        ("max_combo thresholds on all 4",
-         have(lambda s: s["difficulties"] and all(d["max_combo_reward_threshold"]
-                                                  for d in s["difficulties"]))),
+        (
+            "max_combo thresholds on all 4",
+            have(
+                lambda s: (
+                    s["difficulties"] and all(d["max_combo_reward_threshold"] for d in s["difficulties"])
+                )
+            ),
+        ),
         ("named singers", have(lambda s: s["singer"]["characters"])),
         ("singer type ALL", have(lambda s: s["singer"]["type"] == "ALL")),
         ("unlock requirement text", have(lambda s: s["unlock"]["requirement_text"])),
@@ -304,8 +343,7 @@ def main():
     songs = build()
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
-        json.dump({"rewards": global_rewards(), "songs": songs}, fh,
-                  ensure_ascii=False, indent=1)
+        json.dump({"rewards": global_rewards(), "songs": songs}, fh, ensure_ascii=False, indent=1)
     print(f"{len(songs)} songs -> {out}  ({os.path.getsize(out) / 1024:.0f} KB)")
     if "--quiet" not in argv:
         coverage(songs)

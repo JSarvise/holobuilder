@@ -108,8 +108,7 @@ def card_provenance(doc: object) -> CardProvenance | None:
     cards = doc.get("cards")
     if isinstance(cards, list) and len(cards) != card_count:
         raise SchemaError(
-            f"provenance: 'card_count' is {card_count} but the document holds "
-            f"{len(cards)} cards",
+            f"provenance: 'card_count' is {card_count} but the document holds {len(cards)} cards",
             card_id=None,
             field=PROVENANCE_KEY,
         )
@@ -143,7 +142,7 @@ def load_cards(path: Path) -> tuple[Card, ...]:
     void the pin. The cost is one extra read of the same file per run,
     which is nothing next to a solve.
     """
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
 
     doc_errors = validate_document(doc)
@@ -176,7 +175,7 @@ def load_cards(path: Path) -> tuple[Card, ...]:
 def card_provenance_of(path: Path) -> CardProvenance | None:
     """The stat basis of a cards-shaped document: `None` for the maxed
     default (mode A), a `CardProvenance` for a mode-B real-stat document."""
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
     return card_provenance(doc)
 
@@ -188,7 +187,7 @@ def load_owned(path: Path, cards: tuple[Card, ...]) -> tuple[Card, ...]:
     appear in `owned.json` — so two owned files differing only in id order
     resolve to identical tuples. An empty `owned` array returns an empty
     tuple without raising."""
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
 
     doc_errors = validate_owned_document(doc)

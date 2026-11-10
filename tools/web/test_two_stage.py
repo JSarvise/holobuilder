@@ -9,6 +9,7 @@ score it returns is the exact scorer's, and on pools small enough to brute-force
 it finds the true best. Synthetic pools only; the recall measured on the real
 enumerations is on the archive/research branch.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -40,15 +41,20 @@ def _pool(count: int, seed: int, holomems: int | None = None):
     skins and the distinct-member rule bites)."""
     rng = random.Random(seed)
     holomems = holomems or max(5, count * 3 // 4)
-    return [SimpleNamespace(
-        id=f"card-{i:03d}", member=f"Chr{i % holomems}", type=rng.choice(TYPES),
-        generations=frozenset(rng.sample(GENERATIONS, rng.choice([1, 1, 2]))),
-        strength=rng.uniform(0.6, 1.4)) for i in range(count)]
+    return [
+        SimpleNamespace(
+            id=f"card-{i:03d}",
+            member=f"Chr{i % holomems}",
+            type=rng.choice(TYPES),
+            generations=frozenset(rng.sample(GENERATIONS, rng.choice([1, 1, 2]))),
+            strength=rng.uniform(0.6, 1.4),
+        )
+        for i in range(count)
+    ]
 
 
 def _legal(cards):
-    return [s for s in itertools.combinations(range(len(cards)), 5)
-            if len({cards[i].member for i in s}) == 5]
+    return [s for s in itertools.combinations(range(len(cards)), 5) if len({cards[i].member for i in s}) == 5]
 
 
 def _scorer(cards, seed: int):
@@ -56,8 +62,9 @@ def _scorer(cards, seed: int):
     type / generation counts, pair synergies, and a term no screen feature
     explains — so the model is useful and wrong, as it is on the real leaf."""
     rng = random.Random(seed)
-    synergy = {pair: rng.choice([0.0, 0.0, 0.0, 0.08, 0.2])
-               for pair in itertools.combinations(range(len(cards)), 2)}
+    synergy = {
+        pair: rng.choice([0.0, 0.0, 0.0, 0.08, 0.2]) for pair in itertools.combinations(range(len(cards)), 2)
+    }
     calls = []
 
     def score(s) -> float:
@@ -102,11 +109,11 @@ def _model_prediction(screen, cards, s) -> float:
 def test_the_scan_visits_exactly_the_legal_sets_and_never_returns_a_seen_one():
     cards = _pool(22, seed=1, holomems=15)
     legal = _legal(cards)
-    assert len(legal) < math.comb(22, 5)          # the distinct-member rule really excludes some
+    assert len(legal) < math.comb(22, 5)  # the distinct-member rule really excludes some
     screen = surrogate.Screen(cards)
     sets, _preds, n_legal = screen.best(len(legal) + 50)
     assert n_legal == len(legal)
-    assert sets == legal                          # an unfitted model is flat: lexicographic order
+    assert sets == legal  # an unfitted model is flat: lexicographic order
     seen = random.Random(2).sample(legal, 500)
     sets, _preds, _n = screen.best(len(legal), seen)
     assert set(sets) == set(legal) - set(seen) and len(sets) == len(legal) - 500
@@ -119,7 +126,7 @@ def test_the_scan_returns_the_models_own_best_sets_in_the_models_own_order():
     train = random.Random(5).sample(legal, 3000)
     screen = surrogate.Screen(cards)
     mae = screen.fit(train, [math.log(score(s)) for s in train])
-    assert 0.0 <= mae < 0.05                      # it does learn the planted structure
+    assert 0.0 <= mae < 0.05  # it does learn the planted structure
     reference = {s: _model_prediction(screen, cards, s) for s in legal}
     want = 400
     sets, preds, _n = screen.best(want, train[:1000])
@@ -128,7 +135,7 @@ def test_the_scan_returns_the_models_own_best_sets_in_the_models_own_order():
     assert all(a >= b for a, b in zip(preds, preds[1:]))
     assert all(abs(p - reference[s]) < 1e-9 for s, p in zip(sets, preds))
     allowed = sorted((v for s, v in reference.items() if s not in set(train[:1000])), reverse=True)
-    assert preds[-1] >= allowed[want - 1] - 1e-9   # nothing better was left out
+    assert preds[-1] >= allowed[want - 1] - 1e-9  # nothing better was left out
     # deterministic: the same fit and the same scan give the same answer
     again = surrogate.Screen(cards)
     again.fit(train, [math.log(score(s)) for s in train])
@@ -157,7 +164,7 @@ def test_the_search_finds_the_true_best_and_reports_only_exact_scores(seed):
     result = two_stage.search(cards, score_sets, initial=1500, step=600, max_rounds=12, seed=seed)
     stats = result["stats"]
     assert stats["stop"] == "stable" and stats["legal_sets"] == len(legal)
-    assert stats["exact_evals"] < len(legal) / 15            # a search, not an enumeration
+    assert stats["exact_evals"] < len(legal) / 15  # a search, not an enumeration
     ranking = result["ranking"]
     assert ranking[0] == truth[0]
     found = {s for _v, s in ranking}
@@ -209,6 +216,7 @@ def test_a_set_the_scorer_values_at_zero_is_kept_out_of_the_fit_not_out_of_the_b
 
 # --- search_song: the best (leader, members) without a search per leader ------
 
+
 def _leaders(cards, seed: int):
     """Leaders with the three ways a real one moves the score: a flat outfit
     factor, an outfit gated on the members' type count, and a `sings` factor."""
@@ -216,9 +224,16 @@ def _leaders(cards, seed: int):
     out = []
     for i, card in enumerate(cards):
         gate = ("type", rng.choice(TYPES), 3) if rng.random() < 0.4 else None
-        out.append(SimpleNamespace(id=f"lead-{i:03d}", member=card.member, gate=gate,
-                                   flat=rng.uniform(1.0, 1.05), gated=rng.uniform(1.05, 1.2),
-                                   sings=1.0))
+        out.append(
+            SimpleNamespace(
+                id=f"lead-{i:03d}",
+                member=card.member,
+                gate=gate,
+                flat=rng.uniform(1.0, 1.05),
+                gated=rng.uniform(1.05, 1.2),
+                sings=1.0,
+            )
+        )
     return out
 
 
@@ -228,8 +243,9 @@ def _leader_score(cards, score):
         if leader.gate and sum(cards[i].type == leader.gate[1] for i in s) >= leader.gate[2]:
             value *= leader.gated
         if any(cards[i].member == leader.member for i in s):
-            value *= 1.03                              # leader also a member
+            value *= 1.03  # leader also a member
         return float(math.ceil(value))
+
     return of
 
 
@@ -239,14 +255,22 @@ def test_search_song_finds_the_best_leader_and_labels_how_each_row_was_obtained(
     score, _sets, _calls = _scorer(cards, seed=52)
     leaders = _leaders(cards, seed=53)
     for singer in leaders[4:6]:
-        singer.sings = 1.15                            # two leaders sing this song
+        singer.sings = 1.15  # two leaders sing this song
     of = _leader_score(cards, score)
     truth = {l.id: max(of(l, s) for s in legal) for l in leaders}
     base = SimpleNamespace(id="bare", member="Nobody", gate=None, flat=1.0, gated=1.0, sings=1.0)
     result = two_stage.search_song(
-        cards, leaders, lambda leader, sets: [of(leader, s) for s in sets],
-        base_leader=base, always=leaders[4:6], gate_of=lambda l: l.gate,
-        initial=1500, step=600, triage_top=150, tier=60)
+        cards,
+        leaders,
+        lambda leader, sets: [of(leader, s) for s in sets],
+        base_leader=base,
+        always=leaders[4:6],
+        gate_of=lambda l: l.gate,
+        initial=1500,
+        step=600,
+        triage_top=150,
+        tier=60,
+    )
     rows = result["rows"]
     best = max(truth.values())
     assert rows[0]["best"] == best and truth[rows[0]["leader"].id] == best
@@ -270,14 +294,24 @@ def test_search_song_caps_a_flat_field_and_keeps_triage_rows_past_the_deadline()
 
     def run(**options):
         return two_stage.search_song(
-            cards, leaders, lambda leader, sets: [of(leader, s) for s in sets],
-            base_leader=base, gate_of=lambda l: l.gate, initial=800, step=300,
-            triage_top=100, tier=40, **options)
+            cards,
+            leaders,
+            lambda leader, sets: [of(leader, s) for s in sets],
+            base_leader=base,
+            gate_of=lambda l: l.gate,
+            initial=800,
+            step=300,
+            triage_top=100,
+            tier=40,
+            **options,
+        )
 
-    wide = run(margin=1.0, max_searched=3)             # everyone is "within margin"
+    wide = run(margin=1.0, max_searched=3)  # everyone is "within margin"
     assert wide["stats"]["within_margin"] == len(leaders) and wide["stats"]["searched"] == 3
     forced = run(margin=0.0, max_searched=1, always=leaders[:4])
-    assert {r["leader"].id for r in forced["rows"] if r["status"] == "searched"} >=         {l.id for l in leaders[:4]}                    # `always` is never cut by the cap
+    assert {r["leader"].id for r in forced["rows"] if r["status"] == "searched"} >= {
+        l.id for l in leaders[:4]
+    }  # `always` is never cut by the cap
     late = run(margin=1.0, deadline=0.0)
     assert late["stats"]["searched"] == 0 and late["stats"]["not_reached"] == 12
     assert all(r["status"] == "triage" for r in late["rows"])
@@ -286,15 +320,13 @@ def test_search_song_caps_a_flat_field_and_keeps_triage_rows_past_the_deadline()
 def test_a_bad_seed_or_a_non_finite_score_is_refused():
     cards = _pool(20, seed=71, holomems=12)
     score, score_sets, _calls = _scorer(cards, seed=72)
-    twin = next(s for s in itertools.combinations(range(20), 5)
-                if len({cards[i].member for i in s}) < 5)
+    twin = next(s for s in itertools.combinations(range(20), 5) if len({cards[i].member for i in s}) < 5)
     for bad in ([(0, 1, 2, 3, 99)], [(0, 1, 2, 3)], [twin], [(0, 0, 1, 2, 3)]):
         with pytest.raises(ValueError, match="not a legal member set"):
             two_stage.search(cards, score_sets, initial=200, step=100, seeds=bad)
     for poison in (float("nan"), float("inf")):
         with pytest.raises(ValueError, match="the scorer returned"):
-            two_stage.search(cards, lambda sets, poison=poison: [poison] * len(sets),
-                             initial=200, step=100)
+            two_stage.search(cards, lambda sets, poison=poison: [poison] * len(sets), initial=200, step=100)
 
 
 def test_neighbours_reach_a_set_the_screen_cannot_explain():
@@ -316,7 +348,7 @@ def test_neighbours_reach_a_set_the_screen_cannot_explain():
 
     plain = two_stage.search(cards, score_sets, initial=800, step=300, seed=1)
     local = two_stage.search(cards, score_sets, initial=800, step=300, seed=1, neighbours=5)
-    assert plain["ranking"][0][1] != needle            # the screen alone misses it
+    assert plain["ranking"][0][1] != needle  # the screen alone misses it
     assert local["ranking"][0] == (top, needle)
     assert local["stats"]["neighbour_evals"] > 0 and plain["stats"]["neighbour_evals"] == 0
 
@@ -337,8 +369,9 @@ def test_the_net_gives_every_card_its_share_of_proposals_and_off_changes_nothing
     again = two_stage.search(cards, score_sets, initial=400, step=60, seed=3, max_rounds=3, net=0)
     assert plain["ranking"] == again["ranking"]
     assert plain["stats"]["net_evals"] == 0
-    assert any(min(sum(c in s for s in batch) for c in range(len(cards))) == 0
-               for batch in batches[1:4])               # the screen alone leaves cards out
+    assert any(
+        min(sum(c in s for s in batch) for c in range(len(cards))) == 0 for batch in batches[1:4]
+    )  # the screen alone leaves cards out
     batches.clear()
     wide = two_stage.search(cards, score_sets, initial=400, step=60, seed=3, max_rounds=3, net=4)
     for batch in batches[1:]:
@@ -355,23 +388,24 @@ def test_the_event_objective_inside_the_search_finds_the_bonus_team_a_rerank_mis
     the objective inside the search (`objective_scorer`) does."""
     cards = _pool(34, seed=40 + seed)
     for k, c in enumerate(cards):
-        if k % 5 == 0:                                   # every fifth card: weak, +500 live
+        if k % 5 == 0:  # every fifth card: weak, +500 live
             c.strength = 0.75
     bonus = [(500 if k % 5 == 0 else 0, 0) for k in range(len(cards))]
     legal = _legal(cards)
     score, _score_sets, _calls = _scorer(cards, seed=50 + seed)
-    plain = lambda _leader, sets: [score(s) for s in sets]          # noqa: E731
+    plain = lambda _leader, sets: [score(s) for s in sets]  # noqa: E731
     objective = two_stage.objective_scorer(plain, bonus, "event_points")
     truth = max(legal, key=lambda s: (objective(None, [s])[0], s))
 
-    by_score = two_stage.search(cards, lambda sets: plain(None, sets), initial=1500, step=600,
-                                max_rounds=12, seed=seed)
-    reranked = max((s for _v, s in by_score["ranking"][:200]),
-                   key=lambda s: objective(None, [s])[0])
-    assert reranked != truth                             # the post-hoc rerank misses it
+    by_score = two_stage.search(
+        cards, lambda sets: plain(None, sets), initial=1500, step=600, max_rounds=12, seed=seed
+    )
+    reranked = max((s for _v, s in by_score["ranking"][:200]), key=lambda s: objective(None, [s])[0])
+    assert reranked != truth  # the post-hoc rerank misses it
 
-    found = two_stage.search(cards, lambda sets: objective(None, sets), initial=1500, step=600,
-                             max_rounds=12, seed=seed)
+    found = two_stage.search(
+        cards, lambda sets: objective(None, sets), initial=1500, step=600, max_rounds=12, seed=seed
+    )
     assert found["ranking"][0][1] == truth
     assert found["ranking"][0][0] == pytest.approx(objective(None, [truth])[0])
 
@@ -379,9 +413,10 @@ def test_the_event_objective_inside_the_search_finds_the_bonus_team_a_rerank_mis
 def test_the_score_objective_passes_the_scores_through():
     wrapped = two_stage.objective_scorer(lambda _l, sets: [7.0 for _ in sets], [(900, 100)] * 5, "score")
     assert wrapped(None, [(0, 1, 2, 3, 4)]) == [7.0]
-    song = two_stage.objective_scorer(lambda _l, sets: [1000.0 for _ in sets],
-                                      [(0, 0), (0, 100), (0, 50), (0, 0), (0, 0)], "event_song")
-    assert song(None, [(0, 1, 2, 3, 4)]) == [pytest.approx(1100.0)]       # the MAX card, not the sum
+    song = two_stage.objective_scorer(
+        lambda _l, sets: [1000.0 for _ in sets], [(0, 0), (0, 100), (0, 50), (0, 0), (0, 0)], "event_song"
+    )
+    assert song(None, [(0, 1, 2, 3, 4)]) == [pytest.approx(1100.0)]  # the MAX card, not the sum
 
 
 def test_fitted_chart_sample_picks_the_charts_that_track_every_teams_full_mean():

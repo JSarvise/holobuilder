@@ -1,6 +1,7 @@
 """`cbuild.build` on a PC without a compiler (the desktop app on a user's machine): the library
 shipped next to its sources is used even when an update wrote a source a few ms after it, and
 only a missing library is an error."""
+
 from __future__ import annotations
 
 import os
@@ -20,7 +21,7 @@ def test_without_a_compiler_a_shipped_library_is_used_even_if_its_source_is_newe
     target.write_bytes(b"lib")
     source.write_text("int x;", encoding="utf-8")
     os.utime(target, (1_000_000, 1_000_000))
-    os.utime(source, (1_000_005, 1_000_005))         # the source extracted after its library
+    os.utime(source, (1_000_005, 1_000_005))  # the source extracted after its library
     assert cbuild.build(source, target, "test") == target
     assert cbuild.build(source, target, "test", force=True) == target
     assert target.read_bytes() == b"lib"

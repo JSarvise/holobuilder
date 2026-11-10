@@ -18,33 +18,35 @@ from __future__ import annotations
 
 import dataclasses
 
+from support.builders import DEFAULT_RUN_STATE, make_card, make_scoring_config, make_skill
+from support.team_reference import effective_skill_instances
+
 from hbuilder.domain.card import GateCondition, SlotRider, scored_costume_rider_slot
 from hbuilder.domain.gates import (
+    aggregate,
     resolve_leader_costume,
     resolve_leader_costume_skills,
     resolve_team_gates,
-    aggregate,
 )
 from hbuilder.domain.scoring import score_card_set, score_fast, score_with_breakdown
 from hbuilder.domain.song import ChartNote, OverallPower, SongChart, score_song_detailed
 from hbuilder.domain.team import Team
 
-from support.builders import DEFAULT_RUN_STATE, make_card, make_scoring_config, make_skill
-from support.team_reference import effective_skill_instances
-
 CUTE2 = GateCondition(kind="type", target="Cute", count=2)
 CERTAIN = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
 
-RIDER = SlotRider(
-    family="score_support", effect_type="score", magnitude=25.0, condition=CUTE2, target=None
-)
+RIDER = SlotRider(family="score_support", effect_type="score", magnitude=25.0, condition=CUTE2, target=None)
 
 
 def _outfit(rider):
     # Radiant Summer Heatwave's shape: sense +80 gated 2+ Cute, plus the rider.
     return make_skill(
-        "COSTUME", family="stat_up", effect_type="sense", magnitude=80.0,
-        condition=CUTE2, rider=rider,
+        "COSTUME",
+        family="stat_up",
+        effect_type="sense",
+        magnitude=80.0,
+        condition=CUTE2,
+        rider=rider,
     )
 
 
@@ -54,14 +56,25 @@ def _leader(rider):
 
 def _members(cute: int):
     """Five members, `cute` of them Cute, an ACTIVE Score UP on members 0 and 1."""
-    active = make_skill("ACTIVE", family="conditional_score_up", effect_type="score",
-                        magnitude=50.0, duration=10.0, interval=20.0, probability_tier="High")
+    active = make_skill(
+        "ACTIVE",
+        family="conditional_score_up",
+        effect_type="score",
+        magnitude=50.0,
+        duration=10.0,
+        interval=20.0,
+        probability_tier="High",
+    )
     cards = []
     for i in range(5):
-        cards.append(make_card(
-            f"card-m{i}", type_="Cute" if i < cute else "Happy",
-            active=active if i < 2 else None, member=f"M{i}",
-        ))
+        cards.append(
+            make_card(
+                f"card-m{i}",
+                type_="Cute" if i < cute else "Happy",
+                active=active if i < 2 else None,
+                member=f"M{i}",
+            )
+        )
     return tuple(cards)
 
 
@@ -157,13 +170,14 @@ def test_a_leader_without_a_rider_is_bit_identical_to_the_v2_1_pin():
     (`tests/fixtures/cards.json`, leader `nene_01`, members the other five, under
     `make_scoring_config()` defaults): the change must be a no-op for every
     leader whose outfit has no `score_support` rider."""
-    from hbuilder.domain.loader import load_cards
     from support.builders import FIXTURE_CARDS_PATH
 
+    from hbuilder.domain.loader import load_cards
+
     cards = load_cards(FIXTURE_CARDS_PATH)
-    assert not any(
-        isinstance(getattr(c.costume_skill, "rider", None), SlotRider) for c in cards
-    ), "the fixture must stay rider-free for this pin to mean anything"
+    assert not any(isinstance(getattr(c.costume_skill, "rider", None), SlotRider) for c in cards), (
+        "the fixture must stay rider-free for this pin to mean anything"
+    )
     team = Team(leader=cards[0], members=tuple(cards[1:6]))
     cfg = make_scoring_config()
     assert score_fast(team, cfg) == PINNED_V2_1_FIXTURE_SCORE
@@ -181,20 +195,26 @@ PINNED_V2_1_FIXTURE_SCORE = 8402.795174252431
 def test_per_song_total_rises_with_the_rider():
     times = tuple(float(i) for i in range(60))
     chart = SongChart(
-        music_id="m9002", difficulty="EXPERT", difficulty_level=5,
+        music_id="m9002",
+        difficulty="EXPERT",
+        difficulty_level=5,
         live_score_coefficient_permil=4,
         notes=tuple(ChartNote(time=t, perfect_permil=1000) for t in times),
         special_cues=(10.0, 20.0, 30.0, 40.0, 50.0),
     )
     cfg = _cfg()
     members = _members(cute=2)
-    (with_rider,) = score_song_detailed(members, (_leader(RIDER),), chart, cfg, deck_power=OverallPower.fixed(10000.0))
-    (without,) = score_song_detailed(members, (_leader(None),), chart, cfg, deck_power=OverallPower.fixed(10000.0))
+    (with_rider,) = score_song_detailed(
+        members, (_leader(RIDER),), chart, cfg, deck_power=OverallPower.fixed(10000.0)
+    )
+    (without,) = score_song_detailed(
+        members, (_leader(None),), chart, cfg, deck_power=OverallPower.fixed(10000.0)
+    )
     assert with_rider.total_score > without.total_score
     # gate not met: identical
     members1 = _members(cute=1)
-    (a,) = score_song_detailed(members1, (_leader(RIDER),), chart, cfg, deck_power=OverallPower.fixed(10000.0))
+    (a,) = score_song_detailed(
+        members1, (_leader(RIDER),), chart, cfg, deck_power=OverallPower.fixed(10000.0)
+    )
     (b,) = score_song_detailed(members1, (_leader(None),), chart, cfg, deck_power=OverallPower.fixed(10000.0))
     assert a.total_score == b.total_score
-
-

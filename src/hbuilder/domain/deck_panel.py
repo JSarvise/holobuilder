@@ -201,10 +201,10 @@ no I/O.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from math import ceil
-from typing import Iterable, Sequence
 
 __all__ = [
     "PANEL_WINDOW_S",
@@ -293,11 +293,7 @@ class PanelCard:
     @property
     def effect_up_permil(self) -> int:
         """`E_i`: every active-skill effect-up landing on this card."""
-        return (
-            self.outfit_effect_up_permil
-            + self.passive_effect_up_permil
-            + self.board_effect_up_permil
-        )
+        return self.outfit_effect_up_permil + self.passive_effect_up_permil + self.board_effect_up_permil
 
     @property
     def has_board_source(self) -> bool:
@@ -339,9 +335,7 @@ class DeckPanel:
     """True when `tot <= A` zeroed the three effect-up lines together."""
 
 
-def live_seconds(
-    *, cooldown_s: int, duration_s: int, shorten_permil: int = 0
-) -> tuple[int, ...]:
+def live_seconds(*, cooldown_s: int, duration_s: int, shorten_permil: int = 0) -> tuple[int, ...]:
     """The whole seconds in `1..PANEL_WINDOW_S` at which a card is live.
 
     `cool' = cooldown_s * 1000 / (1000 + shorten_permil)` is kept as an exact
@@ -368,7 +362,10 @@ def live_seconds(
 
 
 def _second_terms(
-    cards: Sequence[PanelCard], magnitudes: Sequence[int], *, buffed: bool,
+    cards: Sequence[PanelCard],
+    magnitudes: Sequence[int],
+    *,
+    buffed: bool,
     pre20_magnitudes: Sequence[int] | None = None,
 ) -> list[tuple[int, int]]:
     """`(numerator, denominator)` of `v(t)` for every LIVE second, in timeline
@@ -385,12 +382,7 @@ def _second_terms(
     `magnitudes` itself.
     """
     q = [
-        1000
-        * -(
-            -c.probability_permil
-            * (1000 + (c.board_probability_up_permil if buffed else 0))
-            // 1000
-        )
+        1000 * -(-c.probability_permil * (1000 + (c.board_probability_up_permil if buffed else 0)) // 1000)
         for c in cards
     ]
     live: list[list[int]] = [[] for _ in range(PANEL_WINDOW_S + 1)]
@@ -461,10 +453,7 @@ def _attribution_weights(cards: Sequence[PanelCard]) -> list[Fraction]:
     [0.8462, 1.0128) and the rate gives 1.0119 where `mag*P*live` gives
     1.0492.
     """
-    return [
-        Fraction(c.magnitude_permil * c.probability_permil * c.duration_s, c.cooldown_s)
-        for c in cards
-    ]
+    return [Fraction(c.magnitude_permil * c.probability_permil * c.duration_s, c.cooldown_s) for c in cards]
 
 
 def _split_quotas(cards: Sequence[PanelCard]) -> list[Fraction]:
@@ -509,14 +498,11 @@ def _split_quotas(cards: Sequence[PanelCard]) -> list[Fraction]:
     q_passive = sum((c.passive_effect_up_permil * wi for c, wi in zip(cards, w)), Fraction(0))
     q_board = Fraction(0)
     for c, wi in zip(cards, w):
-        gain = (
-            (1000 + c.board_effect_up_permil)
-            * (1000 + c.board_probability_up_permil)
-            * (1000 + c.board_cooldown_shorten_permil)
-            - 1000 ** 3
-        )
+        gain = (1000 + c.board_effect_up_permil) * (1000 + c.board_probability_up_permil) * (
+            1000 + c.board_cooldown_shorten_permil
+        ) - 1000**3
         # gain / 1000**2 is `1000 * [(1+E)(1+u)(1+c) - 1]` in permil
-        q_board += wi * Fraction(gain, 1000 ** 2)
+        q_board += wi * Fraction(gain, 1000**2)
     return [q_outfit, q_passive, q_board]
 
 
@@ -547,9 +533,7 @@ def _largest_remainder(total: int, weights: Sequence[int]) -> list[int]:
     exact = [Fraction(total * w, pool) for w in weights]
     parts = [int(x) for x in exact]
     short = total - sum(parts)
-    order = sorted(
-        range(len(weights)), key=lambda i: (exact[i] - parts[i], weights[i]), reverse=True
-    )
+    order = sorted(range(len(weights)), key=lambda i: (exact[i] - parts[i], weights[i]), reverse=True)
     for i in order[:short]:
         parts[i] += 1
     return parts
@@ -558,14 +542,14 @@ def _largest_remainder(total: int, weights: Sequence[int]) -> list[int]:
 def unit_score_from_panel(overall_power: int, score_bonus_permil: int) -> int:
     """`ceil(OverallPower * (1000 + bonus) * 203734 / 10**8)` — bit-exact
     against the server's own Unit Score."""
-    numerator = (
-        int(overall_power) * (1000 + int(score_bonus_permil)) * UNIT_SCORE_NUMERATOR
-    )
+    numerator = int(overall_power) * (1000 + int(score_bonus_permil)) * UNIT_SCORE_NUMERATOR
     return -(-numerator // _UNIT_SCORE_DENOMINATOR)
 
 
 def deck_panel(
-    cards: Iterable[PanelCard], *, overall_power: int = 0,
+    cards: Iterable[PanelCard],
+    *,
+    overall_power: int = 0,
     song_bonus_permil: int | float | Fraction = 0,
 ) -> DeckPanel:
     """Compute the panel for one deck. See the module docstring for every law.
@@ -594,23 +578,22 @@ def deck_panel(
     base_magnitudes = [c.magnitude_permil for c in members]
     gated = any(c.combo_base_magnitude_permil is not None for c in members)
     pre20 = (
-        [c.combo_base_magnitude_permil
-         if c.combo_base_magnitude_permil is not None else c.magnitude_permil
-         for c in members]
-        if gated else None
+        [
+            c.combo_base_magnitude_permil if c.combo_base_magnitude_permil is not None else c.magnitude_permil
+            for c in members
+        ]
+        if gated
+        else None
     )
     base_terms = _second_terms(members, base_magnitudes, buffed=False, pre20_magnitudes=pre20)
     a_raw = _exact_window_average(base_terms)
     active = ceil(_forward_float_sum(base_terms))
 
-    boosted = [
-        ceil(Fraction(c.magnitude_permil * (1000 + c.effect_up_permil), 1000))
-        for c in members
-    ]
+    boosted = [ceil(Fraction(c.magnitude_permil * (1000 + c.effect_up_permil), 1000)) for c in members]
     boosted_pre20 = (
-        [ceil(Fraction(m * (1000 + c.effect_up_permil), 1000))
-         for m, c in zip(pre20, members)]
-        if gated and GATE_BOOSTED_PASS else None
+        [ceil(Fraction(m * (1000 + c.effect_up_permil), 1000)) for m, c in zip(pre20, members)]
+        if gated and GATE_BOOSTED_PASS
+        else None
     )
     boosted_terms = _second_terms(members, boosted, buffed=True, pre20_magnitudes=boosted_pre20)
     tot_raw = _exact_window_average(boosted_terms)
@@ -618,9 +601,7 @@ def deck_panel(
     outfit_w = sum(c.outfit_effect_up_permil for c in members)
     passive_w = sum(c.passive_effect_up_permil for c in members)
     board_w = sum(
-        c.board_effect_up_permil
-        + c.board_probability_up_permil
-        + c.board_cooldown_shorten_permil
+        c.board_effect_up_permil + c.board_probability_up_permil + c.board_cooldown_shorten_permil
         for c in members
     )
     present = (

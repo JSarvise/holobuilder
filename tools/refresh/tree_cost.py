@@ -40,6 +40,7 @@ DUMPS = str(paths.DUMPS)
 # minimal stdlib protobuf walker (no protobuf package dependency)
 # --------------------------------------------------------------------------
 
+
 def _varint(buf: bytes, i: int) -> tuple[int, int]:
     val = 0
     shift = 0
@@ -63,16 +64,16 @@ def decode_protobuf(buf: bytes) -> dict[int, list[Any]]:
             val, i = _varint(buf, i)
         elif wire == 2:
             ln, i = _varint(buf, i)
-            raw = buf[i:i + ln]
+            raw = buf[i : i + ln]
             i += ln
             try:
                 val = raw.decode("utf-8")
             except UnicodeDecodeError:
                 val = raw
         elif wire == 5:
-            val, i = int.from_bytes(buf[i:i + 4], "little"), i + 4
+            val, i = int.from_bytes(buf[i : i + 4], "little"), i + 4
         elif wire == 1:
-            val, i = int.from_bytes(buf[i:i + 8], "little"), i + 8
+            val, i = int.from_bytes(buf[i : i + 8], "little"), i + 8
         else:
             raise ValueError(f"unsupported wire type {wire} at {i}")
         out[field].append(val)
@@ -81,14 +82,13 @@ def decode_protobuf(buf: bytes) -> dict[int, list[Any]]:
 
 def blob_bytes(s: str) -> bytes:
     """The master JSON stores raw bytes round-tripped through latin-1-ish text."""
-    return s.encode("utf-8", "surrogateescape") if any(ord(c) > 0xFF for c in s) else bytes(
-        ord(c) for c in s
-    )
+    return s.encode("utf-8", "surrogateescape") if any(ord(c) > 0xFF for c in s) else bytes(ord(c) for c in s)
 
 
 # --------------------------------------------------------------------------
 # loading
 # --------------------------------------------------------------------------
+
 
 def load(table: str) -> list[dict]:
     """Rows with `data` as {str(field): [values]}, values kept as BYTES where binary.
@@ -109,17 +109,14 @@ def load(table: str) -> list[dict]:
             rec: dict[str, Any] = {}
             for k, v in r.items():
                 if k == "data":
-                    rec["data"] = {
-                        str(fn): list(vs) for fn, vs in decode_record(v).items()
-                    }
+                    rec["data"] = {str(fn): list(vs) for fn, vs in decode_record(v).items()}
                 else:
                     rec[k] = v.decode("utf-8", "replace")
             out.append(rec)
         db.close()
         return out
     except Exception as exc:  # noqa: BLE001
-        print(f"[warn] live DB read failed ({exc}); falling back to LOSSY json dump",
-              file=sys.stderr)
+        print(f"[warn] live DB read failed ({exc}); falling back to LOSSY json dump", file=sys.stderr)
         with open(os.path.join(DUMPS, f"master_{table}.json"), encoding="utf-8") as fh:
             return json.load(fh)
 
@@ -150,6 +147,7 @@ def node_cost(row: dict) -> tuple[str | None, int]:
 # --------------------------------------------------------------------------
 # report sections
 # --------------------------------------------------------------------------
+
 
 def section_fields(nodes: list[dict]) -> None:
     print("=== SkillTreeNode: field presence and range ===")
@@ -206,10 +204,7 @@ def section_cost_vs_fields(nodes: list[dict]) -> None:
 
 def char_ids(row: dict) -> list[str]:
     """field 3 is `repeated string characterIds` -- empty means "every character"."""
-    return [
-        v.decode("utf-8", "replace") if isinstance(v, bytes) else v
-        for v in row["data"].get("3", [])
-    ]
+    return [v.decode("utf-8", "replace") if isinstance(v, bytes) else v for v in row["data"].get("3", [])]
 
 
 def rows_for(nodes: list[dict], chr_id: str) -> list[dict]:
@@ -286,10 +281,7 @@ def section_owner(nodes: list[dict]) -> None:
         items: collections.Counter = collections.Counter()
         for g in unlocked:
             # characterIds is REPEATED: empty = every character, else must list this one
-            mine = [
-                r for r in by_group.get(g, [])
-                if not char_ids(r) or chr_id in char_ids(r)
-            ]
+            mine = [r for r in by_group.get(g, []) if not char_ids(r) or chr_id in char_ids(r)]
             for r in mine:
                 s9 += f(r, "9", 0) or 0
                 s13 += f(r, "13", 0) or 0

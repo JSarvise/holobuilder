@@ -18,6 +18,7 @@ reduction (Holomem Board only, 12 % ceiling) DIVIDES: `cooldown / (1 + reduction
 
     python chart_timeline.py <music_id> <difficulty> [--out out.json]
 """
+
 import json
 import os
 import re
@@ -27,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 import master_cache as mc  # noqa: E402
 import sus_parse as sp  # noqa: E402
@@ -59,8 +61,7 @@ def measure_starts(text, upto):
 
 def events(text, chart):
     """[(channel, measure, beat, time, value)] for the three non-note channels."""
-    last = max(int(m.group(1)) for m in
-               (sp.BODY.match(r.strip()) for r in text.splitlines()) if m)
+    last = max(int(m.group(1)) for m in (sp.BODY.match(r.strip()) for r in text.splitlines()) if m)
     starts, lengths = measure_starts(text, last)
     raw = []
     for line in text.splitlines():
@@ -68,7 +69,7 @@ def events(text, chart):
         if not m:
             continue
         measure, chan, data = int(m.group(1)), m.group(2), m.group(3)
-        cells = [data[i:i + 2] for i in range(0, len(data), 2)]
+        cells = [data[i : i + 2] for i in range(0, len(data), 2)]
         for i, cell in enumerate(cells):
             if not cell or cell == "00":
                 continue
@@ -78,8 +79,7 @@ def events(text, chart):
     holder = [sp.Note(beat, 0, "1", "1", 1, None) for _, _, beat, _ in raw]
     sp._set_times(holder, chart.bpms)
     return [
-        {"channel": chan, "measure": measure, "beat": float(beat),
-         "time": round(note.time, 4), "value": cell}
+        {"channel": chan, "measure": measure, "beat": float(beat), "time": round(note.time, 4), "value": cell}
         for (chan, measure, beat, cell), note in zip(raw, holder)
     ]
 
@@ -99,7 +99,7 @@ def team_skills(card_ids, level=2):
     names = {}
     with open(paths.DATA / "cards.json", encoding="utf-8") as fh:
         doc = json.load(fh)
-    for card in (doc["cards"] if isinstance(doc, dict) and "cards" in doc else doc):
+    for card in doc["cards"] if isinstance(doc, dict) and "cards" in doc else doc:
         names[card["id"]] = (card.get("member"), card.get("title"), card.get("type"))
 
     def permil(effect):
@@ -111,25 +111,27 @@ def team_skills(card_ids, level=2):
         a = active[row[12][0]][level]
         s = special[row[13][0]][level]
         member, title, ctype = names.get(cid, (cid, "", ""))
-        out.append({
-            "slot": slot,
-            "card_id": cid,
-            "member": member,
-            "title": title,
-            "type": ctype,
-            "active": {
-                "base_magnitude": permil(a[4][0]),
-                "conditional_magnitude": permil(a[6][0]) if 6 in a else None,
-                "condition": a[5][0] if 5 in a else None,
-                "cooldown": a[7][0] / 1000,
-                "duration": a[10][0] / 1000,
-                "probability": a[8][0] / 1000,
-            },
-            "special": {
-                "magnitude": permil(s[3][0]),
-                "duration": s[6][0] / 1000,
-            },
-        })
+        out.append(
+            {
+                "slot": slot,
+                "card_id": cid,
+                "member": member,
+                "title": title,
+                "type": ctype,
+                "active": {
+                    "base_magnitude": permil(a[4][0]),
+                    "conditional_magnitude": permil(a[6][0]) if 6 in a else None,
+                    "condition": a[5][0] if 5 in a else None,
+                    "cooldown": a[7][0] / 1000,
+                    "duration": a[10][0] / 1000,
+                    "probability": a[8][0] / 1000,
+                },
+                "special": {
+                    "magnitude": permil(s[3][0]),
+                    "duration": s[6][0] / 1000,
+                },
+            }
+        )
     return out
 
 
@@ -153,8 +155,7 @@ def active_windows(skill, song_seconds, reduction=0.0):
     out, k = [], 1
     while k * cooldown <= song_seconds:
         start = k * cooldown
-        out.append({"check": round(start, 3),
-                    "end": round(start + skill["duration"], 3)})
+        out.append({"check": round(start, 3), "end": round(start + skill["duration"], 3)})
         k += 1
     return out
 
@@ -178,13 +179,23 @@ def resolve_exclusive(lanes):
         # whether it was contested — collapsing a contested slice into an
         # uncontested one would mislabel the very thing this chart is drawn to
         # show.
-        if (out and out[-1]["slot"] == slot and out[-1]["contested"] == contested
-                and abs(out[-1]["end"] - lo) < 1e-9):
+        if (
+            out
+            and out[-1]["slot"] == slot
+            and out[-1]["contested"] == contested
+            and abs(out[-1]["end"] - lo) < 1e-9
+        ):
             out[-1]["end"] = round(hi, 3)
             continue
-        out.append({"start": round(lo, 3), "end": round(hi, 3),
-                    "slot": slot, "magnitude": magnitude,
-                    "contested": len(live) > 1})
+        out.append(
+            {
+                "start": round(lo, 3),
+                "end": round(hi, 3),
+                "slot": slot,
+                "magnitude": magnitude,
+                "contested": len(live) > 1,
+            }
+        )
     return out
 
 
@@ -204,31 +215,39 @@ def main():
     # is a team-level effect no per-card metric can see.
     if "--board" in sys.argv:
         from board_active_mods import modifiers
+
         cards = {r["id"]: r["data"] for r in mc.rows("Card")}
         mods = modifiers([cards[e["card_id"]][2][0] for e in team])
         for entry in team:
             chr_id = cards[entry["card_id"]][2][0]
             m = mods[chr_id]
-            entry["board"] = {"character": chr_id, "captured": m["captured"],
-                              "cooldown_reduction": m["cooldown"],
-                              "probability_bonus": m["probability"]}
+            entry["board"] = {
+                "character": chr_id,
+                "captured": m["captured"],
+                "cooldown_reduction": m["cooldown"],
+                "probability_bonus": m["probability"],
+            }
             entry["active"]["cooldown_effective"] = round(
-                entry["active"]["cooldown"] / (1.0 + m["cooldown"]), 4)
+                entry["active"]["cooldown"] / (1.0 + m["cooldown"]), 4
+            )
     evts = events(text, chart)
     specials = sorted([e for e in evts if e["channel"] == "0B"], key=lambda e: e["time"])
 
     for entry in team:
         entry["active"]["windows"] = active_windows(
-            entry["active"], song,
-            reduction=entry.get("board", {}).get("cooldown_reduction", 0.0))
+            entry["active"], song, reduction=entry.get("board", {}).get("cooldown_reduction", 0.0)
+        )
     for entry, ev in zip(team, specials):
         entry["special"]["fires_at"] = ev["time"]
         entry["special"]["ends_at"] = round(ev["time"] + entry["special"]["duration"], 3)
 
     def lanes_for(key):
         return [
-            (e["slot"], e["active"][key] or e["active"]["base_magnitude"],
-             [(w["check"], w["end"]) for w in e["active"]["windows"]])
+            (
+                e["slot"],
+                e["active"][key] or e["active"]["base_magnitude"],
+                [(w["check"], w["end"]) for w in e["active"]["windows"]],
+            )
             for e in team
         ]
 
@@ -259,8 +278,7 @@ def main():
     text_out = json.dumps(out, ensure_ascii=False, indent=1)
     if dest:
         open(dest, "w", encoding="utf-8").write(text_out)
-        print(f"wrote {dest}  ({len(out['notes'])} notes, {song:.1f}s, "
-              f"{len(specials)} special triggers)")
+        print(f"wrote {dest}  ({len(out['notes'])} notes, {song:.1f}s, {len(specials)} special triggers)")
     else:
         print(text_out)
 

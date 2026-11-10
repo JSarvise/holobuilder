@@ -11,6 +11,7 @@ service) and the page says so. Outside an event nothing is read and nothing is r
 (`<region>/*.meta.json`, `start_time` / `chapter_end_time` in ms). A status file that stopped
 arriving (the pull fails) carries old read times, so it raises the same warning.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -37,8 +38,11 @@ def event_open(event_meta: dict | None, chapter_metas: list[dict], now: float) -
             return True
     for ch in chapter_metas:
         start, end = ch.get("start_time"), ch.get("chapter_end_time")
-        if isinstance(start, (int, float)) and isinstance(end, (int, float)) \
-                and start / 1000 <= now <= end / 1000:
+        if (
+            isinstance(start, (int, float))
+            and isinstance(end, (int, float))
+            and start / 1000 <= now <= end / 1000
+        ):
             return True
     return False
 
@@ -51,9 +55,14 @@ def stale_regions(status: dict | None, now: float, stale_after: float = STALE_AF
         last = r.get("borders_at") if "borders_at" in r else r.get("ok_at")
         if last is not None and now - last <= stale_after:
             continue
-        out.append({"region": r.get("region"), "last_read_at": last,
-                    "minutes": None if last is None else int((now - last) // 60),
-                    "error": r.get("error")})
+        out.append(
+            {
+                "region": r.get("region"),
+                "last_read_at": last,
+                "minutes": None if last is None else int((now - last) // 60),
+                "error": r.get("error"),
+            }
+        )
     return out
 
 
@@ -69,6 +78,9 @@ def health(store: Path, event_meta_path: Path, now: float) -> dict:
     status = _read(store / "tracker_status.json")
     metas = [m for m in (_read(p) for p in sorted(store.glob("*/*.meta.json"))) if isinstance(m, dict)]
     is_open = event_open(_read(event_meta_path), metas, now)
-    return {"open": is_open, "status": status is not None,
-            "stale": stale_regions(status, now) if is_open and status is not None else [],
-            "stale_after_min": STALE_AFTER_S // 60}
+    return {
+        "open": is_open,
+        "status": status is not None,
+        "stale": stale_regions(status, now) if is_open and status is not None else [],
+        "stale_after_min": STALE_AFTER_S // 60,
+    }

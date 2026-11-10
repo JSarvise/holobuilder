@@ -19,19 +19,19 @@ import time
 from pathlib import Path
 
 import pytest
-
-from hbuilder.domain.skilltree import (
-    ROOT_NODE,
-    SkillTree,
-    TreeNode,
-    neighbours,
-)
 from support.board_rules import (
     MASTER_ROW_DATA_KEY,
     check,
     check_placements,
     check_plan,
     trees_by_character,
+)
+
+from hbuilder.domain.skilltree import (
+    ROOT_NODE,
+    SkillTree,
+    TreeNode,
+    neighbours,
 )
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -71,9 +71,7 @@ _NODES = {
 
 @pytest.fixture
 def tree() -> SkillTree:
-    return SkillTree(
-        nodes=_NODES, positions=_POSITIONS, adjacency=neighbours(_POSITIONS)
-    )
+    return SkillTree(nodes=_NODES, positions=_POSITIONS, adjacency=neighbours(_POSITIONS))
 
 
 # ==========================================================================
@@ -210,9 +208,7 @@ def test_the_free_root_never_has_to_be_bought_to_hold_a_card():
     assert not unbought.ok
     assert unbought.socket_not_owned == (("c", "S-003"),)
 
-    bought = check_placements(
-        {"c": {"nodes": [ROOT_NODE, "S-003"], "slots": {"S-003": "card-A"}}}
-    )
+    bought = check_placements({"c": {"nodes": [ROOT_NODE, "S-003"], "slots": {"S-003": "card-A"}}})
     assert bought.ok
 
 
@@ -258,8 +254,7 @@ def test_the_real_capture_satisfies_every_placement_rule():
         )
     unlocked = document["unlocked"]
     boards = {
-        holomem: {"nodes": unlocked.get(holomem) or [], "slots": slots}
-        for holomem, slots in placed.items()
+        holomem: {"nodes": unlocked.get(holomem) or [], "slots": slots} for holomem, slots in placed.items()
     }
     verdict = check_placements(boards, cards_with_connect=set(document["card_connect"]))
     assert verdict.ok, verdict.problems
@@ -276,9 +271,14 @@ def test_the_real_capture_satisfies_every_placement_rule():
 
 # The planner tests' team: an outfit leader (the same card again as the fifth
 # member) with four members of other characters.
-_PLAN_TEAM = ["card-04001-5-uniq-0042-00", "card-00023-5-uniq-0019-00",
-              "card-04003-5-uniq-0044-00", "card-00031-5-uniq-0025-00",
-              "card-03002-5-uniq-0034-00", "card-04001-5-uniq-0042-00"]
+_PLAN_TEAM = [
+    "card-04001-5-uniq-0042-00",
+    "card-00023-5-uniq-0019-00",
+    "card-04003-5-uniq-0044-00",
+    "card-00031-5-uniq-0025-00",
+    "card-03002-5-uniq-0034-00",
+    "card-04001-5-uniq-0042-00",
+]
 
 
 def test_every_board_the_planner_returns_is_connected_within_budget_and_socket_legal():
@@ -289,8 +289,7 @@ def test_every_board_the_planner_returns_is_connected_within_budget_and_socket_l
     master's prices, not the planner's), and the sockets must hold each card
     once, on bought sockets."""
     pytest.importorskip("highspy")
-    needed = [_DUMPS / name for name in ("board_state.json", "skilltree.json",
-                                         "master_SkillTreeNode.json")]
+    needed = [_DUMPS / name for name in ("board_state.json", "skilltree.json", "master_SkillTreeNode.json")]
     missing = [p.name for p in needed if not p.exists()]
     if missing:
         pytest.skip(f"the planner's account inputs are gitignored dumps: {missing}")
@@ -310,11 +309,11 @@ def test_every_board_the_planner_returns_is_connected_within_budget_and_socket_l
     started = time.perf_counter()
     plans = {
         "song m0334": board_plan_solver.solve_team_board(
-            scenario="account", song="m0334", pool=1, for_team=_PLAN_TEAM,
-            include_sockets=True),
+            scenario="account", song="m0334", pool=1, for_team=_PLAN_TEAM, include_sockets=True
+        ),
         "no song, no resets": board_plan_solver.solve_team_board(
-            scenario="account", song=None, pool=1, for_team=_PLAN_TEAM,
-            include_sockets=True, max_resets=0),
+            scenario="account", song=None, pool=1, for_team=_PLAN_TEAM, include_sockets=True, max_resets=0
+        ),
     }
     elapsed = time.perf_counter() - started
 
@@ -325,8 +324,12 @@ def test_every_board_the_planner_returns_is_connected_within_budget_and_socket_l
         verdicts, placements = check_plan(plan, trees, points)
         boards += len(verdicts)
         sockets += sum(len(board.get("slots") or {}) for board in plan.values())
-        failures += [f"{name} {cid}: {msg}" for cid, verdict in sorted(verdicts.items())
-                     if not verdict.ok for msg in verdict.messages()]
+        failures += [
+            f"{name} {cid}: {msg}"
+            for cid, verdict in sorted(verdicts.items())
+            if not verdict.ok
+            for msg in verdict.messages()
+        ]
         failures += [f"{name}: {msg}" for msg in placements.problems]
     print(f"{len(plans)} plans, {boards} boards, {sockets} socketed cards, {elapsed:.1f} s")
     assert not failures, "\n".join(failures)
@@ -339,13 +342,13 @@ def test_every_board_the_planner_returns_is_connected_within_budget_and_socket_l
     leader = "chr-" + _PLAN_TEAM[0].split("-")[1]
     tree = trees[leader]
     bought = {ROOT_NODE, *plan[leader]["nodes"]}
-    stray = next(n for n in sorted(tree.nodes)
-                 if n not in bought and not tree.adjacency.get(n, frozenset()) & bought)
+    stray = next(
+        n for n in sorted(tree.nodes) if n not in bought and not tree.adjacency.get(n, frozenset()) & bought
+    )
     stray_plan = {**plan, leader: {**plan[leader], "nodes": [*plan[leader]["nodes"], stray]}}
     assert stray in check_plan(stray_plan, trees, points)[0][leader].disconnected
     seated, board = next((cid, b) for cid, b in sorted(plan.items()) if b.get("slots"))
     card = next(iter(board["slots"].values()))
     other = next(cid for cid in sorted(plan) if cid != seated)
-    doubled = {**plan, other: {**plan[other],
-                               "slots": {**(plan[other].get("slots") or {}), ROOT_NODE: card}}}
+    doubled = {**plan, other: {**plan[other], "slots": {**(plan[other].get("slots") or {}), ROOT_NODE: card}}}
     assert card in dict(check_plan(doubled, trees, points)[1].reused)

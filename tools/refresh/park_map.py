@@ -47,10 +47,11 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-from pathlib import Path
+from pathlib import Path  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 HERE = str(paths.REFRESH_DIR)
 sys.path.insert(0, HERE)
 DUMPS = str(paths.DUMPS)
@@ -59,32 +60,28 @@ FETCHED = os.path.join(DUMPS, "octo_fetched")
 
 AREAS = {
     "area-a01": dict(
-        map="mdl_map_area-a01-02",
-        scene="env_3d_park_area-a01-area-02-noon_data",
-        label="Main Park"),
+        map="mdl_map_area-a01-02", scene="env_3d_park_area-a01-area-02-noon_data", label="Main Park"
+    ),
     "area-a02-game": dict(
-        map="mdl_map_area-a02-02",
-        scene="env_3d_park_area-a02-area-02-noon_data",
-        label="Game Corner"),
+        map="mdl_map_area-a02-02", scene="env_3d_park_area-a02-area-02-noon_data", label="Game Corner"
+    ),
     "area-a02-casino": dict(
-        map="mdl_map_area-a02-03",
-        scene="env_3d_park_area-a02-area-03-night_data",
-        label="Casino"),
+        map="mdl_map_area-a02-03", scene="env_3d_park_area-a02-area-03-night_data", label="Casino"
+    ),
     "area-a02-lobby": dict(
-        map="mdl_map_area-a02-01",
-        scene="env_3d_park_area-a02-area-01-noon_data",
-        label="Lobby"),
+        map="mdl_map_area-a02-01", scene="env_3d_park_area-a02-area-01-noon_data", label="Lobby"
+    ),
     # Soda Pop Lagoon: the three maps are one picture
     # at three stages of the unlock (-00 / -01 carry a 'disable' mask over the part still
     # locked); -02 is the whole lagoon. Its two scenes hold the same 219 positions.
     "area-a03": dict(
-        map="mdl_map_area-a03-02",
-        scene="env_3d_park_area-a03-area-01-noon_data",
-        label="Soda Pop Lagoon"),
+        map="mdl_map_area-a03-02", scene="env_3d_park_area-a03-area-01-noon_data", label="Soda Pop Lagoon"
+    ),
 }
 
 
 # --- assets -------------------------------------------------------------------------
+
 
 def ensure(names):
     """Download any of `names` not already on disk. One request/sec, md5-checked."""
@@ -93,12 +90,14 @@ def ensure(names):
         return
     print(f"fetching {len(missing)} asset(s) from the CDN: {', '.join(missing)}")
     from octo_fetch import fetch
+
     fetch(missing)
 
 
 def _load_bundle(name):
-    import UnityPy
     import octo_crypto
+    import UnityPy
+
     UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
     raw = open(os.path.join(FETCHED, f"{name}.bundle"), "rb").read()
     return UnityPy.load(io.BytesIO(octo_crypto.decrypt_bundle(raw, name)))
@@ -140,9 +139,15 @@ def load_map(name):
             if cls == "ParkMapAreaView":
                 ratio = tuple(struct.unpack_from("<f", raw, 28 + 4 * i)[0] for i in (4, 5, 6))
             elif cls == "VisionRawImage":
-                tex = next((textures[pid] for off in range(0, len(raw) - 12, 4)
-                            for fid, pid in [struct.unpack_from("<iq", raw, off)]
-                            if fid == 0 and pid in textures), None)
+                tex = next(
+                    (
+                        textures[pid]
+                        for off in range(0, len(raw) - 12, 4)
+                        for fid, pid in [struct.unpack_from("<iq", raw, off)]
+                        if fid == 0 and pid in textures
+                    ),
+                    None,
+                )
                 if tex is not None and "_map_facility" in tex.m_Name:
                     pieces.append((d.m_GameObject.read(), tex))
     if base is None or ratio is None or image_rt is None:
@@ -152,11 +157,14 @@ def load_map(name):
     kx = image.width / (image_rt.m_SizeDelta.x * scale.x)
     ky = image.height / (image_rt.m_SizeDelta.y * scale.y)
     for go, tex in pieces:
-        rt = next(c for c in ((c.component if hasattr(c, "component") else c).read() for c in go.m_Component)
-                  if type(c).__name__ == "RectTransform")
+        rt = next(
+            c
+            for c in ((c.component if hasattr(c, "component") else c).read() for c in go.m_Component)
+            if type(c).__name__ == "RectTransform"
+        )
         x = y = 0.0
         sx = sy = 1.0
-        for r in reversed(_rect_chain(rt)):          # root down: position, then that node's scale
+        for r in reversed(_rect_chain(rt)):  # root down: position, then that node's scale
             x += r.m_AnchoredPosition.x * sx
             y += r.m_AnchoredPosition.y * sy
             sx *= r.m_LocalScale.x
@@ -199,7 +207,7 @@ def load_scene(name):
         n = i32()
         if not 0 <= n <= 120 or p[0] + n > len(b):
             raise ValueError("implausible string length")
-        v = b[p[0]:p[0] + n].decode("utf-8", "replace")
+        v = b[p[0] : p[0] + n].decode("utf-8", "replace")
         p[0] += n
         p[0] = (p[0] + 3) & ~3
         return v
@@ -275,7 +283,7 @@ def parse_facilities(b):
         n = i32()
         if not 0 <= n <= 200 or p[0] + n > len(b):
             raise ValueError(f"implausible string length {n} at byte {p[0] - 4}")
-        v = b[p[0]:p[0] + n].decode("utf-8")
+        v = b[p[0] : p[0] + n].decode("utf-8")
         p[0] = (p[0] + n + 3) & ~3
         return v
 
@@ -292,8 +300,8 @@ def parse_facilities(b):
             raise ValueError(f"implausible point count {n}")
         return [point() for _ in range(n)]
 
-    text()                                   # m_Name
-    for _ in range(3):                       # warpPoints, spawnPoints, playerSpawnPoints
+    text()  # m_Name
+    for _ in range(3):  # warpPoints, spawnPoints, playerSpawnPoints
         points()
     n = i32()
     if not 0 <= n <= 1000:
@@ -301,12 +309,12 @@ def parse_facilities(b):
     out = {}
     for _ in range(n):
         fid = text()
-        i32()                                # priority
-        i32()                                # parkActionType
+        i32()  # priority
+        i32()  # parkActionType
         x, _y, z = f32(), f32(), f32()
-        f32(), f32(), f32()                  # hoverTextPoint
+        f32(), f32(), f32()  # hoverTextPoint
         spawn = points()
-        point()                              # warpPoint
+        point()  # warpPoint
         entry = out.setdefault(fid, {"position": (x, z), "spawn": {}})
         entry["spawn"].update(spawn)
     if p[0] != len(b):
@@ -332,18 +340,26 @@ def facility_piece(name):
         if o.type.name != "MonoBehaviour":
             continue
         raw = o.get_raw_data()
-        tex = next((textures[pid] for off in range(0, len(raw) - 12, 4)
-                    for fid, pid in [struct.unpack_from("<iq", raw, off)]
-                    if fid == 0 and pid in textures), None)
+        tex = next(
+            (
+                textures[pid]
+                for off in range(0, len(raw) - 12, 4)
+                for fid, pid in [struct.unpack_from("<iq", raw, off)]
+                if fid == 0 and pid in textures
+            ),
+            None,
+        )
         if tex is None or "_map_facility" not in tex.m_Name:
             continue
         go = o.read().m_GameObject.read()
-        rt = next(c for c in ((c.component if hasattr(c, "component") else c).read()
-                              for c in go.m_Component)
-                  if type(c).__name__ == "RectTransform")
+        rt = next(
+            c
+            for c in ((c.component if hasattr(c, "component") else c).read() for c in go.m_Component)
+            if type(c).__name__ == "RectTransform"
+        )
         x = y = 0.0
         sx = sy = 1.0
-        for r in reversed(_rect_chain(rt)):          # root down: position, then that node's scale
+        for r in reversed(_rect_chain(rt)):  # root down: position, then that node's scale
             x += r.m_AnchoredPosition.x * sx
             y += r.m_AnchoredPosition.y * sy
             sx *= r.m_LocalScale.x
@@ -375,17 +391,18 @@ def composite_facility(image, cal, world_xz, piece):
 def project(x, z, size, cal):
     w, h = size
     s, ox, oy, kx, ky = cal
-    return (w / 2 + kx * (x * s + ox),
-            h / 2 - ky * (z * s + oy))
+    return (w / 2 + kx * (x * s + ox), h / 2 - ky * (z * s + oy))
 
 
 # --- master joins -------------------------------------------------------------------
+
 
 def master_join():
     """(spot_of_mapping, treasures_by_area, candidates_by_area).
 
     spot_of_mapping: park_target_mapping_id -> (area_id, position name)."""
     from master_cache import rows
+
     pos = {}
     for r in rows("ParkPosition"):
         d = r["data"]
@@ -434,8 +451,10 @@ def verify():
         total += len(world)
         good += px_ok
         flag = "OK " if px_ok == len(world) else "*** "
-        print(f"  {flag}{area:16s} {px_ok}/{len(world)} positions on drawn map"
-              f"   (map {W}x{H}, calibration scale={cal[0]:g} offset=({cal[1]:g},{cal[2]:g}))")
+        print(
+            f"  {flag}{area:16s} {px_ok}/{len(world)} positions on drawn map"
+            f"   (map {W}x{H}, calibration scale={cal[0]:g} offset=({cal[1]:g},{cal[2]:g}))"
+        )
     print(f"  total {good}/{total}")
     return good == total
 

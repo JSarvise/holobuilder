@@ -1,4 +1,5 @@
 """`atomic_io`: whole-file writes that never leave a half-written file behind."""
+
 from __future__ import annotations
 
 import os
@@ -34,8 +35,9 @@ def test_a_refused_replace_is_retried_and_the_old_file_survives_a_failure(tmp_pa
     def flaky(src, dst):
         calls.append(dst)
         if len(calls) < 3:
-            raise OSError(22, "Invalid argument")   # the error a real refresh hit
+            raise OSError(22, "Invalid argument")  # the error a real refresh hit
         real(src, dst)
+
     monkeypatch.setattr(atomic_io.os, "replace", flaky)
     monkeypatch.setattr(atomic_io.time, "sleep", lambda _s: None)
     atomic_io.write_text(target, "new")
@@ -43,6 +45,7 @@ def test_a_refused_replace_is_retried_and_the_old_file_survives_a_failure(tmp_pa
 
     def never(src, dst):
         raise OSError(22, "Invalid argument")
+
     monkeypatch.setattr(atomic_io.os, "replace", never)
     with pytest.raises(OSError):
         atomic_io.write_text(target, "newer")

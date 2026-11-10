@@ -86,16 +86,19 @@ def resolve_target_card_ids(
         qualifying = [card for card in cards if target.value in card.generations]
     else:  # pragma: no cover - schema.TARGET_KINDS is exhaustive at load time
         raise ValueError(
-            f"resolve_target_card_ids: unrecognised target kind "
-            f"{target.kind!r} for card {self_card_id!r}"
+            f"resolve_target_card_ids: unrecognised target kind {target.kind!r} for card {self_card_id!r}"
         )
 
     # Rank by the base value of the stat(s) the effect raises; see the docstring for why
     # this rule and not total parameter. Ties keep deck slot order: `candidates` is built in `cards` order and
     # `TopNByBuffedStat.select` is a stable sort.
     candidates = [
-        (card.id, rank_values.get(card.id, 0.0) if rank_values is not None
-         else sum(getattr(card.stats, name) for name in stat_names))
+        (
+            card.id,
+            rank_values.get(card.id, 0.0)
+            if rank_values is not None
+            else sum(getattr(card.stats, name) for name in stat_names),
+        )
         for card in qualifying
     ]
 

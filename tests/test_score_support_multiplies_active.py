@@ -36,11 +36,10 @@ the five members, so every ACTIVE under test sits at index 1 or later.
 from __future__ import annotations
 
 import pytest
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 from hbuilder.domain.card import EffectTarget
 from hbuilder.domain.scoring import score_card_set, score_fast, score_with_breakdown
-
-from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 # the builders' STATS baseline is 300 total per card, so five members are 1500.0.
 BASE_STAT_SUM = 1500.0
@@ -291,9 +290,7 @@ def test_an_outfit_score_support_multiplies_every_members_active():
     1840.032."""
     outfit = make_card(
         "outfit_support",
-        costume_skill=make_skill(
-            "COSTUME", family="score_support", effect_type="score", magnitude=60.0
-        ),
+        costume_skill=make_skill("COSTUME", family="score_support", effect_type="score", magnitude=60.0),
     )
     team = _team(
         [
@@ -318,9 +315,7 @@ def test_batch_and_single_paths_stay_bit_identical_on_a_supported_team():
     closely — `==`, never `pytest.approx`."""
     outfit = make_card(
         "outfit_support",
-        costume_skill=make_skill(
-            "COSTUME", family="score_support", effect_type="score", magnitude=60.0
-        ),
+        costume_skill=make_skill("COSTUME", family="score_support", effect_type="score", magnitude=60.0),
     )
     members = (
         _active_scorer("member_active_a"),
@@ -478,9 +473,7 @@ def test_batch_and_single_paths_stay_bit_identical_across_both_buckets():
     and rebuilds `B` per leader. `==`, never `approx`."""
     outfit = make_card(
         "outfit_support",
-        costume_skill=make_skill(
-            "COSTUME", family="score_support", effect_type="score", magnitude=60.0
-        ),
+        costume_skill=make_skill("COSTUME", family="score_support", effect_type="score", magnitude=60.0),
     )
     members = (
         _active_scorer("member_active_a"),

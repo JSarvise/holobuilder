@@ -1,5 +1,6 @@
 """The session's write guard (tests/support/write_guard.py): the real state/ and dumps/ cannot be
 written; reading them and writing anywhere else still work."""
+
 from __future__ import annotations
 
 import os
@@ -35,7 +36,7 @@ def test_replace_onto_and_delete_of_a_real_file_are_refused(tmp_path):
 def test_reading_and_tmp_path_stay_free(tmp_path):
     (tmp_path / "ok.json").write_text("{}", "utf8")
     assert (tmp_path / "ok.json").read_text("utf8") == "{}"
-    for folder in (paths.STATE, paths.DUMPS):           # a clean clone has neither yet
+    for folder in (paths.STATE, paths.DUMPS):  # a clean clone has neither yet
         if folder.is_dir():
-            folder.mkdir(exist_ok=True)                 # an existing real folder is fine
+            folder.mkdir(exist_ok=True)  # an existing real folder is fine
             next(folder.iterdir(), None)

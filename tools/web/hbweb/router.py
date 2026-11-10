@@ -17,11 +17,11 @@ import http.server
 import json
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from hbuilder import paths
-
 from hbweb import (
     admin,
     board,
@@ -45,7 +45,7 @@ Route = Callable[["Handler"], None]
 PrefixRoute = Callable[["Handler", str], None]
 
 
-def serve_server(h: "Handler") -> None:
+def serve_server(h: Handler) -> None:
     """Which checkout this server runs from, and its process id: `run_local.py start` stops an
     earlier server of its own folder that still holds the port, and nothing else."""
     h.reply_json(200, {"repo": str(paths.REPO), "pid": os.getpid()})
@@ -109,13 +109,12 @@ POST_ROUTES: dict[str, Route] = {
     "/api/gacha/export": gacha.gacha_export,
     "/api/compare": search.compare,
 }
-POST_PREFIXES: tuple[tuple[str, PrefixRoute], ...] = (
-    ("/cancel/", jobs.cancel),
-)
+POST_PREFIXES: tuple[tuple[str, PrefixRoute], ...] = (("/cancel/", jobs.cancel),)
 
 
-def _dispatch(h: "Handler", path: str, routes: dict[str, Route],
-              prefixes: tuple[tuple[str, PrefixRoute], ...]) -> bool:
+def _dispatch(
+    h: Handler, path: str, routes: dict[str, Route], prefixes: tuple[tuple[str, PrefixRoute], ...]
+) -> bool:
     """Run the route for `path`; False when none matches."""
     route = routes.get(path)
     if route is not None:
@@ -123,7 +122,7 @@ def _dispatch(h: "Handler", path: str, routes: dict[str, Route],
         return True
     for prefix, prefix_route in prefixes:
         if path.startswith(prefix):
-            prefix_route(h, path[len(prefix):])
+            prefix_route(h, path[len(prefix) :])
             return True
     return False
 
@@ -300,9 +299,15 @@ def _start_cutoffs_poller() -> None:
         return
     try:
         event.CUTOFFS_POLLER.configure(enabled=True, interval_min=poll_min)
-        print(f"cutoffs poller: on, every {event.CUTOFFS_POLLER.interval_min} min "
-              + ("(pulls the VPS tracker)" if event.CUTOFFS_POLL_SCRIPT == config.CUTOFFS_PULL_SCRIPT
-                 else "(guests only)"), file=sys.stderr)
+        print(
+            f"cutoffs poller: on, every {event.CUTOFFS_POLLER.interval_min} min "
+            + (
+                "(pulls the VPS tracker)"
+                if event.CUTOFFS_POLL_SCRIPT == config.CUTOFFS_PULL_SCRIPT
+                else "(guests only)"
+            ),
+            file=sys.stderr,
+        )
     except ValueError as exc:
         print(f"cutoffs poller: HBUILDER_CUTOFFS_POLL_MIN ignored -- {exc}", file=sys.stderr)
 
@@ -327,8 +332,11 @@ def main(argv: list[str] | None = None) -> int:
         # The message matters more than the traceback: the operator's next
         # move is to find and stop the process holding the port, and on
         # Windows that process may be elevated and refuse an ordinary kill.
-        find = (f"    netstat -ano | findstr :{args.port}" if sys.platform == "win32"
-                else f"    ss -ltnp 'sport = :{args.port}'")
+        find = (
+            f"    netstat -ano | findstr :{args.port}"
+            if sys.platform == "win32"
+            else f"    ss -ltnp 'sport = :{args.port}'"
+        )
         print(
             f"cannot bind {BIND_HOST}:{args.port} -- {exc}\n"
             f"\n"

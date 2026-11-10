@@ -7,9 +7,11 @@ identically to a rider-less one. These pin the fold's recorded shape, its own
 LIFE>=1000 gate, the taint discipline, and that it reaches `team_rate_up` end to
 end through `resolve_team_gates`.
 """
+
 from __future__ import annotations
 
 import pytest
+from support.builders import make_card, make_resolved, make_scoring_config, make_skill, make_team
 
 from hbuilder.domain.card import GateCondition, SlotRider
 from hbuilder.domain.gates import RunState, resolve_team_gates
@@ -18,8 +20,6 @@ from hbuilder.domain.scoring import (
     _fold_rider_activation_rate_up,
 )
 from hbuilder.domain.unknown import UNKNOWN
-
-from support.builders import make_card, make_resolved, make_scoring_config, make_skill, make_team
 
 _RIDER_MAGNITUDE = 55.0  # +55% activation rate, as on card-00002-5-uniq-0001-00
 _HOST_DURATION = 10.0
@@ -79,9 +79,13 @@ def test_unknown_rider_magnitude_or_host_duration_taints_to_zero():
 def test_a_non_activation_rate_rider_is_ignored():
     cfg = make_scoring_config()
     other = make_skill(
-        "SPECIAL", family="score_support", effect_type="score", duration=_HOST_DURATION,
-        rider=SlotRider(family="life_recovery", effect_type="life", magnitude=30.0,
-                        condition=None, target=None),
+        "SPECIAL",
+        family="score_support",
+        effect_type="score",
+        duration=_HOST_DURATION,
+        rider=SlotRider(
+            family="life_recovery", effect_type="life", magnitude=30.0, condition=None, target=None
+        ),
     )
     resolved = make_resolved("m1", "SPECIAL", other)
     assert _fold_rider_activation_rate_up((resolved,), cfg) == 0.0
@@ -90,8 +94,7 @@ def test_a_non_activation_rate_rider_is_ignored():
 def _team_with_rider_carrier(condition):
     carrier = make_card("m1", member="Carrier", special=_special_with_rider(condition=condition))
     leader = make_card("L0", member="Leader")
-    rest = [make_card(f"m{i}", member=name) for i, name in
-            zip(range(2, 6), ("Mem2", "Mem3", "Mem4", "Mem5"))]
+    rest = [make_card(f"m{i}", member=name) for i, name in zip(range(2, 6), ("Mem2", "Mem3", "Mem4", "Mem5"))]
     return make_team([leader, carrier, *rest])
 
 

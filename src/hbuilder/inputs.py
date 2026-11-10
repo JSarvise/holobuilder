@@ -12,14 +12,14 @@ from __future__ import annotations
 import dataclasses
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
+from hbuilder import paths
 from hbuilder.domain.board import BoardModel, load_board
 from hbuilder.domain.card import Card, Stats
 from hbuilder.domain.collection import (
     FULLY_SCORABLE_BLOOM,
-    CollectionError,
     account_bonuses_from_mapping,
     caps_by_rarity_from_mapping,
     collection_stats,
@@ -42,7 +42,6 @@ from hbuilder.domain.scoring_config import (
     load_scoring_config,
 )
 from hbuilder.domain.team import TeamError
-from hbuilder import paths
 
 # What a failed `load_inputs` carries (`_LoadFailure`): which input was bad.
 EXIT_INPUT_DATA = 3  # cards.json / owned.json missing, unreadable, malformed.
@@ -102,8 +101,9 @@ CHARACTER_LEVEL_PATH = f"{paths.DUMPS_REL}/holodori/main_CharacterLevel.json"
 CHARACTER_LEVEL_GROUP = "level-group-1"
 
 
-def max_level_board_points(path: Path | str = paths.REPO / CHARACTER_LEVEL_PATH,
-                           group: str = CHARACTER_LEVEL_GROUP) -> int:
+def max_level_board_points(
+    path: Path | str = paths.REPO / CHARACTER_LEVEL_PATH, group: str = CHARACTER_LEVEL_GROUP
+) -> int:
     """The Holomem Board points a holomem holds at the maximum level: the sum of
     `skillTreePointQuantity` over every level of `group` in the master `CharacterLevel`
     export. Levelling is the only source of board points, so this is the most any
@@ -116,8 +116,10 @@ def max_level_board_points(path: Path | str = paths.REPO / CHARACTER_LEVEL_PATH,
     try:
         rows = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise MissingInput(f"cannot read {path} ({type(exc).__name__}): the max-level board "
-                           "points come from the master export the refresh writes") from None
+        raise MissingInput(
+            f"cannot read {path} ({type(exc).__name__}): the max-level board "
+            "points come from the master export the refresh writes"
+        ) from None
     if isinstance(rows, dict):
         rows = rows.get("rows") or rows.get("data") or []
     total, levels = 0, 0
@@ -128,8 +130,10 @@ def max_level_board_points(path: Path | str = paths.REPO / CHARACTER_LEVEL_PATH,
         levels += 1
         total += int(data.get("skillTreePointQuantity") or 0)
     if not levels:
-        raise MissingInput(f"{path} has no level of {group}: the max-level board points "
-                           "come from the master export the refresh writes")
+        raise MissingInput(
+            f"{path} has no level of {group}: the max-level board points "
+            "come from the master export the refresh writes"
+        )
     return total
 
 
@@ -166,10 +170,7 @@ class BoardBasis:
     def lines(self) -> list[str]:
         if self.model is None:
             if self.path is None:
-                return [
-                    "BOARD: disabled -- the Holomem Board scores "
-                    "as ZERO (29.4-48.7 % of Overall Power)"
-                ]
+                return ["BOARD: disabled -- the Holomem Board scores as ZERO (29.4-48.7 % of Overall Power)"]
             return [
                 f"BOARD: none ({self.path} absent) -- the Holomem Board scores "
                 "as ZERO (29.4-48.7 % of Overall Power); "
@@ -232,10 +233,12 @@ class CollectionBasis:
                 "BASIS: max bloom means every skill is at level 2, so no skill is "
                 "down-levelled and the skill level of ACTIVE/SPECIAL cannot "
                 "affect this answer either way",
-                (f"BASIS: Memory Bonus at {posters} posters (every poster the game has)"
-                 if posters is not None else
-                 f"BASIS: ⚠ Memory Bonus NOT counted -- no {COLLECTION_POSTER_PATH} "
-                 "to say how many posters the game has")
+                (
+                    f"BASIS: Memory Bonus at {posters} posters (every poster the game has)"
+                    if posters is not None
+                    else f"BASIS: ⚠ Memory Bonus NOT counted -- no {COLLECTION_POSTER_PATH} "
+                    "to say how many posters the game has"
+                )
                 + "; Member "
                 f"Power-Up at the roster ceiling "
                 f"({power_up if power_up is not None else 'unknown -- no card_level_curve.json'})",
@@ -278,8 +281,7 @@ class CollectionBasis:
                 f"COLLECTION: {len(self.not_scorable)} card(s) below bloom "
                 f"{FULLY_SCORABLE_BLOOM} -- their stats are correct, but "
                 f"data/cards.json's level-2 SPECIAL/PASSIVE magnitudes OVERSTATE "
-                f"them: {', '.join(self.not_scorable[:5])}"
-                + (" ..." if len(self.not_scorable) > 5 else "")
+                f"them: {', '.join(self.not_scorable[:5])}" + (" ..." if len(self.not_scorable) > 5 else "")
             )
         lines.extend(self._power_up_lines())
         return lines
@@ -303,10 +305,10 @@ class CollectionBasis:
                 return [
                     f"COLLECTION: power_up_permyriad = {derived.permyriad}, DERIVED "
                     f"from your {derived.counted} owned cards (player."
-                    f"power_up_permyriad is \"auto\" -- it cannot go stale)"
+                    f'power_up_permyriad is "auto" -- it cannot go stale)'
                 ]
             return [
-                f"COLLECTION: power_up_permyriad is \"auto\" but NOT derivable -- "
+                f'COLLECTION: power_up_permyriad is "auto" but NOT derivable -- '
                 f"{len(derived.skipped)} owned card(s) have no recorded level, so "
                 f"the answer is only bounded to {derived.permyriad}..{derived.upper}. "
                 f"The term is left unset rather than guessed; refresh with "
@@ -363,8 +365,11 @@ def _load_json_if_present(path: Path) -> dict | None:
 
 
 def _override_collection_levels(
-    document: dict, assume_level: object, assume_bloom: object,
-    keep_higher_level: bool = False, keep_higher_bloom: bool = False,
+    document: dict,
+    assume_level: object,
+    assume_bloom: object,
+    keep_higher_level: bool = False,
+    keep_higher_bloom: bool = False,
     assume_limit_break: object = None,
 ) -> dict:
     """`document` with every card entry — and `card_default` — forced to the
@@ -382,22 +387,23 @@ def _override_collection_levels(
     limit break -- its level CAP by rarity (`card_caps.json`) -- set to that, after
     the level assumption (so "level max" means the cap of that limit break); with
     `keep_higher_level` a card already above it keeps its own."""
+
     def _higher(own: object, assumed: object) -> bool:
-        return (isinstance(own, int) and not isinstance(own, bool)
-                and isinstance(assumed, int) and own > assumed)
+        return (
+            isinstance(own, int) and not isinstance(own, bool) and isinstance(assumed, int) and own > assumed
+        )
 
     def _apply(entry: object) -> dict:
         out = dict(entry) if isinstance(entry, dict) else {}
-        if assume_level is not None and not (keep_higher_level
-                                             and _higher(out.get("level"), assume_level)):
+        if assume_level is not None and not (keep_higher_level and _higher(out.get("level"), assume_level)):
             out["level"] = assume_level
             out["limit_break"] = "max"
-        if assume_bloom is not None and not (keep_higher_bloom
-                                             and _higher(out.get("bloom"), assume_bloom)):
+        if assume_bloom is not None and not (keep_higher_bloom and _higher(out.get("bloom"), assume_bloom)):
             out["bloom"] = assume_bloom
         if assume_limit_break is not None and not (
-                keep_higher_level and _higher(entry.get("limit_break") if isinstance(entry, dict)
-                                              else None, assume_limit_break)):
+            keep_higher_level
+            and _higher(entry.get("limit_break") if isinstance(entry, dict) else None, assume_limit_break)
+        ):
             out["limit_break"] = assume_limit_break
         return out
 
@@ -456,11 +462,12 @@ def apply_collection(
     # The level/bloom "what-if" filter: force every card to an assumed level
     # and/or bloom before the stats are restated. Applied only on the collection
     # (account) path — the maxed basis above already IS max, so it never gets here.
-    if document is not None and (assume_level is not None or assume_bloom is not None
-                                 or assume_limit_break is not None):
-        document = _override_collection_levels(document, assume_level, assume_bloom,
-                                               keep_higher_level, keep_higher_bloom,
-                                               assume_limit_break)
+    if document is not None and (
+        assume_level is not None or assume_bloom is not None or assume_limit_break is not None
+    ):
+        document = _override_collection_levels(
+            document, assume_level, assume_bloom, keep_higher_level, keep_higher_bloom, assume_limit_break
+        )
     curve_raw = _load_json_if_present(paths.REPO / COLLECTION_CURVE_PATH)
     caps_raw = _load_json_if_present(paths.REPO / COLLECTION_CAPS_PATH)
     ladder_raw = _load_json_if_present(paths.REPO / COLLECTION_LADDER_PATH)
@@ -468,9 +475,7 @@ def apply_collection(
     caps = caps_by_rarity_from_mapping(caps_raw) if caps_raw else None
     ladder = skill_ladder_from_mapping(ladder_raw)
 
-    stats, report = collection_stats(
-        [card.id for card in cards], document, caps, basis
-    )
+    stats, report = collection_stats([card.id for card in cards], document, caps, basis)
     # The `player` block rides along on the same document. It reaches
     # `ScoreBreakdown` only -- both terms are ranking-safe to drop, so they are
     # reported and never folded into a score.
@@ -508,9 +513,7 @@ def apply_collection(
     # true `39`). It is derivable from the account's own cards, so derive it and
     # let the run say when the file disagrees. Nothing here writes
     # `state/collection.json`: the correction is the user's to make.
-    derived_power_up = derived_member_power_up_permyriad(
-        basis, report.states, owned_ids or ()
-    )
+    derived_power_up = derived_member_power_up_permyriad(basis, report.states, owned_ids or ())
     # `"auto"` in the document means "compute it", and this is where it is
     # computed. Only an EXACT derivation may fill it: with an owned card whose
     # level is not recorded the answer is a bound, and scoring the lower end of
@@ -522,9 +525,7 @@ def apply_collection(
         and derived_power_up is not None
         and derived_power_up.exact
     ):
-        bonuses = dataclasses.replace(
-            bonuses, power_up_permyriad=derived_power_up.permyriad
-        )
+        bonuses = dataclasses.replace(bonuses, power_up_permyriad=derived_power_up.permyriad)
 
     return tuple(restated), CollectionBasis(
         bonuses=bonuses,
@@ -599,14 +600,10 @@ def load_inputs(
         cfg = load_scoring_config()
     except (SchemaError, TeamError) as exc:
         print(str(exc), file=sys.stderr)
-        raise _LoadFailure(
-            EXIT_CONFIG if current_step == _STEP_CONFIG else EXIT_INPUT_DATA
-        ) from exc
+        raise _LoadFailure(EXIT_CONFIG if current_step == _STEP_CONFIG else EXIT_INPUT_DATA) from exc
     except (OSError, json.JSONDecodeError) as exc:
         print(f"{current_input}: {exc}", file=sys.stderr)
-        raise _LoadFailure(
-            EXIT_CONFIG if current_step == _STEP_CONFIG else EXIT_INPUT_DATA
-        ) from exc
+        raise _LoadFailure(EXIT_CONFIG if current_step == _STEP_CONFIG else EXIT_INPUT_DATA) from exc
 
     return cards, owned, cfg, provenance
 
@@ -617,7 +614,11 @@ def default_paths():
     from types import SimpleNamespace  # noqa: PLC0415
 
     return SimpleNamespace(
-        cards="data/cards.json", owned="data/owned.json", collection=DEFAULT_COLLECTION_PATH,
-        board=DEFAULT_BOARD_PATH, charts=DEFAULT_CHARTS_PATH,
+        cards="data/cards.json",
+        owned="data/owned.json",
+        collection=DEFAULT_COLLECTION_PATH,
+        board=DEFAULT_BOARD_PATH,
+        charts=DEFAULT_CHARTS_PATH,
         skilltree=f"{paths.DUMPS_REL}/skilltree.json",
-        master_nodes=f"{paths.DUMPS_REL}/master_SkillTreeNode.json")
+        master_nodes=f"{paths.DUMPS_REL}/master_SkillTreeNode.json",
+    )

@@ -3,6 +3,7 @@
 The route never runs the real scan here (it logs into the account): `scripts.run_recon_script`
 is replaced, and what is checked is the gate around it (off unless HB_PARK_SCAN=1, one login at
 a time) and that it starts park_scan.py."""
+
 from __future__ import annotations
 
 import datetime
@@ -12,9 +13,9 @@ import urllib.error
 import urllib.request
 
 import pytest
+from hbweb import admin, config, park, scripts
 
 from hbuilder import game_day
-from hbweb import admin, config, park, scripts
 
 
 def _post(base: str) -> tuple[int, dict]:
@@ -51,6 +52,7 @@ def test_on_runs_park_scan_and_reports_the_record(web_base, monkeypatch, last_fi
         seen.append(script)
         last_file.write_text(json.dumps({"counted": True, "areas": [{"area": "area-a03"}]}), "utf8")
         return 0, "done\n"
+
     monkeypatch.setattr(scripts, "run_recon_script", fake)
     code, body = _post(web_base)
     assert code == 200 and body["returncode"] == 0
@@ -76,16 +78,17 @@ def test_one_login_at_a_time(web_base, monkeypatch, last_file):
 
 def test_status_says_when_todays_scan_is_used(monkeypatch, last_file):
     monkeypatch.setenv(config.PARK_SCAN_ENV, "1")
-    now = datetime.datetime(2026, 11, 8, 23, 2, tzinfo=datetime.timezone.utc)
+    now = datetime.datetime(2026, 11, 8, 23, 2, tzinfo=datetime.UTC)
     start = game_day.day_start_ms(now, 5)
     assert park.scan_status(now)["done_today"] is False and park.scan_status(now)["last"] is None
-    last_file.write_text(json.dumps({"counted": True, "game_day_start": start,
-                                     "finished_at": "x", "calls": [1, 2]}), "utf8")
+    last_file.write_text(
+        json.dumps({"counted": True, "game_day_start": start, "finished_at": "x", "calls": [1, 2]}), "utf8"
+    )
     st = park.scan_status(now)
     assert st["enabled"] and st["done_today"] and st["next_at"] == start + game_day.DAY_MS
-    assert "calls" not in st["last"]                      # the page gets the summary only
+    assert "calls" not in st["last"]  # the page gets the summary only
     last_file.write_text(json.dumps({"counted": False, "game_day_start": start}), "utf8")
-    assert park.scan_status(now)["done_today"] is False   # a scan that never moved: not used
+    assert park.scan_status(now)["done_today"] is False  # a scan that never moved: not used
 
 
 def test_the_park_payload_carries_the_scan_status(web_base, monkeypatch, last_file):
@@ -101,9 +104,9 @@ def test_the_day_start_the_page_uses_follows_the_masters_reset_hour(web_base, mo
     monkeypatch.setattr(park, "park_export", lambda: None)
     for hour in (5, 3):
         monkeypatch.setattr(game_day, "reset_hour", lambda *a, h=hour: h)
-        before = datetime.datetime.now(datetime.timezone.utc)
+        before = datetime.datetime.now(datetime.UTC)
         with urllib.request.urlopen(f"{web_base}/api/park", timeout=30) as r:
             got = json.loads(r.read())["game_day_start"]
-        after = datetime.datetime.now(datetime.timezone.utc)
+        after = datetime.datetime.now(datetime.UTC)
         assert got in {game_day.day_start_ms(before, hour), game_day.day_start_ms(after, hour)}
         assert datetime.datetime.fromtimestamp(got / 1000, game_day.JST).hour == hour

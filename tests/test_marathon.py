@@ -3,12 +3,14 @@
 Covers the two primitives taken from the game's data: the wildcard bonus-row matcher
 (rows are patterns, unset fields wildcards, all matching rows SUM) and the live stamina table.
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 import pytest
+from support.event_bonus import event_bonus_permil
 
 from hbuilder.domain.card import Card, Stats
 from hbuilder.domain.marathon import (
@@ -16,7 +18,6 @@ from hbuilder.domain.marathon import (
     MarathonEvent,
     live_stamina_score,
 )
-from support.event_bonus import event_bonus_permil
 
 STATS = Stats(performance=5000, technique=5000, sense=5000)
 
@@ -56,19 +57,19 @@ def test_holomem_row_fires_on_any_card_of_that_character():
 
 def test_card_id_row_fires_only_on_that_card():
     ev = event(live=[MarathonBonusRow(permil=300, card_id="card-00012-5-uniq-0062-00")])
-    r = event_bonus_permil(
-        [card("card-00012-5-uniq-0062-00"), card("card-00012-3-nrml-0000-00")], ev
-    )
+    r = event_bonus_permil([card("card-00012-5-uniq-0062-00"), card("card-00012-3-nrml-0000-00")], ev)
     assert r.per_card_permil == (300, 0)
 
 
 def test_matching_rows_sum_holomem_plus_member_plus_bloom():
     """Worked example: a 5★ event card at bloom 5 draws holomem+Member+bloom = 900."""
-    ev = event(live=[
-        MarathonBonusRow(permil=300, character_id="chr-00012"),
-        MarathonBonusRow(permil=300, card_id="card-00012-5-uniq-0062-00"),
-        MarathonBonusRow(permil=300, rarity=5, bloom=5),
-    ])
+    ev = event(
+        live=[
+            MarathonBonusRow(permil=300, character_id="chr-00012"),
+            MarathonBonusRow(permil=300, card_id="card-00012-5-uniq-0062-00"),
+            MarathonBonusRow(permil=300, rarity=5, bloom=5),
+        ]
+    )
     c = card("card-00012-5-uniq-0062-00", rarity="5★")
     r = event_bonus_permil([c], ev, blooms={c.id: 5})
     assert r.total_permil == 900
@@ -131,8 +132,6 @@ def test_stamina_out_of_range_raises():
         live_stamina_score(11)
 
 
-
-
 def _write(tmp_path: Path, obj) -> Path:
     p = tmp_path / "marathon.json"
     p.write_text(json.dumps(obj), encoding="utf-8")
@@ -153,5 +152,7 @@ def test_the_multi_room_divisor_follows_the_event_kind():
     assert base == 811
     assert mar.event_points(None, None, boosts=3, length_permil=1500, holopass=True, base=base) == 58_392
     # the relay vectors keep their exact values
-    assert mar.event_points(1_469_887, 1110, boosts=3, length_permil=1310, holopass=True,
-                            multi_score=5_143_567) == 38_043
+    assert (
+        mar.event_points(1_469_887, 1110, boosts=3, length_permil=1310, holopass=True, multi_score=5_143_567)
+        == 38_043
+    )

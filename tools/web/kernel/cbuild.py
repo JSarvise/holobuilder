@@ -7,6 +7,7 @@ bit-identical to the Python it replaces, on either platform.
 The library is `<name>.dll` on Windows and `lib<name>.so` elsewhere: a `<name>.so` next to
 `<name>.py` would be taken by Python's import system as an extension module of the same name.
 """
+
 from __future__ import annotations
 
 import os
@@ -51,4 +52,3 @@ def build(source: Path, target: Path, what: str, force: bool = False) -> Path:
     finally:
         tmp.unlink(missing_ok=True)
     return target
-

@@ -31,6 +31,7 @@ Usage
 EXPERT is the default because the ranking mode is **always Expert**, and
 because all four difficulties is 4x the file for charts no mode reads.
 """
+
 import argparse
 import json
 import os
@@ -105,9 +106,7 @@ def build_chart_cache() -> dict:
             text = open(path, encoding="utf-8", errors="replace").read()
             chart = sp.parse(text)
             kinds = sp.classify(chart)
-            cues = sorted(
-                e["time"] for e in ct.events(text, chart) if e["channel"] == "0B"
-            )
+            cues = sorted(e["time"] for e in ct.events(text, chart) if e["channel"] == "0B")
         except Exception:
             continue
         if len(cues) != 5 or sorted(cues) != cues:
@@ -118,14 +117,13 @@ def build_chart_cache() -> dict:
             if permil is None:
                 continue
             if kind == "FLICK":
-                flicks.append(combo)          # index of this note in t/w (0-based)
+                flicks.append(combo)  # index of this note in t/w (0-based)
             combo += 1
             times.append(round(note.time, 6))
             weights.append(permil * (1.0 + combo_coefficient(combo)))
         if not times or sum(weights) <= 0:
             continue
-        out[name[:-4]] = {"t": times, "w": weights, "cues": cues, "f": flicks,
-                          "h": sp.hidden_points(chart)}
+        out[name[:-4]] = {"t": times, "w": weights, "cues": cues, "f": flicks, "h": sp.hidden_points(chart)}
         if (i + 1) % 50 == 0:
             print(f"  parsed {i + 1}/{len(names)} ...", file=sys.stderr)
     return out
@@ -204,15 +202,16 @@ def _casts() -> tuple[dict[str, tuple[list[str], str]], list[str]]:
         singers = [str(c) for c in (data.get("characterIds") or [])]
         music_id = str(row.get("id") or "")
         if scope is None:
-            refused.append(f"{music_id}: unknown musicSingerType "
-                           f"{data.get('musicSingerType')!r}")
+            refused.append(f"{music_id}: unknown musicSingerType {data.get('musicSingerType')!r}")
             continue
         if not singers:
             refused.append(f"{music_id}: singer_type {scope!r} with an empty cast")
             continue
         if scope == "solo" and not 1 <= len(set(singers)) <= 2:
-            refused.append(f"{music_id}: singer_type 'solo' names {len(singers)} "
-                           f"singers {singers} (admits 1, or 2 for a duo)")
+            refused.append(
+                f"{music_id}: singer_type 'solo' names {len(singers)} "
+                f"singers {singers} (admits 1, or 2 for a duo)"
+            )
             continue
         casts[music_id] = (singers, scope)
     # The Music master export can lag a release: a song present only in songs.json (from
@@ -225,15 +224,14 @@ def _casts() -> tuple[dict[str, tuple[list[str], str]], list[str]]:
     except (OSError, ValueError):
         ours = {}
     ours = ours.get("songs", ours) if isinstance(ours, dict) else ours
-    for song in (ours.values() if isinstance(ours, dict) else ours or ()):
+    for song in ours.values() if isinstance(ours, dict) else ours or ():
         music_id = str((song or {}).get("id") or "")
         if not music_id or music_id in casts:
             continue
         singer = song.get("singer") or {}
         scope = str(singer.get("type") or "").lower() or None
         singers = [str(c) for c in (singer.get("character_ids") or [])]
-        if scope in ("solo", "group", "all") and singers and (
-                scope != "solo" or 1 <= len(set(singers)) <= 2):
+        if scope in ("solo", "group", "all") and singers and (scope != "solo" or 1 <= len(set(singers)) <= 2):
             casts[music_id] = (singers, scope)
     return casts, refused
 
@@ -291,8 +289,11 @@ def build(difficulty: str = "EXPERT") -> dict:
             )
         flick_at = set(int(i) for i in raw["f"])
         notes = [
-            [float(time), int(round(weight / (1.0 + combo_coefficient(index + 1)))),
-             1 if index in flick_at else 0]
+            [
+                float(time),
+                int(round(weight / (1.0 + combo_coefficient(index + 1)))),
+                1 if index in flick_at else 0,
+            ]
             for index, (time, weight) in enumerate(zip(raw["t"], raw["w"]))
         ]
         if not notes:
@@ -365,35 +366,45 @@ def rebuild_caches_if_stale() -> bool:
             print(f"  rebuilt: music_coef {len(coef)} rows")
             return True
         return False
-    print(f"  lattice cache STALE: {parsed} parsed vs {expected} expected -- rebuilding "
-          f"({on_disk} .sus, a few minutes)")
+    print(
+        f"  lattice cache STALE: {parsed} parsed vs {expected} expected -- rebuilding "
+        f"({on_disk} .sus, a few minutes)"
+    )
     for path in (CHART_CACHE, MUSIC_CACHE):
         if os.path.exists(path):
             os.replace(path, path + ".stale")
     cache = build_chart_cache()
     with open(CHART_CACHE, "w", encoding="utf-8") as fh:
         json.dump(cache, fh)
-    coef = load_music_coefficients()   # rebuilds + writes when absent
+    coef = load_music_coefficients()  # rebuilds + writes when absent
     print(f"  rebuilt: lattice {len(cache)} charts, music_coef {len(coef)} rows")
     return True
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="build_charts.py")
-    parser.add_argument("--difficulty", default="EXPERT",
-                        help="EASY/NORMAL/HARD/EXPERT, or ALL (default EXPERT)")
+    parser.add_argument(
+        "--difficulty", default="EXPERT", help="EASY/NORMAL/HARD/EXPERT, or ALL (default EXPERT)"
+    )
     parser.add_argument("--out", default=OUT)
-    parser.add_argument("--all-out", default=None,
-                        help="ALSO write every difficulty to this path (Path B's absolute "
-                             "per-song scorer needs EASY/NORMAL/HARD; the ranking library "
-                             "stays EXPERT-only so its digest and size do not move). "
-                             "Kept in the same command so the two files cannot drift.")
-    parser.add_argument("--verify", action="store_true",
-                        help="read the file back through domain.charts_from_mapping")
-    parser.add_argument("--rebuild-caches", action="store_true",
-                        help="if charts_cdn holds .sus files the lattice cache has not parsed, "
-                             "rebuild dumps/lattice_charts.json (build_chart_cache) "
-                             "and dumps/music_coef.json (from the local master) first")
+    parser.add_argument(
+        "--all-out",
+        default=None,
+        help="ALSO write every difficulty to this path (Path B's absolute "
+        "per-song scorer needs EASY/NORMAL/HARD; the ranking library "
+        "stays EXPERT-only so its digest and size do not move). "
+        "Kept in the same command so the two files cannot drift.",
+    )
+    parser.add_argument(
+        "--verify", action="store_true", help="read the file back through domain.charts_from_mapping"
+    )
+    parser.add_argument(
+        "--rebuild-caches",
+        action="store_true",
+        help="if charts_cdn holds .sus files the lattice cache has not parsed, "
+        "rebuild dumps/lattice_charts.json (build_chart_cache) "
+        "and dumps/music_coef.json (from the local master) first",
+    )
     args = parser.parse_args(argv)
 
     if args.rebuild_caches:
@@ -408,8 +419,10 @@ def main(argv=None) -> int:
     flicks = sum(1 for c in charts.values() for n in c["notes"] if n[2])
     with_flicks = sum(1 for c in charts.values() if any(n[2] for n in c["notes"]))
     size = os.path.getsize(args.out) / 1e6
-    print(f"{len(charts)} charts, {notes:,} notes ({flicks:,} flicks on {with_flicks} charts) "
-          f"-> {args.out} ({size:.1f} MB)")
+    print(
+        f"{len(charts)} charts, {notes:,} notes ({flicks:,} flicks on {with_flicks} charts) "
+        f"-> {args.out} ({size:.1f} MB)"
+    )
     for line in document["skipped"]:
         print(f"  SKIPPED {line}")
 
@@ -422,9 +435,11 @@ def main(argv=None) -> int:
         # If it ever does not, one of the two is scoring a different chart.
         shared = {k: v for k, v in every["charts"].items() if k in charts}
         agree = sum(1 for k, v in shared.items() if v == charts[k])
-        print(f"{len(every['charts'])} charts (every difficulty) -> {args.all_out} "
-              f"({os.path.getsize(args.all_out) / 1e6:.1f} MB); "
-              f"{agree}/{len(charts)} identical to {args.out}")
+        print(
+            f"{len(every['charts'])} charts (every difficulty) -> {args.all_out} "
+            f"({os.path.getsize(args.all_out) / 1e6:.1f} MB); "
+            f"{agree}/{len(charts)} identical to {args.out}"
+        )
         if agree != len(charts):
             print("  ⚠ the two chart files DISAGREE on a shared chart — do not use either")
             return 1
@@ -432,8 +447,7 @@ def main(argv=None) -> int:
     if args.verify:
         library = charts_from_mapping(document, source=args.out)
         cues = sum(1 for c in library.charts.values() if len(c.special_cues) == 5)
-        print(f"  loader accepts {len(library)} charts; "
-              f"{cues} carry the expected 5 SPECIAL cues")
+        print(f"  loader accepts {len(library)} charts; {cues} carry the expected 5 SPECIAL cues")
         for key, chart in library.charts.items():
             if len(chart.special_cues) != 5:
                 print(f"  ⚠ {key}: {len(chart.special_cues)} cues, not 5")

@@ -99,36 +99,30 @@ LEADER_BOARD_EFFECT_UP_REVISIONS = (
     ("2026-08-30T23:20:00", {"chr-04001": 251, "chr-04016": 20}),
     # Ina's `R-032` unlocked: a SECOND family with a small quota denominator.
     # After the unlock Ina derives exactly 20.
-    ("2026-09-08T02:40:00",
-     {"chr-04001": 251, "chr-04016": 20, "chr-04003": 20}),
+    ("2026-09-08T02:40:00", {"chr-04001": 251, "chr-04016": 20, "chr-04003": 20}),
     # Ina's `R-049` ("Score Support Effect 4.0% to all") bought between two capture
     # batches. Board refresh: nodes 479 -> 481, Ina derives exactly 60.
-    ("2026-09-09T03:00:00",
-     {"chr-04001": 251, "chr-04016": 20, "chr-04003": 60}),
+    ("2026-09-09T03:00:00", {"chr-04001": 251, "chr-04016": 20, "chr-04003": 60}),
     # Ina's `R-033`+`R-034` AND `R-050`+`R-051` bought: a THIRD board state that
     # preserves the exact per-card Outfit quotas. Two +40 score-support nodes, so
     # 60 -> 140 and E 660 -> 740.
-    ("2026-09-09T22:00:00",
-     {"chr-04001": 251, "chr-04016": 20, "chr-04003": 140}),
+    ("2026-09-09T22:00:00", {"chr-04001": 251, "chr-04016": 20, "chr-04003": 140}),
     # Several boards RESPEC'd -- nodes are refundable, so a character can LOSE
     # leader-scope effect-up. Read from the account: chr-04001, chr-04003 and chr-00034
     # lost nodes and the points went to chr-00036 and others. Calliope's 251 and Ina's 140
     # are GONE and Takane Lui (chr-00036) is the score-support leader at 221 permil
     # (5 unconditional leader-scope terms: .037+.040+.074+.040+.030).
-    ("2026-09-13T03:00:00",
-     {"chr-00036": 221, "chr-04016": 20}),
+    ("2026-09-13T03:00:00", {"chr-00036": 221, "chr-04016": 20}),
     # The `random_teams` corpus (847 rows, all captured at 02:28 that day) ran on the
     # board frozen beside it, which derives Lui 260 + Fuwawa 20. No rows lie between the
     # previous revision and this capture, so the boundary only has to precede the capture
     # (the placement is inferred, the values are read from the board).
-    ("2026-10-13T00:00:00",
-     {"chr-00036": 260, "chr-04016": 20}),
+    ("2026-10-13T00:00:00", {"chr-00036": 260, "chr-04016": 20}),
     # After that capture the boards were re-spec'd for an event: Ayunda Risu (chr-03001)
     # gained 260 of leader-scope effect-up and Lui fell 260 -> 200 (derived from the live
     # board). Without this boundary the previous corpus is scored on the newer board and
     # `test_deck_panel`'s oracle falls 96.7 % -> 95.6 % (14 Risu-led rows off by +64..+128).
-    ("2026-10-13T03:00:00",
-     {"chr-00036": 200, "chr-03001": 260, "chr-04016": 20}),
+    ("2026-10-13T03:00:00", {"chr-00036": 200, "chr-03001": 260, "chr-04016": 20}),
 )
 
 
@@ -172,8 +166,9 @@ CARDS = {c["id"]: c for c in _load_json(REPO / default_paths().cards)["cards"]}
 #: no card state of their own, so scoring them on today's levels mixes two instants -- the
 #: corpus matched 847/847 Active lines on its own collection, 688/847 on a later one.
 _CAPTURE_COLLECTION = DUMPS / "bonus_extract_db.collection.json"
-COLLECTION = _load_json(_CAPTURE_COLLECTION if _CAPTURE_COLLECTION.exists()
-                        else REPO / "state" / "collection.json")["cards"]
+COLLECTION = _load_json(
+    _CAPTURE_COLLECTION if _CAPTURE_COLLECTION.exists() else REPO / "state" / "collection.json"
+)["cards"]
 
 
 def _load_active():
@@ -205,11 +200,7 @@ def _load_special():
         out[(m.group(1), str(row["level"]))] = dict(
             magnitude_permil=_trailing_int(_text(d, 3)) or 0,
             duration_s=round(d.get(6, [0])[0] / 1000),
-            rider_permil=(
-                _trailing_int(rider) or 0
-                if "activation_probability" in rider
-                else 0
-            ),
+            rider_permil=(_trailing_int(rider) or 0 if "activation_probability" in rider else 0),
         )
     return out
 
@@ -232,17 +223,13 @@ def _load_leader():
                 raw,
             )
             if mm:
-                effects.append(
-                    dict(kind=mm.group(1), permil=int(mm.group(2)), trigger=_text(d, trigger_key))
-                )
+                effects.append(dict(kind=mm.group(1), permil=int(mm.group(2)), trigger=_text(d, trigger_key)))
         skills[m.group(1)] = effects
     by_costume = {}
     for row in mc.rows("Costume"):
         leader = _text(row["data"], 4)
         if leader:
-            by_costume[row["id"]] = skills.get(
-                leader.replace("live_leader_skill-", ""), []
-            )
+            by_costume[row["id"]] = skills.get(leader.replace("live_leader_skill-", ""), [])
     return by_costume
 
 
@@ -338,9 +325,7 @@ def leader_effect_up(costume_id, members):
         if not trigger:
             permil = effect["permil"]
             continue
-        m = re.match(
-            r"live_skill_trigger-deck_card_attribute-(attribute_\d)-(\d)", trigger
-        )
+        m = re.match(r"live_skill_trigger-deck_card_attribute-(attribute_\d)-(\d)", trigger)
         if m is None:
             continue
         n = sum(1 for c in members if CARDS[c].get("type") == _ATTRIBUTE[m.group(1)])
@@ -391,9 +376,7 @@ def panel_cards(row):
                 passive_effect_up_permil=max(0, total_effect - outfit - board_effect),
                 board_effect_up_permil=board_effect,
                 board_probability_up_permil=round(per_card.get("active_prob_up") or 0),
-                board_cooldown_shorten_permil=round(
-                    per_card.get("active_cool_shorten") or 0
-                ),
+                board_cooldown_shorten_permil=round(per_card.get("active_cool_shorten") or 0),
                 special_magnitude_permil=spec["magnitude_permil"],
                 special_duration_s=spec["duration_s"],
                 special_rate_rider_permil=spec["rider_permil"],

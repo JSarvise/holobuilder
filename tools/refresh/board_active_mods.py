@@ -16,6 +16,7 @@ to switch between (SCOR-05), so this module reports the raw total and refuses to
 
     python board_active_mods.py [chr-id ...]
 """
+
 import json
 import os
 import sys
@@ -54,8 +55,7 @@ def modifiers(character_ids=None):
     out = {}
     for chr_id in ids:
         entry = state.get(chr_id)
-        acc = {"cooldown": 0.0, "probability": 0.0, "nodes": [],
-               "captured": entry is not None}
+        acc = {"cooldown": 0.0, "probability": 0.0, "nodes": [], "captured": entry is not None}
         for node_id in (entry or {}).get("nodes", []):
             hit = effects.get(node_id)
             if hit:
@@ -73,8 +73,10 @@ def main():
         if not m["captured"]:
             print(f"{chr_id:14} {'--':>9} {'--':>12}  not captured")
             continue
-        print(f"{chr_id:14} {m['cooldown'] * 100:>8.1f}% {m['probability'] * 100:>11.1f}%"
-              f"  {' '.join(m['nodes']) or '-'}")
+        print(
+            f"{chr_id:14} {m['cooldown'] * 100:>8.1f}% {m['probability'] * 100:>11.1f}%"
+            f"  {' '.join(m['nodes']) or '-'}"
+        )
 
 
 if __name__ == "__main__":

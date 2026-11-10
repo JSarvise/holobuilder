@@ -30,8 +30,13 @@ def refresh_route(h) -> None:
     An exception escaping a handler makes `http.server` emit an HTML error page, which the
     page reports as a JSON parse error naming a column number."""
     if not REFRESH_LOCK.acquire(blocking=False):
-        h.reply_json(409, {"error": "a refresh is already running; wait for it to finish "
-                                    "(the server console shows its progress)"})
+        h.reply_json(
+            409,
+            {
+                "error": "a refresh is already running; wait for it to finish "
+                "(the server console shows its progress)"
+            },
+        )
         return
     try:
         refresh(h)
@@ -44,11 +49,14 @@ def refresh_route(h) -> None:
 
         detail = traceback.format_exc()
         print(detail, flush=True)
-        h.reply_json(500, {
-            "returncode": -1,
-            "stdout": "",
-            "stderr": f"{type(exc).__name__}: {exc}\n\n{detail}",
-        })
+        h.reply_json(
+            500,
+            {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": f"{type(exc).__name__}: {exc}\n\n{detail}",
+            },
+        )
     finally:
         REFRESH_LOCK.release()
 
@@ -76,12 +84,15 @@ def refresh(h) -> None:
     gacha_block = gacha.sync_after_refresh(h, code)
     if gacha_block is None:
         return
-    h.reply_json(200, {
-        "returncode": code,
-        "stdout": stdout[-20000:],
-        "stderr": "",
-        "gacha": gacha_block,
-    })
+    h.reply_json(
+        200,
+        {
+            "returncode": code,
+            "stdout": stdout[-20000:],
+            "stderr": "",
+            "gacha": gacha_block,
+        },
+    )
 
 
 def park_scan_route(h) -> None:
@@ -93,16 +104,21 @@ def park_scan_route(h) -> None:
         h.reply_json(403, {"error": "Scan all areas is off: turn it on in Settings"})
         return
     if not REFRESH_LOCK.acquire(blocking=False):
-        h.reply_json(409, {"error": "a refresh or a scan is already running; wait for it to "
-                                    "finish"})
+        h.reply_json(409, {"error": "a refresh or a scan is already running; wait for it to finish"})
         return
     try:
         ran = scripts.run_recon_script(h, config.PARK_SCAN_SCRIPT, "park-scan")
         if ran is None:
             return
         code, stdout = ran
-        h.reply_json(200, {"returncode": code, "stdout": stdout[-8000:],
-                           "last": config.read_json(config.PARK_SCAN_LAST_PATH)})
+        h.reply_json(
+            200,
+            {
+                "returncode": code,
+                "stdout": stdout[-8000:],
+                "last": config.read_json(config.PARK_SCAN_LAST_PATH),
+            },
+        )
     except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
         raise
     except Exception as exc:  # noqa: BLE001
@@ -120,13 +136,17 @@ def admin_proxy(h, method: str, route: str) -> None:
     an admin. Reads state/server_api.json; writes nothing here (approvals live on the VPS)."""
     import urllib.error  # noqa: PLC0415
     import urllib.request  # noqa: PLC0415
+
     conf = config.read_json(config.SERVER_API_PATH) or {}
     if not conf.get("token"):
         h.reply_json(200, {"admin": False, "error": "no server key on this PC"})
         return
-    req = urllib.request.Request(conf["url"].rstrip("/") + "/auth/" + route, method=method,
-                                 data=b"" if method == "POST" else None,
-                                 headers={"Authorization": f"Bearer {conf['token']}"})
+    req = urllib.request.Request(
+        conf["url"].rstrip("/") + "/auth/" + route,
+        method=method,
+        data=b"" if method == "POST" else None,
+        headers={"Authorization": f"Bearer {conf['token']}"},
+    )
     try:
         with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310 -- our own host
             h.reply_json(200, json.loads(r.read()))

@@ -7,21 +7,21 @@ with multi-row nodes taken as the max variant, not summed."""
 
 from __future__ import annotations
 
-from hbuilder.domain.card import Stats
-from hbuilder.domain.board_plan import node_costs_from_master, power_node_values
-
 import pytest
 from support.builders import make_card
+
+from hbuilder.domain.board_plan import node_costs_from_master, power_node_values
+from hbuilder.domain.card import Stats
 
 K = 2.03734
 _STATS = Stats(performance=1000, technique=1000, sense=1000)
 
-_LEADER = ("skill_tree_effect-all_parameter_up-100-skill_tree_effect_target"
-           "-all-set_live_leader")
-_MEMBER = ("skill_tree_effect-sense_up-50-skill_tree_effect_target"
-           "-skill_tree_character-always")
-_GROUPING = ("skill_tree_effect-all_parameter_up_for_character_grouping-225"
-             "-skill_tree_effect_target-character_grouping-grp-gen_0-always")
+_LEADER = "skill_tree_effect-all_parameter_up-100-skill_tree_effect_target-all-set_live_leader"
+_MEMBER = "skill_tree_effect-sense_up-50-skill_tree_effect_target-skill_tree_character-always"
+_GROUPING = (
+    "skill_tree_effect-all_parameter_up_for_character_grouping-225"
+    "-skill_tree_effect_target-character_grouping-grp-gen_0-always"
+)
 
 
 def test_node_costs_read_field_9_and_ignore_the_rest():
@@ -38,14 +38,17 @@ def test_node_costs_read_field_9_and_ignore_the_rest():
 def _values(node_effect_ids, *, is_leader, own, members):
     return power_node_values(
         node_effect_ids,
-        is_leader=is_leader, own_card=own, member_cards=members,
-        bonus_permil=0.0, overall_power=0.0, k_constant=K,
+        is_leader=is_leader,
+        own_card=own,
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=0.0,
+        k_constant=K,
     )
 
 
 def test_leader_node_reaches_all_members_only_while_leading():
-    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS)
-                    for i in range(5))
+    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS) for i in range(5))
     v_leading = _values({"R-001": [_LEADER]}, is_leader=True, own=None, members=members)
     v_bench = _values({"R-001": [_LEADER]}, is_leader=False, own=None, members=members)
     # flat +100 to all 3 stats of all 5 members, times dUS/dPower (= K at bonus 0).
@@ -67,15 +70,17 @@ def test_grouping_node_is_skipped_and_variants_take_the_max():
     big = _LEADER.replace("-100-", "-300-")
     v = _values(
         {"G-001": [_GROUPING], "R-001": [_LEADER, big]},
-        is_leader=True, own=None, members=members,
+        is_leader=True,
+        own=None,
+        members=members,
     )
     assert v["G-001"] == 0.0
     assert v["R-001"] == pytest.approx(300 * 3 * 1 * K)  # max(100, 300) variant, one member
 
 
 def test_optimize_team_boards_sums_distinct_characters_by_role():
-    from hbuilder.domain.skilltree import SkillTree, TreeNode, ROOT_NODE
     from hbuilder.domain.board_plan import optimize_team_boards
+    from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, TreeNode
 
     # ROOT - R-001 (leader stat, reaches all members) ; ROOT - B-001 (member stat)
     nodes = {
@@ -92,11 +97,16 @@ def test_optimize_team_boards_sums_distinct_characters_by_role():
     effects = {"R-001": [_LEADER], "B-001": [_MEMBER]}
 
     leader = make_card("card-lead-5-uniq-0000-00", member="Lead", stats=_STATS)
-    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS)
-                    for i in range(5))
+    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS) for i in range(5))
     plan = optimize_team_boards(
-        leader, members, tree_for=lambda c: tree, budget_for=lambda c: 10,
-        node_effect_ids=effects, overall_power=0.0, bonus_permil=0.0, k_constant=K,
+        leader,
+        members,
+        tree_for=lambda c: tree,
+        budget_for=lambda c: 10,
+        node_effect_ids=effects,
+        overall_power=0.0,
+        bonus_permil=0.0,
+        k_constant=K,
     )
     # 6 distinct characters each get a plan; the total is positive.
     assert len(plan.per_character) == 6
@@ -116,8 +126,8 @@ def test_leader_whose_holomem_is_also_a_member_gets_ONE_board_valued_as_leader()
     leads) AND reaching her member card's blue nodes — not two plans where the
     member's overwrites the leader's name-keyed board and silently drops every
     red (no R-044/062/063, singer power 0)."""
-    from hbuilder.domain.skilltree import SkillTree, TreeNode, ROOT_NODE
-    from hbuilder.domain.board_plan import optimize_team_boards, board_model_from_plan
+    from hbuilder.domain.board_plan import board_model_from_plan, optimize_team_boards
+    from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, TreeNode
 
     nodes = {
         ROOT_NODE: TreeNode(node_id=ROOT_NODE, branch="S", cost=0, player_level=None),
@@ -134,12 +144,17 @@ def test_leader_whose_holomem_is_also_a_member_gets_ONE_board_valued_as_leader()
 
     leader = make_card("card-04001-5-uniq-0042-00", member="Mori Calliope", stats=_STATS)
     calli_member = make_card("card-04001-4-cmmn-0000-00", member="Mori Calliope", stats=_STATS)
-    others = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS)
-                   for i in range(4))
+    others = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS) for i in range(4))
     members = (calli_member, *others)
     plan = optimize_team_boards(
-        leader, members, tree_for=lambda c: tree, budget_for=lambda c: 10,
-        node_effect_ids=effects, overall_power=0.0, bonus_permil=0.0, k_constant=K,
+        leader,
+        members,
+        tree_for=lambda c: tree,
+        budget_for=lambda c: 10,
+        node_effect_ids=effects,
+        overall_power=0.0,
+        bonus_permil=0.0,
+        k_constant=K,
     )
     # 5 distinct CHARACTERS, not 6 cards.
     assert len(plan.per_character) == 5
@@ -150,22 +165,32 @@ def test_leader_whose_holomem_is_also_a_member_gets_ONE_board_valued_as_leader()
     assert "B-001" in calli.selected
     # ...and the assembled name-keyed board carries THAT plan, not an overwrite.
     board = board_model_from_plan(
-        plan, leader, members, {"nodes": {}, "members": [], "models": {}}, effects,
-        overall_power=0.0, bonus_permil=0.0, k_constant=K, active_pool_rate=0.0)
+        plan,
+        leader,
+        members,
+        {"nodes": {}, "members": [], "models": {}},
+        effects,
+        overall_power=0.0,
+        bonus_permil=0.0,
+        k_constant=K,
+        active_pool_rate=0.0,
+    )
     got = {n.node_id for n in board.characters["Mori Calliope"].nodes}
     assert got == {"R-001", "B-001"}
 
 
 def test_board_points_from_snapshot_reads_the_point_list():
     from hbuilder.domain.board_plan import board_points_from_snapshot
-    snap = {"board_points": [
-        {"point_id": "skill_tree_point-chr-00001", "quantity": 26},
-        {"point_id": "skill_tree_point-chr-00004", "quantity": 29},
-        {"point_id": "not-a-point", "quantity": 5},
-        {"point_id": "skill_tree_point-chr-00005"},  # no quantity -> 0 (proto3 elides zero)
-    ]}
-    assert board_points_from_snapshot(snap) == {"chr-00001": 26, "chr-00004": 29,
-                                                "chr-00005": 0}
+
+    snap = {
+        "board_points": [
+            {"point_id": "skill_tree_point-chr-00001", "quantity": 26},
+            {"point_id": "skill_tree_point-chr-00004", "quantity": 29},
+            {"point_id": "not-a-point", "quantity": 5},
+            {"point_id": "skill_tree_point-chr-00005"},  # no quantity -> 0 (proto3 elides zero)
+        ]
+    }
+    assert board_points_from_snapshot(snap) == {"chr-00001": 26, "chr-00004": 29, "chr-00005": 0}
 
 
 def test_board_points_from_snapshot_reads_an_elided_quantity_as_zero():
@@ -175,28 +200,37 @@ def test_board_points_from_snapshot_reads_an_elided_quantity_as_zero():
     develop budget her 0 points and the estimate propose selling her whole
     board."""
     from hbuilder.domain.board_plan import board_points_from_snapshot
-    snap = {"board_points": [
-        {"point_id": "skill_tree_point-chr-04001"},
-        {"point_id": "skill_tree_point-chr-00001", "quantity": 26},
-        {"point_id": "not-a-point"},
-    ]}
+
+    snap = {
+        "board_points": [
+            {"point_id": "skill_tree_point-chr-04001"},
+            {"point_id": "skill_tree_point-chr-00001", "quantity": 26},
+            {"point_id": "not-a-point"},
+        ]
+    }
     assert board_points_from_snapshot(snap) == {"chr-04001": 0, "chr-00001": 26}
 
 
-_EFF_UP = ("skill_tree_effect-live_active_skill_effect_up_permil_up-40"
-           "-skill_tree_effect_target-all-set_live_leader")
-_ACT_UP = ("skill_tree_effect-live_active_skill_activation_probability_up_permil_up"
-           "-60-skill_tree_effect_target-skill_tree_character-always")
+_EFF_UP = (
+    "skill_tree_effect-live_active_skill_effect_up_permil_up-40-skill_tree_effect_target-all-set_live_leader"
+)
+_ACT_UP = (
+    "skill_tree_effect-live_active_skill_activation_probability_up_permil_up"
+    "-60-skill_tree_effect_target-skill_tree_character-always"
+)
 
 
 def test_active_pool_channels_are_valued_off_the_pool():
-    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS)
-                    for i in range(5))
+    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS) for i in range(5))
     own = members[0]
     v = power_node_values(
         {"R-002": [_EFF_UP], "B-007": [_ACT_UP]},
-        is_leader=True, own_card=own, member_cards=members,
-        bonus_permil=0.0, overall_power=1_000_000.0, k_constant=K,
+        is_leader=True,
+        own_card=own,
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=1_000_000.0,
+        k_constant=K,
         active_pool_rate=0.5,
     )
     # skill_effect_up multiplies the WHOLE pool: pool * V * power * K.
@@ -209,14 +243,18 @@ def test_active_pool_channels_are_valued_off_the_pool():
 
 # Real node strings from `dumps/board.json`: the pooled `all` bucket at 1 permil
 # and a `solo`-scoped tile at 20.
-_SONG_ALL = ("skill_tree_effect-live_score_bonus_add_permil_up_by_music_"
-             "skill_tree_character_and_music_singer_type-1-"
-             "skill_tree_effect_passive_trigger-music_skill_tree_character_"
-             "and_music_singer_type-all-always-all")
-_SONG_SOLO = ("skill_tree_effect-live_score_bonus_add_permil_up_by_music_"
-              "skill_tree_character_and_music_singer_type-20-"
-              "skill_tree_effect_passive_trigger-music_skill_tree_character_"
-              "and_music_singer_type-solo-always-solo")
+_SONG_ALL = (
+    "skill_tree_effect-live_score_bonus_add_permil_up_by_music_"
+    "skill_tree_character_and_music_singer_type-1-"
+    "skill_tree_effect_passive_trigger-music_skill_tree_character_"
+    "and_music_singer_type-all-always-all"
+)
+_SONG_SOLO = (
+    "skill_tree_effect-live_score_bonus_add_permil_up_by_music_"
+    "skill_tree_character_and_music_singer_type-20-"
+    "skill_tree_effect_passive_trigger-music_skill_tree_character_"
+    "and_music_singer_type-solo-always-solo"
+)
 
 
 def test_song_score_bonus_is_valued_per_UNIT_of_rate_not_per_permil():
@@ -229,12 +267,15 @@ def test_song_score_bonus_is_valued_per_UNIT_of_rate_not_per_permil():
     Scaling it by `Power * K / 1000` — the per-PERMIL constant — would divide
     the fraction by 1000 a second time and make yellow nodes worth ~1/1000 of
     their real value (about half a percent of team score on a real roster)."""
-    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS)
-                    for i in range(5))
+    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS) for i in range(5))
     v = power_node_values(
         {"Y-001": [_SONG_ALL], "Y-002": [_SONG_SOLO]},
-        is_leader=True, own_card=members[0], member_cards=members,
-        bonus_permil=0.0, overall_power=1_000_000.0, k_constant=K,
+        is_leader=True,
+        own_card=members[0],
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=1_000_000.0,
+        k_constant=K,
         singer_weight=1.0,
     )
     assert v["Y-001"] == pytest.approx(0.001 * 1_000_000 * K)
@@ -246,13 +287,17 @@ def test_song_score_bonus_shares_the_scale_of_its_sibling_rate_channels():
     of `r` and a skill-effect-up of `r` over the whole pool must land on the
     SAME scale. A factor-of-1000 slip between them is invisible unless the two
     channels are compared."""
-    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS)
-                    for i in range(5))
+    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS) for i in range(5))
     v = power_node_values(
         {"Y-002": [_SONG_SOLO], "R-002": [_EFF_UP]},
-        is_leader=True, own_card=members[0], member_cards=members,
-        bonus_permil=0.0, overall_power=1_000_000.0, k_constant=K,
-        active_pool_rate=1.0, singer_weight=1.0,
+        is_leader=True,
+        own_card=members[0],
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=1_000_000.0,
+        k_constant=K,
+        active_pool_rate=1.0,
+        singer_weight=1.0,
     )
     # _EFF_UP is 40 permil over a full pool -> 0.040 * Power * K.
     # _SONG_SOLO is 20 permil -> 0.020 * Power * K. Same scale, ratio exactly 2.
@@ -263,12 +308,15 @@ def test_a_song_scoped_node_is_worth_nothing_when_the_leader_does_not_sing():
     """`singer_weight` gates the solo/group scopes; the pooled `all` bucket is
     every song's, so it is not gated. Pinned so a change to the unit scale
     cannot quietly take the gate with it."""
-    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS)
-                    for i in range(5))
+    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS) for i in range(5))
     v = power_node_values(
         {"Y-001": [_SONG_ALL], "Y-002": [_SONG_SOLO]},
-        is_leader=True, own_card=members[0], member_cards=members,
-        bonus_permil=0.0, overall_power=1_000_000.0, k_constant=K,
+        is_leader=True,
+        own_card=members[0],
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=1_000_000.0,
+        k_constant=K,
         singer_weight=0.0,
     )
     assert v["Y-002"] == pytest.approx(0.0)
@@ -276,13 +324,17 @@ def test_a_song_scoped_node_is_worth_nothing_when_the_leader_does_not_sing():
 
 
 def test_active_channels_zero_without_a_pool_or_active_member():
-    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS)
-                    for i in range(5))
+    members = tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS) for i in range(5))
     # no pool -> no active value at all.
     v0 = power_node_values(
         {"R-002": [_EFF_UP], "B-007": [_ACT_UP]},
-        is_leader=True, own_card=members[0], member_cards=members,
-        bonus_permil=0.0, overall_power=1_000_000.0, k_constant=K, active_pool_rate=0.0,
+        is_leader=True,
+        own_card=members[0],
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=1_000_000.0,
+        k_constant=K,
+        active_pool_rate=0.0,
     )
     assert v0["R-002"] == 0.0 and v0["B-007"] == 0.0
     # a pure outfit-leader (own card is NOT one of the members) fields no active,
@@ -290,8 +342,13 @@ def test_active_channels_zero_without_a_pool_or_active_member():
     outsider = make_card("card-lead-5-uniq-0000-00", member="Lead", stats=_STATS)
     v1 = power_node_values(
         {"B-007": [_ACT_UP]},
-        is_leader=True, own_card=outsider, member_cards=members,
-        bonus_permil=0.0, overall_power=1_000_000.0, k_constant=K, active_pool_rate=0.5,
+        is_leader=True,
+        own_card=outsider,
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=1_000_000.0,
+        k_constant=K,
+        active_pool_rate=0.5,
     )
     assert v1["B-007"] == 0.0
 
@@ -301,20 +358,24 @@ def test_grouping_node_valued_from_the_chr_override():
     # the members in THIS character's own grouping, read from the chr override.
     members = tuple(
         make_card(
-            f"card-m{i}-5-uniq-0000-00", member=f"M{i}",
+            f"card-m{i}-5-uniq-0000-00",
+            member=f"M{i}",
             generations=frozenset({"Myth"}) if i < 3 else frozenset({"Gen0"}),
             stats=_STATS,
         )
         for i in range(5)
     )
-    skilltree_nodes = {
-        "G-011": {"chr": {"chr-m0": {"v": 225, "tgt": "character_grouping-grp-myth-always"}}}
-    }
+    skilltree_nodes = {"G-011": {"chr": {"chr-m0": {"v": 225, "tgt": "character_grouping-grp-myth-always"}}}}
     v = power_node_values(
         {"G-011": ["ignored-master-variant"]},
-        is_leader=False, own_card=members[0], member_cards=members,
-        bonus_permil=0.0, overall_power=0.0, k_constant=K,
-        skilltree={"nodes": skilltree_nodes}, own_chr="chr-m0",
+        is_leader=False,
+        own_card=members[0],
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=0.0,
+        k_constant=K,
+        skilltree={"nodes": skilltree_nodes},
+        own_chr="chr-m0",
     )
     # +225 to each of 3 stats of the 3 Myth members, dUS/dPower = K at bonus 0.
     assert v["G-011"] == pytest.approx(225 * 3 * 3 * K)
@@ -322,25 +383,31 @@ def test_grouping_node_valued_from_the_chr_override():
 
 def test_connect_multipliers_boost_the_covered_valuable_nodes():
     from hbuilder.domain.board_plan import _connect_multipliers
+
     skilltree = {
         "models": {"m": {"S-001": [0, 0], "R-001": [1, 0], "R-002": [0, 1]}},
-        "extents": {"area-a": [[1, 0]]},          # covers the node one step to the right
+        "extents": {"area-a": [[1, 0]]},  # covers the node one step to the right
         "connect": {"eff-a": {"area": "area-a", "levels": [{"v": 1500}, {"v": 2000}]}},
         "card_connect": {"card-x": "eff-a"},
     }
     # R-001 is covered and valuable, R-002 is neither.
     mult = _connect_multipliers(skilltree, "m", {"R-001": 100.0, "R-002": 5.0})
-    assert mult["R-001"] == pytest.approx(3.0)   # 1 + 2000/1000 (bloom-5 level)
-    assert "R-002" not in mult                   # outside every socket's shape
+    assert mult["R-001"] == pytest.approx(3.0)  # 1 + 2000/1000 (bloom-5 level)
+    assert "R-002" not in mult  # outside every socket's shape
 
 
 def test_effect_string_for_uses_the_grouping_override_else_the_master_effect():
     from hbuilder.domain.board_plan import _effect_string_for
-    skilltree = {"nodes": {
-        "G-011": {"chr": {"chr-04003": {"v": 225, "tgt": "character_grouping-grp-myth-always"}}},
-        "R-001": {"chr": {}},
-    }}
-    effects = {"R-001": ["skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader"]}
+
+    skilltree = {
+        "nodes": {
+            "G-011": {"chr": {"chr-04003": {"v": 225, "tgt": "character_grouping-grp-myth-always"}}},
+            "R-001": {"chr": {}},
+        }
+    }
+    effects = {
+        "R-001": ["skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader"]
+    }
     # grouping node -> the character's exact override, rebuilt as an effect id.
     g = _effect_string_for(skilltree, "G-011", "chr-04003", effects)
     assert "grp-myth" in g and "-225-" in g
@@ -360,8 +427,7 @@ def test_effect_string_for_uses_the_grouping_override_else_the_master_effect():
 # leader-only Alpha's nodes carry value: a leader-only card's own-card (blue)
 # effects reach nobody, and these tests pin the Connect
 # MECHANICS, not the blue reach.
-_B_EFFECT = ("skill_tree_effect-sense_up-50-skill_tree_effect_target"
-             "-all-always")
+_B_EFFECT = "skill_tree_effect-sense_up-50-skill_tree_effect_target-all-always"
 
 
 def _connect_fixture():
@@ -374,29 +440,42 @@ def _connect_fixture():
     member = make_card("card-00002-5-uniq-0000-00", member="Beta", stats=_STATS)
     skilltree = {
         "nodes": {"B-001": {"chr": {}}, "B-002": {"chr": {}}},
-        "members": [{"chr": "chr-00001", "model": "mA"},
-                    {"chr": "chr-00002", "model": "mB"}],
-        "models": {"mA": {"S-001": [0, 0], "B-001": [1, 0], "B-002": [2, 0]},
-                   "mB": {"S-001": [0, 0], "B-001": [1, 0]}},
+        "members": [{"chr": "chr-00001", "model": "mA"}, {"chr": "chr-00002", "model": "mB"}],
+        "models": {
+            "mA": {"S-001": [0, 0], "B-001": [1, 0], "B-002": [2, 0]},
+            "mB": {"S-001": [0, 0], "B-001": [1, 0]},
+        },
         # idealised path needs these; the real path reads `connect_cards` instead.
         "extents": {"area-2": [[1, 0], [2, 0]]},
         "connect": {"eff-2": {"area": "area-2", "levels": [{"v": 1000}]}},
         "card_connect": {"card-shape": "eff-2"},
     }
     effects = {"B-001": [_B_EFFECT], "B-002": [_B_EFFECT]}
-    plan = TeamBoardPlan(total_gain=0.0, per_character={
-        leader.id: BoardPlan(selected=frozenset({"B-001", "B-002"}), spent=0, value=0.0),
-        member.id: BoardPlan(selected=frozenset({"B-001"}), spent=0, value=0.0),
-    })
+    plan = TeamBoardPlan(
+        total_gain=0.0,
+        per_character={
+            leader.id: BoardPlan(selected=frozenset({"B-001", "B-002"}), spent=0, value=0.0),
+            member.id: BoardPlan(selected=frozenset({"B-001"}), spent=0, value=0.0),
+        },
+    )
     return leader, member, skilltree, effects, plan
 
 
 def _model_from_plan(leader, member, skilltree, effects, plan, **kw):
     from hbuilder.domain.board_plan import board_model_from_plan
+
     return board_model_from_plan(
-        plan, leader, (member,), skilltree, effects,
-        overall_power=0.0, bonus_permil=0.0, k_constant=K, active_pool_rate=0.0,
-        **kw)
+        plan,
+        leader,
+        (member,),
+        skilltree,
+        effects,
+        overall_power=0.0,
+        bonus_permil=0.0,
+        k_constant=K,
+        active_pool_rate=0.0,
+        **kw,
+    )
 
 
 def _mult(board, member_name, node_id):
@@ -408,9 +487,12 @@ def test_real_connect_assigns_each_card_once_best_socket_first():
     leader, member, skilltree, effects, plan = _connect_fixture()
     placements: list = []
     board = _model_from_plan(
-        leader, member, skilltree, effects, plan,
-        connect_cards={"card-big": (((1, 0), (2, 0)), 1000),
-                       "card-small": (((1, 0), (2, 0)), 400)},
+        leader,
+        member,
+        skilltree,
+        effects,
+        plan,
+        connect_cards={"card-big": (((1, 0), (2, 0)), 1000), "card-small": (((1, 0), (2, 0)), 400)},
         placements_out=placements,
     )
     # the x2.0 card takes the double-value board (Alpha), the x1.4 the other.
@@ -428,7 +510,11 @@ def test_real_connect_never_reuses_a_card_across_the_team():
     leader, member, skilltree, effects, plan = _connect_fixture()
     placements: list = []
     board = _model_from_plan(
-        leader, member, skilltree, effects, plan,
+        leader,
+        member,
+        skilltree,
+        effects,
+        plan,
         connect_cards={"card-only": (((1, 0), (2, 0)), 1000)},
         placements_out=placements,
     )
@@ -447,13 +533,20 @@ def test_real_connect_needs_the_socket_bought_except_the_free_root():
     skilltree["models"]["mA"]["B-003"] = [1, 1]
     skilltree["nodes"]["B-003"] = {"chr": {}}
     effects["B-003"] = [_B_EFFECT]
-    plan = TeamBoardPlan(total_gain=0.0, per_character={
-        leader.id: BoardPlan(selected=frozenset({"B-001", "B-002"}), spent=0, value=0.0),
-        member.id: BoardPlan(selected=frozenset({"B-001"}), spent=0, value=0.0),
-    })
+    plan = TeamBoardPlan(
+        total_gain=0.0,
+        per_character={
+            leader.id: BoardPlan(selected=frozenset({"B-001", "B-002"}), spent=0, value=0.0),
+            member.id: BoardPlan(selected=frozenset({"B-001"}), spent=0, value=0.0),
+        },
+    )
     placements: list = []
     _model_from_plan(
-        leader, member, skilltree, effects, plan,
+        leader,
+        member,
+        skilltree,
+        effects,
+        plan,
         connect_cards={"card-a": (((1, 0),), 1000), "card-b": (((1, 0),), 1000)},
         placements_out=placements,
     )
@@ -464,8 +557,7 @@ def test_real_connect_needs_the_socket_bought_except_the_free_root():
 def test_connect_cards_none_keeps_the_idealised_multipliers():
     leader, member, skilltree, effects, plan = _connect_fixture()
     placements: list = []
-    board = _model_from_plan(leader, member, skilltree, effects, plan,
-                             placements_out=placements)
+    board = _model_from_plan(leader, member, skilltree, effects, plan, placements_out=placements)
     # idealised: best shape at max bloom on EVERY board, no placements reported.
     assert placements == []
     assert _mult(board, "Alpha", "B-001") == pytest.approx(2.0)
@@ -479,22 +571,27 @@ def test_bench_characters_ride_along_and_the_team_overrides_its_own():
     leader, member, skilltree, effects, plan = _connect_fixture()
     bench = {
         # a pure bench holomem: rides along untouched.
-        "Gamma": [{"node": "G-001",
-                   "effects": ["skill_tree_effect-all_parameter_up-5-"
-                               "skill_tree_effect_target-all-always"],
-                   "connect_multiplier": 1.5}],
+        "Gamma": [
+            {
+                "node": "G-001",
+                "effects": ["skill_tree_effect-all_parameter_up-5-skill_tree_effect_target-all-always"],
+                "connect_multiplier": 1.5,
+            }
+        ],
         # the team's own Alpha: must be REPLACED by the developed plan.
-        "Alpha": [{"node": "G-099",
-                   "effects": ["skill_tree_effect-all_parameter_up-5-"
-                               "skill_tree_effect_target-all-always"],
-                   "connect_multiplier": 1.0}],
+        "Alpha": [
+            {
+                "node": "G-099",
+                "effects": ["skill_tree_effect-all_parameter_up-5-skill_tree_effect_target-all-always"],
+                "connect_multiplier": 1.0,
+            }
+        ],
     }
-    board = _model_from_plan(leader, member, skilltree, effects, plan,
-                             bench_characters=bench)
+    board = _model_from_plan(leader, member, skilltree, effects, plan, bench_characters=bench)
     assert "Gamma" in board.characters
     assert board.characters["Gamma"].nodes[0].connect_multiplier == 1.5
     alpha_nodes = {n.node_id for n in board.characters["Alpha"].nodes}
-    assert alpha_nodes == {"B-001", "B-002"}   # the plan's, not the bench G-099
+    assert alpha_nodes == {"B-001", "B-002"}  # the plan's, not the bench G-099
     assert "Beta" in board.characters
 
 
@@ -507,8 +604,10 @@ def test_bench_characters_ride_along_and_the_team_overrides_its_own():
 # own song than on a stranger's.
 # ---------------------------------------------------------------------------
 
-_R044 = ("skill_tree_effect-technique_up_permil_up-100-skill_tree_effect_target-all"
-         "-skill_tree_effect_passive_trigger-music_skill_tree_character-set_live_leader")
+_R044 = (
+    "skill_tree_effect-technique_up_permil_up-100-skill_tree_effect_target-all"
+    "-skill_tree_effect_passive_trigger-music_skill_tree_character-set_live_leader"
+)
 
 
 def _singer_fixture():
@@ -519,9 +618,12 @@ def _singer_fixture():
     member = make_card("card-00002-5-uniq-0000-00", member="Beta", stats=_STATS)
     skilltree = {"nodes": {"R-044": {"chr": {}}}, "members": [], "models": {}}
     effects = {"R-044": [_R044]}
-    plan = TeamBoardPlan(total_gain=0.0, per_character={
-        leader.id: BoardPlan(selected=frozenset({"R-044"}), spent=0, value=0.0),
-    })
+    plan = TeamBoardPlan(
+        total_gain=0.0,
+        per_character={
+            leader.id: BoardPlan(selected=frozenset({"R-044"}), spent=0, value=0.0),
+        },
+    )
     return leader, member, skilltree, effects, plan
 
 
@@ -532,14 +634,14 @@ def test_developed_board_fires_singer_conditionals_for_the_teams_own_chr_ids():
     power = board.conditional_stat_power_for((member,), leader.member, ("chr-00018",))
     assert power > 0
     # ...and matches the same call by name (what fixtures always did)
-    assert power == board.conditional_stat_power_for((member,), leader.member,
-                                                     ("Hoshimachi Suisei",))
+    assert power == board.conditional_stat_power_for((member,), leader.member, ("Hoshimachi Suisei",))
 
 
 def test_developed_board_accepts_a_wider_name_by_chr_for_bench_singers():
     leader, member, skilltree, effects, plan = _singer_fixture()
-    board = _model_from_plan(leader, member, skilltree, effects, plan,
-                             name_by_chr={"chr-99999": "Somebody Else"})
+    board = _model_from_plan(
+        leader, member, skilltree, effects, plan, name_by_chr={"chr-99999": "Somebody Else"}
+    )
     assert board.name_by_chr["chr-99999"] == "Somebody Else"
     # the team's own mapping is not lost under a caller-supplied one
     assert board.name_by_chr["chr-00018"] == "Hoshimachi Suisei"
@@ -552,31 +654,44 @@ def test_developed_board_accepts_a_wider_name_by_chr_for_bench_singers():
 # card's blues reach nobody; a bench character values only its greens.
 # ---------------------------------------------------------------------------
 
-_R002 = ("skill_tree_effect-live_active_skill_effect_up_permil_up-100"
-         "-skill_tree_effect_target-all-skill_tree_effect_passive_trigger"
-         "-music_skill_tree_character-set_live_leader")
-_Y_SOLO = ("skill_tree_effect-live_score_bonus_add_permil_up_by_music_skill_tree_character"
-           "_and_music_singer_type-5-skill_tree_effect_passive_trigger-music_skill_tree"
-           "_character_and_music_singer_type-solo-always-solo")
-_Y_GROUP = ("skill_tree_effect-live_score_bonus_add_permil_up_by_music_skill_tree_character"
-            "_and_music_singer_type-5-skill_tree_effect_passive_trigger-music_skill_tree"
-            "_character_and_music_singer_type-group-always-group")
-_Y_ALL = ("skill_tree_effect-live_score_bonus_add_permil_up_by_music_skill_tree_character"
-          "_and_music_singer_type-1-skill_tree_effect_passive_trigger-music_skill_tree"
-          "_character_and_music_singer_type-all-always-all")
+_R002 = (
+    "skill_tree_effect-live_active_skill_effect_up_permil_up-100"
+    "-skill_tree_effect_target-all-skill_tree_effect_passive_trigger"
+    "-music_skill_tree_character-set_live_leader"
+)
+_Y_SOLO = (
+    "skill_tree_effect-live_score_bonus_add_permil_up_by_music_skill_tree_character"
+    "_and_music_singer_type-5-skill_tree_effect_passive_trigger-music_skill_tree"
+    "_character_and_music_singer_type-solo-always-solo"
+)
+_Y_GROUP = (
+    "skill_tree_effect-live_score_bonus_add_permil_up_by_music_skill_tree_character"
+    "_and_music_singer_type-5-skill_tree_effect_passive_trigger-music_skill_tree"
+    "_character_and_music_singer_type-group-always-group"
+)
+_Y_ALL = (
+    "skill_tree_effect-live_score_bonus_add_permil_up_by_music_skill_tree_character"
+    "_and_music_singer_type-1-skill_tree_effect_passive_trigger-music_skill_tree"
+    "_character_and_music_singer_type-all-always-all"
+)
 
 
 def _five_members():
-    return tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS)
-                 for i in range(5))
+    return tuple(make_card(f"card-m{i}-5-uniq-0000-00", member=f"M{i}", stats=_STATS) for i in range(5))
 
 
 def test_conditional_reds_are_worth_singer_weight_of_their_value():
     members = _five_members()
     leader = make_card("card-lead-5-uniq-0000-00", member="Lead", stats=_STATS)
-    kw = dict(is_leader=True, own_card=leader, member_cards=members,
-              bonus_permil=0.0, overall_power=1_000_000.0, k_constant=K,
-              active_pool_rate=0.5)
+    kw = dict(
+        is_leader=True,
+        own_card=leader,
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=1_000_000.0,
+        k_constant=K,
+        active_pool_rate=0.5,
+    )
     off = power_node_values({"R-044": [_R044], "R-002": [_R002]}, **kw)
     on = power_node_values({"R-044": [_R044], "R-002": [_R002]}, singer_weight=1.0, **kw)
     half = power_node_values({"R-044": [_R044], "R-002": [_R002]}, singer_weight=0.5, **kw)
@@ -587,8 +702,11 @@ def test_conditional_reds_are_worth_singer_weight_of_their_value():
     assert on["R-002"] == pytest.approx(0.5 * 0.10 * 1_000_000 * K)
     assert half["R-044"] == pytest.approx(on["R-044"] / 2)
     # an UNCONDITIONAL red is untouched by the weight.
-    assert (power_node_values({"R-001": [_LEADER]}, **kw)["R-001"]
-            == power_node_values({"R-001": [_LEADER]}, singer_weight=1.0, **kw)["R-001"] > 0)
+    assert (
+        power_node_values({"R-001": [_LEADER]}, **kw)["R-001"]
+        == power_node_values({"R-001": [_LEADER]}, singer_weight=1.0, **kw)["R-001"]
+        > 0
+    )
 
 
 def test_yellow_solo_group_follow_singer_weight_and_all_stays_pooled():
@@ -603,8 +721,14 @@ def test_yellow_solo_group_follow_singer_weight_and_all_stays_pooled():
     members = _five_members()
     leader = make_card("card-lead-5-uniq-0000-00", member="Lead", stats=_STATS)
     effects = {"Y-001": [_Y_SOLO], "Y-002": [_Y_GROUP], "Y-003": [_Y_ALL]}
-    kw = dict(is_leader=True, own_card=leader, member_cards=members,
-              bonus_permil=0.0, overall_power=1_000_000.0, k_constant=K)
+    kw = dict(
+        is_leader=True,
+        own_card=leader,
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=1_000_000.0,
+        k_constant=K,
+    )
     off = power_node_values(effects, **kw)
     on = power_node_values(effects, singer_weight=1.0, **kw)
     per_unit = 1_000_000.0 * K
@@ -623,8 +747,15 @@ def test_a_song_pays_only_its_own_scope_of_yellows():
     members = _five_members()
     leader = make_card("card-lead-5-uniq-0000-00", member="Lead", stats=_STATS)
     effects = {"Y-001": [_Y_SOLO], "Y-002": [_Y_GROUP], "Y-003": [_Y_ALL]}
-    kw = dict(is_leader=True, own_card=leader, member_cards=members, bonus_permil=0.0,
-              overall_power=1_000_000.0, k_constant=K, singer_weight=1.0)
+    kw = dict(
+        is_leader=True,
+        own_card=leader,
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=1_000_000.0,
+        k_constant=K,
+        singer_weight=1.0,
+    )
     legacy = power_node_values(effects, **kw)
     group = power_node_values(effects, song_scope="group", **kw)
     solo = power_node_values(effects, song_scope="solo", **kw)
@@ -635,15 +766,17 @@ def test_a_song_pays_only_its_own_scope_of_yellows():
 
 def test_a_song_cast_carries_its_scope_to_the_bench_yellows():
     from hbuilder.domain.board_plan import SongCast, bench_yellow_pays
+
     group = SongCast({"chr-00003"}, "group")
-    assert group == frozenset({"chr-00003"})          # read as the cast everywhere
+    assert group == frozenset({"chr-00003"})  # read as the cast everywhere
     assert bench_yellow_pays("group", "chr-00003", group)
     assert not bench_yellow_pays("solo", "chr-00003", group)
     assert not bench_yellow_pays("group", "chr-00009", group)
     assert bench_yellow_pays("solo", "chr-00003", frozenset({"chr-00003"}))  # scope unknown
     assert bench_yellow_pays("all", "chr-00003", SongCast({"chr-00003"}, "all"))
     import pickle
-    back = pickle.loads(pickle.dumps(group))          # worker processes get it whole
+
+    back = pickle.loads(pickle.dumps(group))  # worker processes get it whole
     assert back == group and back.scope == "group"
 
 
@@ -658,20 +791,23 @@ def test_blue_of_a_leader_only_card_reaches_nobody_but_a_member_card_reaches_its
 
 def test_bench_node_values_keep_only_the_greens():
     from hbuilder.domain.board_plan import bench_node_values
+
     members = _five_members()
-    _G_ALL = ("skill_tree_effect-sense_up-10-skill_tree_effect_target-all-always")
+    _G_ALL = "skill_tree_effect-sense_up-10-skill_tree_effect_target-all-always"
     v = bench_node_values(
-        {"G-001": [_G_ALL], "R-001": [_LEADER], "B-001": [_MEMBER],
-         "R-044": [_R044], "Y-003": [_Y_ALL]},
-        member_cards=members, bonus_permil=0.0, overall_power=1_000_000.0, k_constant=K,
+        {"G-001": [_G_ALL], "R-001": [_LEADER], "B-001": [_MEMBER], "R-044": [_R044], "Y-003": [_Y_ALL]},
+        member_cards=members,
+        bonus_permil=0.0,
+        overall_power=1_000_000.0,
+        k_constant=K,
     )
     assert v["G-001"] == pytest.approx(5 * 10 * K)
     assert v["R-001"] == v["B-001"] == v["R-044"] == v["Y-003"] == 0.0
 
 
 def test_optimize_team_boards_singer_weight_reaches_only_the_leader_plan():
-    from hbuilder.domain.skilltree import SkillTree, TreeNode, ROOT_NODE
     from hbuilder.domain.board_plan import optimize_team_boards
+    from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, TreeNode
 
     nodes = {
         ROOT_NODE: TreeNode(node_id=ROOT_NODE, branch="S", cost=0, player_level=None),
@@ -681,9 +817,14 @@ def test_optimize_team_boards_singer_weight_reaches_only_the_leader_plan():
     tree = SkillTree(nodes=nodes, positions={}, adjacency=adjacency)
     leader = make_card("card-lead-5-uniq-0000-00", member="Lead", stats=_STATS)
     members = _five_members()
-    common = dict(tree_for=lambda c: tree, budget_for=lambda c: 10,
-                  node_effect_ids={"R-044": [_R044]}, overall_power=0.0,
-                  bonus_permil=0.0, k_constant=K)
+    common = dict(
+        tree_for=lambda c: tree,
+        budget_for=lambda c: 10,
+        node_effect_ids={"R-044": [_R044]},
+        overall_power=0.0,
+        bonus_permil=0.0,
+        k_constant=K,
+    )
     agnostic = optimize_team_boards(leader, members, **common)
     sung = optimize_team_boards(leader, members, singer_weight=1.0, **common)
     assert "R-044" not in agnostic.per_character[leader.id].selected
@@ -699,26 +840,51 @@ def test_socket_bench_puts_the_bench_root_socket_in_the_same_matching():
     counting on the nodes an S-001 shape reaches; nodes outside that reach keep theirs."""
     leader, member, skilltree, effects, plan = _connect_fixture()
     green = "skill_tree_effect-all_parameter_up-5-skill_tree_effect_target-all-always"
-    skilltree = {**skilltree,
-                 "nodes": {**skilltree["nodes"], "G-001": {"chr": {}}, "G-002": {"chr": {}}},
-                 "members": [*skilltree["members"], {"chr": "chr-00003", "model": "mG"}],
-                 "models": {**skilltree["models"],
-                            "mG": {"S-001": [0, 0], "G-001": [1, 0], "G-002": [6, 6]}}}
-    bench = {"Gamma": [{"node": "G-001", "effects": [green], "connect_multiplier": 1.5},
-                       {"node": "G-002", "effects": [green], "connect_multiplier": 1.5}]}
-    cards = {"card-a": (((1, 0), (2, 0)), 1000), "card-b": (((1, 0), (2, 0)), 1000),
-             "card-c": (((1, 0), (2, 0)), 1000)}
+    skilltree = {
+        **skilltree,
+        "nodes": {**skilltree["nodes"], "G-001": {"chr": {}}, "G-002": {"chr": {}}},
+        "members": [*skilltree["members"], {"chr": "chr-00003", "model": "mG"}],
+        "models": {**skilltree["models"], "mG": {"S-001": [0, 0], "G-001": [1, 0], "G-002": [6, 6]}},
+    }
+    bench = {
+        "Gamma": [
+            {"node": "G-001", "effects": [green], "connect_multiplier": 1.5},
+            {"node": "G-002", "effects": [green], "connect_multiplier": 1.5},
+        ]
+    }
+    cards = {
+        "card-a": (((1, 0), (2, 0)), 1000),
+        "card-b": (((1, 0), (2, 0)), 1000),
+        "card-c": (((1, 0), (2, 0)), 1000),
+    }
     placements: list = []
-    board = _model_from_plan(leader, member, skilltree, effects, plan, connect_cards=cards,
-                             bench_characters=bench, name_by_chr={"chr-00003": "Gamma"},
-                             placements_out=placements, socket_bench=True)
-    assert len({p.card for p in placements}) == len(placements)          # once account-wide
+    board = _model_from_plan(
+        leader,
+        member,
+        skilltree,
+        effects,
+        plan,
+        connect_cards=cards,
+        bench_characters=bench,
+        name_by_chr={"chr-00003": "Gamma"},
+        placements_out=placements,
+        socket_bench=True,
+    )
+    assert len({p.card for p in placements}) == len(placements)  # once account-wide
     assert {p.chr for p in placements} <= {"chr-00001", "chr-00002", "chr-00003"}
     assert _mult(board, "Gamma", "G-001") in (pytest.approx(1.0), pytest.approx(2.0))
-    assert _mult(board, "Gamma", "G-002") == pytest.approx(1.5)        # beyond the root's reach
+    assert _mult(board, "Gamma", "G-002") == pytest.approx(1.5)  # beyond the root's reach
     # off by default: the bench rides along as it is
-    board = _model_from_plan(leader, member, skilltree, effects, plan, connect_cards=cards,
-                             bench_characters=bench, name_by_chr={"chr-00003": "Gamma"})
+    board = _model_from_plan(
+        leader,
+        member,
+        skilltree,
+        effects,
+        plan,
+        connect_cards=cards,
+        bench_characters=bench,
+        name_by_chr={"chr-00003": "Gamma"},
+    )
     assert _mult(board, "Gamma", "G-001") == pytest.approx(1.5)
 
 
@@ -728,11 +894,15 @@ def _bench_fixture():
     as on the real layout, where no bench S-002..S-004 reaches a green."""
     leader, member, skilltree, effects, plan = _connect_fixture()
     green = "skill_tree_effect-all_parameter_up-5-skill_tree_effect_target-all-always"
-    skilltree = {**skilltree,
-                 "nodes": {**skilltree["nodes"], "G-001": {"chr": {}}, "B-009": {"chr": {}}},
-                 "members": [*skilltree["members"], {"chr": "chr-00003", "model": "mG"}],
-                 "models": {**skilltree["models"],
-                            "mG": {"S-001": [0, 0], "G-001": [1, 0], "S-002": [9, 9], "B-009": [10, 9]}}}
+    skilltree = {
+        **skilltree,
+        "nodes": {**skilltree["nodes"], "G-001": {"chr": {}}, "B-009": {"chr": {}}},
+        "members": [*skilltree["members"], {"chr": "chr-00003", "model": "mG"}],
+        "models": {
+            **skilltree["models"],
+            "mG": {"S-001": [0, 0], "G-001": [1, 0], "S-002": [9, 9], "B-009": [10, 9]},
+        },
+    }
     bench = {"Gamma": [{"node": "G-001", "effects": [green], "connect_multiplier": 2.0}]}
     cards = {"card-a": (((1, 0), (2, 0)), 1000), "card-b": (((1, 0), (2, 0)), 1000)}
     return leader, member, skilltree, effects, plan, bench, cards
@@ -744,6 +914,7 @@ def test_held_bench_cards_are_the_ones_lifting_a_bench_green():
     reaches no green lifts nothing a team sees and stays free; the team's own boards are
     re-assigned, so their cards are free too."""
     from hbuilder.domain.board_plan import held_bench_cards
+
     _l, _m, skilltree, _e, _p, _b, cards = _bench_fixture()
     sockets = {"chr-00003": {"S-001": "card-a", "S-002": "card-b"}}
     assert held_bench_cards(sockets, {"chr-00001", "chr-00002"}, skilltree, cards) == {"card-a"}
@@ -758,15 +929,32 @@ def test_team_matching_never_reuses_a_card_held_on_a_bench_green():
     leader, member, skilltree, effects, plan, bench, cards = _bench_fixture()
     sockets = {"chr-00003": {"S-001": "card-a", "S-002": "card-b"}}
     placements: list = []
-    board = _model_from_plan(leader, member, skilltree, effects, plan, connect_cards=cards,
-                             bench_characters=bench, name_by_chr={"chr-00003": "Gamma"},
-                             placements_out=placements, bench_sockets=sockets)
+    board = _model_from_plan(
+        leader,
+        member,
+        skilltree,
+        effects,
+        plan,
+        connect_cards=cards,
+        bench_characters=bench,
+        name_by_chr={"chr-00003": "Gamma"},
+        placements_out=placements,
+        bench_sockets=sockets,
+    )
     assert {p.card for p in placements} == {"card-b"}
-    assert _mult(board, "Gamma", "G-001") == pytest.approx(2.0)        # the bench as it is
+    assert _mult(board, "Gamma", "G-001") == pytest.approx(2.0)  # the bench as it is
     placements = []
-    _model_from_plan(leader, member, skilltree, effects, plan, connect_cards=cards,
-                     bench_characters=bench, name_by_chr={"chr-00003": "Gamma"},
-                     placements_out=placements)                          # no bench info: as before
+    _model_from_plan(
+        leader,
+        member,
+        skilltree,
+        effects,
+        plan,
+        connect_cards=cards,
+        bench_characters=bench,
+        name_by_chr={"chr-00003": "Gamma"},
+        placements_out=placements,
+    )  # no bench info: as before
     assert "card-a" in {p.card for p in placements}
 
 
@@ -777,18 +965,30 @@ def test_socket_bench_with_bench_sockets_reassigns_every_unlocked_bench_socket()
     leader, member, skilltree, effects, plan, bench, cards = _bench_fixture()
     sockets = {"chr-00003": {"S-001": "card-a", "S-002": None}}
     placements: list = []
-    board = _model_from_plan(leader, member, skilltree, effects, plan, connect_cards=cards,
-                             bench_characters=bench, name_by_chr={"chr-00003": "Gamma"},
-                             placements_out=placements, socket_bench=True, bench_sockets=sockets)
+    board = _model_from_plan(
+        leader,
+        member,
+        skilltree,
+        effects,
+        plan,
+        connect_cards=cards,
+        bench_characters=bench,
+        name_by_chr={"chr-00003": "Gamma"},
+        placements_out=placements,
+        socket_bench=True,
+        bench_sockets=sockets,
+    )
     assert len({p.card for p in placements}) == len(placements) == 2
     on_gamma = {p.socket: p.card for p in placements if p.chr == "chr-00003"}
     assert set(on_gamma) <= {"S-001", "S-002"}
     assert _mult(board, "Gamma", "G-001") == pytest.approx(2.0 if "S-001" in on_gamma else 1.0)
 
 
-_SOLO_YELLOW = ("skill_tree_effect-live_score_bonus_add_permil_up_by_music_skill_tree_character"
-                "_and_music_singer_type-5-skill_tree_effect_passive_trigger-music_skill_tree"
-                "_character_and_music_singer_type-solo-always-solo")
+_SOLO_YELLOW = (
+    "skill_tree_effect-live_score_bonus_add_permil_up_by_music_skill_tree_character"
+    "_and_music_singer_type-5-skill_tree_effect_passive_trigger-music_skill_tree"
+    "_character_and_music_singer_type-solo-always-solo"
+)
 
 
 def _yellow_bench_fixture():
@@ -796,9 +996,11 @@ def _yellow_bench_fixture():
     lifts nothing green, but Gamma's own song pays her yellows whoever is on the team."""
     leader, member, skilltree, effects, plan, bench, cards = _bench_fixture()
     yellow = {"chr": {"chr-00003": {"t": _SOLO_YELLOW, "tr": "solo"}}}
-    skilltree = {**skilltree, "nodes": {**skilltree["nodes"], "Y-007": yellow},
-                 "models": {**skilltree["models"],
-                            "mG": {**skilltree["models"]["mG"], "Y-007": [11, 9]}}}
+    skilltree = {
+        **skilltree,
+        "nodes": {**skilltree["nodes"], "Y-007": yellow},
+        "models": {**skilltree["models"], "mG": {**skilltree["models"]["mG"], "Y-007": [11, 9]}},
+    }
     return leader, member, skilltree, {**effects, "Y-007": [_SOLO_YELLOW]}, plan, bench, cards
 
 
@@ -808,16 +1010,24 @@ def test_a_card_on_a_bench_singers_yellow_is_held_on_her_song():
     (that would count it twice, about +2 % on such a solo). Held on a song Gamma sings,
     free on any other, and free when the yellow is not bought."""
     from hbuilder.domain.board_plan import held_bench_cards
+
     _l, _m, skilltree, _e, _p, _b, cards = _yellow_bench_fixture()
     sockets = {"chr-00003": {"S-001": "card-a", "S-002": "card-b"}}
     team = {"chr-00001", "chr-00002"}
-    assert held_bench_cards(sockets, team, skilltree, cards,
-                            cast=frozenset({"chr-00003"})) == {"card-a", "card-b"}
-    assert held_bench_cards(sockets, team, skilltree, cards,
-                            cast=frozenset({"chr-00009"})) == {"card-a"}
-    assert held_bench_cards(sockets, team, skilltree, cards) == {"card-a"}    # cast unknown
-    assert held_bench_cards(sockets, team, skilltree, cards, cast=frozenset({"chr-00003"}),
-                            bought={"chr-00003": frozenset({"G-001"})}) == {"card-a"}
+    assert held_bench_cards(sockets, team, skilltree, cards, cast=frozenset({"chr-00003"})) == {
+        "card-a",
+        "card-b",
+    }
+    assert held_bench_cards(sockets, team, skilltree, cards, cast=frozenset({"chr-00009"})) == {"card-a"}
+    assert held_bench_cards(sockets, team, skilltree, cards) == {"card-a"}  # cast unknown
+    assert held_bench_cards(
+        sockets,
+        team,
+        skilltree,
+        cards,
+        cast=frozenset({"chr-00003"}),
+        bought={"chr-00003": frozenset({"G-001"})},
+    ) == {"card-a"}
 
 
 def test_bench_node_values_keep_the_yellows_the_song_pays():
@@ -825,12 +1035,21 @@ def test_bench_node_values_keep_the_yellows_the_song_pays():
     value (at 0, `socket_bench` would take the card off her yellow socket, a loss of a few
     percent); a non-singer's stays 0, and without a cast only greens count."""
     from hbuilder.domain.board_plan import bench_node_values
+
     _l, member, skilltree, effects, _p, _b, _c = _yellow_bench_fixture()
+
     def value(cast):
-        return bench_node_values(effects, member_cards=(member,), bonus_permil=0.0,
-                                 overall_power=100_000.0, k_constant=K,
-                                 skilltree={"nodes": skilltree["nodes"]}, own_chr="chr-00003",
-                                 cast=cast).get("Y-007", 0.0)
+        return bench_node_values(
+            effects,
+            member_cards=(member,),
+            bonus_permil=0.0,
+            overall_power=100_000.0,
+            k_constant=K,
+            skilltree={"nodes": skilltree["nodes"]},
+            own_chr="chr-00003",
+            cast=cast,
+        ).get("Y-007", 0.0)
+
     assert value(frozenset({"chr-00003"})) > 0
     assert value(frozenset({"chr-00009"})) == 0.0
     assert value(None) == 0.0
@@ -841,15 +1060,26 @@ def test_a_yellow_lift_partly_over_the_cap_still_wins_when_its_capped_part_is_wo
     its capped part and leave room unused. Here one card lifts either the green (4)
     or a 5-permil yellow (10) with 2.5 permil of room: capped, the yellow is worth 5."""
     from hbuilder.domain.board_plan import _yellow_capped_assignment
+
     _l, _m, skilltree, effects, _p, _b, _c = _yellow_bench_fixture()
     positions = skilltree["models"]["mG"]
-    per_char = {"chr-00003": (positions, frozenset({"G-001", "S-002", "B-009", "Y-007"}),
-                              {"G-001": 4.0, "B-009": 0.0, "Y-007": 10.0})}
+    per_char = {
+        "chr-00003": (
+            positions,
+            frozenset({"G-001", "S-002", "B-009", "Y-007"}),
+            {"G-001": 4.0, "B-009": 0.0, "Y-007": 10.0},
+        )
+    }
     cards = {"card-a": (((1, 0), (2, 0)), 1000)}
     room_left = [("chr-00003", {"node": "Y-007", "connect_multiplier": 18.5})]  # 100-92.5-5
-    _m1, placed = _yellow_capped_assignment(per_char, cards, cast=frozenset({"chr-00003"}),
-                                            skilltree=skilltree, node_effect_ids=effects,
-                                            fixed_rows=room_left)
+    _m1, placed = _yellow_capped_assignment(
+        per_char,
+        cards,
+        cast=frozenset({"chr-00003"}),
+        skilltree=skilltree,
+        node_effect_ids=effects,
+        fixed_rows=room_left,
+    )
     assert [(p.socket, p.card) for p in placed] == [("S-002", "card-a")]
 
 
@@ -859,18 +1089,33 @@ def test_a_holomem_who_leads_and_plays_a_member_card_is_one_board_in_the_matchin
     valued as the leader WITH her member card's blues -- so a plan listing both cards
     places sockets exactly like a plan listing the leader alone."""
     from hbuilder.domain.board_plan import TeamBoardPlan
+
     leader, member, skilltree, effects, plan = _connect_fixture()
     twin = make_card("card-00001-5-uniq-0001-00", member="Alpha", stats=_STATS)
-    both = TeamBoardPlan(total_gain=0.0, per_character={
-        **plan.per_character, twin.id: plan.per_character[leader.id]})
+    both = TeamBoardPlan(
+        total_gain=0.0, per_character={**plan.per_character, twin.id: plan.per_character[leader.id]}
+    )
     from hbuilder.domain.board_plan import board_model_from_plan
+
     cards = {"card-a": (((1, 0), (2, 0)), 1000)}
+
     def placements(p):
         out: list = []
-        board_model_from_plan(p, leader, (member, twin), skilltree, effects,
-                              overall_power=100_000.0, bonus_permil=0.0, k_constant=K,
-                              active_pool_rate=0.0, connect_cards=cards, placements_out=out)
+        board_model_from_plan(
+            p,
+            leader,
+            (member, twin),
+            skilltree,
+            effects,
+            overall_power=100_000.0,
+            bonus_permil=0.0,
+            k_constant=K,
+            active_pool_rate=0.0,
+            connect_cards=cards,
+            placements_out=out,
+        )
         return sorted((x.chr, x.socket, x.card) for x in out)
+
     assert placements(both) == placements(plan)
     assert ("chr-00001", "S-001", "card-a") in placements(both)
 
@@ -880,17 +1125,20 @@ def test_the_socket_matching_stops_paying_for_yellows_past_the_song_cap():
     every permil would send cards to bench singers already at the cap. With room under
     the cap the yellow socket is filled; with none it is not."""
     from hbuilder.domain.board_plan import _yellow_capped_assignment
+
     _l, _m, skilltree, effects, _p, _b, _c = _yellow_bench_fixture()
     positions = skilltree["models"]["mG"]
     per_char = {"chr-00003": (positions, frozenset({"S-002", "Y-007"}), {"Y-007": 10.0})}
     cards = {"card-a": (((2, 0),), 1000)}
     cast = frozenset({"chr-00003"})
-    _m1, placed = _yellow_capped_assignment(per_char, cards, cast=cast, skilltree=skilltree,
-                                            node_effect_ids=effects)
+    _m1, placed = _yellow_capped_assignment(
+        per_char, cards, cast=cast, skilltree=skilltree, node_effect_ids=effects
+    )
     assert [(p.socket, p.card) for p in placed] == [("S-002", "card-a")]
-    full = [("chr-00003", {"node": "Y-007", "connect_multiplier": 20.0})]   # 5 permil x 20
-    _m2, placed = _yellow_capped_assignment(per_char, cards, cast=cast, skilltree=skilltree,
-                                            node_effect_ids=effects, fixed_rows=full)
+    full = [("chr-00003", {"node": "Y-007", "connect_multiplier": 20.0})]  # 5 permil x 20
+    _m2, placed = _yellow_capped_assignment(
+        per_char, cards, cast=cast, skilltree=skilltree, node_effect_ids=effects, fixed_rows=full
+    )
     assert placed == []
 
 
@@ -903,17 +1151,26 @@ def test_a_song_yellow_is_priced_at_the_unit_score_it_multiplies():
     from hbuilder.domain.board_plan import node_values_from_recipes
 
     def yellow(scope):
-        return SimpleNamespace(kind="song_score_bonus", scope="all", song_scope=scope,
-                               value=0.005, conditional=False, stat=None)
+        return SimpleNamespace(
+            kind="song_score_bonus", scope="all", song_scope=scope, value=0.005, conditional=False, stat=None
+        )
 
     card = make_card("card-00031-5-a-0000-00", stats=Stats(1, 1, 1))
     recipes = [("Y-solo", None, (yellow("solo"),)), ("Y-all", None, (yellow("all"),))]
-    kw = dict(is_leader=True, own_card=card, member_cards=[card], bonus_permil=900.0,
-              overall_power=200_000.0, k_constant=2.0, singer_weight=1.0)
+    kw = dict(
+        is_leader=True,
+        own_card=card,
+        member_cards=[card],
+        bonus_permil=900.0,
+        overall_power=200_000.0,
+        k_constant=2.0,
+        singer_weight=1.0,
+    )
     v = node_values_from_recipes(recipes, song_scope="solo", **kw)
     assert v["Y-solo"] == pytest.approx(0.005 * 200_000.0 * (1.0 + 0.9) * 2.0)
     # the pooled `all` bucket is superseded by the song's own scope: worth nothing here
     assert v["Y-all"] == 0.0
     # ... and pays on a song whose scope is not known
     assert node_values_from_recipes(recipes, song_scope="", **kw)["Y-all"] == pytest.approx(
-        0.005 * 200_000.0 * (1.0 + 0.9) * 2.0)
+        0.005 * 200_000.0 * (1.0 + 0.9) * 2.0
+    )

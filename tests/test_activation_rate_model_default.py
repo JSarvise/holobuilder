@@ -27,11 +27,11 @@ import dataclasses
 import json
 from pathlib import Path
 
+from support.builders import make_card, make_scoring_config, make_skill, make_team
+
 from hbuilder.domain.scoring import score_fast
 from hbuilder.domain.scoring_config import DEFAULT_CONFIG, load_scoring_config
 from hbuilder.domain.scoring_models import ACTIVATION_RATE_MODELS
-
-from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -92,9 +92,7 @@ def test_a_tier_dependent_bonus_orders_two_skills_by_scaled_tier():
 
 
 def _cfg(model_key: str):
-    return dataclasses.replace(
-        make_scoring_config(), activation_rate_model=ACTIVATION_RATE_MODELS[model_key]
-    )
+    return dataclasses.replace(make_scoring_config(), activation_rate_model=ACTIVATION_RATE_MODELS[model_key])
 
 
 def _active_scorer(card_id: str, member: str, tier: str, magnitude: float):

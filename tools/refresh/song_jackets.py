@@ -28,22 +28,27 @@ interpreter (requests + UnityPy + Pillow) with no SQLCipher dependency.
   python song_jackets.py --render [--max-width 320] [--full]
       -> dumps/song_jackets/<asset name>.webp  (+ .png with --full)
 """
-import io, os, sys
+
+import io
+import os
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import run_cli  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 DUMPS = str(paths.DUMPS)
-BUNDLES = os.path.join(DUMPS, "octo_fetched")      # shared with octo_fetch.py
+BUNDLES = os.path.join(DUMPS, "octo_fetched")  # shared with octo_fetch.py
 IMAGES = os.path.join(DUMPS, "song_jackets")
-PREFIX = "img_music_jacket_"                        # not configurable, deliberately
+PREFIX = "img_music_jacket_"  # not configurable, deliberately
 
 
 def names():
     """Every jacket asset name in the production catalog, sorted."""
     import octo_fetch
+
     _tmpl, index, src = octo_fetch.catalog()
     out = sorted(n for n in index if n.startswith(PREFIX))
     if not out:
@@ -71,6 +76,7 @@ def status():
 
 def fetch(limit=None):
     import octo_fetch
+
     have, _src = names()
     todo = [n for n in have if not on_disk(n)]
     if limit:
@@ -78,8 +84,7 @@ def fetch(limit=None):
     if not todo:
         print("nothing to fetch; all jackets are already on disk")
         return 0
-    print(f"fetching {len(todo)} of {len(have)} jackets at 1 req/s "
-          f"(~{len(todo) // 60}m{len(todo) % 60}s)")
+    print(f"fetching {len(todo)} of {len(have)} jackets at 1 req/s (~{len(todo) // 60}m{len(todo) % 60}s)")
     return octo_fetch.fetch(todo)
 
 
@@ -92,8 +97,10 @@ def render(max_width=320, keep_full=False, only_missing=False):
     can never be mistaken for a fresh one.
     """
     import warnings
+
     warnings.filterwarnings("ignore")
     import UnityPy
+
     UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
     import octo_crypto
 
@@ -126,7 +133,7 @@ def render(max_width=320, keep_full=False, only_missing=False):
             if keep_full:
                 best.save(os.path.join(IMAGES, name + ".png"))
             thumb = best.copy()
-            thumb.thumbnail((max_width, max_width), 1)       # 1 = LANCZOS; jackets are square-ish
+            thumb.thumbnail((max_width, max_width), 1)  # 1 = LANCZOS; jackets are square-ish
             thumb.convert("RGBA").save(os.path.join(IMAGES, name + ".webp"), quality=82)
             done += 1
         except Exception as exc:

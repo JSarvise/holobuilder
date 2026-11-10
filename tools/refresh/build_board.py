@@ -149,13 +149,11 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-
 # Import the domain module so the converter validates its own output with the
 # very parser the solver will use. A converter that emits a file `load_board`
 # rejects is worse than no converter: it fails at solve time, not build time.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
-from hbuilder.errors import MissingInput  # noqa: E402
 from hbuilder.domain.board import BoardError, board_from_mapping  # noqa: E402
 from hbuilder.domain.collection import (  # noqa: E402
     MAX,
@@ -163,6 +161,7 @@ from hbuilder.domain.collection import (  # noqa: E402
     connect_bonus_level,
     resolve_card_state,
 )
+from hbuilder.errors import MissingInput  # noqa: E402
 
 # How a resolved Connect level was arrived at, worst (least trustworthy) last.
 # The document records this per socket because the difference between them is
@@ -263,9 +262,7 @@ class ConnectLevels:
 
         rarity = _rarity_of(card_id)
         caps = self.caps_by_rarity.get(rarity) if rarity else None
-        state = resolve_card_state(
-            card_id, self.entries.get(card_id), self.default, caps
-        )
+        state = resolve_card_state(card_id, self.entries.get(card_id), self.default, caps)
         derived = connect_bonus_level(state.bloom, rarity)
 
         if derived is None:
@@ -404,8 +401,15 @@ def build(
         holomem = member["name"]
 
         multipliers, connect_notes, sockets_ok = _connect_multipliers(
-            chr_id, state, members, models, extents, connect, card_connect,
-            levels, problems,
+            chr_id,
+            state,
+            members,
+            models,
+            extents,
+            connect,
+            card_connect,
+            levels,
+            problems,
         )
 
         node_ids = list(state.get("nodes") or [])
@@ -424,9 +428,7 @@ def build(
                 continue
             row, why = _select_row(group_rows, chr_id)
             if row is None:
-                problems.append(
-                    f"{chr_id}/{holomem}: node {node_id} ({len(group_rows)} rows): {why}"
-                )
+                problems.append(f"{chr_id}/{holomem}: node {node_id} ({len(group_rows)} rows): {why}")
                 continue
             effect_ids = row[ROW_DATA_KEY].get("6") or []
             if not effect_ids:
@@ -530,17 +532,14 @@ def main(argv: list[str] | None = None) -> int:
         collection_path = Path(args.collection)
         if not collection_path.exists():
             print(
-                f"--connect-level auto needs a collection; {collection_path} "
-                f"does not exist",
+                f"--connect-level auto needs a collection; {collection_path} does not exist",
                 file=sys.stderr,
             )
             return 2
         collection = json.loads(collection_path.read_text(encoding="utf-8"))
         caps_path = Path(args.card_caps)
         if caps_path.exists():
-            caps_by_rarity = caps_by_rarity_from_mapping(
-                json.loads(caps_path.read_text(encoding="utf-8"))
-            )
+            caps_by_rarity = caps_by_rarity_from_mapping(json.loads(caps_path.read_text(encoding="utf-8")))
 
     document, report, problems = build(
         board_state,
@@ -566,20 +565,14 @@ def main(argv: list[str] | None = None) -> int:
                 "correctly, but check the name join): " + ", ".join(orphans)
             )
 
-    Path(args.out).write_text(
-        json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    Path(args.out).write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     print("PER CHARACTER")
     for line in report:
         print("  " + line)
     total_nodes = sum(len(v) for v in document["characters"].values())
-    total_effects = sum(
-        len(r["effects"]) for v in document["characters"].values() for r in v
-    )
-    boosted = sum(
-        1 for v in document["characters"].values() for r in v if r["connect_multiplier"] > 1.0
-    )
+    total_effects = sum(len(r["effects"]) for v in document["characters"].values() for r in v)
+    boosted = sum(1 for v in document["characters"].values() for r in v if r["connect_multiplier"] > 1.0)
     basis = " ".join(f"{k}={v}" for k, v in document["connect_basis"].items())
     print(
         f"TOTAL characters={len(document['characters'])} nodes={total_nodes} "

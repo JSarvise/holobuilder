@@ -40,6 +40,7 @@ puller asks only for what it has not seen). `tracker_pull.py` is the local side.
     HB_API_PROXY=<proxy-host>:<port> HOLODREAMS_APP_VERSION=1.2.101 \
         python event_tracker.py --serve-port 8790
 """
+
 from __future__ import annotations
 
 import argparse
@@ -76,7 +77,7 @@ RPC_EVENTS = "/rpc.api.Event/ListEventInfo"
 # viewer's lease, every 5 min. About 0.1 GB/month of proxy traffic while a chapter is open
 # (an estimate: 3 x 6 KB / 5 min + a login a day), plus ~0.5 MB per watched hour of a top 100.
 DEFAULT_PLAN = {r: {"borders": 300, "top": 0, "top_watch": 300} for r in ("us", "as", "jp")}
-WATCH_MAX_S = 1800           # one lease lasts at most this long; the page renews it
+WATCH_MAX_S = 1800  # one lease lasts at most this long; the page renews it
 # re-read the event list (chapters, tiers) this often, and at the next start / reveal it already
 # lists. The list is ~27 KB a read (3.9 MB a day through the paid proxy at 30 min, a fifth of
 # the tracker's traffic) while what it says changes only at its own dates.
@@ -85,13 +86,13 @@ EVENTS_EVERY = 3 * 3600
 # a PING every KEEPALIVE_S, but only while the next read is at most KEEPALIVE_AHEAD away.
 KEEPALIVE_S = 20
 KEEPALIVE_AHEAD = 600
-TOKEN_MAX_AGE = 12 * 3600    # the game's token lives 24 h
-IDLE_EVENTS_EVERY = 1800     # nothing open: look again this often
+TOKEN_MAX_AGE = 12 * 3600  # the game's token lives 24 h
+IDLE_EVENTS_EVERY = 1800  # nothing open: look again this often
 MAX_BACKOFF = 900
 # the game in maintenance (grpc-status 3 IN_MAINTENANCE, code 2006, on all three regions): not a fault to back off from but a wait with an end -- look every 5 min so the
 # reads resume within minutes of it, instead of up to MAX_BACKOFF later
 MAINTENANCE_RETRY = 300
-PACE_S = 1.0                 # project etiquette: <= 1 request per second per region
+PACE_S = 1.0  # project etiquette: <= 1 request per second per region
 # the app's content store (tools/app/publish.py), on the same server as the tracker
 CONTENT_DIR = Path(os.environ.get("HB_CONTENT_DIR", "/srv/holobuilder/content"))
 CLIENT_VERSION_REL = f"{paths.DUMPS_REL}/client_version.json"
@@ -154,8 +155,7 @@ def top_final_kinds(store: Path, region: str, chapter_id: str) -> set[str]:
     return out
 
 
-def top_chapters(listed: list[dict], live: list[dict], store: Path, region: str,
-                 now_ms: int) -> list[dict]:
+def top_chapters(listed: list[dict], live: list[dict], store: Path, region: str, now_ms: int) -> list[dict]:
     """The chapters whose top 100 is worth reading: the live ones, plus an ended one the server
     still lists whose top 100 lacks a final for some kind -- a song ranking's board, added
     after its chapter ended, is still served until the event leaves its term."""
@@ -182,8 +182,12 @@ def append_top(store: Path, rec: dict) -> Path:
 def next_boundary(listed: list[dict], now: float) -> float:
     """The next instant (epoch s) at which the live chapter set changes by date alone: a
     listed chapter's start or its final read (ec.final_after). inf when none is ahead."""
-    times = [t / 1000 for ch in listed for t in (ch.get("start_time") or 0, ec.final_after(ch))
-             if t and t / 1000 > now]
+    times = [
+        t / 1000
+        for ch in listed
+        for t in (ch.get("start_time") or 0, ec.final_after(ch))
+        if t and t / 1000 > now
+    ]
     return min(times, default=float("inf")) + 5
 
 
@@ -202,32 +206,51 @@ class Region:
         self.events_at = 0.0
         self.next_boundary = float("inf")
         self.next_border = self.next_top = 0.0
-        self.watch_until = 0.0       # the main board's lease (Event Pt / Total)
+        self.watch_until = 0.0  # the main board's lease (Event Pt / Total)
         # a song board's lease, per kind music:<id>: read only while someone has that song's
         # tab open (the same savings as the main board), never because the Event Pt board is
         # watched
         self.song_watch: dict[str, float] = {}
         self.wake = 0.0
         self.backoff = 0
-        self.stat = {"region": region, "host": self.host, "ok_at": None, "borders_at": None,
-                     "error": None,
-                     "error_at": None, "reads": 0, "top_reads": 0, "logins": 0,
-                     "bytes_in": 0, "pings": 0, "ping_fails": 0, "chapters": []}
+        self.stat = {
+            "region": region,
+            "host": self.host,
+            "ok_at": None,
+            "borders_at": None,
+            "error": None,
+            "error_at": None,
+            "reads": 0,
+            "top_reads": 0,
+            "logins": 0,
+            "bytes_in": 0,
+            "pings": 0,
+            "ping_fails": 0,
+            "chapters": [],
+        }
 
     # -- transport -------------------------------------------------------------------------
     def rpc(self, path: str, body: bytes = b"", *, auth: bool = True, mv: bool = True) -> bytes:
         """One call; `auth` sends the token, `mv` the master version (Master/Get sends neither,
         Auth/Login only the version -- as the client does)."""
         A = self.A
-        rh, tr, data = self.chan.call(path, A.frame(A.seal(body) if body else b""),
-                                      token=self.token if auth else None, ident=self.ident,
-                                      master_version=self.mv if mv else None)
+        rh, tr, data = self.chan.call(
+            path,
+            A.frame(A.seal(body) if body else b""),
+            token=self.token if auth else None,
+            ident=self.ident,
+            master_version=self.mv if mv else None,
+        )
         time.sleep(PACE_S)
         self.stat["bytes_in"] += len(data)
         st = tr.get("grpc-status", rh.get("grpc-status"))
         if st not in (None, "0"):
-            raise GameError(path, st, tr.get("grpc-message", rh.get("grpc-message", ""))[:160],
-                            tr.get("x-app-error-code", rh.get("x-app-error-code")))
+            raise GameError(
+                path,
+                st,
+                tr.get("grpc-message", rh.get("grpc-message", ""))[:160],
+                tr.get("x-app-error-code", rh.get("x-app-error-code")),
+            )
         for m in A.unframe(data):
             if m:
                 return A.unseal(m)
@@ -239,8 +262,7 @@ class Region:
     def login(self) -> None:
         if not self.mv:
             self.mv = self._master()
-        blob = self.rpc("/rpc.api.Auth/Login",
-                        self.A.pb_bytes_field(1, self.credential), auth=False)
+        blob = self.rpc("/rpc.api.Auth/Login", self.A.pb_bytes_field(1, self.credential), auth=False)
         token = None
         for fn, wt, v in self.A.fields(blob):
             if fn == 1 and wt == 2:
@@ -294,8 +316,11 @@ class Region:
         cur = os.environ.get("HOLODREAMS_APP_VERSION") or ""
         pub = published_app_version()
         if not pub or pub == cur:
-            print(f"[{self.region}] app version {cur or '?'} refused; published version: "
-                  f"{pub or 'none'} -- run tools/app/publish.py from an updated install", flush=True)
+            print(
+                f"[{self.region}] app version {cur or '?'} refused; published version: "
+                f"{pub or 'none'} -- run tools/app/publish.py from an updated install",
+                flush=True,
+            )
             return False
         os.environ["HOLODREAMS_APP_VERSION"] = pub
         print(f"[{self.region}] app version {cur or '?'} -> {pub} (published)", flush=True)
@@ -307,8 +332,9 @@ class Region:
         blob = self.call(RPC_EVENTS)
         listed = ec.parse_event_info(blob)
         self.listed = listed
-        self.chapters = ec.live_chapters(listed, int(now * 1000), store=self.store,
-                                         region=self.region, songs=True)
+        self.chapters = ec.live_chapters(
+            listed, int(now * 1000), store=self.store, region=self.region, songs=True
+        )
         self.events_at = now
         self.next_boundary = next_boundary(listed, now)
         for ch in self.chapters:
@@ -324,10 +350,10 @@ class Region:
             else:
                 # no read: which listed chapters are live (or still owe their final) changes
                 # with the clock and the store, both local
-                self.chapters = ec.live_chapters(self.listed, int(now * 1000), store=self.store,
-                                                 region=self.region, songs=True)
-            self.top_chs = top_chapters(self.listed, self.chapters, self.store, self.region,
-                                        int(now * 1000))
+                self.chapters = ec.live_chapters(
+                    self.listed, int(now * 1000), store=self.store, region=self.region, songs=True
+                )
+            self.top_chs = top_chapters(self.listed, self.chapters, self.store, self.region, int(now * 1000))
             if not self.chapters and not (self.top_chs and self.watched(now)):
                 self.wake = now + IDLE_EVENTS_EVERY
                 self.events_at = 0.0
@@ -341,15 +367,20 @@ class Region:
                 self.read_top()
                 self.next_top = now + every
             self._ok(now)
-            self.wake = min(self.next_border, self.next_top if every else 1e18,
-                            self.watched_until() if self.watched(now) else 1e18)
+            self.wake = min(
+                self.next_border,
+                self.next_top if every else 1e18,
+                self.watched_until() if self.watched(now) else 1e18,
+            )
         except Exception as exc:  # noqa: BLE001 -- a region failing must never stop the others
             if "IN_MAINTENANCE" in str(exc):
                 self.wake = now + MAINTENANCE_RETRY
                 self.chan.close()
                 if not self.stat.get("maintenance"):
-                    print(f"[{self.region}] game in maintenance -- looking again every "
-                          f"{MAINTENANCE_RETRY}s", flush=True)
+                    print(
+                        f"[{self.region}] game in maintenance -- looking again every {MAINTENANCE_RETRY}s",
+                        flush=True,
+                    )
                 self.stat["maintenance"] = True
                 self.stat["error"] = "IN_MAINTENANCE"
                 self.stat["error_at"] = int(now)
@@ -409,7 +440,7 @@ class Region:
         self.stat["watched_until"] = int(self.watched_until())
         dense = now + int(self.plan.get("top_watch") or 120)
         if first or self.next_top > dense:
-            self.next_top = now          # a new viewer gets a fresh board now, not in 30 min
+            self.next_top = now  # a new viewer gets a fresh board now, not in 30 min
         self.wake = min(self.wake, now)
 
     def _ok(self, now: float) -> None:
@@ -422,8 +453,11 @@ class Region:
         for ch in self.chapters:
             # the song ranking of each chapter too: one more read per chapter;
             # after the reveal only the kinds whose final is not stored yet
-            done = (ec.final_kinds(self.store, self.region, ch["chapter_id"])
-                    if time.time() * 1000 > ec.final_after(ch) else set())
+            done = (
+                ec.final_kinds(self.store, self.region, ch["chapter_id"])
+                if time.time() * 1000 > ec.final_after(ch)
+                else set()
+            )
             for kind, rpc, music_id in ec.kinds_for(ch, songs=True):
                 if kind in done:
                     continue
@@ -435,8 +469,15 @@ class Region:
                         continue
                     raise
                 at = int(time.time() * 1000)
-                rec = ec.make_record(region=self.region, ch=ch, kind=kind, account="guest",
-                                     captured_at=at, result=res, keep_self=False)
+                rec = ec.make_record(
+                    region=self.region,
+                    ch=ch,
+                    kind=kind,
+                    account="guest",
+                    captured_at=at,
+                    result=res,
+                    keep_self=False,
+                )
                 ec.append_record(self.store, rec)
                 self.stat["reads"] += 1
                 self.stat["borders_at"] = at // 1000
@@ -448,13 +489,21 @@ class Region:
     def read_top(self) -> None:
         for ch in getattr(self, "top_chs", None) or self.chapters:
             # after the reveal, only the kinds whose final board is not stored yet
-            done = (top_final_kinds(self.store, self.region, ch["chapter_id"])
-                    if int(time.time() * 1000) >= ec.final_after(ch) else set())
+            done = (
+                top_final_kinds(self.store, self.region, ch["chapter_id"])
+                if int(time.time() * 1000) >= ec.final_after(ch)
+                else set()
+            )
             for kind, rpc, music_id in ec.kinds_for(ch, songs=True):
                 if kind in done or not self.kind_watched(kind, time.time()):
                     continue
-                top_rpc = (RPC_TOP_POINTS if kind == "points" else RPC_TOP_TOTAL if kind == "total"
-                           else RPC_TOP_MUSIC)
+                top_rpc = (
+                    RPC_TOP_POINTS
+                    if kind == "points"
+                    else RPC_TOP_TOTAL
+                    if kind == "total"
+                    else RPC_TOP_MUSIC
+                )
                 try:
                     rows = parse_top(self.call(top_rpc, ec.request_body(ch["chapter_id"], music_id)))
                 except GameError as exc:
@@ -462,10 +511,18 @@ class Region:
                         continue
                     raise
                 at = int(time.time() * 1000)
-                append_top(self.store, {
-                    "captured_at": at, "final": at >= ec.final_after(ch) > 0,
-                    "region": self.region, "event_id": ch["event_id"],
-                    "chapter_id": ch["chapter_id"], "kind": kind, "rows": rows})
+                append_top(
+                    self.store,
+                    {
+                        "captured_at": at,
+                        "final": at >= ec.final_after(ch) > 0,
+                        "region": self.region,
+                        "event_id": ch["event_id"],
+                        "chapter_id": ch["chapter_id"],
+                        "kind": kind,
+                        "rows": rows,
+                    },
+                )
                 self.stat["top_reads"] += 1
 
 
@@ -507,8 +564,13 @@ def make_handler(store: Path, status: callable, watch: callable = None):
                 for p in sorted(root.rglob("*")):
                     if p.is_file() and p.suffix in (".jsonl", ".json"):
                         st = p.stat()
-                        files.append({"path": p.relative_to(root).as_posix(), "size": st.st_size,
-                                      "mtime": int(st.st_mtime)})
+                        files.append(
+                            {
+                                "path": p.relative_to(root).as_posix(),
+                                "size": st.st_size,
+                                "mtime": int(st.st_mtime),
+                            }
+                        )
                 return self._send(200, json.dumps({"files": files}).encode())
             if u.path == "/file":
                 rel = (q.get("path") or [""])[0]
@@ -532,8 +594,10 @@ def make_handler(store: Path, status: callable, watch: callable = None):
                 except ValueError:
                     return self._send(400, b'{"error":"seconds"}')
                 kind = (q.get("kind") or [None])[0] or None
-                if kind is not None and not (kind in ("points", "total") or (
-                        kind.startswith("music:") and kind[6:].replace("_", "").isalnum())):
+                if kind is not None and not (
+                    kind in ("points", "total")
+                    or (kind.startswith("music:") and kind[6:].replace("_", "").isalnum())
+                ):
                     return self._send(400, b'{"error":"kind"}')
                 if not watch(region, secs, kind):
                     return self._send(404, b'{"error":"no such region"}')
@@ -553,6 +617,7 @@ def main() -> int:
     args = ap.parse_args()
 
     import account_snapshot as A  # noqa: PLC0415
+
     plan = dict(DEFAULT_PLAN)
     if args.plan:
         plan.update(json.loads(args.plan))
@@ -561,14 +626,20 @@ def main() -> int:
     for r in args.regions.split(","):
         r = r.strip()
         if r:
-            regions.append(Region(r, plan.get(r, {"borders": 300, "top": 0, "top_watch": 120}),
-                                  args.store, A))
+            regions.append(
+                Region(r, plan.get(r, {"borders": 300, "top": 0, "top_watch": 120}), args.store, A)
+            )
     started = int(time.time())
 
     def status() -> dict:
-        return {"started": started, "now": int(time.time()), "proxy": bool(A.API_PROXY),
-                "app_version": os.environ.get("HOLODREAMS_APP_VERSION"), "plan": plan,
-                "regions": [g.stat for g in regions]}
+        return {
+            "started": started,
+            "now": int(time.time()),
+            "proxy": bool(A.API_PROXY),
+            "app_version": os.environ.get("HOLODREAMS_APP_VERSION"),
+            "plan": plan,
+            "regions": [g.stat for g in regions],
+        }
 
     woke = threading.Event()
 
@@ -581,8 +652,7 @@ def main() -> int:
         return True
 
     if args.serve_port:
-        srv = ThreadingHTTPServer(("127.0.0.1", args.serve_port),
-                                  make_handler(args.store, status, watch))
+        srv = ThreadingHTTPServer(("127.0.0.1", args.serve_port), make_handler(args.store, status, watch))
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         print(f"[api] 127.0.0.1:{args.serve_port}", flush=True)
 
@@ -592,8 +662,7 @@ def main() -> int:
         for g in regions:
             g.keepalive(time.time())
         try:
-            atomic_io.write_bytes(args.store / "status.json",
-                                  json.dumps(status(), indent=1).encode())
+            atomic_io.write_bytes(args.store / "status.json", json.dumps(status(), indent=1).encode())
         except OSError:
             pass
         if args.once:

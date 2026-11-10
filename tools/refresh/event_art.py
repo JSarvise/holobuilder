@@ -27,16 +27,19 @@ script exits 0 unless its own arguments are wrong.
 
     python event_art.py            # every open marathon event
 """
+
 from __future__ import annotations
 
 import datetime as _dt
 import json
-import atomic_io
 import sys
 from pathlib import Path
 
+import atomic_io
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
 DUMPS = paths.DUMPS
@@ -75,12 +78,12 @@ def _fields(b: bytes) -> dict[int, list]:
             v, p = _varint(b, p)
         elif wt == 2:
             n, p = _varint(b, p)
-            v = b[p:p + n]
+            v = b[p : p + n]
             p += n
         elif wt == 5:
-            v, p = int.from_bytes(b[p:p + 4], "little"), p + 4
+            v, p = int.from_bytes(b[p : p + 4], "little"), p + 4
         elif wt == 1:
-            v, p = int.from_bytes(b[p:p + 8], "little"), p + 8
+            v, p = int.from_bytes(b[p : p + 8], "little"), p + 8
         else:
             raise ValueError(f"wire type {wt} at {p}")
         out.setdefault(fn, []).append(v)
@@ -101,7 +104,7 @@ def iso(ms: int | None) -> str | None:
     """ms since the epoch -> ISO 8601 UTC, or None."""
     if not ms:
         return None
-    return _dt.datetime.fromtimestamp(ms / 1000, tz=_dt.timezone.utc).isoformat()
+    return _dt.datetime.fromtimestamp(ms / 1000, tz=_dt.UTC).isoformat()
 
 
 def parse_event_info(blob: bytes) -> list[dict]:
@@ -115,15 +118,29 @@ def parse_event_info(blob: bytes) -> list[dict]:
         for mi in ev.get(14, []):
             for ch_raw in _fields(mi).get(4, []):
                 ch = _fields(ch_raw)
-                chapters.append({"id": _s(ch, 1), "number": _i(ch, 2),
-                                 "ends_at": iso(_i(ch, 4)),
-                                 "background_asset_id": _s(ch, 13)})
+                chapters.append(
+                    {
+                        "id": _s(ch, 1),
+                        "number": _i(ch, 2),
+                        "ends_at": iso(_i(ch, 4)),
+                        "background_asset_id": _s(ch, 13),
+                    }
+                )
         etype = _i(ev, 2)
-        events.append({"event_id": _s(ev, 1), "type": EVENT_TYPE.get(etype, etype),
-                       "kind_label": _s(ev, 3), "starts_at": iso(_i(ev, 4)),
-                       "ends_at": iso(_i(ev, 5)), "exchange_ends_at": iso(_i(ev, 6)),
-                       "logo_asset_id": _s(ev, 7), "background_asset_id": _s(ev, 8),
-                       "chapters": chapters, "_type_code": etype})
+        events.append(
+            {
+                "event_id": _s(ev, 1),
+                "type": EVENT_TYPE.get(etype, etype),
+                "kind_label": _s(ev, 3),
+                "starts_at": iso(_i(ev, 4)),
+                "ends_at": iso(_i(ev, 5)),
+                "exchange_ends_at": iso(_i(ev, 6)),
+                "logo_asset_id": _s(ev, 7),
+                "background_asset_id": _s(ev, 8),
+                "chapters": chapters,
+                "_type_code": etype,
+            }
+        )
     return events
 
 
@@ -131,7 +148,7 @@ def parse_event_info(blob: bytes) -> list[dict]:
 def _rows(tables, name: str) -> dict[str, dict]:
     """{id: data} of one master table, from the first of `tables` (one folder or several) that
     has it: as the refresh's own export (`main_<T>.json`) or a master dump (`<T>.json`)."""
-    for folder in (tables if isinstance(tables, (list, tuple)) else (tables,)):
+    for folder in tables if isinstance(tables, (list, tuple)) else (tables,):
         for path in (folder / f"main_{name}.json", folder / f"{name}.json"):
             try:
                 doc = json.loads(path.read_text(encoding="utf-8"))
@@ -166,8 +183,10 @@ def chapter_titles(tables: Path, chapter_ids: list[str]) -> dict[str, str]:
 def art_names(event: dict) -> dict[str, list[str]]:
     eid = event["event_id"]
     logo = event.get("logo_asset_id")
-    return {"banner": [f"img_banner_full_{eid}_lang-eng", f"img_banner_full_{eid}"],
-            "logo": [f"{logo}_lang-eng", logo] if logo else []}
+    return {
+        "banner": [f"img_banner_full_{eid}_lang-eng", f"img_banner_full_{eid}"],
+        "logo": [f"{logo}_lang-eng", logo] if logo else [],
+    }
 
 
 def art_files(event_id: str) -> dict[str, str]:
@@ -176,21 +195,25 @@ def art_files(event_id: str) -> dict[str, str]:
 
 def _default_fetch(names: list[str]) -> None:
     import octo_fetch  # noqa: PLC0415
+
     octo_fetch.fetch(names)
 
 
 def _default_extract(bundle_path: Path, name: str):
     import gacha_art  # noqa: PLC0415 -- the same UnityPy + octo_crypto extraction
+
     return gacha_art._default_extract(bundle_path, name)
 
 
 def _save_webp(img, dst: Path) -> None:
     import gacha_art  # noqa: PLC0415 -- <= 1280 px wide, WEBP q85
+
     gacha_art._save_webp(img, dst)
 
 
-def ensure_art(events: list[dict], art_dir: Path, fetch=None, extract=None,
-               fetched: Path = FETCHED) -> dict[str, dict[str, str | None]]:
+def ensure_art(
+    events: list[dict], art_dir: Path, fetch=None, extract=None, fetched: Path = FETCHED
+) -> dict[str, dict[str, str | None]]:
     """event id -> {kind: file name or None}. Only kinds missing on disk are fetched."""
     fetch = fetch or _default_fetch
     extract = extract or _default_extract
@@ -226,10 +249,19 @@ def ensure_art(events: list[dict], art_dir: Path, fetch=None, extract=None,
 
 
 # --- the file -------------------------------------------------------------------------------
-def build(blob: bytes, tables: Path, art_dir: Path, *, fetch=None, extract=None,
-          fetched: Path = FETCHED, fetched_at: float | None = None) -> dict:
-    events = [e for e in parse_event_info(blob) if e.get("_type_code") in MARATHON_TYPES
-              and e.get("event_id")]
+def build(
+    blob: bytes,
+    tables: Path,
+    art_dir: Path,
+    *,
+    fetch=None,
+    extract=None,
+    fetched: Path = FETCHED,
+    fetched_at: float | None = None,
+) -> dict:
+    events = [
+        e for e in parse_event_info(blob) if e.get("_type_code") in MARATHON_TYPES and e.get("event_id")
+    ]
     titles = chapter_titles(tables, [c["id"] for e in events for c in e["chapters"] if c["id"]])
     art = ensure_art(events, art_dir, fetch=fetch, extract=extract, fetched=fetched)
     out = []
@@ -237,13 +269,15 @@ def build(blob: bytes, tables: Path, art_dir: Path, *, fetch=None, extract=None,
         e = {k: v for k, v in e.items() if not k.startswith("_")}
         for c in e["chapters"]:
             c["title"] = titles.get(c["id"])
-        first = next((c for c in sorted(e["chapters"], key=lambda c: c["number"] or 0)
-                      if c["title"]), None)
+        first = next((c for c in sorted(e["chapters"], key=lambda c: c["number"] or 0) if c["title"]), None)
         e["title"] = first["title"] if first else None
         e["art"] = art.get(e["event_id"], {})
         out.append(e)
-    return {"source": "Event/ListEventInfo + master Poster/LangPoster_Eng + Octo banner_full",
-            "fetched_at": fetched_at, "events": out}
+    return {
+        "source": "Event/ListEventInfo + master Poster/LangPoster_Eng + Octo banner_full",
+        "fetched_at": fetched_at,
+        "events": out,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -264,9 +298,11 @@ def main(argv: list[str] | None = None) -> int:
     atomic_io.write_text(OUT_JSON, json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
     for e in doc["events"]:
         missing = [k for k, v in e["art"].items() if not v]
-        print(f"event {e['event_id']}: {e['title'] or '(NO TITLE in the master)'} -- "
-              f"{e['kind_label']}, {e['starts_at']} .. {e['ends_at']}; art "
-              f"{'ok' if not missing else 'MISSING ' + ', '.join(missing)}")
+        print(
+            f"event {e['event_id']}: {e['title'] or '(NO TITLE in the master)'} -- "
+            f"{e['kind_label']}, {e['starts_at']} .. {e['ends_at']}; art "
+            f"{'ok' if not missing else 'MISSING ' + ', '.join(missing)}"
+        )
     print(f"written {OUT_JSON}")
     return 0
 

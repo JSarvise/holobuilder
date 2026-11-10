@@ -36,14 +36,16 @@ every few minutes.
     python event_cutoffs.py --region us --self
     python event_cutoffs.py --songs         also per-song borders
 """
+
 from __future__ import annotations
 
 import argparse
 import json
-import atomic_io
 import sys
 import time
 from pathlib import Path
+
+import atomic_io
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
@@ -102,11 +104,11 @@ def msg(b: bytes) -> dict[int, list]:
             ln, i = _read_varint(b, i)
             if i + ln > len(b):
                 raise ValueError("overrun")
-            v, i = b[i:i + ln], i + ln
+            v, i = b[i : i + ln], i + ln
         elif wt == 1:
-            v, i = b[i:i + 8], i + 8
+            v, i = b[i : i + 8], i + 8
         elif wt == 5:
-            v, i = b[i:i + 4], i + 4
+            v, i = b[i : i + 4], i + 4
         else:
             raise ValueError(f"wire type {wt}")
         out.setdefault(fn, []).append(v)
@@ -132,9 +134,11 @@ def _sint(v: int | None) -> int | None:
 
 def request_body(chapter_id: str, music_id: str | None = None) -> bytes:
     """`{marathon_chapter_id = 1[, music_id = 2]}` -- the Grade requests' only fields."""
+
     def field(fn: int, s: str) -> bytes:
         raw = s.encode()
         return _write_varint((fn << 3) | 2) + _write_varint(len(raw)) + raw
+
     return field(1, chapter_id) + (field(2, music_id) if music_id else b"")
 
 
@@ -153,7 +157,7 @@ def parse_event_info(blob: bytes) -> list[dict]:
 
             def tiers(fn: int, rank_fn: int, grade_fn: int, music_fn: int | None = None):
                 rows = []
-                for rr in ch.get(fn, []):
+                for rr in ch.get(fn, []):  # noqa: B023
                     r = msg(rr)
                     row = {"end_rank": _i(r, rank_fn), "grade_id": _s(r, grade_fn)}
                     if music_fn:
@@ -165,24 +169,26 @@ def parse_event_info(blob: bytes) -> list[dict]:
             music: dict[str, list] = {}
             for row in music_rows:
                 music.setdefault(row.pop("music_id") or "?", []).append(row)
-            chapters.append({
-                "event_id": _s(ev, 1),
-                "event_name": _s(ev, 3),
-                "event_type": _i(ev, 2),
-                "start_time": _i(ev, 4),
-                "end_time": _i(ev, 5),
-                "chapter_id": _s(ch, 1),
-                "chapter_number": _i(ch, 2),
-                "chapter_end_time": _i(ch, 4),
-                "aggregation_start_time": _i(info, 2),
-                "reveal_time": _i(ch, 15) or _i(info, 3),
-                "points_ranking_disabled": bool(_i(info, 5)),
-                "tiers": {
-                    "points": tiers(16, 2, 4),
-                    "total": tiers(18, 2, 4),
-                    "music": music,
-                },
-            })
+            chapters.append(
+                {
+                    "event_id": _s(ev, 1),
+                    "event_name": _s(ev, 3),
+                    "event_type": _i(ev, 2),
+                    "start_time": _i(ev, 4),
+                    "end_time": _i(ev, 5),
+                    "chapter_id": _s(ch, 1),
+                    "chapter_number": _i(ch, 2),
+                    "chapter_end_time": _i(ch, 4),
+                    "aggregation_start_time": _i(info, 2),
+                    "reveal_time": _i(ch, 15) or _i(info, 3),
+                    "points_ranking_disabled": bool(_i(info, 5)),
+                    "tiers": {
+                        "points": tiers(16, 2, 4),
+                        "total": tiers(18, 2, 4),
+                        "music": music,
+                    },
+                }
+            )
     # A Spotlight (relay) event's chapters run one after another -- each starts when the one
     # before it ends -- but the wire gives only the event's start: so a
     # chapter's own start is its predecessor's end, and a chapter not yet begun is not read
@@ -260,14 +266,27 @@ def append_points(store: Path, region: str, event_id: str, captured_at: int, poi
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{event_id}.self_points.jsonl"
     with path.open("ab") as fh:
-        fh.write((json.dumps({"captured_at": captured_at, "event_id": event_id, "chapters": points},
-                             separators=(",", ":")) + "\n").encode("utf-8"))
+        fh.write(
+            (
+                json.dumps(
+                    {"captured_at": captured_at, "event_id": event_id, "chapters": points},
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode("utf-8")
+        )
     return path
 
 
-def live_chapters(chapters: list[dict], now_ms: int, *, store: Path | None = None,
-                  region: str | None = None, need_self: bool = False,
-                  songs: bool = False) -> list[dict]:
+def live_chapters(
+    chapters: list[dict],
+    now_ms: int,
+    *,
+    store: Path | None = None,
+    region: str | None = None,
+    need_self: bool = False,
+    songs: bool = False,
+) -> list[dict]:
     """Chapters worth reading now: started, and not yet past the final-ranking reveal --
     plus, with `store`, an ENDED chapter the server still lists (until its exchange
     closes) whose final standing is not stored yet: read ONCE more for it.
@@ -310,8 +329,9 @@ def kinds_for(ch: dict, songs: bool) -> list[tuple[str, str, str | None]]:
     return out
 
 
-def make_record(*, region: str, ch: dict, kind: str, account: str, captured_at: int,
-                result: dict, keep_self: bool) -> dict:
+def make_record(
+    *, region: str, ch: dict, kind: str, account: str, captured_at: int, result: dict, keep_self: bool
+) -> dict:
     return {
         "captured_at": captured_at,
         # read after the reveal (else the chapter's end): the chapter's final standing
@@ -322,8 +342,15 @@ def make_record(*, region: str, ch: dict, kind: str, account: str, captured_at: 
         "kind": kind,
         "account": account,
         "borders": result["borders"],
-        "self": ({"rank": result["self_rank"], "score": result["self_score"],
-                  "out_of_range": result["self_out_of_range"]} if keep_self else None),
+        "self": (
+            {
+                "rank": result["self_rank"],
+                "score": result["self_score"],
+                "out_of_range": result["self_out_of_range"],
+            }
+            if keep_self
+            else None
+        ),
     }
 
 
@@ -340,8 +367,12 @@ def write_meta(store: Path, region: str, ch: dict, fetched_at: int) -> Path:
     d = store / region
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{ch['chapter_id']}.meta.json"
-    atomic_io.write_bytes(path, json.dumps(dict(ch, region=region, fetched_at=fetched_at),
-                                indent=1, ensure_ascii=False).encode("utf-8"))
+    atomic_io.write_bytes(
+        path,
+        json.dumps(dict(ch, region=region, fetched_at=fetched_at), indent=1, ensure_ascii=False).encode(
+            "utf-8"
+        ),
+    )
     return path
 
 
@@ -354,8 +385,14 @@ def needs_daily_login(exc: BaseException, account: str) -> bool:
 
 
 def _grpc(asnap, host: str, path: str, body: bytes, token: str, ident, mv: str) -> bytes:
-    rh, tr, data = asnap.call(host, path, asnap.frame(asnap.seal(body) if body else b""),
-                              token=token, ident=ident, master_version=mv)
+    rh, tr, data = asnap.call(
+        host,
+        path,
+        asnap.frame(asnap.seal(body) if body else b""),
+        token=token,
+        ident=ident,
+        master_version=mv,
+    )
     st = tr.get("grpc-status", rh.get("grpc-status"))
     if st not in (None, "0"):
         raise RuntimeError(f"{path} rejected: grpc-status {st} {tr.get('grpc-message', '')}")
@@ -376,8 +413,9 @@ def owner_fallback(exc: BaseException, account: str) -> bool:
     return account == "main" and "DATE_CHANGED" in str(exc)
 
 
-def fetch_region(region: str, *, account: str, songs: bool, keep_self: bool,
-                 store: Path = STORE) -> list[dict]:
+def fetch_region(
+    region: str, *, account: str, songs: bool, keep_self: bool, store: Path = STORE
+) -> list[dict]:
     import account_snapshot as asnap  # noqa: PLC0415  (network deps only when fetching)
 
     host, credential = asnap.load_credential(account)
@@ -414,23 +452,29 @@ def fetch_region(region: str, *, account: str, songs: bool, keep_self: bool,
                 continue
             if pts:
                 append_points(store, region, eid, int(time.time() * 1000), pts)
-                print(f"[{region}] {eid} your Event Pt: "
-                      + ", ".join(f"{c.rsplit('-', 1)[-1]}={v:,}" for c, v in sorted(pts.items())))
-    chapters = live_chapters(listed, now, store=store, region=region, need_self=keep_self,
-                             songs=songs)
+                print(
+                    f"[{region}] {eid} your Event Pt: "
+                    + ", ".join(f"{c.rsplit('-', 1)[-1]}={v:,}" for c, v in sorted(pts.items()))
+                )
+    chapters = live_chapters(listed, now, store=store, region=region, need_self=keep_self, songs=songs)
     if not chapters:
         print(f"[{region}] no marathon chapter is open or awaiting its reveal")
     records = []
     for ch in chapters:
         write_meta(store, region, ch, now)
-        done = final_kinds(store, region, ch["chapter_id"], with_self=keep_self) if now > final_after(ch) else set()
+        done = (
+            final_kinds(store, region, ch["chapter_id"], with_self=keep_self)
+            if now > final_after(ch)
+            else set()
+        )
         for kind, rpc, music_id in kinds_for(ch, songs):
             if kind in done:
                 continue
             time.sleep(PACE_S)
             try:
-                res = parse_ranking_result(_grpc(asnap, host, rpc, request_body(
-                    ch["chapter_id"], music_id), token, ident, mv))
+                res = parse_ranking_result(
+                    _grpc(asnap, host, rpc, request_body(ch["chapter_id"], music_id), token, ident, mv)
+                )
             except RuntimeError as exc:
                 if not out_of_term(exc):
                     raise
@@ -438,32 +482,54 @@ def fetch_region(region: str, *, account: str, songs: bool, keep_self: bool,
                 # refused until its reveal. Skip it; the region's other chapters still read.
                 print(f"[{region}] {ch['chapter_id']} {kind}: not readable now (EVENT_OUT_OF_TERM)")
                 continue
-            rec = make_record(region=region, ch=ch, kind=kind, account="main" if account == "main"
-                              else "guest", captured_at=int(time.time() * 1000), result=res,
-                              keep_self=keep_self)
+            rec = make_record(
+                region=region,
+                ch=ch,
+                kind=kind,
+                account="main" if account == "main" else "guest",
+                captured_at=int(time.time() * 1000),
+                result=res,
+                keep_self=keep_self,
+            )
             path = append_record(store, rec)
             line = "  ".join(f"T{b['rank']}={b['score']:,}" for b in rec["borders"])
-            print(f"[{region}] {ch['chapter_id']} {kind}: {line or '(no borders)'}"
-                  + (f"  | you: #{res['self_rank']} {res['self_score']:,}" if keep_self
-                     and res["self_rank"] else ""))
+            print(
+                f"[{region}] {ch['chapter_id']} {kind}: {line or '(no borders)'}"
+                + (
+                    f"  | you: #{res['self_rank']} {res['self_score']:,}"
+                    if keep_self and res["self_rank"]
+                    else ""
+                )
+            )
             records.append(rec)
-            print(f"[{region}]   appended -> {path.relative_to(paths.REPO) if path.is_relative_to(paths.REPO) else path}")
+            print(
+                f"[{region}]   appended -> {path.relative_to(paths.REPO) if path.is_relative_to(paths.REPO) else path}"
+            )
     return records
 
 
 def asnap_state() -> Path:
     """state/ (the guest accounts live there), from account_snapshot -- imported only here."""
     import account_snapshot as asnap  # noqa: PLC0415
+
     return asnap.STATE
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--region", choices=REGIONS + ("all", "own"), default="all",
-                    help="'own' = only the owner's own region, read with his account (--self): "
-                         "the desktop app's refresh, which has no guest accounts")
-    ap.add_argument("--self", dest="self_", action="store_true",
-                    help="read the owner's own region with the owner's account (own rank)")
+    ap.add_argument(
+        "--region",
+        choices=REGIONS + ("all", "own"),
+        default="all",
+        help="'own' = only the owner's own region, read with his account (--self): "
+        "the desktop app's refresh, which has no guest accounts",
+    )
+    ap.add_argument(
+        "--self",
+        dest="self_",
+        action="store_true",
+        help="read the owner's own region with the owner's account (own rank)",
+    )
     ap.add_argument("--songs", action="store_true", help="also read per-song borders")
     args = ap.parse_args()
 
@@ -472,8 +538,9 @@ def main() -> int:
     own_region = None
     if args.self_:
         import account_snapshot as asnap  # noqa: PLC0415
+
         own_region = asnap.load_credential("main")[0].split(".", 1)[0]
-    regions = REGIONS if args.region == "all" else (own_region,) if args.region == "own"         else (args.region,)
+    regions = REGIONS if args.region == "all" else (own_region,) if args.region == "own" else (args.region,)
     failures = 0
     total = 0
     for i, region in enumerate(regions):
@@ -487,8 +554,9 @@ def main() -> int:
             continue
         try:
             try:
-                total += len(fetch_region(region, account=account, songs=args.songs,
-                                          keep_self=(account == "main")))
+                total += len(
+                    fetch_region(region, account=account, songs=args.songs, keep_self=(account == "main"))
+                )
             except RuntimeError as exc:
                 if not owner_fallback(exc, account):
                     raise
@@ -497,14 +565,17 @@ def main() -> int:
                 # The app ships no guest accounts -- there the 24/7 tracker's borders reach it
                 # anyway, so the read ends here instead of failing the step.
                 if not (asnap_state() / "ranking_accounts.json").is_file():
-                    print(f"[{region}] your account was refused DATE_CHANGED (the game was not opened"
-                          f" today): own rank skipped; open the game once today")
+                    print(
+                        f"[{region}] your account was refused DATE_CHANGED (the game was not opened"
+                        f" today): own rank skipped; open the game once today"
+                    )
                     continue
-                print(f"[{region}] your account was refused DATE_CHANGED (the game was not opened"
-                      f" today): borders via the {region} guest, own rank skipped")
+                print(
+                    f"[{region}] your account was refused DATE_CHANGED (the game was not opened"
+                    f" today): borders via the {region} guest, own rank skipped"
+                )
                 time.sleep(PACE_S)
-                total += len(fetch_region(region, account=region, songs=args.songs,
-                                          keep_self=False))
+                total += len(fetch_region(region, account=region, songs=args.songs, keep_self=False))
         except Exception as exc:  # noqa: BLE001  one region failing must not hide the others
             failures += 1
             print(f"[{region}] FAILED: {type(exc).__name__}: {exc}")

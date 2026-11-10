@@ -1,5 +1,6 @@
 """tools/local/run_local.py: what setup.cmd, refresh.cmd and start.cmd rely on, without the game,
 an account or the network."""
+
 from __future__ import annotations
 
 import socket
@@ -24,7 +25,7 @@ def _cred(folder: Path, name: str = "0123456789abcdef0123456789abcdef", size: in
 def test_the_one_account_file_in_the_game_folder_is_found(tmp_path):
     want = _cred(tmp_path)
     (tmp_path / "Player.log").write_text("log")
-    (tmp_path / ("f" * 32)).write_bytes(b"x" * 5000)            # right name, not a credential's size
+    (tmp_path / ("f" * 32)).write_bytes(b"x" * 5000)  # right name, not a credential's size
     assert run_local.find_credential({}, tmp_path) == (want, "the game's own folder")
 
 
@@ -43,8 +44,10 @@ def test_no_game_folder_says_what_to_do(tmp_path):
 def test_HB_CREDENTIAL_FILE_wins_and_must_exist(tmp_path):
     _cred(tmp_path / "game")
     mine = _cred(tmp_path / "elsewhere")
-    assert run_local.find_credential({"HB_CREDENTIAL_FILE": str(mine)}, tmp_path / "game") == \
-        (mine, "HB_CREDENTIAL_FILE")
+    assert run_local.find_credential({"HB_CREDENTIAL_FILE": str(mine)}, tmp_path / "game") == (
+        mine,
+        "HB_CREDENTIAL_FILE",
+    )
     path, why = run_local.find_credential({"HB_CREDENTIAL_FILE": str(tmp_path / "nope")}, tmp_path / "game")
     assert path is None and "names no file" in why
 
@@ -96,7 +99,7 @@ def test_the_children_get_the_account_settings(tmp_path):
     env = run_local.child_env(tmp_path / "cred", "as.example", base={"HOLODREAMS_DIR": "D:\\game"})
     assert env["HB_CREDENTIAL_FILE"] == str(tmp_path / "cred")
     assert env["HB_ACCOUNT_HOST"] == "as.example"
-    assert env["HOLODREAMS_DIR"] == "D:\\game"                # a folder set by hand is kept
+    assert env["HOLODREAMS_DIR"] == "D:\\game"  # a folder set by hand is kept
     assert env["PYTHONIOENCODING"] == "utf-8"
     bare = run_local.child_env(None, None, base={"HOLODREAMS_DIR": "D:\\game"})
     assert "HB_CREDENTIAL_FILE" not in bare and "HB_ACCOUNT_HOST" not in bare
@@ -119,7 +122,7 @@ def test_a_port_held_by_another_program_is_left_alone(monkeypatch):
         monkeypatch.setattr(run_local.time, "sleep", lambda s: None)
         killed = []
         monkeypatch.setattr(run_local.os, "kill", lambda *a: killed.append(a))
-        monkeypatch.setattr(run_local, "server_on", lambda p: None)      # not a holobuilder server
+        monkeypatch.setattr(run_local, "server_on", lambda p: None)  # not a holobuilder server
         got = run_local.claim_port(port)
         assert got is not None and got != port and not killed
         monkeypatch.setattr(run_local, "server_on", lambda p: {"repo": "/elsewhere", "pid": 9})
@@ -138,7 +141,7 @@ def test_an_earlier_server_of_this_folder_is_stopped(monkeypatch):
 
     def kill(pid, sig):
         killed.append((pid, sig))
-        held.close()                                     # the old server lets the port go
+        held.close()  # the old server lets the port go
 
     monkeypatch.setattr(run_local, "server_on", lambda p: {"repo": str(run_local.REPO), "pid": 4242})
     monkeypatch.setattr(run_local.os, "kill", kill)
@@ -188,8 +191,9 @@ def test_a_free_port_is_used_as_it_is():
 
 def test_refresh_passes_other_options_to_refresh_all(monkeypatch):
     seen = {}
-    monkeypatch.setattr(run_local, "refresh", lambda args, extra: seen.update(region=args.region,
-                                                                               extra=extra) or 0)
+    monkeypatch.setattr(
+        run_local, "refresh", lambda args, extra: seen.update(region=args.region, extra=extra) or 0
+    )
     assert run_local.main(["refresh", "--region", "as", "--skip", "chibi", "--pictures-later"]) == 0
     assert seen == {"region": "as", "extra": ["--skip", "chibi", "--pictures-later"]}
 
@@ -204,19 +208,19 @@ def test_start_and_check_refuse_unknown_options():
 def test_the_launchers_call_the_helper_from_their_own_folder():
     for name, sub in (("setup.cmd", "setup"), ("refresh.cmd", "refresh"), ("start.cmd", "start")):
         raw = (ROOT / name).read_bytes()
-        text = raw.decode("ascii")                         # cmd reads them in the OEM code page
-        assert 'cd /d "%~dp0"' in text                    # any clone folder, any working directory
+        text = raw.decode("ascii")  # cmd reads them in the OEM code page
+        assert 'cd /d "%~dp0"' in text  # any clone folder, any working directory
         assert f"tools\\local\\run_local.py {sub}" in text
-        assert "goto" not in text.lower() and "\n:" not in text   # no labels: LF-only copies still run
+        assert "goto" not in text.lower() and "\n:" not in text  # no labels: LF-only copies still run
 
 
 def test_the_shell_launchers_mirror_the_cmd_ones():
     for name, sub in (("setup.sh", "setup"), ("refresh.sh", "refresh"), ("start.sh", "start")):
         raw = (ROOT / name).read_bytes()
-        assert b"\r" not in raw                            # bash reads a CR as part of the line
+        assert b"\r" not in raw  # bash reads a CR as part of the line
         text = raw.decode("ascii")
         assert text.startswith("#!/usr/bin/env bash\n")
-        assert 'cd "$(dirname "$0")"' in text             # any clone folder, any working directory
+        assert 'cd "$(dirname "$0")"' in text  # any clone folder, any working directory
         assert f"tools/local/run_local.py {sub}" in text
     assert "*.sh text eol=lf" in (ROOT / ".gitattributes").read_text("utf8")
 
@@ -251,14 +255,17 @@ def test_setup_creates_the_venv_installs_and_checks(monkeypatch, tmp_path):
     assert run_local.setup() == 0
     assert calls[0][1:] == ["-m", "venv", str(venv)]
     assert calls[1] == [str(py), "-m", "pip", "--version"]
-    assert calls[2][:4] == [str(py), "-m", "pip", "install"] and calls[2][-3:] == [".", "-r", "requirements.txt"]
+    assert calls[2][:4] == [str(py), "-m", "pip", "install"] and calls[2][-3:] == [
+        ".",
+        "-r",
+        "requirements.txt",
+    ]
     assert calls[3][0] == str(py) and calls[3][-1] == "check"
 
 
 def test_setup_stops_when_the_venv_cannot_be_made(monkeypatch, tmp_path):
     monkeypatch.setattr(run_local.paths, "VENV", tmp_path / ".venv")
-    monkeypatch.setattr(run_local.subprocess, "run",
-                        lambda cmd, **_kw: type("R", (), {"returncode": 1})())
+    monkeypatch.setattr(run_local.subprocess, "run", lambda cmd, **_kw: type("R", (), {"returncode": 1})())
     assert run_local.setup() == 1
 
 
@@ -277,9 +284,11 @@ def test_setup_makes_a_venv_from_an_older_python_again(monkeypatch, tmp_path, ca
     calls = []
     monkeypatch.setattr(run_local.paths, "VENV", venv)
     monkeypatch.setattr(run_local, "venv_version", lambda _py: (3, 11))
-    monkeypatch.setattr(run_local.subprocess, "run",
-                        lambda cmd, **_kw: calls.append([str(c) for c in cmd])
-                        or type("R", (), {"returncode": 0})())
+    monkeypatch.setattr(
+        run_local.subprocess,
+        "run",
+        lambda cmd, **_kw: calls.append([str(c) for c in cmd]) or type("R", (), {"returncode": 0})(),
+    )
     assert run_local.setup() == 0
     assert calls[0] == [sys.executable, "-m", "venv", "--clear", str(venv)]
     assert "runs Python 3.11, too old" in capsys.readouterr().out
@@ -313,5 +322,6 @@ def test_the_minimum_python_is_the_same_everywhere():
 
 def test_venv_python_per_platform(tmp_path):
     from hbuilder import paths
+
     assert paths.venv_python(tmp_path, "win32") == tmp_path / "Scripts" / "python.exe"
     assert paths.venv_python(tmp_path, "linux") == tmp_path / "bin" / "python"

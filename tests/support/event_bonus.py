@@ -6,10 +6,11 @@ loops (Event Pt rows SUM over the five members, Event Song Score rows take the M
 card). These functions do the same deck-level arithmetic in one call, so the tests
 can pin the matching rules and the two laws on small hand-built decks.
 """
+
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Iterable, Mapping
 
 from hbuilder.domain.card import Card
 from hbuilder.domain.marathon import (
@@ -75,8 +76,9 @@ def event_bonus_permil(
     )
 
 
-def event_point_bonus_permil(members: Iterable[Card], event: MarathonEvent, *,
-                             blooms: Mapping[str, int]) -> EventBonusResult:
+def event_point_bonus_permil(
+    members: Iterable[Card], event: MarathonEvent, *, blooms: Mapping[str, int]
+) -> EventBonusResult:
     """`E` for Event Points: the LIVE rows only, summed per card, summed over the members.
     Pass the five members, never the leader."""
     rows = event.rows_for(LIVE_CHANNEL)
@@ -86,13 +88,14 @@ def event_point_bonus_permil(members: Iterable[Card], event: MarathonEvent, *,
         bloom = blooms.get(card.id)
         skipped += sum(1 for r in rows if r.bloom is not None and bloom is None)
         per_card.append(_card_permil(card, rows, bloom=bloom, music_id=None))
-    return EventBonusResult(total_permil=sum(per_card), per_card_permil=tuple(per_card),
-                            bloom_rows_skipped=skipped)
+    return EventBonusResult(
+        total_permil=sum(per_card), per_card_permil=tuple(per_card), bloom_rows_skipped=skipped
+    )
 
 
-def event_song_bonus_permil(members: Iterable[Card], event: MarathonEvent, *, music_id: str,
-                            blooms: Mapping[str, int]) -> int:
+def event_song_bonus_permil(
+    members: Iterable[Card], event: MarathonEvent, *, music_id: str, blooms: Mapping[str, int]
+) -> int:
     """`P` for Event Song Score: the song-gated rows, summed per card, then the LARGEST card."""
     rows = event.rows_for(MUSIC_CHANNEL)
-    return max((_card_permil(c, rows, bloom=blooms.get(c.id), music_id=music_id)
-                for c in members), default=0)
+    return max((_card_permil(c, rows, bloom=blooms.get(c.id), music_id=music_id) for c in members), default=0)

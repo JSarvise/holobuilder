@@ -5,22 +5,43 @@ each buy the whole G-008/011/021 chain (1,350), the game counts only 900.
 A character's three nodes can feed DIFFERENT groupings (Fubuki: G-008 to Gen 1,
 G-011 to GAMERS); assuming one grouping per character, read in set order, drops
 a chain GAMERS needs on some processes and not others."""
+
 from __future__ import annotations
+
+from support.builders import make_card
 
 from hbuilder.domain import board_plan as bp
 from hbuilder.domain.board_optimizer import BoardPlan
 
-from support.builders import make_card
-
 GEN1, GAMERS = "character_grouping-grp-gen_1-always", "character_grouping-grp-gamers-always"
-SKILLTREE = {"nodes": {
-    "G-008": {"chr": {"chr-00001": {"tgt": GEN1, "v": 75}, "chr-00002": {"tgt": GEN1, "v": 75},
-                      "chr-00003": {"tgt": GEN1, "v": 75}, "chr-00004": {"tgt": GEN1, "v": 75}}},
-    "G-011": {"chr": {"chr-00001": {"tgt": GEN1, "v": 225}, "chr-00002": {"tgt": GEN1, "v": 225},
-                      "chr-00003": {"tgt": GEN1, "v": 225}, "chr-00004": {"tgt": GAMERS, "v": 300}}},
-    "G-021": {"chr": {"chr-00001": {"tgt": GEN1, "v": 150}, "chr-00002": {"tgt": GEN1, "v": 150},
-                      "chr-00003": {"tgt": GEN1, "v": 150}, "chr-00004": {"tgt": GAMERS, "v": 150}}},
-}}
+SKILLTREE = {
+    "nodes": {
+        "G-008": {
+            "chr": {
+                "chr-00001": {"tgt": GEN1, "v": 75},
+                "chr-00002": {"tgt": GEN1, "v": 75},
+                "chr-00003": {"tgt": GEN1, "v": 75},
+                "chr-00004": {"tgt": GEN1, "v": 75},
+            }
+        },
+        "G-011": {
+            "chr": {
+                "chr-00001": {"tgt": GEN1, "v": 225},
+                "chr-00002": {"tgt": GEN1, "v": 225},
+                "chr-00003": {"tgt": GEN1, "v": 225},
+                "chr-00004": {"tgt": GAMERS, "v": 300},
+            }
+        },
+        "G-021": {
+            "chr": {
+                "chr-00001": {"tgt": GEN1, "v": 150},
+                "chr-00002": {"tgt": GEN1, "v": 150},
+                "chr-00003": {"tgt": GEN1, "v": 150},
+                "chr-00004": {"tgt": GAMERS, "v": 150},
+            }
+        },
+    }
+}
 CHAIN = frozenset({"S-001", "G-008", "G-011", "G-021"})
 
 
@@ -48,8 +69,10 @@ def test_the_third_same_grouping_chain_is_surplus_but_not_one_another_grouping_n
 
 
 def test_room_is_what_the_other_boards_leave_under_the_cap():
-    bench = {"M1": [{"node": "G-008"}, {"node": "G-011"}, {"node": "G-021"}],
-             "M2": [{"node": "G-011", "connect_multiplier": 2.0}]}
+    bench = {
+        "M1": [{"node": "G-008"}, {"node": "G-011"}, {"node": "G-021"}],
+        "M2": [{"node": "G-011", "connect_multiplier": 2.0}],
+    }
     names = {"chr-00001": "M1", "chr-00002": "M2", "chr-00003": "M3", "chr-00004": "M4"}
     room = bp.grouping_room(SKILLTREE, bench, names)
     # M3: others give 450 + 450 (M2's G-011 doubled by a Connect card) = 900 -> no room

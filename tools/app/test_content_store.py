@@ -1,5 +1,6 @@
 """content_store: sync brings the 'sync' files, lazy serves the rest, the cache is capped.
 The server is a dict; nothing touches the network."""
+
 from __future__ import annotations
 
 import hashlib
@@ -20,8 +21,10 @@ def sha(b: bytes) -> str:
 
 def server(files: dict[str, tuple[str, bytes]]):
     """{rel: (kind, body)} -> (fetch, calls)."""
-    manifest = {"id": "m1", "files": {rel: {"sha256": sha(b), "size": len(b), "kind": k}
-                                      for rel, (k, b) in files.items()}}
+    manifest = {
+        "id": "m1",
+        "files": {rel: {"sha256": sha(b), "size": len(b), "kind": k} for rel, (k, b) in files.items()},
+    }
     objects = {f"objects/{sha(b)[:2]}/{sha(b)}": b for _, b in files.values()}
     calls = []
 
@@ -30,11 +33,16 @@ def server(files: dict[str, tuple[str, bytes]]):
         if route == "manifest.json":
             return json.dumps(manifest).encode()
         return objects[route]
+
     return fetch, calls
 
 
-FILES = {"d/charts.json": ("sync", b"charts"), "d/icons/a.png": ("sync", b"icon"),
-         "d/live2d/m.moc3": ("lazy", b"m" * 100), "d/live2d/n.moc3": ("lazy", b"n" * 100)}
+FILES = {
+    "d/charts.json": ("sync", b"charts"),
+    "d/icons/a.png": ("sync", b"icon"),
+    "d/live2d/m.moc3": ("lazy", b"m" * 100),
+    "d/live2d/n.moc3": ("lazy", b"n" * 100),
+}
 
 
 def test_sync_writes_only_sync_files_and_skips_what_matches(tmp_path):
@@ -44,10 +52,10 @@ def test_sync_writes_only_sync_files_and_skips_what_matches(tmp_path):
     r = s.sync(seen.append)
     assert r == {"manifest": "m1", "files": 2, "bytes": 10}
     assert (tmp_path / "d/charts.json").read_bytes() == b"charts"
-    assert not (tmp_path / "d/live2d/m.moc3").exists()          # lazy stays on the server
+    assert not (tmp_path / "d/live2d/m.moc3").exists()  # lazy stays on the server
     assert seen[-1]["i"] == seen[-1]["n"] == 2
     calls.clear()
-    assert s.sync()["files"] == 0                               # second run: nothing to fetch
+    assert s.sync()["files"] == 0  # second run: nothing to fetch
     assert calls == ["manifest.json"]
 
 
@@ -59,7 +67,7 @@ def test_lazy_prefers_local_then_caches_then_serves_from_cache(tmp_path):
     p = s.lazy("d/live2d/m.moc3")
     assert p.read_bytes() == b"m" * 100 and s.store in p.parents
     calls.clear()
-    assert s.lazy("d/live2d/m.moc3") == p and calls == []       # second view: from disk
+    assert s.lazy("d/live2d/m.moc3") == p and calls == []  # second view: from disk
     assert s.lazy("d/nope.moc3") is None
 
 
@@ -69,11 +77,11 @@ def test_cache_cap_evicts_the_oldest_and_zero_is_unlimited(tmp_path):
     s.sync()
     first = s.lazy("d/live2d/m.moc3")
     second = s.lazy("d/live2d/n.moc3")
-    assert second.is_file() and not first.exists()              # 200 B > 150 B cap: oldest out
-    s0 = cst.ContentStore(tmp_path / "z", verify=False, fetch=fetch, cap=0)   # the default: no cap
+    assert second.is_file() and not first.exists()  # 200 B > 150 B cap: oldest out
+    s0 = cst.ContentStore(tmp_path / "z", verify=False, fetch=fetch, cap=0)  # the default: no cap
     s0.sync()
     a, b = s0.lazy("d/live2d/m.moc3"), s0.lazy("d/live2d/n.moc3")
-    assert a.is_file() and b.is_file()                          # nothing evicted
+    assert a.is_file() and b.is_file()  # nothing evicted
 
 
 def test_prefetch_fills_the_cache_once_and_only_when_unlimited(tmp_path):
@@ -105,6 +113,7 @@ def test_a_corrupt_object_is_never_written(tmp_path):
     def bad(route: str) -> bytes:
         body = fetch(route)
         return body if route == "manifest.json" else body + b"!"
+
     s = cst.ContentStore(tmp_path, verify=False, fetch=bad)
     with pytest.raises(ValueError):
         s.sync()
@@ -113,8 +122,9 @@ def test_a_corrupt_object_is_never_written(tmp_path):
 
 def test_an_unsigned_or_altered_manifest_is_refused(tmp_path, monkeypatch):
     """The server is public and untrusted: only the publisher's signature counts (signing.py)."""
-    from Crypto.PublicKey import ECC
     import signing
+    from Crypto.PublicKey import ECC
+
     key = ECC.generate(curve="ed25519")
     pem = tmp_path / "k.pem"
     pem.write_text(key.export_key(format="PEM"))
@@ -125,6 +135,7 @@ def test_an_unsigned_or_altered_manifest_is_refused(tmp_path, monkeypatch):
 
     def serve(sig, manifest=body):
         return lambda route: {"manifest.json": manifest, "manifest.sig": sig}.get(route) or fetch(route)
+
     assert cst.ContentStore(tmp_path / "a", fetch=serve(good)).sync()["files"] == 2
     with pytest.raises(signing.BadSignature):
         cst.ContentStore(tmp_path / "b", fetch=serve(b"AAAA")).sync()
@@ -138,10 +149,9 @@ def test_an_older_manifest_is_refused(tmp_path):
     the manifest id is its publish time."""
     fetch, _ = server(FILES)
     s = cst.ContentStore(tmp_path, verify=False, fetch=fetch)
-    s.sync()                                            # holds manifest "m1"
+    s.sync()  # holds manifest "m1"
     older = json.dumps({"id": "m0", "files": {}}).encode()
-    s2 = cst.ContentStore(tmp_path, verify=False,
-                          fetch=lambda r: older if r == "manifest.json" else fetch(r))
+    s2 = cst.ContentStore(tmp_path, verify=False, fetch=lambda r: older if r == "manifest.json" else fetch(r))
     with pytest.raises(OSError, match="older"):
         s2.sync()
     assert (tmp_path / "d" / "charts.json").read_bytes() == b"charts"

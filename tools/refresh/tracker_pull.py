@@ -15,6 +15,7 @@ rest of state/). Prints `cutoffs: N appended` like event_cutoffs.py, so the serv
     python tracker_pull.py
     python tracker_pull.py --watch us   (a viewer: read us's top 100 densely)
 """
+
 from __future__ import annotations
 
 import json
@@ -38,7 +39,7 @@ REPO = paths.REPO
 CONFIG = paths.STATE / "tracker_remote.json"
 STORE = paths.DUMPS / "cutoffs"
 STATE_FILE = ".pull_state.json"
-WATCH_S = 300   # a viewer's lease; the page renews it about every minute while it is open
+WATCH_S = 300  # a viewer's lease; the page renews it about every minute while it is open
 
 
 def load_config(path: Path = CONFIG) -> dict | None:
@@ -49,7 +50,7 @@ def load_config(path: Path = CONFIG) -> dict | None:
     return cfg if isinstance(cfg, dict) and cfg.get("ssh") else None
 
 
-API_CONFIG = paths.STATE / "server_api.json"   # {"url", "token"}: the desktop app's server
+API_CONFIG = paths.STATE / "server_api.json"  # {"url", "token"}: the desktop app's server
 
 
 def load_api_config(path: Path = API_CONFIG) -> dict | None:
@@ -76,8 +77,9 @@ class Https:
             return r.read()
 
     def post(self, route: str, **q) -> bytes:
-        req = urllib.request.Request(self.base + route + "?" + urllib.parse.urlencode(q),
-                                     data=b"", method="POST", headers=self.headers)
+        req = urllib.request.Request(
+            self.base + route + "?" + urllib.parse.urlencode(q), data=b"", method="POST", headers=self.headers
+        )
         with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
             return r.read()
 
@@ -97,10 +99,23 @@ class Tunnel:
     def __init__(self, ssh: str, remote_port: int):
         self.local = _free_port()
         self.proc = subprocess.Popen(  # noqa: S603
-            ["ssh", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes",
-             "-o", "ConnectTimeout=15", "-N",
-             "-L", f"127.0.0.1:{self.local}:127.0.0.1:{remote_port}", ssh],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            [
+                "ssh",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ExitOnForwardFailure=yes",
+                "-o",
+                "ConnectTimeout=15",
+                "-N",
+                "-L",
+                f"127.0.0.1:{self.local}:127.0.0.1:{remote_port}",
+                ssh,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
         deadline = time.time() + 25
         while time.time() < deadline:
             if self.proc.poll() is not None:
@@ -206,12 +221,12 @@ def pull(get, store: Path = STORE) -> dict:
         if not rel.endswith(".jsonl"):
             continue
         off = int(offsets.get(rel, 0))
-        if size < off:       # replaced on the remote: start over (the merge skips duplicates)
+        if size < off:  # replaced on the remote: start over (the merge skips duplicates)
             off = 0
         if size == off:
             continue
         data = get("/file", path=rel, offset=off)
-        end = data.rfind(b"\n") + 1        # only whole lines; a torn tail waits for next time
+        end = data.rfind(b"\n") + 1  # only whole lines; a torn tail waits for next time
         if end:
             appended += merge_lines(local, data[:end].splitlines())
             offsets[rel] = off + end
@@ -221,12 +236,14 @@ def pull(get, store: Path = STORE) -> dict:
 
 
 def top_reads(status: dict, region: str) -> int:
-    return next((int(r.get("top_reads") or 0) for r in status.get("regions", [])
-                 if r.get("region") == region), 0)
+    return next(
+        (int(r.get("top_reads") or 0) for r in status.get("regions", []) if r.get("region") == region), 0
+    )
 
 
-def watch(tunnel: "Tunnel", region: str, seconds: int = WATCH_S, wait_s: float = 25,
-          kind: str | None = None) -> bool:
+def watch(
+    tunnel: Tunnel, region: str, seconds: int = WATCH_S, wait_s: float = 25, kind: str | None = None
+) -> bool:
     """Hold (or renew) a viewer's lease on `region`'s top 100, then wait for the read it triggers
     when the lease is new -- so the pull right after brings a fresh board. True when one landed."""
     before = top_reads(json.loads(tunnel.get("/status")), region)
@@ -251,21 +268,24 @@ def main() -> int:
     kind = sys.argv[sys.argv.index("--kind") + 1] if "--kind" in sys.argv[:-1] else None
     cfg, api = load_config(), load_api_config()
     if not cfg and not api:
-        print(f"[tracker] FAILED: no {CONFIG.relative_to(REPO)} (ssh target) "
-              f"and no {API_CONFIG.relative_to(REPO)} (https)")
+        print(
+            f"[tracker] FAILED: no {CONFIG.relative_to(REPO)} (ssh target) "
+            f"and no {API_CONFIG.relative_to(REPO)} (https)"
+        )
         return 2
     try:
         # SSH where it is configured (the operator's PC), HTTPS otherwise (the desktop app)
-        tunnel = (Tunnel(cfg["ssh"], int(cfg.get("port") or 8790)) if cfg
-                  else Https(api["url"], api["token"]))
+        tunnel = Tunnel(cfg["ssh"], int(cfg.get("port") or 8790)) if cfg else Https(api["url"], api["token"])
     except RuntimeError as exc:
         print(f"[tracker] FAILED: {exc}")
         return 1
     try:
         if region:
             fresh = watch(tunnel, region, kind=kind)
-            print(f"[{region}] top 100{f' {kind}' if kind else ''} watched"
-                  + ("" if fresh else " (no new read yet)"))
+            print(
+                f"[{region}] top 100{f' {kind}' if kind else ''} watched"
+                + ("" if fresh else " (no new read yet)")
+            )
         res = pull(tunnel.get)
         status = json.loads(tunnel.get("/status"))
     except Exception as exc:  # noqa: BLE001
@@ -274,10 +294,15 @@ def main() -> int:
     finally:
         tunnel.close()
     for r in status.get("regions", []):
-        ok = (f"ok {int(time.time()) - int(r['ok_at'])}s ago" if r.get("ok_at")
-              else "no good read since it started")
-        print(f"[{r['region']}] tracker {ok}, reads {r.get('reads')}, "
-              f"top {r.get('top_reads')}" + (f", last error: {r['error']}" if r.get("error") else ""))
+        ok = (
+            f"ok {int(time.time()) - int(r['ok_at'])}s ago"
+            if r.get("ok_at")
+            else "no good read since it started"
+        )
+        print(
+            f"[{r['region']}] tracker {ok}, reads {r.get('reads')}, "
+            f"top {r.get('top_reads')}" + (f", last error: {r['error']}" if r.get("error") else "")
+        )
     print(f"cutoffs: {res['appended']} appended ({res['metas']} meta, {res['files']} files)")
     return 0
 

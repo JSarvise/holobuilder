@@ -24,6 +24,7 @@ name by mistake.
     python octo_catalog.py --status    # what is on disk, decrypt nothing
     python octo_catalog.py --force     # decrypt even if the copy looks current
 """
+
 from __future__ import annotations
 
 import argparse

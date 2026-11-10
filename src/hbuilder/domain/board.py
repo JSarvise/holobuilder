@@ -191,8 +191,9 @@ def _close_grouping(flat: dict[str, float]) -> dict[str, float]:
     return out
 
 
-def _is_grouping_all(effect: "BoardEffect") -> bool:
+def _is_grouping_all(effect: BoardEffect) -> bool:
     return effect.scope == "grouping" and effect.kind == "stat" and effect.stat == "all"
+
 
 # The families this module knows how to route, and where each one goes.
 # `("stat", <stat or "all">)`  — flat stat points.
@@ -216,9 +217,7 @@ _STAT_FAMILIES: dict[str, tuple[str, str]] = {
 _SKILL_EFFECT_UP = "live_active_skill_effect_up_permil_up"
 _ACTIVATION_RATE_UP = "live_active_skill_activation_probability_up_permil_up"
 _COOLDOWN_SHORTEN = "live_active_skill_cool_time_shorten_permil_up"
-_SONG_SCORE_BONUS = (
-    "live_score_bonus_add_permil_up_by_music_skill_tree_character_and_music_singer_type"
-)
+_SONG_SCORE_BONUS = "live_score_bonus_add_permil_up_by_music_skill_tree_character_and_music_singer_type"
 
 # Reward/economy families. Parsed so an unknown family still raises, but they
 # reach neither power nor score and are dropped on the floor deliberately.
@@ -251,12 +250,21 @@ _GROUPING_RE = re.compile(r"^character_grouping-(?P<grouping>.+?)-(?P<condition>
 # board tests) still match on the first leg, so the check accepts EITHER form.
 # Source: `import_to_cards.GENERATION_BY_GROUP`.
 _GENERATION_BY_GROUPING = {
-    "grp-gen_0": "0期生", "grp-gen_1": "1期生", "grp-gen_2": "2期生",
-    "grp-gen_3": "3期生", "grp-gen_4": "4期生", "grp-gen_5": "5期生",
-    "grp-gamers": "ゲーマーズ", "grp-holox": "holoX",
-    "grp-indonesia-gen_1": "ID1", "grp-indonesia-gen_2": "ID2",
-    "grp-indonesia-gen_3": "ID3", "grp-myth": "Myth", "grp-promise": "Promise",
-    "grp-advent": "Advent", "grp-regloss": "ReGLOSS",
+    "grp-gen_0": "0期生",
+    "grp-gen_1": "1期生",
+    "grp-gen_2": "2期生",
+    "grp-gen_3": "3期生",
+    "grp-gen_4": "4期生",
+    "grp-gen_5": "5期生",
+    "grp-gamers": "ゲーマーズ",
+    "grp-holox": "holoX",
+    "grp-indonesia-gen_1": "ID1",
+    "grp-indonesia-gen_2": "ID2",
+    "grp-indonesia-gen_3": "ID3",
+    "grp-myth": "Myth",
+    "grp-promise": "Promise",
+    "grp-advent": "Advent",
+    "grp-regloss": "ReGLOSS",
 }
 
 
@@ -396,9 +404,19 @@ class BoardDigest:
     `is` before trusting a digest it was handed."""
 
     __slots__ = (
-        "board", "leader_scoped", "song_ops", "song_scopes", "skill_effect_up",
-        "conditional_skill_effect_up", "conditional_stat", "uptime",
-        "uptime_error", "stat_effects", "flat_exact", "inert", "_stat_ops",
+        "board",
+        "leader_scoped",
+        "song_ops",
+        "song_scopes",
+        "skill_effect_up",
+        "conditional_skill_effect_up",
+        "conditional_stat",
+        "uptime",
+        "uptime_error",
+        "stat_effects",
+        "flat_exact",
+        "inert",
+        "_stat_ops",
         "_stat_ops_by_card",
     )
 
@@ -458,17 +476,21 @@ class BoardDigest:
         # Whether every flat stat value on this board is a whole number small
         # enough that sums of them are exact — see `BoardModel._terms`.
         self.flat_exact = all(
-            effect.value == math.floor(effect.value)
-            and abs(effect.value) <= _FLAT_EXACT_MAX
+            effect.value == math.floor(effect.value) and abs(effect.value) <= _FLAT_EXACT_MAX
             for effect in stat_effects
             if effect.kind == "stat"
         )
         # Nothing here but plain stat effects: `BoardModel.__post_init__` has
         # nothing to derive from this board and only files its digest.
         self.inert = not (
-            leader_scoped or song_ops or skill_effect_up
-            or conditional_skill_effect_up or conditional_stat
-            or uptime_error is not None or rate or cooldown
+            leader_scoped
+            or song_ops
+            or skill_effect_up
+            or conditional_skill_effect_up
+            or conditional_stat
+            or uptime_error is not None
+            or rate
+            or cooldown
         )
         self._stat_ops: dict[tuple, tuple[tuple, tuple, tuple]] = {}
         # The same memo reached by the card OBJECT: `(id(card), leader_here) ->
@@ -614,55 +636,43 @@ class BoardModel:
     # because one has been used and the other has not.
     # Derived in `__post_init__` too — `score_bonus_rate` is a model constant.
     _score_bonus_rate: float = field(default=0.0, repr=False)
-    _terms_cache: dict[
-        tuple[str | None, str, str, frozenset[str]], tuple[dict, dict]
-    ] = field(default_factory=dict, compare=False, repr=False)
+    _terms_cache: dict[tuple[str | None, str, str, frozenset[str]], tuple[dict, dict]] = field(
+        default_factory=dict, compare=False, repr=False
+    )
     # Every non-conditional `skill_effect_up` effect, in `resolve`'s own
     # characters -> nodes -> effects walk order, as `(holomem, effect)`. Order
     # is load-bearing: float addition is not associative, so summing a subset
     # of these in index order is what keeps `skill_effect_up_for` bit-identical
     # to `resolve`.
-    _skill_effect_up_terms: tuple[tuple[str, "BoardEffect"], ...] = field(
-        default=(), repr=False
-    )
+    _skill_effect_up_terms: tuple[tuple[str, BoardEffect], ...] = field(default=(), repr=False)
     # `(leader_holomem, card key) -> the indices of the terms above that reach
     # that one card`. Per CARD, so the memo survives the solver swapping one
     # member; the team's value is the sum over the UNION of five such sets.
-    _skill_effect_up_cache: dict[
-        tuple[str | None, str, str, frozenset[str]], frozenset[int]
-    ] = field(default_factory=dict, compare=False, repr=False)
+    _skill_effect_up_cache: dict[tuple[str | None, str, str, frozenset[str]], frozenset[int]] = field(
+        default_factory=dict, compare=False, repr=False
+    )
     # The same two shapes for the CONDITIONAL half — the terms `resolve` and
     # `_skill_effect_up_terms` both drop, and which a song-aware caller can
     # evaluate because it knows the cast. Kept apart from the unconditional
     # terms so a caller with no cast cannot accidentally pick them up.
-    _conditional_skill_effect_up_terms: tuple[tuple[str, "BoardEffect"], ...] = field(
-        default=(), repr=False
-    )
+    _conditional_skill_effect_up_terms: tuple[tuple[str, BoardEffect], ...] = field(default=(), repr=False)
     # The same, for the singer-conditional STAT/RATE effects (R-044/062/063:
     # "when [character] is included as a singer, grants +stat% to all"). `resolve`
     # and `_terms` both drop these (`if effect.conditional: continue`); a song-aware
     # caller applies them via `conditional_stat_power_for` when the holomem sings.
-    _conditional_stat_terms: tuple[tuple[str, "BoardEffect"], ...] = field(
-        default=(), repr=False
-    )
+    _conditional_stat_terms: tuple[tuple[str, BoardEffect], ...] = field(default=(), repr=False)
     # holomem -> {song_scope: rate}, the Y branch kept per character. The pooled
     # `_score_bonus_rate` above is exact only for `all`.
-    _song_score_bonus_by_holomem: Mapping[str, Mapping[str, float]] = field(
-        default_factory=dict, repr=False
-    )
+    _song_score_bonus_by_holomem: Mapping[str, Mapping[str, float]] = field(default_factory=dict, repr=False)
     # holomem -> (activation_rate_up, cooldown_shorten), summed over that
     # character's own board. A model CONSTANT per character, not a per-team
     # quantity -- see `uptime_for` for the measurement that makes it one.
-    _uptime: Mapping[str, tuple[float, float]] = field(
-        default_factory=dict, repr=False
-    )
+    _uptime: Mapping[str, tuple[float, float]] = field(default_factory=dict, repr=False)
     # holomem -> that board's `BoardDigest`. A caller that keeps boards alive
     # across models (`PlanCache`) passes the digests it kept; `__post_init__`
     # builds whichever are missing or belong to another board object. A cache
     # of a pure function of each board, so never part of `__eq__`.
-    _digests: Mapping[str, BoardDigest] = field(
-        default_factory=dict, compare=False, repr=False
-    )
+    _digests: Mapping[str, BoardDigest] = field(default_factory=dict, compare=False, repr=False)
     # Derived: every board's `BoardDigest.flat_exact` holds — see `_terms`.
     _flat_exact: bool = field(default=False, compare=False, repr=False)
     # The bench this model was assembled over, if the caller has one
@@ -673,13 +683,11 @@ class BoardModel:
     _base: BoardBase | None = field(default=None, compare=False, repr=False)
     # Derived: holomem -> position in `characters`, for every board that is
     # NOT the base's own digest at that position.
-    _base_special: Mapping[str, int] = field(
-        default_factory=dict, compare=False, repr=False
-    )
+    _base_special: Mapping[str, int] = field(default_factory=dict, compare=False, repr=False)
     # The model a `with_cooldowns` copy was made from (the root of a chain of copies), or
     # `None`. A copy differs from it only in the cooldown terms, so anything that is not a
     # function of the cooldowns (the Overall Power) can be computed once for both.
-    _cooldown_source: "BoardModel | None" = field(default=None, compare=False, repr=False)
+    _cooldown_source: BoardModel | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         # Both derived here rather than at every construction site so no caller
@@ -845,9 +853,7 @@ class BoardModel:
             ]
             for holomem, board in self.characters.items()
         ]
-        return hashlib.sha256(
-            json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        ).hexdigest()
+        return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode("utf-8")).hexdigest()
 
     @property
     def leader_scoped_holomem(self) -> frozenset[str]:
@@ -958,9 +964,7 @@ class BoardModel:
         self._terms_cache[key] = (flat, rate)
         return (flat, rate)
 
-    def _terms_over_base(
-        self, card: Card, card_key: tuple, leader_holomem: str | None
-    ) -> tuple[dict, dict]:
+    def _terms_over_base(self, card: Card, card_key: tuple, leader_holomem: str | None) -> tuple[dict, dict]:
         """`_terms`' walk, taken as the base's totals corrected by the boards
         this model does not share with it — see `BoardBase` for why that is
         the same number. Only reached when `__post_init__` kept `_base`.
@@ -974,11 +978,7 @@ class BoardModel:
         total, count, base_rates = base.terms(card, card_key)
         special = self._base_special
         corrected = list(special.items())
-        if (
-            leader_holomem is not None
-            and leader_holomem not in special
-            and leader_holomem in base.index
-        ):
+        if leader_holomem is not None and leader_holomem not in special and leader_holomem in base.index:
             corrected.append((leader_holomem, base.index[leader_holomem]))
         flat_total = dict(total)
         flat_count = dict(count)
@@ -1005,19 +1005,15 @@ class BoardModel:
         # A stat is in the bucket exactly when some addend reached it — the
         # count, not the total, says so (a total can be a legitimate 0.0).
         flat = {stat: value for stat, value in flat_total.items() if flat_count[stat]}
-        rates.extend(
-            (pos, ops) for pos, holomem, ops in base_rates if holomem not in replaced
-        )
-        rates.sort(key=_FIRST)     # board order; positions are unique
+        rates.extend((pos, ops) for pos, holomem, ops in base_rates if holomem not in replaced)
+        rates.sort(key=_FIRST)  # board order; positions are unique
         rate: dict[str, float] = {}
         for _pos, ops in rates:
             for stat, value in ops:
                 rate[stat] = rate.get(stat, 0.0) + value
         return (flat, rate)
 
-    def power_bonus_for(
-        self, members: tuple[Card, ...], leader_holomem: str | None
-    ) -> float:
+    def power_bonus_for(self, members: tuple[Card, ...], leader_holomem: str | None) -> float:
         """`resolve(self, leader, members).power_bonus(members)`, without the walk.
 
         Bit-identical to it, and the accumulation loop below is copied from
@@ -1080,7 +1076,7 @@ class BoardModel:
         quietly paid to the wrong cards."""
         return self._uptime.get(holomem, (0.0, 0.0))
 
-    def with_cooldowns(self, cooldowns: Mapping[str, float]) -> "BoardModel":
+    def with_cooldowns(self, cooldowns: Mapping[str, float]) -> BoardModel:
         """This model with some holomems' activation-frequency term (`uptime_for`'s
         `cooldown_shorten`, a fraction) replaced: `{holomem: cooldown_shorten}`. Everything
         else, derived terms and caches included, is shared, so the copy scores what this
@@ -1096,14 +1092,12 @@ class BoardModel:
         return new
 
     @property
-    def power_identity(self) -> "BoardModel":
+    def power_identity(self) -> BoardModel:
         """The model whose Overall Power this one shares: the one a `with_cooldowns` copy
         was made from, else itself. The cooldowns never enter the Overall Power."""
         return self._cooldown_source if self._cooldown_source is not None else self
 
-    def skill_effect_up_for(
-        self, members: tuple[Card, ...], leader_holomem: str | None
-    ) -> float:
+    def skill_effect_up_for(self, members: tuple[Card, ...], leader_holomem: str | None) -> float:
         """`resolve(self, leader, members).skill_effect_up`, memoised per card.
 
         The board's `SkillEffectUpPermilUp` — it sits INSIDE
@@ -1135,9 +1129,7 @@ class BoardModel:
             if indices is None:
                 indices = frozenset(
                     index
-                    for index, (holomem, effect) in enumerate(
-                        self._skill_effect_up_terms
-                    )
+                    for index, (holomem, effect) in enumerate(self._skill_effect_up_terms)
                     if _reaches_one(effect, holomem, leader_holomem, card)
                 )
                 self._skill_effect_up_cache[key] = indices
@@ -1203,10 +1195,7 @@ class BoardModel:
             # Counted ONCE for the team, exactly as the unconditional half is:
             # `SkillEffectUpPermilUp` is a single addend in the game's
             # parenthesis, so `any` and not a per-card sum.
-            if any(
-                _reaches_one(effect, holomem, leader_holomem, card)
-                for card in members
-            ):
+            if any(_reaches_one(effect, holomem, leader_holomem, card) for card in members):
                 total += effect.value
         return total
 
@@ -1255,9 +1244,7 @@ class BoardModel:
                         flat_total += effect.value
                     else:  # rate
                         key = (card.id, stat)
-                        rate_by_card_stat[key] = (
-                            rate_by_card_stat.get(key, 0.0) + effect.value
-                        )
+                        rate_by_card_stat[key] = rate_by_card_stat.get(key, 0.0) + effect.value
         total = flat_total
         card_by_id = {card.id: card for card in members}
         for (card_id, stat), rate in rate_by_card_stat.items():
@@ -1292,8 +1279,10 @@ class BoardModel:
         """`{holomem: rate}` -- each singer's own share of `song_score_bonus_for`
         BEFORE the cap (Connect multipliers included), so a page can say whose
         yellows the song's bonus comes from and how much of it the cap wastes."""
-        return {holomem: self._song_score_bonus_by_holomem.get(holomem, {}).get(scope, 0.0)
-                for holomem in sorted(set(self._holomem_names(singers)))}
+        return {
+            holomem: self._song_score_bonus_by_holomem.get(holomem, {}).get(scope, 0.0)
+            for holomem in sorted(set(self._holomem_names(singers)))
+        }
 
 
 # `(effect_id, branch) -> BoardEffect`, filled by `parse_effect_id` on success.
@@ -1301,7 +1290,7 @@ class BoardModel:
 # unlocks the node; uncached, the parse (regex + routing) is 15 % of a develop,
 # because every `board_from_mapping` re-parses the whole bench.
 # Failures are NOT cached: an unparseable id raises every time.
-_PARSE_CACHE: dict[tuple[str, str], "BoardEffect"] = {}
+_PARSE_CACHE: dict[tuple[str, str], BoardEffect] = {}
 
 
 def parse_effect_id(effect_id: str, *, branch: str) -> BoardEffect:
@@ -1337,9 +1326,7 @@ def _parse_effect_id_uncached(effect_id: str, *, branch: str) -> BoardEffect:
     conditional = match.group("kind") == "passive_trigger"
 
     if family.startswith(_IGNORED_FAMILY_PREFIXES):
-        return BoardEffect(
-            family=family, kind="ignored", stat="", value=0.0, scope="account"
-        )
+        return BoardEffect(family=family, kind="ignored", stat="", value=0.0, scope="account")
 
     scope, grouping = _scope_for(branch, rest, effect_id)
 
@@ -1441,8 +1428,10 @@ def _reaches(effect: BoardEffect, holomem: str, card: Card) -> bool:
     if effect.scope == "grouping":
         # The effect names a group TOKEN (`grp-myth`); a card carries either that
         # token (board tests) or the catalogue's DISPLAY name (`Myth`) — accept both.
-        return (effect.grouping in card.generations
-                or _GENERATION_BY_GROUPING.get(effect.grouping) in card.generations)
+        return (
+            effect.grouping in card.generations
+            or _GENERATION_BY_GROUPING.get(effect.grouping) in card.generations
+        )
     if effect.scope == "account":
         return True
     raise BoardError(f"unknown board scope {effect.scope!r}")
@@ -1467,9 +1456,7 @@ def _recipients(
     return tuple(card for card in members if _reaches(effect, holomem, card))
 
 
-def _reaches_one(
-    effect: BoardEffect, holomem: str, leader_holomem: str | None, card: Card
-) -> bool:
+def _reaches_one(effect: BoardEffect, holomem: str, leader_holomem: str | None, card: Card) -> bool:
     """`card in _recipients(effect, holomem, leader, members)`, for one card.
 
     Written as the per-card decomposition of `_recipients` and kept immediately
@@ -1544,9 +1531,7 @@ def board_from_mapping(raw: object, *, source: str = "<mapping>") -> BoardModel:
                 raise BoardError(f"{source}: characters[{holomem!r}] holds a non-object")
             node_id = row.get("node")
             if not isinstance(node_id, str) or not node_id:
-                raise BoardError(
-                    f"{source}: characters[{holomem!r}] has a row with no 'node' id"
-                )
+                raise BoardError(f"{source}: characters[{holomem!r}] has a row with no 'node' id")
             effect_ids = row.get("effects") or []
             if not isinstance(effect_ids, list):
                 raise BoardError(f"{source}: {node_id}'s 'effects' must be a list")
@@ -1559,10 +1544,7 @@ def board_from_mapping(raw: object, *, source: str = "<mapping>") -> BoardModel:
             nodes.append(
                 BoardNode(
                     node_id=node_id,
-                    effects=tuple(
-                        parse_effect_id(effect_id, branch=node_id[:1])
-                        for effect_id in effect_ids
-                    ),
+                    effects=tuple(parse_effect_id(effect_id, branch=node_id[:1]) for effect_id in effect_ids),
                     connect_multiplier=float(multiplier),
                 )
             )

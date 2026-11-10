@@ -49,22 +49,18 @@ def _skill(cooldown: float, duration: float) -> dict:
 
 
 def test_the_last_window_runs_past_the_end_of_the_song() -> None:
-    windows = chart_timeline.active_windows(
-        _skill(INA_COOLDOWN, INA_DURATION), M0001_EASY_SONG_SECONDS
-    )
+    windows = chart_timeline.active_windows(_skill(INA_COOLDOWN, INA_DURATION), M0001_EASY_SONG_SECONDS)
 
     # The lattice itself is untouched by the fix: checks at k * cooldown for
     # every k with k * cooldown <= song_seconds. Three, not four (128.0 > 98.65).
     assert [w["check"] for w in windows] == [32.0, 64.0, 96.0]
 
-    assert windows[-1]["end"] == 110.0            # 96.0 + 14.0, unclamped
-    assert windows[-1]["end"] != M0001_EASY_SONG_SECONDS   # the previous answer
+    assert windows[-1]["end"] == 110.0  # 96.0 + 14.0, unclamped
+    assert windows[-1]["end"] != M0001_EASY_SONG_SECONDS  # the previous answer
 
 
 def test_the_last_note_is_inside_the_last_window() -> None:
-    windows = chart_timeline.active_windows(
-        _skill(INA_COOLDOWN, INA_DURATION), M0001_EASY_SONG_SECONDS
-    )
+    windows = chart_timeline.active_windows(_skill(INA_COOLDOWN, INA_DURATION), M0001_EASY_SONG_SECONDS)
     last = windows[-1]
 
     # Half-open, exactly as `resolve_exclusive` and `special_alignment`
@@ -80,9 +76,7 @@ def test_the_last_note_is_inside_the_last_window() -> None:
 
 def test_a_window_wholly_inside_the_song_is_unchanged() -> None:
     """The fix must move only the windows the clamp actually bit."""
-    windows = chart_timeline.active_windows(
-        _skill(INA_COOLDOWN, INA_DURATION), M0001_EASY_SONG_SECONDS
-    )
+    windows = chart_timeline.active_windows(_skill(INA_COOLDOWN, INA_DURATION), M0001_EASY_SONG_SECONDS)
     assert windows[0] == {"check": 32.0, "end": 46.0}
     assert windows[1] == {"check": 64.0, "end": 78.0}
 
@@ -92,8 +86,6 @@ def test_cooldown_reduction_still_divides() -> None:
 
     Slot 1 of `DEFAULT_TEAM` under its captured 4 % board node: 26.0 / 1.04 =
     25.0 exactly, so the lattice moves from 26/52/78 to 25/50/75."""
-    windows = chart_timeline.active_windows(
-        _skill(26.0, 9.0), M0001_EASY_SONG_SECONDS, reduction=0.04
-    )
+    windows = chart_timeline.active_windows(_skill(26.0, 9.0), M0001_EASY_SONG_SECONDS, reduction=0.04)
     assert [w["check"] for w in windows] == [25.0, 50.0, 75.0]
     assert [w["end"] for w in windows] == [34.0, 59.0, 84.0]

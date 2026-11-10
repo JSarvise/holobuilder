@@ -13,9 +13,13 @@ the `all`-target supports (member PASSIVE `all`, leader COSTUME, SPECIAL).
 
 Every number here is derived by hand; parity between the three drivers is
 pinned bit-identical."""
+
 from __future__ import annotations
 
 import dataclasses
+
+from support.builders import certain_config as cfg
+from support.builders import make_card, make_skill, make_team
 
 from hbuilder.domain.card import EffectTarget, Stats
 from hbuilder.domain.scoring import (
@@ -24,7 +28,6 @@ from hbuilder.domain.scoring import (
     score_with_breakdown,
 )
 from hbuilder.domain.song import ChartNote, OverallPower, SongChart, score_song_detailed
-from support.builders import certain_config as cfg, make_card, make_skill, make_team
 
 
 def _active(magnitude: float):
@@ -83,7 +86,7 @@ def _members(support_target, *, support_on="card-e"):
 
 
 LEADER = make_card("card-L", type_="Cute")
-ALL = None                                  # structurally team-wide
+ALL = None  # structurally team-wide
 CUTE_2 = EffectTarget(kind="type", value="Cute", count=2)
 COOL_2 = EffectTarget(kind="type", value="Cool", count=2)
 
@@ -213,9 +216,16 @@ def test_a_tie_in_active_magnitude_goes_to_the_earlier_slot():
         members[k] = dataclasses.replace(members[k], skills=(None, _active(49.0), None))
         members[0] = dataclasses.replace(members[0], skills=(None, _active(50.0), None))
         return tuple(members)
+
     # card-a at 50 % is paid; card-b and card-c tie at 49 % for the second place
-    assert _support_recipients(tied(("card-a", "card-b", "card-c", "card-d", "card-e"))) == ("card-a", "card-b")
-    assert _support_recipients(tied(("card-a", "card-c", "card-b", "card-d", "card-e"))) == ("card-a", "card-c")
+    assert _support_recipients(tied(("card-a", "card-b", "card-c", "card-d", "card-e"))) == (
+        "card-a",
+        "card-b",
+    )
+    assert _support_recipients(tied(("card-a", "card-c", "card-b", "card-d", "card-e"))) == (
+        "card-a",
+        "card-c",
+    )
 
 
 def test_every_driver_pays_the_strongest_actives():

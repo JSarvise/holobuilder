@@ -1,4 +1,4 @@
-﻿"""Every page of the rail, and every ES module and stylesheet it reaches, is served.
+"""Every page of the rail, and every ES module and stylesheet it reaches, is served.
 
 If the static route were an allowlist, a module that falls off it would not be a loud error:
 an ES module import that 404s aborts the whole module graph and leaves a blank page. So the
@@ -19,8 +19,8 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-
 from hbweb import config
+
 from hbuilder.inputs import load_inputs
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -38,7 +38,7 @@ def _get(url: str) -> tuple[int, str, bytes]:
 
 
 def test_root_opens_the_optimizer(web_base):
-    status, ctype, body = _get(web_base + "/")          # urllib follows the 302
+    status, ctype, body = _get(web_base + "/")  # urllib follows the 302
     assert status == 200 and "text/html" in ctype
     assert b'data-page="optimizer"' in body
 
@@ -140,9 +140,7 @@ def test_what_the_page_saves_scores_the_same_as_the_cli(web_base, tmp_path, monk
     assert written.is_file(), "POST reported success and wrote nothing"
     assert json.loads(written.read_text(encoding="utf-8")) == document
 
-    cards, _owned, _cfg, _prov = load_inputs(
-        config.CARDS_PATH, config.OWNED_PATH
-    )
+    cards, _owned, _cfg, _prov = load_inputs(config.CARDS_PATH, config.OWNED_PATH)
     _restated, basis = apply_collection(tuple(cards), str(written))
     assert basis.applied == saved["cards_restated"]
     assert basis.unchanged == saved["cards_unchanged"]

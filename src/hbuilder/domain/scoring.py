@@ -12,13 +12,13 @@ per-song scorer that does take a chart is `song.py`.
 from __future__ import annotations
 
 import math  # noqa: E401
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import cache
-from typing import Callable, Mapping
 
 from hbuilder.domain import targets
-from hbuilder.domain.collection import _f32, member_power_up, memory_bonus_per_stat
 from hbuilder.domain.card import Card, EffectTarget, SlotRider
+from hbuilder.domain.collection import _f32, member_power_up, memory_bonus_per_stat
 from hbuilder.domain.gates import (
     ResolvedSkill,
     RunState,
@@ -161,18 +161,15 @@ assert set(STAT_NAMES_BY_EFFECT_TYPE) == {
     "stat-name declaration must fail at import, never at score time"
 )
 assert all(
-    stat_name in STAT_NAMES
-    for stat_names in STAT_NAMES_BY_EFFECT_TYPE.values()
-    for stat_name in stat_names
+    stat_name in STAT_NAMES for stat_names in STAT_NAMES_BY_EFFECT_TYPE.values() for stat_name in stat_names
 ), "STAT_NAMES_BY_EFFECT_TYPE values must only name real STAT_NAMES members"
 # `_stat_sum` scatters each entry's rate into one bucket per declared stat
 # name. A tuple WITH repeats would place the rate twice, so the no-repeat
 # property is asserted here rather than left as an unwritten assumption
 # inside the hot loop.
-assert all(
-    len(set(stat_names)) == len(stat_names)
-    for stat_names in STAT_NAMES_BY_EFFECT_TYPE.values()
-), "STAT_NAMES_BY_EFFECT_TYPE values must not repeat a stat name — `_stat_sum` scatters"
+assert all(len(set(stat_names)) == len(stat_names) for stat_names in STAT_NAMES_BY_EFFECT_TYPE.values()), (
+    "STAT_NAMES_BY_EFFECT_TYPE values must not repeat a stat name — `_stat_sum` scatters"
+)
 
 
 # The one shared known-fields oracle: "which fields must be known before this
@@ -217,6 +214,7 @@ _REQUIRED_KNOWN_FIELDS: tuple[str, ...] = (
     "probability_tier",
     "magnitude",
 )
+
 
 def _first_missing_field(resolved: ResolvedSkill) -> str | None:
     """The name of the first field this skill needs known before it may
@@ -267,11 +265,7 @@ def _effective_magnitude(resolved: ResolvedSkill) -> object:
     returned unchanged — the override's gate never suppresses the whole
     skill, it only decides whether the second magnitude is in play at all."""
     skill = resolved.skill
-    if (
-        skill.override is not None
-        and resolved.override_gate is not None
-        and resolved.override_gate.fired
-    ):
+    if skill.override is not None and resolved.override_gate is not None and resolved.override_gate.fired:
         return max(skill.override.magnitude, skill.magnitude)
     return skill.magnitude
 
@@ -404,9 +398,7 @@ def _score_active(resolved: ResolvedSkill, cfg: ScoringConfig, team_rate_up: flo
     # It raises uptime, and the clamp still binds: `duration / interval` never
     # reaches 1 in the real data, but a shortened interval moves it closer, and
     # a skill can never be more than fully live.
-    return _active_occupancy(resolved, cfg, team_rate_up) * _as_rate(
-        float(_effective_magnitude(resolved))
-    )
+    return _active_occupancy(resolved, cfg, team_rate_up) * _as_rate(float(_effective_magnitude(resolved)))
 
 
 def _active_occupancy(resolved: ResolvedSkill, cfg: ScoringConfig, team_rate_up: float) -> float:
@@ -512,14 +504,10 @@ def _special_occupancy(resolved: ResolvedSkill, cfg: ScoringConfig, team_rate_up
     zero client-side consumers. 128.8 is solved
     from ten captured decks (see `scoring_config`)."""
     del team_rate_up  # SPECIAL is gauge-fired, never on an activation roll
-    return cfg.expected_fires_per_run * (
-        float(resolved.skill.duration) / REFERENCE_RUN_SECONDS
-    )
+    return cfg.expected_fires_per_run * (float(resolved.skill.duration) / REFERENCE_RUN_SECONDS)
 
 
-def _always_on_occupancy(
-    resolved: ResolvedSkill, cfg: ScoringConfig, team_rate_up: float
-) -> float:
+def _always_on_occupancy(resolved: ResolvedSkill, cfg: ScoringConfig, team_rate_up: float) -> float:
     """Occupancy `1.0`: a PASSIVE or COSTUME effect is live for the whole run
     Takes the full `(resolved, cfg, team_rate_up)` signature so
     every `OCCUPANCY_FUNCTIONS` entry shares one call shape, and reads none of
@@ -667,9 +655,7 @@ def _fold_activation_rate_up(resolved_skills: tuple[ResolvedSkill, ...], cfg: Sc
     return total
 
 
-def _fold_rider_activation_rate_up(
-    resolved_skills: tuple[ResolvedSkill, ...], cfg: ScoringConfig
-) -> float:
+def _fold_rider_activation_rate_up(resolved_skills: tuple[ResolvedSkill, ...], cfg: ScoringConfig) -> float:
     """Pass 1b: fold every *fired* `activation_rate_up` RIDER into the
     same team-wide rate modifier `_fold_activation_rate_up` builds.
 
@@ -772,11 +758,7 @@ def _score_bucket(resolved: ResolvedSkill) -> str:
 
     This function is the whole partition. Nothing else in this module reads a
     bucket key."""
-    return (
-        SCORE_BUCKET_SPECIAL
-        if resolved.skill.kind == "SPECIAL"
-        else SCORE_BUCKET_ACTIVE
-    )
+    return SCORE_BUCKET_SPECIAL if resolved.skill.kind == "SPECIAL" else SCORE_BUCKET_ACTIVE
 
 
 def _score_up_implements_boost(resolved: ResolvedSkill) -> bool:
@@ -1003,7 +985,10 @@ def _bucket_term(
                 0.0,
                 0.0,
                 _active_interval(resolved),
-                _windows_are_mutually_exclusive(resolved), 0.0, 0.0,  # no lattice
+                _windows_are_mutually_exclusive(resolved),
+                # no lattice
+                0.0,
+                0.0,
             )
         return _lattice_entry(resolved, cfg, team_rate_up, weight, state)
     return None
@@ -1154,19 +1139,16 @@ def _score_up_pool(
     # Only the magnitude (index 1) is scaled; `occupancy`, `interval`, `exclusive`
     # and the trailing `(duration, probability)` pair pass via `*rest`.
     if boost_targets is None or all(t is None for t in boost_targets):
-        multiplier = (
-            1.0 + skill_effect_up + cfg.active_stacking_model.combine(boost_entries)
-        )
+        multiplier = 1.0 + skill_effect_up + cfg.active_stacking_model.combine(boost_entries)
         return combine_ratio(
-            [
-                (bucket, magnitude_rate * multiplier, *rest)
-                for bucket, magnitude_rate, *rest in ratio_entries
-            ]
+            [(bucket, magnitude_rate * multiplier, *rest) for bucket, magnitude_rate, *rest in ratio_entries]
         )
     assert ratio_owners is not None and len(ratio_owners) == len(ratio_entries)
     assert len(boost_targets) == len(boost_entries)
-    shared = 1.0 + skill_effect_up + cfg.active_stacking_model.combine(
-        [e for e, t in zip(boost_entries, boost_targets) if t is None]
+    shared = (
+        1.0
+        + skill_effect_up
+        + cfg.active_stacking_model.combine([e for e, t in zip(boost_entries, boost_targets) if t is None])
     )
     targeted = [(e, t) for e, t in zip(boost_entries, boost_targets) if t is not None]
     scaled: list[tuple] = []
@@ -1176,9 +1158,7 @@ def _score_up_pool(
     return combine_ratio(scaled)
 
 
-def _support_targets(
-    resolved: ResolvedSkill, target_ids: frozenset[str]
-) -> frozenset[str] | None:
+def _support_targets(resolved: ResolvedSkill, target_ids: frozenset[str]) -> frozenset[str] | None:
     """`_score_up_pool`'s `boost_targets` element for one support: `None`
     when the support is team-wide (structural `None` or `{kind: all}`), the
     RESOLVED recipient set otherwise. Shared by every driver so the
@@ -1522,9 +1502,7 @@ def _effective_stat_sum(
     orderings_cache: dict | None = None,
 ) -> tuple[float, tuple[str, ...] | None]:
     """The single dispatch point both drivers call for the stat stage."""
-    return SLOT_ORDER_RESOLVERS[cfg.slot_order_rule](
-        members, stat_entries, cfg, orderings_cache
-    )
+    return SLOT_ORDER_RESOLVERS[cfg.slot_order_rule](members, stat_entries, cfg, orderings_cache)
 
 
 def _board_score_rate(members: tuple[Card, ...], cfg: ScoringConfig) -> float:
@@ -1626,9 +1604,7 @@ def _board_bonus(
     )
 
 
-def _score_team(
-    team: Team, cfg: ScoringConfig, *, with_breakdown: bool = False
-) -> float | ScoreBreakdown:
+def _score_team(team: Team, cfg: ScoringConfig, *, with_breakdown: bool = False) -> float | ScoreBreakdown:
     """The two-phase driver, and the *only* implementation of
     gate resolution plus EV arithmetic in this module — `score_fast` and
     `score_with_breakdown` both delegate here rather than each
@@ -1816,7 +1792,10 @@ def _score_team(
                     0.0,
                     0.0,
                     _active_interval(resolved),
-                    _windows_are_mutually_exclusive(resolved), 0.0, 0.0,  # no lattice
+                    _windows_are_mutually_exclusive(resolved),
+                    # no lattice
+                    0.0,
+                    0.0,
                 )
             )
             boost_targets.append(_support_targets(resolved, support_target_ids))
@@ -1846,14 +1825,10 @@ def _score_team(
                     target_kind=target_kind,
                     target_card_ids=target_card_ids,
                     override_fired=(
-                        resolved.override_gate.fired
-                        if resolved.override_gate is not None
-                        else None
+                        resolved.override_gate.fired if resolved.override_gate is not None else None
                     ),
                     rider_family=(
-                        resolved.skill.rider.family
-                        if isinstance(resolved.skill.rider, SlotRider)
-                        else None
+                        resolved.skill.rider.family if isinstance(resolved.skill.rider, SlotRider) else None
                     ),
                     rider_effect_type=(
                         resolved.skill.rider.effect_type
@@ -1886,9 +1861,7 @@ def _score_team(
     # Read BEFORE the pool, not after: `board_skill_effect_up` belongs inside
     # `_score_up_pool`'s multiplier, so it has to exist by the time the pool is
     # built. `score_card_set` orders these two the same way for the same reason.
-    board_power, board_score_rate, board_skill_effect_up = _board_bonus(
-        team.leader, cards, cfg
-    )
+    board_power, board_score_rate, board_skill_effect_up = _board_bonus(team.leader, cards, cfg)
     # Every Score UP collapses into ONE aggregate contribution
     # (`SkillScoreUpRatio`), appended last so the combine order is fixed rather
     # than interleaved with the non-Score-UP rates — `score_card_set` builds
@@ -1909,11 +1882,7 @@ def _score_team(
     # every ordering therefore scores identically.
     effective_stat_sum, member_order = _effective_stat_sum(cards, stat_entries, cfg)
 
-    total_score = (
-        (effective_stat_sum + board_power)
-        * (1.0 + combined_score_rate)
-        * (1.0 + board_score_rate)
-    )
+    total_score = (effective_stat_sum + board_power) * (1.0 + combined_score_rate) * (1.0 + board_score_rate)
 
     if not with_breakdown:
         return total_score
@@ -1984,9 +1953,7 @@ def _score_team(
         for entry in stat_entries
     ]
     op_stat_lines: dict[str, float] = {}
-    op_stat_subtotals = _overall_power_stat_subtotals(
-        cards, stat_entries, cfg, op_recipients, op_stat_lines
-    )
+    op_stat_subtotals = _overall_power_stat_subtotals(cards, stat_entries, cfg, op_recipients, op_stat_lines)
     overall_power_stat_sum = float(sum(op_stat_subtotals))
     # Per-member Holomem Board power: `power_bonus_for` sums over the members
     # passed, so one single-member call yields exactly that member's board
@@ -1999,27 +1966,18 @@ def _score_team(
         if cfg.board is None
         else [cfg.board.power_bonus_for((c,), _holomem) for c in cards]
     )
-    power_up_bases = [
-        op_stat_subtotals[i] + per_member_board_power[i] for i in range(len(cards))
-    ]
+    power_up_bases = [op_stat_subtotals[i] + per_member_board_power[i] for i in range(len(cards))]
 
     account = getattr(cfg, "account", None)
     memory_line = (
         None
         if account is None
         else memory_bonus_per_stat(
-            [
-                (m.stats.performance, m.stats.technique, m.stats.sense)
-                for m in team.members
-            ],
+            [(m.stats.performance, m.stats.technique, m.stats.sense) for m in team.members],
             account.memory_permil,
         )
     )
-    power_up_line = (
-        None
-        if account is None
-        else member_power_up(power_up_bases, account.power_up_permyriad)
-    )
+    power_up_line = None if account is None else member_power_up(power_up_bases, account.power_up_permyriad)
 
     return ScoreBreakdown(
         total_score=total_score,
@@ -2369,9 +2327,7 @@ class DeckScreenScore:
         return not self.missing
 
 
-def deck_screen_unit_score(
-    breakdown: ScoreBreakdown, *, k: float = UNIT_SCORE_K
-) -> DeckScreenScore:
+def deck_screen_unit_score(breakdown: ScoreBreakdown, *, k: float = UNIT_SCORE_K) -> DeckScreenScore:
     """Assemble `breakdown` into the deck screen's additive Unit Score.
 
     Overall Power is the sum of the power summands — the stat sum (which
@@ -2572,9 +2528,9 @@ def score_card_set(
     normal_resolved: list[ResolvedSkill] = []
     for card in members:
         normal_resolved.extend(card_set_gates.normal_by_card_id[card.id])
-    team_rate_up = _fold_activation_rate_up(
+    team_rate_up = _fold_activation_rate_up(tuple(normal_resolved), cfg) + _fold_rider_activation_rate_up(
         tuple(normal_resolved), cfg
-    ) + _fold_rider_activation_rate_up(tuple(normal_resolved), cfg)
+    )
     active_rank = active_magnitude_by_card(normal_resolved)
 
     # Target resolution depends only on the assembled 6-card
@@ -2618,9 +2574,7 @@ def score_card_set(
                 resolved.skill.target,
                 resolved.card_id,
                 members,
-                STAT_NAMES
-                if pool == "support"
-                else STAT_NAMES_BY_EFFECT_TYPE[resolved.skill.effect_type],
+                STAT_NAMES if pool == "support" else STAT_NAMES_BY_EFFECT_TYPE[resolved.skill.effect_type],
                 cfg.target_selection_model,
                 cfg.target_under_supply,
                 rank_values=active_rank if pool == "support" else None,
@@ -2673,9 +2627,7 @@ def score_card_set(
     # `(card_id, slot_kind, source)` key and walked below in emission order.
     leader_costumes: dict[str, tuple[ResolvedSkill, ...]] = {}
     for card in representatives:
-        costume_skills = resolve_leader_costume_skills(
-            card, card_set_gates.aggregates, cfg.run_state
-        )
+        costume_skills = resolve_leader_costume_skills(card, card_set_gates.aggregates, cfg.run_state)
         if costume_skills:
             leader_costumes[card.id] = costume_skills
     for costume in (c for skills in leader_costumes.values() for c in skills):
@@ -2696,9 +2648,7 @@ def score_card_set(
                 costume.skill.target,
                 costume.card_id,
                 members,
-                STAT_NAMES
-                if pool == "support"
-                else STAT_NAMES_BY_EFFECT_TYPE[costume.skill.effect_type],
+                STAT_NAMES if pool == "support" else STAT_NAMES_BY_EFFECT_TYPE[costume.skill.effect_type],
                 cfg.target_selection_model,
                 cfg.target_under_supply,
                 rank_values=active_rank if pool == "support" else None,
@@ -2721,9 +2671,7 @@ def score_card_set(
     # — so when one is configured the term is recomputed per leader inside the
     # loop below. `cfg.board is None` is the shipped default, so the hoist is
     # what runs without a board.
-    hoisted_board_bonus = (
-        (0.0, _board_score_rate(members, cfg), 0.0) if cfg.board is None else None
-    )
+    hoisted_board_bonus = (0.0, _board_score_rate(members, cfg), 0.0) if cfg.board is None else None
 
     # ...but "not leader-invariant" is true of far fewer leaders than it looks.
     # `BoardModel.leader_scoped_holomem` names every holomem who owns a red
@@ -2739,9 +2687,7 @@ def score_card_set(
     board_leader_scoped: frozenset[str] = (
         frozenset() if cfg.board is None else cfg.board.leader_scoped_holomem
     )
-    board_bonus_invariant = (
-        None if cfg.board is None else _board_bonus(None, members, cfg)
-    )
+    board_bonus_invariant = None if cfg.board is None else _board_bonus(None, members, cfg)
     board_bonus_by_holomem: dict[str, tuple[float, float, float]] = {}
 
     # Shared across every candidate leader, and that is the whole point: the
@@ -2846,14 +2792,10 @@ def score_card_set(
         # The per-card, per-stat accumulation, through the SAME
         # `_effective_stat_sum` `_score_team` calls, so the two cannot diverge.
         # The leader is NOT iterated inside it: it contributes no stats.
-        effective_stat_sum, _member_order = _effective_stat_sum(
-            members, stat_entries, cfg, orderings_cache
-        )
+        effective_stat_sum, _member_order = _effective_stat_sum(members, stat_entries, cfg, orderings_cache)
 
         total_score = (
-            (effective_stat_sum + board_power)
-            * (1.0 + combined_score_rate)
-            * (1.0 + board_score_rate)
+            (effective_stat_sum + board_power) * (1.0 + combined_score_rate) * (1.0 + board_score_rate)
         )
         # The class's answer, written onto every leader in it. Assigning the
         # same float object is what makes the expansion bit-exact by
@@ -2862,8 +2804,7 @@ def score_card_set(
             scores[index] = total_score
 
     return tuple(
-        LeaderScore(leader_id=leader.id, total_score=scores[index])
-        for index, leader in enumerate(leaders)
+        LeaderScore(leader_id=leader.id, total_score=scores[index]) for index, leader in enumerate(leaders)
     )
 
 
@@ -3071,4 +3012,3 @@ def team_taint(team: Team) -> tuple[str, ...]:
             _card_taint_cache[id(card)] = hit
         fields.extend(hit[1])
     return tuple(fields)
-

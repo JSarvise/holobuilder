@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
 import board_export  # noqa: E402,F401  (callers read precompute.board_export)
@@ -51,15 +52,18 @@ def _annotate_plan_budget(doc: dict, *, char_level: str = "current") -> None:
     max_points = None
     if char_level == "max":
         import tree_budget  # noqa: PLC0415
+
         max_points = tree_budget.budget_curve()[to.MAX_CHARACTER_LEVEL]
     for character in doc.get("characters", []):
         plan = character.get("plan")
         if not plan:
             continue
-        plan["point_cost"] = sum(prices.get(n, {}).get("points", 0)
-                                 for n in plan.get("optimised_nodes") or [])
-        plan["point_budget"] = (max_points if char_level == "max"
-                                else (character.get("points") or {}).get("granted"))
+        plan["point_cost"] = sum(
+            prices.get(n, {}).get("points", 0) for n in plan.get("optimised_nodes") or []
+        )
+        plan["point_budget"] = (
+            max_points if char_level == "max" else (character.get("points") or {}).get("granted")
+        )
 
 
 _CHR_NAMES: dict | None = None
@@ -110,8 +114,9 @@ def _card_names() -> dict:
     return _CARD_NAMES
 
 
-def connect_cards_for(scenario: str = "account", *, assume_bloom: object = None,
-                      keep_higher_bloom: bool = False) -> dict[str, tuple[tuple, int]]:
+def connect_cards_for(
+    scenario: str = "account", *, assume_bloom: object = None, keep_higher_bloom: bool = False
+) -> dict[str, tuple[tuple, int]]:
     """`card id -> (shape offsets, permil at the card's resolved Connect level)`
     — the `connect_cards` input the domain's REAL socket assignment takes
     (`board_plan.board_model_from_plan`). On the `account` scenario the pool is
@@ -138,10 +143,13 @@ def connect_cards_for(scenario: str = "account", *, assume_bloom: object = None,
     collection = to._load(paths.STATE / "collection.json")
     if assume_bloom is not None and collection is not None:
         from hbuilder.inputs import _override_collection_levels  # noqa: PLC0415
-        collection = _override_collection_levels(collection, None, assume_bloom,
-                                                 keep_higher_bloom=keep_higher_bloom)
+
+        collection = _override_collection_levels(
+            collection, None, assume_bloom, keep_higher_bloom=keep_higher_bloom
+        )
     levels = socket_optimise.build_board.ConnectLevels(
-        forced, collection, to._load(paths.DUMPS / "card_caps.json"))
+        forced, collection, to._load(paths.DUMPS / "card_caps.json")
+    )
     out: dict[str, tuple[tuple, int]] = {}
     for card in sorted(pool):
         eff = connect.get(card_connect.get(card))
@@ -184,6 +192,7 @@ def master_poster_count() -> int | None:
     master's `main_Poster.json` export): what an account owning every poster
     holds. `None` if the export is absent."""
     from hbuilder.inputs import master_poster_count as count  # noqa: PLC0415
+
     return count(_POSTER_MASTER)
 
 
@@ -193,6 +202,7 @@ def maxed_account_bonuses(basis, *, posters: int | None = None):
     already carry the roster's power-up ceiling, level 50 and every poster the
     game has; `posters` overrides the poster count."""
     import dataclasses  # noqa: PLC0415
+
     bonuses = basis.bonuses
     if posters is None or bonuses is None:
         return bonuses
@@ -209,6 +219,7 @@ def bench_reach_nodes(skilltree: dict, node_master: list, chr_id: str) -> list[s
     gets nothing from them. An effect id the parser does not know is kept: the scorer
     then reports it instead of it silently dropping out here."""
     import build_board  # noqa: PLC0415
+
     from hbuilder.domain.board import BoardError, parse_effect_id  # noqa: PLC0415
 
     model_id = next((m.get("model") for m in skilltree["members"] if m["chr"] == chr_id), None)
@@ -246,13 +257,13 @@ def _rows_by_group(node_master: list) -> dict:
     held = _ROWS_BY_GROUP.get(id(node_master))
     if held is None or held[0] is not node_master:
         _ROWS_BY_GROUP.clear()
-        held = _ROWS_BY_GROUP[id(node_master)] = (node_master,
-                                                  build_board._effect_rows_by_group(node_master))
+        held = _ROWS_BY_GROUP[id(node_master)] = (node_master, build_board._effect_rows_by_group(node_master))
     return held[1]
 
 
-def maxed_account_board_state(skilltree: dict | None = None, points: int | None = None, *,
-                              node_master: list | None = None) -> dict:
+def maxed_account_board_state(
+    skilltree: dict | None = None, points: int | None = None, *, node_master: list | None = None
+) -> dict:
     """`{chr: {"nodes": [...], "slots": {}}}` for every holomem in `skilltree.json`: her
     board on a maxed account's bench, no sockets filled yet (`maxed_account_bench`
     places them).
@@ -301,9 +312,18 @@ def maxed_account_board_state(skilltree: dict | None = None, points: int | None 
     return out
 
 
-def maxed_account_bench(cards, cfg, nominal_team, *, skilltree=None,
-                        node_master=None, connect_cards=None, points: int | None = None,
-                        report: list | None = None, state_out: dict | None = None) -> dict:
+def maxed_account_bench(
+    cards,
+    cfg,
+    nominal_team,
+    *,
+    skilltree=None,
+    node_master=None,
+    connect_cards=None,
+    points: int | None = None,
+    report: list | None = None,
+    state_out: dict | None = None,
+) -> dict:
     """The maxed-account BENCH: `board.json`-shaped, name-keyed `characters`
     mapping (`bench_characters` for `optimize_and_rerank` / `RefineContext`)
     in which EVERY holomem is at max level, her `points` (default: the max-level
@@ -327,11 +347,14 @@ def maxed_account_bench(cards, cfg, nominal_team, *, skilltree=None,
     import dataclasses  # noqa: PLC0415
 
     import build_board  # noqa: PLC0415
+
     from hbuilder.domain.board_plan import (  # noqa: PLC0415
-        _team_connect_assignment, bench_node_values, model_for_character,
-        node_effect_ids_from_master)
-    from hbuilder.domain.scoring import (  # noqa: PLC0415
-        UNIT_SCORE_K, deck_screen_unit_score, score_with_breakdown)
+        _team_connect_assignment,
+        bench_node_values,
+        model_for_character,
+        node_effect_ids_from_master,
+    )
+    from hbuilder.domain.scoring import UNIT_SCORE_K, deck_screen_unit_score, score_with_breakdown  # noqa: PLC0415
     from hbuilder.domain.team import Team  # noqa: PLC0415
 
     skilltree = skilltree or to._load(paths.DUMPS / "skilltree.json")
@@ -350,9 +373,15 @@ def maxed_account_bench(cards, cfg, nominal_team, *, skilltree=None,
         if not model_id:
             continue
         values = bench_node_values(
-            effects, member_cards=team.members, bonus_permil=ds.score_bonus_permil,
-            overall_power=ds.overall_power, k_constant=UNIT_SCORE_K,
-            skilltree=skilltree, model_id="", own_chr=chr_id)
+            effects,
+            member_cards=team.members,
+            bonus_permil=ds.score_bonus_permil,
+            overall_power=ds.overall_power,
+            k_constant=UNIT_SCORE_K,
+            skilltree=skilltree,
+            model_id="",
+            own_chr=chr_id,
+        )
         per_char[chr_id] = (skilltree["models"][model_id], frozenset(entry["nodes"]), values)
     _mults, placements = _team_connect_assignment(per_char, connect_cards)
     for p in placements:
@@ -361,7 +390,9 @@ def maxed_account_bench(cards, cfg, nominal_team, *, skilltree=None,
         # `{chr: {"nodes": [her bench board], "slots": {socket: card}}}`: the same bench as
         # a board state, for showing what an account needs to reach it (the web's board
         # panel on a maxed account)
-        state_out.update({c: {"nodes": list(v["nodes"]), "slots": dict(v["slots"])} for c, v in state.items()})
+        state_out.update(
+            {c: {"nodes": list(v["nodes"]), "slots": dict(v["slots"])} for c, v in state.items()}
+        )
     doc, rep, problems = build_board.build(state, skilltree, node_master, level=2)
     if report is not None:
         report.extend(rep)
@@ -389,21 +420,35 @@ def developed_bench_characters(seed_ids: list[str], *, max_level: bool, resource
 
     import board_plan_solver  # noqa: PLC0415
     import build_board  # noqa: PLC0415
+
     from hbuilder.domain.collection import caps_by_rarity_from_mapping  # noqa: PLC0415
 
     dumps = paths.DUMPS
     read = lambda path: json.loads(path.read_text(encoding="utf-8"))  # noqa: E731
-    solved = board_plan_solver.solve_team_board(
-        scenario="account", song=None, pool=1, for_team=list(seed_ids),
-        char_level="max" if max_level else "current", resources=resources,
-        develop_bench=True, include_sockets=False) or {}
+    solved = (
+        board_plan_solver.solve_team_board(
+            scenario="account",
+            song=None,
+            pool=1,
+            for_team=list(seed_ids),
+            char_level="max" if max_level else "current",
+            resources=resources,
+            develop_bench=True,
+            include_sockets=False,
+        )
+        or {}
+    )
     team_chr = {"chr-" + card_id.split("-")[1] for card_id in seed_ids}
     state = {k: dict(v) for k, v in read(dumps / "board_state.json").items()}
     for chr_id, plan in solved.items():
         if chr_id not in team_chr:
             state[chr_id] = {**state.get(chr_id, {}), "nodes": plan["nodes"]}
     document, _report, _problems = build_board.build(
-        state, read(dumps / "skilltree.json"), read(dumps / "master_SkillTreeNode.json"),
-        level=None, collection=read(paths.STATE / "collection.json"),
-        caps_by_rarity=caps_by_rarity_from_mapping(read(dumps / "card_caps.json")))
+        state,
+        read(dumps / "skilltree.json"),
+        read(dumps / "master_SkillTreeNode.json"),
+        level=None,
+        collection=read(paths.STATE / "collection.json"),
+        caps_by_rarity=caps_by_rarity_from_mapping(read(dumps / "card_caps.json")),
+    )
     return document.get("characters") or {}

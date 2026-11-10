@@ -8,6 +8,7 @@
 Uses this PC's admin key (state/server_api.json). Nothing about anyone's game account is on the
 server to show: the username they chose, their email (from Google) and when they last connected.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,9 +25,12 @@ CONF = paths.STATE / "server_api.json"
 
 def call(method: str, route: str) -> dict:
     conf = json.loads(CONF.read_text("utf8"))
-    req = urllib.request.Request(conf["url"].rstrip("/") + "/auth/" + route, method=method,
-                                 data=b"" if method == "POST" else None,
-                                 headers={"Authorization": f"Bearer {conf['token']}"})
+    req = urllib.request.Request(
+        conf["url"].rstrip("/") + "/auth/" + route,
+        method=method,
+        data=b"" if method == "POST" else None,
+        headers={"Authorization": f"Bearer {conf['token']}"},
+    )
     with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310 -- our own host
         return json.loads(r.read())
 
@@ -35,7 +39,9 @@ def ago(t: int | None) -> str:
     if not t:
         return "never"
     s = int(time.time() - t)
-    return f"{s // 86400} d ago" if s >= 86400 else f"{s // 3600} h ago" if s >= 3600 else f"{s // 60} min ago"
+    return (
+        f"{s // 86400} d ago" if s >= 86400 else f"{s // 3600} h ago" if s >= 3600 else f"{s // 60} min ago"
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -51,8 +57,10 @@ def main(argv: list[str]) -> int:
         print("no one has signed in yet")
     for u in users:
         mark = {"pending": "⏳", "approved": "✓", "revoked": "✗"}.get(u["status"], "?")
-        print(f"{u['id']:>3}  {mark} {u['status']:<9} {(u.get('username') or '(no username)')[:20]:<20} {u['email'][:34]:<34} "
-              f"seen {ago(u['last_seen']):<12} app {u['app'] or '-'}{'  (admin)' if u['admin'] else ''}")
+        print(
+            f"{u['id']:>3}  {mark} {u['status']:<9} {(u.get('username') or '(no username)')[:20]:<20} {u['email'][:34]:<34} "
+            f"seen {ago(u['last_seen']):<12} app {u['app'] or '-'}{'  (admin)' if u['admin'] else ''}"
+        )
     return 0
 
 

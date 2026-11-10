@@ -11,11 +11,17 @@
 #   - card_params.json (account_snapshot.py --refresh-card-params): id -> 3 stats + total
 #
 # Usage: python build_cards_dataset.py
-import sys, json, os, re, math, struct
+import json
+import math
+import os
+import re
+import struct
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
 
@@ -23,15 +29,18 @@ def _f32(value):
     """Round to IEEE-754 binary32, the way an `ss` SSE instruction does."""
     return struct.unpack("<f", struct.pack("<f", value))[0]
 
-from master_db import decode_record
-from master_cache import open_table
-import skills
+
+import skills  # noqa: E402
+from master_cache import open_table  # noqa: E402
+from master_db import decode_record  # noqa: E402
 
 DUMPS = str(paths.DUMPS)
+
 
 def _s(f, k):
     v = f.get(k, [None])[0]
     return v.decode("utf-8", "replace") if isinstance(v, bytes) else v
+
 
 def _alllevel_map(idx, table):
     """skill_id -> {level: decoded record}, EVERY level (skills cap at level 2).
@@ -59,27 +68,33 @@ def _maxlevel(by_level):
     """The highest-level record of an `_alllevel_map` entry."""
     return by_level[max(by_level)]
 
+
 def _cardlevel_maxmult(idx):
     """card-level group_id -> (max_level, mult) from CardLevel."""
     db = open_table("CardLevel", idx)
     g = {}
     for r in db.query("SELECT group_id,level,data FROM CardLevel"):
-        gid = r["group_id"].decode(); lv = int(r["level"]); mult = decode_record(r["data"])[3][0]
+        gid = r["group_id"].decode()
+        lv = int(r["level"])
+        mult = decode_record(r["data"])[3][0]
         if gid not in g or lv > g[gid][0]:
             g[gid] = (lv, mult)
     db.close()
     return g
+
 
 def _bloom_mult(idx):
     """rarity potential group_id -> full-bloom stat multiplier (1 + sum(effect_type 4 permil)/1000)."""
     db = open_table("CardPotential", idx)
     perm = {}
     for r in db.query("SELECT group_id,effect_type,data FROM CardPotential"):
-        gid = r["group_id"].decode(); f = decode_record(r["data"])
-        if f.get(3, [None])[0] == 4:              # effect_type 4 == all-parameter permil bonus
+        gid = r["group_id"].decode()
+        f = decode_record(r["data"])
+        if f.get(3, [None])[0] == 4:  # effect_type 4 == all-parameter permil bonus
             perm[gid] = perm.get(gid, 0) + f.get(4, [0])[0]
     db.close()
     return {gid: _f32(_f32(1.0) + _f32(_f32(v) / _f32(1000.0))) for gid, v in perm.items()}
+
 
 def _max_stats(ratio, level_group, potential_group, GM, BM):
     """maxed stat = ceil(ceil(ratio_i * (CardLevel_mult(maxlvl)/1000)) * bloom_mult), binary32.
@@ -106,14 +121,21 @@ def _max_stats(ratio, level_group, potential_group, GM, BM):
     in this loop that is not computed locally. Keep it that way."""
     if not (ratio and level_group in GM and potential_group in BM):
         return None
-    mult = GM[level_group][1]; bloom = BM[potential_group]
+    mult = GM[level_group][1]
+    bloom = BM[potential_group]
     per_mille = _f32(_f32(mult) / _f32(1000.0))
-    s = [math.ceil(_f32(_f32(math.ceil(_f32(_f32(r) * per_mille))) * _f32(bloom)))
-         for r in ratio]
-    return {"performance": s[0], "technique": s[1], "sense": s[2], "total": sum(s),
-            "at": {"level": GM[level_group][0], "bloom_mult": round(bloom, 3)}}
+    s = [math.ceil(_f32(_f32(math.ceil(_f32(_f32(r) * per_mille))) * _f32(bloom))) for r in ratio]
+    return {
+        "performance": s[0],
+        "technique": s[1],
+        "sense": s[2],
+        "total": sum(s),
+        "at": {"level": GM[level_group][0], "bloom_mult": round(bloom, 3)},
+    }
+
 
 _TAG_RE = re.compile(r"\[/?[a-z]+(?:=[a-z_0-9]+)?\]")
+
 
 def _lang(table, idx):
     """A Lang*_Eng master -> {la-key: English text}. These 124 `Lang*_Eng` tables are where
@@ -155,11 +177,9 @@ def _costume_by_card(costumes):
         leader_skill_id = cos["leader_skill_id"]
         if not leader_skill_id or not leader_skill_id.startswith(_LEADER_SKILL_PREFIX):
             continue
-        card_id = leader_skill_id[len(_LEADER_SKILL_PREFIX):]
+        card_id = leader_skill_id[len(_LEADER_SKILL_PREFIX) :]
         if card_id in by_card:
-            raise ValueError(
-                f"two costumes claim card {card_id!r}: {by_card[card_id]!r} and {costume_id!r}"
-            )
+            raise ValueError(f"two costumes claim card {card_id!r}: {by_card[card_id]!r} and {costume_id!r}")
         by_card[card_id] = costume_id
     return by_card
 
@@ -186,9 +206,12 @@ def _costume(card_id, f23, by_card, costumes, LEAD, LANG_COS):
     if not cos:
         return {"id": costume_id, "name_key": None, "name": None, "skill": None}
     lead = LEAD.get(cos["leader_skill_id"])
-    return {"id": costume_id, "name_key": cos["name_key"],
-            "name": LANG_COS.get(cos["name_key"]),
-            "skill": skills.resolve_leader(lead) if lead else None}
+    return {
+        "id": costume_id,
+        "name_key": cos["name_key"],
+        "name": LANG_COS.get(cos["name_key"]),
+        "skill": skills.resolve_leader(lead) if lead else None,
+    }
 
 
 def main():
@@ -199,8 +222,8 @@ def main():
     ACT = _alllevel_map(idx, "LiveActiveSkillLevel")
     PAS = _alllevel_map(idx, "LivePassiveSkillLevel")
     SPE = _alllevel_map(idx, "LiveSpecialSkillLevel")
-    GM = _cardlevel_maxmult(idx)     # level_group -> (maxlvl, mult)
-    BM = _bloom_mult(idx)            # potential_group -> full-bloom multiplier
+    GM = _cardlevel_maxmult(idx)  # level_group -> (maxlvl, mult)
+    BM = _bloom_mult(idx)  # potential_group -> full-bloom multiplier
     # Costume master: costume id -> (name localization key, leader/outfit skill id).
     # The outfit skill a costume grants is Costume.f4, and inverting it is how a card
     # finds its costume -- Card.f23 is blank on every 3★ card (see `_costume_by_card`).
@@ -215,8 +238,12 @@ def main():
     LANG_CARD = _lang("LangCard_Eng", idx)
     LANG_COS = _lang("LangCostume_Eng", idx)
     LANG_DESC = {}
-    for t in ("LangGeneratedLiveActiveSkillLevel_Eng", "LangGeneratedLivePassiveSkillLevel_Eng",
-              "LangGeneratedLiveSpecialSkillLevel_Eng", "LangGeneratedLiveLeaderSkill_Eng"):
+    for t in (
+        "LangGeneratedLiveActiveSkillLevel_Eng",
+        "LangGeneratedLivePassiveSkillLevel_Eng",
+        "LangGeneratedLiveSpecialSkillLevel_Eng",
+        "LangGeneratedLiveLeaderSkill_Eng",
+    ):
         LANG_DESC.update(_lang(t, idx))
     LEAD = {}
     ldb = open_table("LiveLeaderSkill", idx)
@@ -229,7 +256,9 @@ def main():
     for row in cdb.query("SELECT id,data FROM Character"):
         f = decode_record(row["data"])
         chars[row["id"].decode()] = {
-            "member": _s(f, 4), "member_short": _s(f, 5), "generation": _s(f, 30),
+            "member": _s(f, 4),
+            "member_short": _s(f, 5),
+            "generation": _s(f, 30),
             "generation_group": _s(f, 1000),
         }
     cdb.close()
@@ -243,13 +272,18 @@ def main():
     cp = os.path.join(DUMPS, "card_params.json")
     if os.path.exists(cp):
         for r in json.load(open(cp)):
-            stats[r["id"]] = {"performance": r["stat3"], "technique": r["stat4"],
-                              "sense": r["stat5"], "total": r["total"]}
+            stats[r["id"]] = {
+                "performance": r["stat3"],
+                "technique": r["stat4"],
+                "sense": r["stat5"],
+                "total": r["total"],
+            }
     # Card master -> join
     mdb = open_table("Card", idx)
     out = []
     for row in mdb.query("SELECT id,data FROM Card"):
-        cid = row["id"].decode(); f = decode_record(row["data"])
+        cid = row["id"].decode()
+        f = decode_record(row["data"])
         chr_id = _s(f, 2)
         ch = chars.get(chr_id, {})
         rec = {
@@ -257,16 +291,17 @@ def main():
             "card_num": cid.split("-")[1],
             "rarity": cid.split("-")[3],
             "rarity_rank": _s(f, 4),
-            "attribute": _s(f, 5),                 # card type/attribute (1/2/3)
+            "attribute": _s(f, 5),  # card type/attribute (1/2/3)
             "chr_id": chr_id,
             "member": ch.get("member"),
             "member_short": ch.get("member_short"),
             "generation": ch.get("generation"),
-            "name_key": _s(f, 3),                  # localization key -> display title (text master)
+            "name_key": _s(f, 3),  # localization key -> display title (text master)
             "stat_ratio_permil": [f.get(7, [None])[0], f.get(8, [None])[0], f.get(9, [None])[0]],
-            "stats": stats.get(cid),               # current owned-card stats (gRPC), None if unowned
-            "stats_max": _max_stats([f.get(7, [0])[0], f.get(8, [0])[0], f.get(9, [0])[0]],
-                                    _s(f, 6), _s(f, 14), GM, BM),  # computed fully-maxed stats
+            "stats": stats.get(cid),  # current owned-card stats (gRPC), None if unowned
+            "stats_max": _max_stats(
+                [f.get(7, [0])[0], f.get(8, [0])[0], f.get(9, [0])[0]], _s(f, 6), _s(f, 14), GM, BM
+            ),  # computed fully-maxed stats
             "title": LANG_CARD.get(_s(f, 3)),
             "costume": _costume(cid, _s(f, 23), COSTUME_BY_CARD, costumes, LEAD, LANG_COS),
             # the game's own English skill text, for eyeball review of every mapping decision
@@ -277,7 +312,7 @@ def main():
                 "COSTUME": LANG_DESC.get(f"la-generated-live_leader_skill-{cid}-description"),
             },
             "skills": {
-                "ACTIVE":  skills.resolve_active(_maxlevel(ACT[_s(f, 12)]))  if _s(f, 12) in ACT else None,
+                "ACTIVE": skills.resolve_active(_maxlevel(ACT[_s(f, 12)])) if _s(f, 12) in ACT else None,
                 "PASSIVE": skills.resolve_passive(_maxlevel(PAS[_s(f, 11)])) if _s(f, 11) in PAS else None,
                 "SPECIAL": skills.resolve_special(_maxlevel(SPE[_s(f, 13)])) if _s(f, 13) in SPE else None,
             },
@@ -285,12 +320,13 @@ def main():
             # each kind is in `domain/collection.SKILL_BLOOM_STEP`; a card below
             # it has the LOWER row, not a scaled version of the higher one.
             "skills_by_level": {
-                "ACTIVE": {str(lv): skills.resolve_active(rec)
-                           for lv, rec in ACT.get(_s(f, 12), {}).items()},
-                "PASSIVE": {str(lv): skills.resolve_passive(rec)
-                            for lv, rec in PAS.get(_s(f, 11), {}).items()},
-                "SPECIAL": {str(lv): skills.resolve_special(rec)
-                            for lv, rec in SPE.get(_s(f, 13), {}).items()},
+                "ACTIVE": {str(lv): skills.resolve_active(rec) for lv, rec in ACT.get(_s(f, 12), {}).items()},
+                "PASSIVE": {
+                    str(lv): skills.resolve_passive(rec) for lv, rec in PAS.get(_s(f, 11), {}).items()
+                },
+                "SPECIAL": {
+                    str(lv): skills.resolve_special(rec) for lv, rec in SPE.get(_s(f, 13), {}).items()
+                },
             },
         }
         out.append(rec)
@@ -299,8 +335,9 @@ def main():
     dst = os.path.join(DUMPS, "cards_enriched.json")
     json.dump(out, open(dst, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
     with_stats = sum(1 for r in out if r["stats"])
-    print(f"{len(out)} cards -> {dst}  ({with_stats} with gRPC stats, {len(out)-with_stats} metadata-only)")
+    print(f"{len(out)} cards -> {dst}  ({with_stats} with gRPC stats, {len(out) - with_stats} metadata-only)")
     print(f"members resolved: {len(set(r['member'] for r in out if r['member']))}")
+
 
 if __name__ == "__main__":
     main()

@@ -202,7 +202,7 @@ def test_a_not_applicable_field_is_not_treated_as_untranscribed(tmp_path):
         "family": "conditional_score_up",
         "effect_type": "score",
         "duration": 10.0,
-        "interval": None,          # NOT_APPLICABLE to SPECIAL
+        "interval": None,  # NOT_APPLICABLE to SPECIAL
         "probability_tier": None,  # NOT_APPLICABLE to SPECIAL
         "magnitude": 20.0,
         "condition": {"kind": "ungated"},

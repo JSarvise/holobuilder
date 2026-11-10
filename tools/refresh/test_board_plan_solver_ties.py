@@ -9,6 +9,7 @@ it: the socket-first fill counts blue as paying only where it reaches a member
 (`_socket_branch_pays`), and the MILP's objective has a term that breaks a
 zero-value tie (`TIE_BREAK`).
 """
+
 from __future__ import annotations
 
 import sys
@@ -22,9 +23,14 @@ for _p in (HERE, REPO / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-LEADER = "card-00036-5-uniq-0029-00"   # Takane Lui, the leader slot only
-MEMBERS = ["card-00031-5-uniq-0025-00", "card-03001-5-uniq-0033-00", "card-00034-5-uniq-0027-00",
-           "card-03003-5-uniq-0035-00", "card-03002-5-uniq-0034-00"]
+LEADER = "card-00036-5-uniq-0029-00"  # Takane Lui, the leader slot only
+MEMBERS = [
+    "card-00031-5-uniq-0025-00",
+    "card-03001-5-uniq-0033-00",
+    "card-00034-5-uniq-0027-00",
+    "card-03003-5-uniq-0035-00",
+    "card-03002-5-uniq-0034-00",
+]
 
 
 @pytest.fixture(scope="module")
@@ -35,8 +41,8 @@ def plan():
     import board_plan_solver
 
     solved = board_plan_solver.solve_team_board(
-        scenario="account", song="m0342", pool=1, for_team=[LEADER, *MEMBERS],
-        develop_bench=True)
+        scenario="account", song="m0342", pool=1, for_team=[LEADER, *MEMBERS], develop_bench=True
+    )
     assert solved
     return solved
 
@@ -60,8 +66,12 @@ def test_no_grouping_is_planned_past_its_900_cap(plan):
 
     import tree_optimise as to
 
-    nodes = json.loads((REPO / "tools" / "recon" / "proxy" / "dumps" / "skilltree.json").read_text(encoding="utf-8"))["nodes"]
-    state = json.loads((REPO / "tools" / "recon" / "proxy" / "dumps" / "board_state.json").read_text(encoding="utf-8"))
+    nodes = json.loads(
+        (REPO / "tools" / "recon" / "proxy" / "dumps" / "skilltree.json").read_text(encoding="utf-8")
+    )["nodes"]
+    state = json.loads(
+        (REPO / "tools" / "recon" / "proxy" / "dumps" / "board_state.json").read_text(encoding="utf-8")
+    )
     state.update(plan)
     total: dict = {}
     for cid, entry in state.items():
@@ -84,9 +94,15 @@ def test_a_reset_that_must_earn_its_keep_happens_less(plan):
 
     def resets(p):
         return sum(len(set(owned.get(c) or ()) - set(v["nodes"]) - {to.ROOT}) for c, v in p.items())
+
     priced = board_plan_solver.solve_team_board(
-        scenario="account", song="m0342", pool=1, for_team=[LEADER, *MEMBERS],
-        develop_bench=True, reset_min_gain=0.002)
+        scenario="account",
+        song="m0342",
+        pool=1,
+        for_team=[LEADER, *MEMBERS],
+        develop_bench=True,
+        reset_min_gain=0.002,
+    )
     assert priced
     assert 0 < resets(priced) < resets(plan)
 
@@ -100,8 +116,13 @@ def test_no_refund_charges_only_new_buys_against_the_inventory():
     owned, prices = to._owned_nodes(), to._prices()
     inventory, _src = to.balance_from_disk()
     plan = board_plan_solver.solve_team_board(
-        scenario="account", song="m0342", pool=1, for_team=[LEADER, *MEMBERS],
-        develop_bench=True, no_refund=True)
+        scenario="account",
+        song="m0342",
+        pool=1,
+        for_team=[LEADER, *MEMBERS],
+        develop_bench=True,
+        no_refund=True,
+    )
     assert plan
     spent = {cur: 0 for cur in to.CURRENCIES}
     for c, v in plan.items():
@@ -118,11 +139,14 @@ def test_no_yellow_is_bought_past_the_song_cap(plan):
     the game counts 100 (`SONG_ALL_CAP_PERMIL`). Valued per node, a plan would buy
     Fubuki's and Okayu's missing yellows (23 points) to reach 160; capped, a new
     yellow is bought only while the sum is under 100 (the owned 110 are kept)."""
-    import tree_optimise as to
-    from board_plan_solver import SONG_YELLOW_CAP, _YELLOW_PERMIL
-
     import json
-    nodes = json.loads((REPO / "tools" / "recon" / "proxy" / "dumps" / "skilltree.json").read_text(encoding="utf-8"))["nodes"]
+
+    import tree_optimise as to
+    from board_plan_solver import _YELLOW_PERMIL, SONG_YELLOW_CAP
+
+    nodes = json.loads(
+        (REPO / "tools" / "recon" / "proxy" / "dumps" / "skilltree.json").read_text(encoding="utf-8")
+    )["nodes"]
     owned = to._owned_nodes()
     singers = ["chr-00006", "chr-00014", "chr-00016", "chr-00017"]
 
@@ -136,6 +160,7 @@ def test_no_yellow_is_bought_past_the_song_cap(plan):
             if n[0] == "Y" and m and eff.get("tr") == "group":
                 out += int(m.group(1))
         return out
+
     kept = sum(permil(c, set(owned.get(c) or ()) & set(plan[c]["nodes"])) for c in singers)
     new = sum(permil(c, set(plan[c]["nodes"]) - set(owned.get(c) or ())) for c in singers)
     assert new == 0 or kept + new <= SONG_YELLOW_CAP, (kept, new)

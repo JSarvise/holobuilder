@@ -39,12 +39,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import run_cli  # noqa: E402
+
 HERE = str(paths.REFRESH_DIR)
 sys.path.insert(0, HERE)
 
 from account_snapshot import (  # noqa: E402
-    client_headers, fetch_master_version, fetch_userdata, fields, load_credential,
-    load_userdata_schema, locate_userdata, login)
+    client_headers,
+    fetch_master_version,
+    fetch_userdata,
+    fields,
+    load_credential,
+    load_userdata_schema,
+    locate_userdata,
+    login,
+)
 from master_cache import decode_record, open_table, rows, sql_table  # noqa: E402
 
 # Field numbers in rpc.api.common.UserData (hash-derived, from the studio's own .proto).
@@ -75,6 +83,7 @@ def decode_reward(blob: bytes) -> str:
 
 
 # --- masters ------------------------------------------------------------------------
+
 
 def master_blobs(table):
     """Rows with the `data` blob left as RAW BYTES.
@@ -131,7 +140,6 @@ def load_candidates():
 # --- account state ------------------------------------------------------------------
 
 
-
 def userdata_live(account="main"):
     """Log in and pull a fresh User/Get. Read-only: the same whitelisted RPC path
     account_snapshot.py already uses for --refresh-board-state.
@@ -155,9 +163,14 @@ def park_state(userdata_fields):
     """UserData fields -> {random: {area: {...}}, opened_treasures: [...], fixed: [...],
     free_chat: {picks: [...], details: [...]}} (park_free_chat.parse_userdata)."""
     import park_free_chat  # noqa: PLC0415
+
     userdata_fields = list(userdata_fields)
-    state = {"random": {}, "opened_treasures": [], "fixed_collected": [],
-             "free_chat": park_free_chat.parse_userdata(userdata_fields, fields)}
+    state = {
+        "random": {},
+        "opened_treasures": [],
+        "fixed_collected": [],
+        "free_chat": park_free_chat.parse_userdata(userdata_fields, fields),
+    }
     for fn, wt, v in userdata_fields:
         if wt != 2:
             continue
@@ -174,7 +187,10 @@ def park_state(userdata_fields):
                 elif f2 == 5:
                     refreshed = v2
             state["random"][area] = {
-                "picked": picked, "collected": collected, "last_refreshed_time": refreshed}
+                "picked": picked,
+                "collected": collected,
+                "last_refreshed_time": refreshed,
+            }
         elif fn == F_TREASURE:
             for f2, w2, v2 in fields(v):
                 if f2 == 2:
@@ -188,6 +204,7 @@ def park_state(userdata_fields):
 
 # --- report -------------------------------------------------------------------------
 
+
 def report(state, spot, treasures, pool):
     import datetime
 
@@ -197,8 +214,7 @@ def report(state, spot, treasures, pool):
     # The roll is per-area and lazy: an area you have not
     # entered since the day's reset (hbuilder.game_day) still shows YESTERDAY's row. Flag it rather than
     # letting the caller mistake a stale pick for the current one.
-    stamps = [s["last_refreshed_time"] for s in state["random"].values()
-              if s["last_refreshed_time"]]
+    stamps = [s["last_refreshed_time"] for s in state["random"].values() if s["last_refreshed_time"]]
     newest = max(stamps) if stamps else None
     for area in sorted(state["random"]):
         s = state["random"][area]
@@ -206,8 +222,9 @@ def report(state, spot, treasures, pool):
         when = datetime.datetime.fromtimestamp(t / 1000).isoformat(" ") if t else "never"
         stale = " *** STALE -- enter this area to re-roll ***" if t and t != newest else ""
         cand = pool.get(area, [])
-        print(f"\n  {area}   picked {len(s['picked'])} of {len(cand)} eligible spots"
-              f"   (rolled {when}){stale}")
+        print(
+            f"\n  {area}   picked {len(s['picked'])} of {len(cand)} eligible spots   (rolled {when}){stale}"
+        )
         for m in s["picked"]:
             info = spot.get(m, {})
             mark = "COLLECTED" if m in s["collected"] else "   OUT   "
@@ -241,7 +258,7 @@ def main():
     if "--account" in argv:
         i = argv.index("--account")
         account = argv[i + 1]
-        argv = argv[:i] + argv[i + 2:]
+        argv = argv[:i] + argv[i + 2 :]
     as_json = "--json" in argv
 
     source = f"live User/Get [{account}]"
@@ -252,8 +269,11 @@ def main():
     pool = load_candidates()
 
     if as_json:
-        print(json.dumps({"state": state, "treasures": treasures, "candidate_pool": pool},
-                         ensure_ascii=False, indent=1))
+        print(
+            json.dumps(
+                {"state": state, "treasures": treasures, "candidate_pool": pool}, ensure_ascii=False, indent=1
+            )
+        )
     else:
         print(f"source: {source}\n")
         report(state, spot, treasures, pool)

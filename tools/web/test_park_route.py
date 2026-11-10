@@ -30,14 +30,12 @@ too. Fixtures are in-memory dicts injected by monkeypatch, never on disk.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
-
 from hbweb import config, park
-
 
 # ---------------------------------------------------------------------------
 # Fixtures — an in-memory export and a live state, matching the REAL shapes
@@ -93,19 +91,13 @@ FIXTURE_EXPORT = {
         },
     },
     "mapping_to_spot": {
-        "target_map-random_symbol-a01-010": {
-            "area": "area-a01", "spot": "reward_random_10"},
-        "target_map-random_symbol-a01-004": {
-            "area": "area-a01", "spot": "reward_random_04"},
+        "target_map-random_symbol-a01-010": {"area": "area-a01", "spot": "reward_random_10"},
+        "target_map-random_symbol-a01-004": {"area": "area-a01", "spot": "reward_random_04"},
         # Points at a spot with no pixel in area-a01 -> "no pixel" unresolved.
-        "target_map-random_symbol-a01-099": {
-            "area": "area-a01", "spot": "reward_random_99"},
-        "target_map-random_symbol-a02_casino-001": {
-            "area": "area-a02-casino", "spot": "reward_random_01"},
-        "target_map-random_symbol-a02_casino-002": {
-            "area": "area-a02-casino", "spot": "reward_random_02"},
-        "target_map-random_symbol-a02_game-001": {
-            "area": "area-a02-game", "spot": "reward_random_01"},
+        "target_map-random_symbol-a01-099": {"area": "area-a01", "spot": "reward_random_99"},
+        "target_map-random_symbol-a02_casino-001": {"area": "area-a02-casino", "spot": "reward_random_01"},
+        "target_map-random_symbol-a02_casino-002": {"area": "area-a02-casino", "spot": "reward_random_02"},
+        "target_map-random_symbol-a02_game-001": {"area": "area-a02-game", "spot": "reward_random_01"},
     },
     "candidates": {
         "area-a01": [
@@ -114,14 +106,11 @@ FIXTURE_EXPORT = {
         ],
     },
     "treasures": {
-        "park_treasure-area-a01-001": {
-            "area": "area-a01", "spot": "reward_treasure_01"},
-        "park_treasure-area-a02-lobby-001": {
-            "area": "area-a02-lobby", "spot": "reward_treasure_02"},
+        "park_treasure-area-a01-001": {"area": "area-a01", "spot": "reward_treasure_01"},
+        "park_treasure-area-a02-lobby-001": {"area": "area-a02-lobby", "spot": "reward_treasure_02"},
         # The real export's three unplaceable chests: an area with no map asset
         # and no entry in `areas`. Must be counted, not silently dropped.
-        "park_treasure-area-a01-008": {
-            "area": "area-a01-house", "spot": "reward_treasure_01"},
+        "park_treasure-area-a01-008": {"area": "area-a01-house", "spot": "reward_treasure_01"},
     },
 }
 
@@ -187,8 +176,7 @@ def _area_by_id(payload: dict, area_id: str) -> dict:
     for area in payload["areas"]:
         if area["id"] == area_id:
             return area
-    raise AssertionError(f"area {area_id!r} not in payload: "
-                         f"{[a['id'] for a in payload['areas']]}")
+    raise AssertionError(f"area {area_id!r} not in payload: {[a['id'] for a in payload['areas']]}")
 
 
 # ---------------------------------------------------------------------------
@@ -272,8 +260,8 @@ def test_every_picked_resolves_to_a_pixel_or_is_reported(web_base, stub_park):
     # from `picked` (reported, not dropped INTO the placed list).
     unresolved = {u["mapping"]: u["reason"] for u in a01["unresolved"]}
     assert set(unresolved) == {
-        "target_map-random_symbol-a01-099",       # spot exists, no pixel
-        "target_map-random_symbol-a01-UNKNOWN",   # no mapping_to_spot entry
+        "target_map-random_symbol-a01-099",  # spot exists, no pixel
+        "target_map-random_symbol-a01-UNKNOWN",  # no mapping_to_spot entry
     }
     assert "no entry" in unresolved["target_map-random_symbol-a01-UNKNOWN"]
     assert "no pixel" in unresolved["target_map-random_symbol-a01-099"]
@@ -329,9 +317,7 @@ def test_absent_export_degrades_with_a_reason(web_base, monkeypatch):
     payload = _park(web_base)
     assert payload["available"] is False
     assert payload["areas"] == []
-    assert "park_export.py" in payload["reason"], (
-        "an absent export must name the command that fixes it"
-    )
+    assert "park_export.py" in payload["reason"], "an absent export must name the command that fixes it"
 
 
 def test_no_saved_pick_asks_for_a_refresh(web_base, monkeypatch):
@@ -349,8 +335,9 @@ def test_no_saved_pick_asks_for_a_refresh(web_base, monkeypatch):
 
 def test_the_saved_pick_carries_its_capture_time(web_base, monkeypatch):
     monkeypatch.setattr(park, "park_export", lambda: FIXTURE_EXPORT)
-    monkeypatch.setattr(park, "park_saved_state",
-                        lambda: {**FIXTURE_STATE, "_captured_at": "2026-11-05T12:00:00+0100"})
+    monkeypatch.setattr(
+        park, "park_saved_state", lambda: {**FIXTURE_STATE, "_captured_at": "2026-11-05T12:00:00+0100"}
+    )
     payload = _park(web_base)
     assert payload["available"] is True
     assert payload["captured_at"] == "2026-11-05T12:00:00+0100"
@@ -368,7 +355,7 @@ def test_park_saved_state_reads_the_refresh_output(monkeypatch, tmp_path):
     saved = tmp_path / "park_state.json"
     monkeypatch.setattr(config, "PARK_STATE_PATH", saved)
     assert park.park_saved_state() is None
-    saved.write_bytes(json.dumps(FIXTURE_STATE).encode())  # noqa: test-only file in tmp_path
+    saved.write_bytes(json.dumps(FIXTURE_STATE).encode())  # a test-only file in tmp_path
     assert park.park_saved_state() == FIXTURE_STATE
 
 
@@ -387,8 +374,14 @@ def test_park_image_name_regex_forbids_traversal():
     """Unit guard on the regex, since URL normalisation can hide a traversal
     before it reaches the handler: the pattern itself must reject `..`, slashes
     and backslashes, and accept the real area ids."""
-    reject = ["area-../secret.png", "area-a01/../x.png", "area-a01\\x.png",
-              "../park-area-a01.png", "area-a01.png.exe", "area_a01.png"]
+    reject = [
+        "area-../secret.png",
+        "area-a01/../x.png",
+        "area-a01\\x.png",
+        "../park-area-a01.png",
+        "area-a01.png.exe",
+        "area_a01.png",
+    ]
     for name in reject:
         assert not park.PARK_IMAGE_NAME_RE.match(name), name
     for name in ["area-a01.png", "area-a02-casino.png", "area-a02-lobby.png"]:
@@ -420,35 +413,72 @@ def test_real_png_is_served_when_the_export_is_present(web_base):
 # ---------------------------------------------------------------------------
 FC_EXPORT = {
     "chats": {
-        "chat-read": {"site": "facility-a01-house", "x": 1, "y": 2,
-                      "cast": ["chr-00001", "chr-00013"], "conditions": ["cd-q"]},
-        "chat-pending": {"site": "facility-a01-house", "x": 1, "y": 2,
-                         "cast": ["chr-00013", "chr-00002"], "conditions": ["cd-q"]},
-        "chat-unseen": {"site": "facility-a01-multiplay", "x": 5, "y": 6,
-                        "cast": ["chr-00024", "chr-00001"], "conditions": []},
+        "chat-read": {
+            "site": "facility-a01-house",
+            "x": 1,
+            "y": 2,
+            "cast": ["chr-00001", "chr-00013"],
+            "conditions": ["cd-q"],
+        },
+        "chat-pending": {
+            "site": "facility-a01-house",
+            "x": 1,
+            "y": 2,
+            "cast": ["chr-00013", "chr-00002"],
+            "conditions": ["cd-q"],
+        },
+        "chat-unseen": {
+            "site": "facility-a01-multiplay",
+            "x": 5,
+            "y": 6,
+            "cast": ["chr-00024", "chr-00001"],
+            "conditions": [],
+        },
     },
     "sites": {
-        "facility-a01-house": {"name": "holo Home", "map": "area-a01", "x": 1, "y": 2,
-                               "inside": None, "photo": "park-site-area-a01-house-00.jpg",
-                               "icon_image": "park-icon-house.png"},
-        "facility-a01-multiplay": {"name": "Fortune Network", "map": "area-a01", "x": 5, "y": 6,
-                                   "inside": "area-a01-multiplay", "photo": None,
-                                   "icon_image": None},
+        "facility-a01-house": {
+            "name": "holo Home",
+            "map": "area-a01",
+            "x": 1,
+            "y": 2,
+            "inside": None,
+            "photo": "park-site-area-a01-house-00.jpg",
+            "icon_image": "park-icon-house.png",
+        },
+        "facility-a01-multiplay": {
+            "name": "Fortune Network",
+            "map": "area-a01",
+            "x": 5,
+            "y": 6,
+            "inside": "area-a01-multiplay",
+            "photo": None,
+            "icon_image": None,
+        },
     },
     "conditions": {"cd-q": "Main quest 1-2 cleared"},
-    "characters": {"chr-00001": {"name": "Tokino Sora", "short": "Sora"},
-                   "chr-00002": {"name": "Roboco", "short": "Roboco"},
-                   "chr-00013": {"name": "AZKi", "short": "AZKi"},
-                   "chr-00024": {"name": "Amane Kanata", "short": "Kanata"}},
+    "characters": {
+        "chr-00001": {"name": "Tokino Sora", "short": "Sora"},
+        "chr-00002": {"name": "Roboco", "short": "Roboco"},
+        "chr-00013": {"name": "AZKi", "short": "AZKi"},
+        "chr-00024": {"name": "Amane Kanata", "short": "Kanata"},
+    },
 }
-FC_LOG = {"chats": {
-    "chat-read": {"read": ["chr-00001", "chr-00013"], "seen": "2026-10-26T02:37:44+01:00",
-                  "read_seen": "2026-08-30T02:29:44+02:00"},
-    "chat-pending": {"read": [], "seen": "2026-10-26T02:37:44+01:00", "read_seen": None},
-    # a row the catalogue no longer has must not invent a chat
-    "gone": {"read": ["chr-00001"], "seen": "2026-08-08T00:54:02+02:00", "read_seen": None}},
-    "observations": [{"at": "2026-08-08T00:54:02+02:00", "areas": ["area-a01"]},
-                     {"at": "2026-10-26T02:37:44+01:00", "areas": ["area-a01"]}]}
+FC_LOG = {
+    "chats": {
+        "chat-read": {
+            "read": ["chr-00001", "chr-00013"],
+            "seen": "2026-10-26T02:37:44+01:00",
+            "read_seen": "2026-08-30T02:29:44+02:00",
+        },
+        "chat-pending": {"read": [], "seen": "2026-10-26T02:37:44+01:00", "read_seen": None},
+        # a row the catalogue no longer has must not invent a chat
+        "gone": {"read": ["chr-00001"], "seen": "2026-08-08T00:54:02+02:00", "read_seen": None},
+    },
+    "observations": [
+        {"at": "2026-08-08T00:54:02+02:00", "areas": ["area-a01"]},
+        {"at": "2026-10-26T02:37:44+01:00", "areas": ["area-a01"]},
+    ],
+}
 
 
 def test_free_chat_status_is_read_pending_or_unseen():
@@ -484,11 +514,15 @@ def test_free_chat_without_a_log_is_all_unseen_and_without_an_export_says_why():
 
 
 def test_free_chat_counters_come_from_the_games_achievement():
-    snapshot = {"missions": [
-        {"mission_id": "mission-achievement-chr-00001-absolute_park_talk_free_unique_count",
-         "progress": 6},
-        {"mission_id": "mission-achievement-chr-00001-increment_live_play_count-m0032",
-         "progress": 32}]}
+    snapshot = {
+        "missions": [
+            {
+                "mission_id": "mission-achievement-chr-00001-absolute_park_talk_free_unique_count",
+                "progress": 6,
+            },
+            {"mission_id": "mission-achievement-chr-00001-increment_live_play_count-m0032", "progress": 32},
+        ]
+    }
     assert park.free_chat_counters(snapshot) == {"chr-00001": 6}
     assert park.free_chat_counters(None) == {}
 
@@ -501,8 +535,14 @@ def test_the_park_route_carries_free_chat(web_base, stub_park, monkeypatch):
 def test_site_photos_and_icons_are_servable_names_only():
     for name in ["site-area-a01-house-00.jpg", "icon-house.png", "icon-fishing.png", "symbol.png"]:
         assert park.PARK_IMAGE_NAME_RE.match(name), name
-    for name in ["site-area-a01-house-00.png", "icon-house.jpg", "site-../x.jpg",
-                 "icon-../x.png", "site-area-a01/../x.jpg", "icon-House.png"]:
+    for name in [
+        "site-area-a01-house-00.png",
+        "icon-house.jpg",
+        "site-../x.jpg",
+        "icon-../x.png",
+        "site-area-a01/../x.jpg",
+        "icon-House.png",
+    ]:
         assert not park.PARK_IMAGE_NAME_RE.match(name), name
 
 

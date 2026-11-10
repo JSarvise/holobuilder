@@ -26,8 +26,8 @@ from hbuilder.domain.schema import (
     CONDITION_KINDS,
     NOT_APPLICABLE_CONDITION_FIELDS_BY_CONDITION_KIND,
     SCHEMA_VERSION,
-    SchemaError,
     UNGATED_CONDITION_KIND,
+    SchemaError,
     validate_skill_slot,
 )
 from hbuilder.domain.scoring import team_taint
@@ -54,9 +54,7 @@ def _active_slot(**overrides: object) -> dict:
     return slot
 
 
-def _card_record(
-    *, card_id: str, active_condition: object, type_: str = "Cute"
-) -> dict:
+def _card_record(*, card_id: str, active_condition: object, type_: str = "Cute") -> dict:
     """A minimal, schema-shaped card record whose ACTIVE slot carries the
     given `condition` value directly (may be `None`, a populated dict, or
     an `{"kind": "ungated", ...}` dict under test)."""
@@ -112,9 +110,7 @@ def test_null_condition_appears_in_unknown_fields():
 def test_ungated_kind_condition_does_not_appear_in_unknown_fields():
     # The affirmative marker is not tainting — it is a real assertion
     # that the skill has no gate.
-    record = _card_record(
-        card_id="ungated_01", active_condition={"kind": UNGATED_CONDITION_KIND}
-    )
+    record = _card_record(card_id="ungated_01", active_condition={"kind": UNGATED_CONDITION_KIND})
     assert validate_skill_slot(record["skills"]["ACTIVE"], "ungated_01", "ACTIVE") == []
     card = card_from_record(record)
     assert "skills.ACTIVE.condition" not in card.unknown_fields()
@@ -122,9 +118,7 @@ def test_ungated_kind_condition_does_not_appear_in_unknown_fields():
 
 
 def test_null_condition_taints_the_team(tmp_path):
-    path = _write_cards_document(
-        tmp_path, _card_record(card_id="untranscribed_01", active_condition=None)
-    )
+    path = _write_cards_document(tmp_path, _card_record(card_id="untranscribed_01", active_condition=None))
     cards = load_cards(path)
     # The card under test must be a MEMBER: taint, gates and EV are all
     # computed over the five members, and a leader's own slots are never
@@ -180,9 +174,7 @@ def test_condition_key_absent_entirely_is_still_a_schema_error():
     slot = _active_slot()
     del slot["condition"]
     errors = validate_skill_slot(slot, "card_missing_condition_01", "ACTIVE")
-    assert any(
-        "condition" in e and "card_missing_condition_01" in e for e in errors
-    )
+    assert any("condition" in e and "card_missing_condition_01" in e for e in errors)
 
 
 # --- real condition kinds still resolve and fire exactly as before ----------
@@ -190,11 +182,9 @@ def test_condition_key_absent_entirely_is_still_a_schema_error():
 
 def test_type_kind_condition_still_resolves_and_fires_exactly_as_before():
     condition = {"kind": "type", "target": "Cute", "count": 2}
-    leader = card_from_record(
-        _card_record(card_id="gated_carrier", active_condition=condition, type_="Cute")
-    )
+    leader = card_from_record(_card_record(card_id="gated_carrier", active_condition=condition, type_="Cute"))
     members = (
-        leader,                                    # carrier + m1 = 2 Cute -> fires
+        leader,  # carrier + m1 = 2 Cute -> fires
         _ungated_filler_card("m1", type_="Cute"),
         _ungated_filler_card("m2", type_="Pure"),
         _ungated_filler_card("m3", type_="Pure"),

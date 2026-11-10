@@ -77,9 +77,7 @@ def _unterminated(source: str) -> list[tuple[int, str]]:
     return offenders
 
 
-@pytest.mark.parametrize(
-    "path", sorted(STATIC.glob("*.js")), ids=lambda p: p.name
-)
+@pytest.mark.parametrize("path", sorted(STATIC.glob("*.js")), ids=lambda p: p.name)
 def test_no_string_literal_spans_a_line_break(path: Path) -> None:
     offenders = _unterminated(path.read_text(encoding="utf-8"))
     assert not offenders, (

@@ -6,6 +6,7 @@ multiplies the reset-list count by the setting. A partial reset also removes eve
 one chosen, so the count here (nodes owned now and absent from the plan) is a LOWER bound
 on what the game will list. S-001, the free root, is never reset.
 """
+
 from __future__ import annotations
 
 import json
@@ -41,5 +42,4 @@ def reset_cost(now: dict, plan: dict, *, gold_per_node: int | None = None) -> di
         if dropped:
             per_character[cid] = dropped
     count = sum(len(v) for v in per_character.values())
-    return {"count": count, "gold": count * price, "gold_per_node": price,
-            "per_character": per_character}
+    return {"count": count, "gold": count * price, "gold_per_node": price, "per_character": per_character}

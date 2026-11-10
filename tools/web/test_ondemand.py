@@ -4,19 +4,25 @@ runs on a stub engine. The search itself is held in `test_joint_search.py`.
 
     python -m pytest tools/web/test_ondemand.py
 """
+
 from __future__ import annotations
 
 import queue
 
-import pytest
-
 import ondemand
+import pytest
 from hbweb import config, jobs
 
 # the account's own files (gitignored): absent on a fresh checkout
-_ACCOUNT = all((config.REPO_ROOT / p).exists() for p in (
-    "data/owned.json", "state/collection.json", "tools/recon/proxy/dumps/board_state.json",
-    "tools/recon/proxy/dumps/holodori/main_Poster.json"))
+_ACCOUNT = all(
+    (config.REPO_ROOT / p).exists()
+    for p in (
+        "data/owned.json",
+        "state/collection.json",
+        "tools/recon/proxy/dumps/board_state.json",
+        "tools/recon/proxy/dumps/holodori/main_Poster.json",
+    )
+)
 needs_account = pytest.mark.skipif(not _ACCOUNT, reason="needs the account's data (gitignored)")
 
 
@@ -38,14 +44,26 @@ class _Stub:
         self.calls.append((song, filters, top))
         if self.raise_:
             raise self.raise_
-        emit({"type": "progress", "stage": "search", "round": 1, "evaluated": 10,
-              "best_so_far": {"value": 123.0, "metric": "song_est"}})
+        emit(
+            {
+                "type": "progress",
+                "stage": "search",
+                "round": 1,
+                "evaluated": 10,
+                "best_so_far": {"value": 123.0, "metric": "song_est"},
+            }
+        )
         return {"scope": "song", "song": song, "ranking": [], "on_demand": True}
 
 
 def _opts(**kw):
-    base = {"song": "m0342", "basis": "account", "difficulty": "EXPERT", "top": 50,
-            "filters": ondemand.Filters()}
+    base = {
+        "song": "m0342",
+        "basis": "account",
+        "difficulty": "EXPERT",
+        "top": 50,
+        "filters": ondemand.Filters(),
+    }
     base.update(kw)
     return base
 
@@ -58,8 +76,11 @@ def test_job_emits_plan_progress_result_end():
     assert [e["type"] for e in events] == ["plan", "stage", "stage", "stage", "progress", "result", "end"]
     # the account load is its own stage (the page shows "Loading your account"), then the search
     assert [(e["stage"], e["state"]) for e in events[1:4]] == [
-        ("build", "active"), ("build", "done"), ("search", "active")]
-    assert events[4]["best_so_far"]["value"] == 123.0          # JobProgress passes it on
+        ("build", "active"),
+        ("build", "done"),
+        ("search", "active"),
+    ]
+    assert events[4]["best_so_far"]["value"] == 123.0  # JobProgress passes it on
     assert events[5]["payload"]["on_demand"] is True
     assert stub.calls[0][0] == "m0342"
 
@@ -82,9 +103,15 @@ def test_one_search_reports_its_rounds_with_no_start_count():
     rounds({"round": 1, "pairs": 1700, "best": 2_100_000.0})
     assert events == [
         {"type": "progress", "stage": "search", "round": 0, "evaluated": 500, "best_so_far": None},
-        {"type": "progress", "stage": "search", "round": 1, "evaluated": 1700,
-         "best_so_far": {"value": 2_100_000.0, "metric": "song_est"}}]
-    ondemand.SearchRounds(None)({"round": 0, "pairs": 1, "best": None})     # no listener: nothing
+        {
+            "type": "progress",
+            "stage": "search",
+            "round": 1,
+            "evaluated": 1700,
+            "best_so_far": {"value": 2_100_000.0, "metric": "song_est"},
+        },
+    ]
+    ondemand.SearchRounds(None)({"round": 0, "pairs": 1, "best": None})  # no listener: nothing
 
 
 def test_merged_searches_say_which_one_runs_and_keep_counting_teams():
@@ -99,18 +126,28 @@ def test_merged_searches_say_which_one_runs_and_keep_counting_teams():
     rounds({"round": 0, "pairs": 300, "best": 4.0})
     rounds({"round": 1, "pairs": 2500, "best": 4.5})
     assert [(e["start"], e["starts"], e["round"], e["evaluated"]) for e in events] == [
-        (1, 2, 0, 400), (1, 2, 2, 9000), (2, 2, 0, 9300), (2, 2, 1, 11500)]
+        (1, 2, 0, 400),
+        (1, 2, 2, 9000),
+        (2, 2, 0, 9300),
+        (2, 2, 1, 11500),
+    ]
     assert [e["best_so_far"]["value"] for e in events] == [3.0, 5.0, 4.0, 4.5]
 
 
 def test_parse_filters_reads_lists_and_comma_strings():
-    f = ondemand.parse_filters({"leader_member": "Takane Lui", "require": "a,b", "exclude": ["c"],
-                                "no_leader_overlap": 1})
-    assert f == ondemand.Filters(leader_member="Takane Lui", require=("a", "b"), exclude=("c",),
-                                 no_leader_overlap=True)
+    f = ondemand.parse_filters(
+        {"leader_member": "Takane Lui", "require": "a,b", "exclude": ["c"], "no_leader_overlap": 1}
+    )
+    assert f == ondemand.Filters(
+        leader_member="Takane Lui", require=("a", "b"), exclude=("c",), no_leader_overlap=True
+    )
     assert ondemand.parse_filters({}) == ondemand.Filters()
-    assert f.key() == ondemand.parse_filters({"leader_member": "Takane Lui", "require": ["b", "a"],
-                                              "exclude": "c", "no_leader_overlap": True}).key()
+    assert (
+        f.key()
+        == ondemand.parse_filters(
+            {"leader_member": "Takane Lui", "require": ["b", "a"], "exclude": "c", "no_leader_overlap": True}
+        ).key()
+    )
 
 
 # --- the engine on a fake leaf ---------------------------------------------------
@@ -124,12 +161,27 @@ import pytest  # noqa: E402
 
 def _fake_engine(n_cards: int = 14, n_charts: int = 9):
     rng = random.Random(3)
-    reps = [SimpleNamespace(id=f"card-{i:05d}-5-uniq-{i:04d}-00", member=f"Chr{i % 11}",
-                            costume_name=f"Outfit{i}", type=rng.choice(["Cute", "Cool"]),
-                            generations=frozenset([rng.choice(["A", "B"])]), w=rng.uniform(1, 2))
-           for i in range(n_cards)]
-    charts = [SimpleNamespace(music_id=f"m{k:04d}", difficulty="EXPERT", singers=(), singer_type=None,
-                              notes=[0] * (100 + 10 * k)) for k in range(n_charts)]
+    reps = [
+        SimpleNamespace(
+            id=f"card-{i:05d}-5-uniq-{i:04d}-00",
+            member=f"Chr{i % 11}",
+            costume_name=f"Outfit{i}",
+            type=rng.choice(["Cute", "Cool"]),
+            generations=frozenset([rng.choice(["A", "B"])]),
+            w=rng.uniform(1, 2),
+        )
+        for i in range(n_cards)
+    ]
+    charts = [
+        SimpleNamespace(
+            music_id=f"m{k:04d}",
+            difficulty="EXPERT",
+            singers=(),
+            singer_type=None,
+            notes=[0] * (100 + 10 * k),
+        )
+        for k in range(n_charts)
+    ]
     calls = []
 
     class Pool:
@@ -141,16 +193,27 @@ def _fake_engine(n_cards: int = 14, n_charts: int = 9):
                 base = sum(m.w for m in t.members) * (1.1 if t.leader.type == "Cute" else 1.0)
                 plain = sum(base * 1000 * (1 + 0.01 * k) for k in idx) / len(idx)
                 if refine_activation == "screen_both":
-                    out.append((plain, plain + 4))      # (plain, its count screen)
+                    out.append((plain, plain + 4))  # (plain, its count screen)
                     continue
                 if refine_activation == "counts_both":
-                    out.append((plain, plain + 6))      # (plain, the counts chosen per chart)
+                    out.append((plain, plain + 6))  # (plain, the counts chosen per chart)
                     continue
                 # the search's lens adds 3, the refinement 5, its level 2 (every frequency
                 # count) 8, the counts chosen per chart (In general) 6
-                out.append(plain + (8 if refine_activation == 2 else 3 if refine_activation == "lens"
-                                    else 6 if refine_activation == "counts"
-                                    else 5 if refine_activation else 0))
+                out.append(
+                    plain
+                    + (
+                        8
+                        if refine_activation == 2
+                        else 3
+                        if refine_activation == "lens"
+                        else 6
+                        if refine_activation == "counts"
+                        else 5
+                        if refine_activation
+                        else 0
+                    )
+                )
             return out
 
         def batch_score_and_ceiling(self, teams, chart_indices, refine_activation):
@@ -163,8 +226,9 @@ def _fake_engine(n_cards: int = 14, n_charts: int = 9):
 
         def batch_score_per_chart(self, teams):
             calls.append((len(teams), "per_chart"))
-            return [[sum(m.w for m in t.members) * 1000 * (1 + 0.01 * k) for k in range(n_charts)]
-                    for t in teams]
+            return [
+                [sum(m.w for m in t.members) * 1000 * (1 + 0.01 * k) for k in range(n_charts)] for t in teams
+            ]
 
     eng = object.__new__(ondemand.Engine)
     eng.basis, eng.difficulty, eng.assumptions, eng.levels = "account", "EXPERT", None, None
@@ -186,24 +250,28 @@ def test_engine_song_and_general_payloads(monkeypatch):
     monkeypatch.setattr(ondemand, "GENERAL_WIDE", 5)
     monkeypatch.setattr(ondemand, "FITTED_SAMPLE", 3)
     # the fake cards are not Card instances; the engine only builds and passes teams
-    monkeypatch.setattr(team_mod, "Team", lambda leader, members: SimpleNamespace(leader=leader, members=members))
+    monkeypatch.setattr(
+        team_mod, "Team", lambda leader, members: SimpleNamespace(leader=leader, members=members)
+    )
     eng, calls = _fake_engine()
-    eng.basis = "maxed"                                           # a GENERAL_FITTED basis
+    eng.basis = "maxed"  # a GENERAL_FITTED basis
     song = eng.search("m0002")
     # the best refined teams are refined once more at level 2 (every frequency count)
     assert song["scope"] == "song" and song["ranking"][0]["refined"] == 2
     assert any(r["refined"] is True for r in song["ranking"])
     # every served row of a one-song search carries its ceiling (the page sorts by Max)
     assert all(r["song_max"] is not None and r["song_max"] > r["best"] - 5 for r in song["ranking"])
-    assert all(c[1] in ((2,), "ceiling") for c in calls)          # only that chart
+    assert all(c[1] in ((2,), "ceiling") for c in calls)  # only that chart
     calls.clear()
     gen = eng.search(None)
     assert gen["scope"] == "general" and gen["song"] is None and gen["charts"] == 9
     assert len(gen["sample"]) == 3
-    assert any(c[1] is None for c in calls)                       # the re-score on every chart
-    assert any(c[1] not in (None, "per_chart") and len(c[1]) == 5 for c in calls)   # the climb, on the wide sample
+    assert any(c[1] is None for c in calls)  # the re-score on every chart
+    assert any(
+        c[1] not in (None, "per_chart") and len(c[1]) == 5 for c in calls
+    )  # the climb, on the wide sample
     assert tuple(gen_sample := eng._wide)[:3] == eng._sample and len(gen_sample) == 5
-    assert all(r["song_max"] is None for r in gen["ranking"])     # an average over charts: no single run
+    assert all(r["song_max"] is None for r in gen["ranking"])  # an average over charts: no single run
     values = [r["best"] for r in gen["ranking"]]
     assert values == sorted(values, reverse=True)
     # the served number is the FULL mean (every chart), not the sample's, with the
@@ -238,11 +306,26 @@ def test_assumptions_default_is_the_account_untouched_and_levers_parse():
     a = ondemand.parse_assumptions({})
     assert a == ondemand.Assumptions() and a.boards == "as_is" and a.level == "account"
     assert a.describe() == "your cards as they are; your Holomem Boards exactly as they are"
-    b = ondemand.parse_assumptions({"level": "60", "bloom": 2, "keep_higher": True, "boards": "plan",
-                                    "max_points": True, "infinite": True})
-    assert (b.level, b.bloom, b.keep_higher, b.boards, b.max_points, b.infinite) == (60, 2, True, "plan", True, True)
+    b = ondemand.parse_assumptions(
+        {
+            "level": "60",
+            "bloom": 2,
+            "keep_higher": True,
+            "boards": "plan",
+            "max_points": True,
+            "infinite": True,
+        }
+    )
+    assert (b.level, b.bloom, b.keep_higher, b.boards, b.max_points, b.infinite) == (
+        60,
+        2,
+        True,
+        "plan",
+        True,
+        True,
+    )
     assert b.notes() == []
-    assert ondemand.parse_assumptions({"boards": "plan"}).notes()      # materials not enforced: said
+    assert ondemand.parse_assumptions({"boards": "plan"}).notes()  # materials not enforced: said
     assert ondemand.parse_assumptions({"level": "max"}).level == "max"
     for bad in ({"boards": "nope"}, {"level": 99}, {"bloom": 7}, {"level": "x"}):
         with pytest.raises(ValueError):
@@ -255,7 +338,7 @@ def test_materials_mode_and_reset_cap():
     assert a.materials and "re-planned within your cubes and hexas" in a.notes()[0]
     assert "within your cubes and hexas" in a.describe()
     assert not ondemand.parse_assumptions({"boards": "plan", "infinite": True}).materials
-    assert not ondemand.parse_assumptions({}).materials                  # as they are
+    assert not ondemand.parse_assumptions({}).materials  # as they are
     assert ondemand.parse_assumptions({"boards": "plan", "max_resets": -1}).max_resets is None
     capped = ondemand.parse_assumptions({"boards": "plan", "max_resets": "5"})
     assert capped.max_resets == 5 and "at most 5 resets" in capped.describe()
@@ -266,24 +349,37 @@ def test_materials_mode_and_reset_cap():
 
 def test_the_remaining_holodori_levers_parse_and_trigger_the_exact_replan():
     a = ondemand.parse_assumptions({"boards": "plan", "infinite": True})
-    assert not a.replan                                     # nothing the quick plan misses
+    assert not a.replan  # nothing the quick plan misses
     b = ondemand.parse_assumptions({"boards": "plan", "infinite": True, "branches": "gy"})
     assert b.branches == "GY" and b.replan and "only G/Y" in b.describe()
-    c = ondemand.parse_assumptions({"boards": "plan", "infinite": True,
-                                    "targets": [{"chr": "chr-00036", "node": "R-044", "mode": "keep"},
-                                                {"chr": "chr-00036", "node": "G-024"}]})
+    c = ondemand.parse_assumptions(
+        {
+            "boards": "plan",
+            "infinite": True,
+            "targets": [
+                {"chr": "chr-00036", "node": "R-044", "mode": "keep"},
+                {"chr": "chr-00036", "node": "G-024"},
+            ],
+        }
+    )
     assert c.replan and c.targets == (("chr-00036", "G-024", "buy"), ("chr-00036", "R-044", "keep"))
     assert c.plan_opts()["targets"] == {"chr-00036": {"G-024": "buy", "R-044": "keep"}}
-    d = ondemand.parse_assumptions({"boards": "plan", "no_refund": True, "all_invited": True,
-                                    "sp_training": 2, "level": "max"})
+    d = ondemand.parse_assumptions(
+        {"boards": "plan", "no_refund": True, "all_invited": True, "sp_training": 2, "level": "max"}
+    )
     opts = d.plan_opts()
     assert opts["no_refund"] and opts["all_invited"] and opts["resources"] == "inventory"
     assert d.sp_training == 2 and "SP training 2" in d.describe() and "no refund" in d.describe()
     # no refund means nothing with unlimited materials
-    assert not ondemand.parse_assumptions({"boards": "plan", "infinite": True,
-                                           "no_refund": True}).plan_opts()["no_refund"]
-    for bad in ({"branches": "x"}, {"sp_training": 5}, {"targets": [{"chr": "x", "node": "G-1"}]},
-                {"targets": [{"chr": "chr-1", "node": "G-1", "mode": "maybe"}]}):
+    assert not ondemand.parse_assumptions(
+        {"boards": "plan", "infinite": True, "no_refund": True}
+    ).plan_opts()["no_refund"]
+    for bad in (
+        {"branches": "x"},
+        {"sp_training": 5},
+        {"targets": [{"chr": "x", "node": "G-1"}]},
+        {"targets": [{"chr": "chr-1", "node": "G-1", "mode": "maybe"}]},
+    ):
         with pytest.raises(ValueError):
             ondemand.parse_assumptions(bad)
     assert len({x.key() for x in (a, b, c, d)}) == 4
@@ -304,19 +400,26 @@ def test_reset_min_gain_is_a_percent_lever_passed_to_the_plan_as_a_fraction():
         ondemand.parse_assumptions({"boards": "plan", "reset_min_gain": 9})
 
 
-
 def test_five_star_pool_limits_the_members_not_the_leader():
     """'Only 5*' applies to the five members; an outfit leader of any rarity
     stays a candidate. The on-demand search must honour the switch."""
     from types import SimpleNamespace as C
-    reps = [C(id="card-00001-5-uniq-0001-00"), C(id="card-00002-4-uniq-0002-00"),
-            C(id="card-00003-3-uniq-0003-00"), C(id="card-00004-5-uniq-0004-00")]
+
+    reps = [
+        C(id="card-00001-5-uniq-0001-00"),
+        C(id="card-00002-4-uniq-0002-00"),
+        C(id="card-00003-3-uniq-0003-00"),
+        C(id="card-00004-5-uniq-0004-00"),
+    ]
     f = ondemand.parse_filters({"pool": "5star", "exclude": ["card-00004-5-uniq-0004-00"]})
     assert f.members_five_star and f.key() != ondemand.parse_filters({}).key()
     pool, leaders = ondemand.candidates(reps, f)
     assert [c.id for c in pool] == ["card-00001-5-uniq-0001-00"]
-    assert [c.id for c in leaders] == ["card-00001-5-uniq-0001-00", "card-00002-4-uniq-0002-00",
-                                       "card-00003-3-uniq-0003-00"]
+    assert [c.id for c in leaders] == [
+        "card-00001-5-uniq-0001-00",
+        "card-00002-4-uniq-0002-00",
+        "card-00003-3-uniq-0003-00",
+    ]
     pool, leaders = ondemand.candidates(reps, ondemand.parse_filters({}))
     assert len(pool) == len(leaders) == 4
 
@@ -329,25 +432,29 @@ def test_song_board_bonus_reports_yellow_per_singer_capped_and_the_singer_reds(m
     from types import SimpleNamespace as NS
 
     import row_detail
+
     from hbuilder.domain.song import OverallPower
 
-    monkeypatch.setattr(row_detail, "overall_power_for",
-                        lambda members, leader, cfg: OverallPower.fixed(100000.0))
-    monkeypatch.setattr(row_detail, "song_overall_power",
-                        lambda members, leader, cfg, chart: 101274.4)
+    monkeypatch.setattr(
+        row_detail, "overall_power_for", lambda members, leader, cfg: OverallPower.fixed(100000.0)
+    )
+    monkeypatch.setattr(row_detail, "song_overall_power", lambda members, leader, cfg, chart: 101274.4)
 
     class Board:
         def song_score_bonus_by_singer(self, singers, *, scope):
             assert scope == "group"
             return {"A": 0.075, "B": 0.040}
+
         def conditional_skill_effect_up_for(self, members, leader, singers):
             return 0.041 if leader == "A" else 0.0
+
         def conditional_stat_power_for(self, members, leader, singers):
             return 1234.4 if leader == "A" else 0.0
 
     team = NS(leader=NS(member="A"), members=())
-    got = row_detail.song_board_bonus(team, NS(board=Board()), NS(singers=("chr-1", "chr-2"),
-                                                                   singer_type="group"))
+    got = row_detail.song_board_bonus(
+        team, NS(board=Board()), NS(singers=("chr-1", "chr-2"), singer_type="group")
+    )
     assert got["yellow_permil"] == 100 and got["yellow_uncapped_permil"] == 115
     assert got["yellow_by_singer"] == [{"holomem": "A", "permil": 75}, {"holomem": "B", "permil": 40}]
     assert got["red_support_permil"] == 41 and got["red_power"] == 1274 and got["leader_sings"]
@@ -364,7 +471,7 @@ def test_the_engine_key_moves_when_a_refresh_moves_the_boards_or_the_wallet(tmp_
     monkeypatch.setattr(ondemand, "DUMPS", dumps)
     monkeypatch.setattr(ondemand.leaf_inputs, "today_keys", lambda basis, difficulty: ({}, "scoring-key"))
     k0 = ondemand.account_key("EXPERT")
-    assert k0 and ondemand.account_key("EXPERT") == k0                    # stable
+    assert k0 and ondemand.account_key("EXPERT") == k0  # stable
     (dumps / "board_state.json").write_text('{"chr-00001": {"nodes": [], "slots": {"S-001": "card-1"}}}')
     k1 = ondemand.account_key("EXPERT")
     (dumps / "inventory.json").write_text('{"items": {"cube": 5}}')
@@ -386,7 +493,7 @@ def test_materials_plan_rereads_a_file_a_refresh_rewrote(tmp_path, monkeypatch):
     assert materials_plan._read("board_state.json") == {"a": 1}
     path.write_text('{"a": 2}')
     st = path.stat()
-    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))   # a later write
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))  # a later write
     assert materials_plan._read("board_state.json") == {"a": 2}
 
 
@@ -403,7 +510,11 @@ def test_with_play_sets_both_halves_of_auto():
     auto = ondemand.with_play(ctx, ("pc", True)).cfg
     assert (auto.platform, auto.song_auto, auto.run_state.combo) == ("pc", True, 0)
     manual = ondemand.with_play(ctx, ("mobile", False)).cfg
-    assert (manual.platform, manual.song_auto, manual.run_state.combo) == ("mobile", False, cfg.run_state.combo)
+    assert (manual.platform, manual.song_auto, manual.run_state.combo) == (
+        "mobile",
+        False,
+        cfg.run_state.combo,
+    )
     assert ondemand.parse_play({"platform": "PC", "auto": True}) == ("pc", True)
     assert ondemand.parse_play({}) == ("mobile", False)
 
@@ -426,8 +537,9 @@ def test_a_replanned_team_is_remembered_under_its_own_name(monkeypatch):
 
     class Card(SimpleNamespace):
         pass
+
     leaders = [Card(id=f"card-0000{k}-5-a-0000-00", member=f"m{k}") for k in range(1, 4)]
-    leaders[2] = Card(id="card-00031-5-a-0000-00", member="Nene")         # the singer
+    leaders[2] = Card(id="card-00031-5-a-0000-00", member="Nene")  # the singer
     pool = [Card(id=f"card-0100{k}-5-a-0000-00", member=f"p{k}") for k in range(6)]
     ranking = [(3.0 - k / 10, li, (0, 1, 2, 3, 4)) for k, li in enumerate((0, 1, 2))]
 
@@ -437,20 +549,29 @@ def test_a_replanned_team_is_remembered_under_its_own_name(monkeypatch):
         def apply_async(self, _fn, args, callback, error_callback):
             k, leader_id, members, _song, _ci, _opts, _carried, _generation = args[0]
             callback((k, 1.0, None, None, ("plan of", leader_id, members)))
+
     held = []
-    monkeypatch.setattr(materials_plan, "remember",
-                        lambda leader_id, members, _song, _opts, entry: held.append(
-                            ((leader_id, members), entry[1:])))
-    leaf = SimpleNamespace(cfg=SimpleNamespace(platform="mobile", song_auto=False,
-                                               run_state=SimpleNamespace(combo=None)))
+    monkeypatch.setattr(
+        materials_plan,
+        "remember",
+        lambda leader_id, members, _song, _opts, entry: held.append(((leader_id, members), entry[1:])),
+    )
+    leaf = SimpleNamespace(
+        cfg=SimpleNamespace(platform="mobile", song_auto=False, run_state=SimpleNamespace(combo=None))
+    )
     a = SimpleNamespace(plan_opts=lambda: {}, key=lambda: ())
     engine = SimpleNamespace(
-        difficulty="EXPERT", levels=None,
-        charts=[SimpleNamespace(singers=("chr-00031",))], index={"m0020": 0},
-        pool=SimpleNamespace(_pool=FakeWorkers(), new_generation=lambda: 1,
-                             stop_through=lambda _g: None, ctx=leaf))
-    out, failed, optimal, _boards = ondemand.Engine._within_materials(engine, a, ranking, leaders, pool, "m0020",
-                                                             (0,), None)
+        difficulty="EXPERT",
+        levels=None,
+        charts=[SimpleNamespace(singers=("chr-00031",))],
+        index={"m0020": 0},
+        pool=SimpleNamespace(
+            _pool=FakeWorkers(), new_generation=lambda: 1, stop_through=lambda _g: None, ctx=leaf
+        ),
+    )
+    out, failed, optimal, _boards = ondemand.Engine._within_materials(
+        engine, a, ranking, leaders, pool, "m0020", (0,), None
+    )
     assert failed == [] and len(out) == 3 and len(optimal) == 3
     assert held and all(team == entry for team, entry in held)
 
@@ -491,14 +612,27 @@ def test_the_plan_options_share_one_engine():
     within the materials: they are left out of the engine's key (its workers' context is
     the same) and kept in the full key, which the hints and the plan options carry."""
     base = ondemand.parse_assumptions({"boards": "plan"})
-    for change in ({"max_resets": 3}, {"no_refund": True}, {"branches": "gy"},
-                   {"targets": [{"chr": "chr-00031", "node": "G-001", "mode": "buy"}]}, {"reset_min_gain": 0.5}):
+    for change in (
+        {"max_resets": 3},
+        {"no_refund": True},
+        {"branches": "gy"},
+        {"targets": [{"chr": "chr-00031", "node": "G-001", "mode": "buy"}]},
+        {"reset_min_gain": 0.5},
+    ):
         other = ondemand.parse_assumptions({"boards": "plan", **change})
         assert other.engine_key() == base.engine_key(), change
         assert other.key() != base.key(), change
-    for change in ({"level": "max"}, {"bloom": 2}, {"infinite": True}, {"max_points": True},
-                   {"all_invited": True}, {"boards": "as_is"}):
-        assert ondemand.parse_assumptions({"boards": "plan", **change}).engine_key() !=             base.engine_key(), change
+    for change in (
+        {"level": "max"},
+        {"bloom": 2},
+        {"infinite": True},
+        {"max_points": True},
+        {"all_invited": True},
+        {"boards": "as_is"},
+    ):
+        assert ondemand.parse_assumptions({"boards": "plan", **change}).engine_key() != base.engine_key(), (
+            change
+        )
 
 
 def test_a_search_uses_its_own_plan_options_and_hints():
@@ -507,7 +641,6 @@ def test_a_search_uses_its_own_plan_options_and_hints():
     other = ondemand.parse_assumptions({"boards": "plan"})
     with pytest.raises(ValueError):
         eng.search("m0001", assumptions=other)
-
 
 
 def test_the_counts_funnel_takes_the_teams_the_counts_lift_most(monkeypatch):
@@ -519,7 +652,9 @@ def test_the_counts_funnel_takes_the_teams_the_counts_lift_most(monkeypatch):
     monkeypatch.setattr(ondemand, "GENERAL_COUNTS_HEAD", 3)
     monkeypatch.setattr(ondemand, "GENERAL_COUNTS_FUNNEL", 8)
     monkeypatch.setattr(ondemand, "GENERAL_COUNTS_SAMPLE", 4)
-    monkeypatch.setattr(team_mod, "Team", lambda leader, members: SimpleNamespace(leader=leader, members=members))
+    monkeypatch.setattr(
+        team_mod, "Team", lambda leader, members: SimpleNamespace(leader=leader, members=members)
+    )
     eng, _calls = _fake_engine()
     asked = []
 
@@ -528,6 +663,7 @@ def test_the_counts_funnel_takes_the_teams_the_counts_lift_most(monkeypatch):
             asked.append((len(teams), tuple(chart_indices), refine_activation))
             # the 6th team gains 5 % from its counts, the others nothing
             return [(1000.0, 1050.0 if k == 5 else 1000.0) for k in range(len(teams))]
+
     eng.pool = Pool()
     leaders, pool = eng.reps, eng.reps
     ranking = [(1000.0 - k, k, (k + 1,)) for k in range(12)]

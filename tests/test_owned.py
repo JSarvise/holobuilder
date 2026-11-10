@@ -10,11 +10,10 @@ import json
 from pathlib import Path
 
 import pytest
+from support.builders import FIXTURE_CARDS_PATH, FIXTURE_OWNED_PATH
 
 from hbuilder.domain.loader import completeness_report, load_cards, load_owned
 from hbuilder.domain.schema import SCHEMA_VERSION, SchemaError
-
-from support.builders import FIXTURE_CARDS_PATH, FIXTURE_OWNED_PATH
 
 CARDS_PATH = FIXTURE_CARDS_PATH
 OWNED_PATH = FIXTURE_OWNED_PATH
@@ -98,9 +97,7 @@ def test_empty_owned_array_returns_empty_tuple_without_raising(tmp_path, cards):
     assert load_owned(path, cards) == ()
 
 
-def test_load_owned_returns_cards_json_order_regardless_of_owned_json_order(
-    tmp_path, cards
-):
+def test_load_owned_returns_cards_json_order_regardless_of_owned_json_order(tmp_path, cards):
     ids = [card.id for card in cards]
 
     forward_doc = {"schema_version": SCHEMA_VERSION, "owned": ids}
@@ -141,5 +138,3 @@ def test_completeness_report_omits_cards_with_no_unknown_fields(cards):
 
 
 # --- CLI: OWNED and COMPLETENESS lines --------------------------------------
-
-

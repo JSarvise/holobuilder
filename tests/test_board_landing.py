@@ -30,14 +30,13 @@ from pathlib import Path
 
 import pytest
 from support import board_reference
+from support.builders import make_card, make_scoring_config, make_team
 
 from hbuilder import inputs as cli
 from hbuilder.domain import board as board_module
 from hbuilder.domain.board import BoardError, board_from_mapping, load_board
 from hbuilder.domain.collection import CardLevelCaps
 from hbuilder.domain.scoring import score_card_set, score_fast
-
-from support.builders import make_card, make_scoring_config, make_team
 
 _REPO = Path(__file__).resolve().parents[1]
 _BUILD_BOARD = _REPO / "tools" / "refresh" / "build_board.py"
@@ -93,9 +92,7 @@ _SKILLTREE = {
 
 _LEADER_EFFECT = "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader"
 _ACCOUNT_EFFECT = "skill_tree_effect-all_parameter_up-5-skill_tree_effect_target-all-always"
-_MEMBER_EFFECT = (
-    "skill_tree_effect-sense_up-100-skill_tree_effect_target-skill_tree_character-always"
-)
+_MEMBER_EFFECT = "skill_tree_effect-sense_up-100-skill_tree_effect_target-skill_tree_character-always"
 _GROUPING_ALPHA = (
     "skill_tree_effect-all_parameter_up_for_character_grouping-50"
     "-skill_tree_effect_target-character_grouping-grp-gen_0-always"
@@ -159,9 +156,7 @@ def build_board():
 
 @pytest.fixture(scope="module")
 def converted(build_board):
-    document, report, problems = build_board.build(
-        _STATE, _SKILLTREE, _NODE_MASTER, level=1
-    )
+    document, report, problems = build_board.build(_STATE, _SKILLTREE, _NODE_MASTER, level=1)
     return document, report, problems
 
 
@@ -225,9 +220,7 @@ def test_connect_level_two_is_selectable_and_is_not_the_default(build_board):
     bloom is not recorded. Level 1 is the default because it is what
     reproduces the +28.73 pp acceptance number; level 2 is reachable so the
     sensitivity can be measured rather than argued about."""
-    level_two, _report, problems = build_board.build(
-        _STATE, _SKILLTREE, _NODE_MASTER, level=2
-    )
+    level_two, _report, problems = build_board.build(_STATE, _SKILLTREE, _NODE_MASTER, level=2)
     assert problems == []
     assert level_two["connect_level"] == 2
     by_node = {row["node"]: row["connect_multiplier"] for row in level_two["characters"]["Alpha"]}
@@ -259,17 +252,17 @@ _STATE_REAL_ID = {
 # `"max"` can only mean a bloom if something says what the maximum IS, and that
 # is `card_caps.json`. Without it the resolver leaves the bloom unknown — see
 # `test_a_maxed_default_without_card_caps_cannot_invent_a_bloom`.
-_CAPS = {
-    "5": CardLevelCaps(
-        level_by_limit_break=(40, 50, 60, 70, 80), max_bloom=5, bloom_mult_permil=()
-    )
-}
+_CAPS = {"5": CardLevelCaps(level_by_limit_break=(40, 50, 60, 70, 80), max_bloom=5, bloom_mult_permil=())}
 
 
 def _auto(collection, caps=_CAPS):
     return _BUILD.build(
-        _STATE_REAL_ID, _SKILLTREE_REAL_ID, _NODE_MASTER, level=None,
-        collection=collection, caps_by_rarity=caps,
+        _STATE_REAL_ID,
+        _SKILLTREE_REAL_ID,
+        _NODE_MASTER,
+        level=None,
+        collection=collection,
+        caps_by_rarity=caps,
     )
 
 
@@ -277,9 +270,7 @@ def test_auto_reads_level_two_from_a_bloom_the_owner_typed():
     """A named bloom 5 on a 5★ is account truth, so the document says
     `actual` — the derived level and the trustworthy-provenance label are one
     decision, not two."""
-    document, _report, problems = _auto(
-        {"card_default": "unknown", "cards": {_R5_CARD: {"bloom": 5}}}
-    )
+    document, _report, problems = _auto({"card_default": "unknown", "cards": {_R5_CARD: {"bloom": 5}}})
     assert problems == []
     assert document["connect_level"] == "auto"
     assert document["basis"] == "actual"
@@ -292,9 +283,7 @@ def test_auto_reads_level_one_from_a_bloom_below_five():
     """A real case, confirmed in game: both socket cards
     are below bloom 5, so the base level is not an assumption here — it is
     what the collection says."""
-    document, _report, problems = _auto(
-        {"card_default": "unknown", "cards": {_R5_CARD: {"bloom": 4}}}
-    )
+    document, _report, problems = _auto({"card_default": "unknown", "cards": {_R5_CARD: {"bloom": 4}}})
     assert problems == []
     assert document["basis"] == "actual"
     assert document["connect_basis"] == {_BUILD.BASIS_MANUAL: 1}
@@ -357,7 +346,10 @@ def test_forcing_a_level_is_recorded_as_forced_and_stays_actual(build_board):
     can never be tainted by a maxed default — which is why it remains the
     shipped default while `auto` is opt-in."""
     document, _report, _problems = build_board.build(
-        _STATE_REAL_ID, _SKILLTREE_REAL_ID, _NODE_MASTER, level=1,
+        _STATE_REAL_ID,
+        _SKILLTREE_REAL_ID,
+        _NODE_MASTER,
+        level=1,
         collection={"card_default": "max", "cards": {}},
     )
     assert document["basis"] == "actual"
@@ -398,26 +390,20 @@ def test_y_group_falls_back_to_the_default_row_when_no_variant_names_the_charact
 
 def test_an_unknown_node_is_reported_not_dropped(build_board):
     state = {"chr-00001": {"nodes": ["R-001", "Z-999"], "slots": {}}}
-    document, _report, problems = build_board.build(
-        state, _SKILLTREE, _NODE_MASTER, level=1
-    )
+    document, _report, problems = build_board.build(state, _SKILLTREE, _NODE_MASTER, level=1)
     assert any("Z-999" in problem for problem in problems)
     assert [row["node"] for row in document["characters"]["Alpha"]] == ["R-001"]
 
 
 def test_a_placed_card_with_no_connect_effect_is_reported(build_board):
     state = {"chr-00001": {"nodes": ["R-001"], "slots": {"S-001": "card-unknown"}}}
-    _document, _report, problems = build_board.build(
-        state, _SKILLTREE, _NODE_MASTER, level=1
-    )
+    _document, _report, problems = build_board.build(state, _SKILLTREE, _NODE_MASTER, level=1)
     assert any("card-unknown" in problem and "UNRESOLVED" in problem for problem in problems)
 
 
 def test_a_character_missing_from_the_member_table_is_reported(build_board):
     state = {"chr-99999": {"nodes": ["R-001"], "slots": {}}}
-    document, _report, problems = build_board.build(
-        state, _SKILLTREE, _NODE_MASTER, level=1
-    )
+    document, _report, problems = build_board.build(state, _SKILLTREE, _NODE_MASTER, level=1)
     assert document["characters"] == {}
     assert any("chr-99999" in problem for problem in problems)
 
@@ -428,9 +414,7 @@ def test_a_group_whose_rows_all_name_other_characters_is_reported(build_board):
     node_master = [_row("G-008", "1", _GROUPING_ALPHA, ["chr-00001"])]
     skilltree = dict(_SKILLTREE)
     state = {"chr-00002": {"nodes": ["G-008"], "slots": {}}}
-    document, _report, problems = build_board.build(
-        state, skilltree, node_master, level=1
-    )
+    document, _report, problems = build_board.build(state, skilltree, node_master, level=1)
     assert document["characters"]["Beta"] == []
     assert any("chr-00002" in problem for problem in problems)
 
@@ -441,10 +425,7 @@ def test_a_group_whose_rows_all_name_other_characters_is_reported(build_board):
 
 
 def _stat_totals(contribution, members):
-    return {
-        card.id: sum(contribution.flat_by_card.get(card.id, {}).values())
-        for card in members
-    }
+    return {card.id: sum(contribution.flat_by_card.get(card.id, {}).values()) for card in members}
 
 
 def test_a_leader_scope_effect_pays_only_when_that_holomem_leads(converted):
@@ -510,9 +491,7 @@ def test_the_whole_team_score_moves_when_the_leader_changes(converted):
     # Without the board the two arrangements score alike (the cards are
     # stat-identical); with it, Alpha's red branch separates them.
     assert score_fast(alpha_leads, cfg) == pytest.approx(score_fast(beta_leads, cfg))
-    assert score_fast(alpha_leads, cfg_with_board) > score_fast(
-        beta_leads, cfg_with_board
-    )
+    assert score_fast(alpha_leads, cfg_with_board) > score_fast(beta_leads, cfg_with_board)
 
 
 # --------------------------------------------------------------------------
@@ -563,9 +542,7 @@ def test_a_leader_WITH_a_red_node_does_not_resolve_like_no_leader(converted):
     members = (alpha, *others)
 
     assert alpha.member in model.leader_scoped_holomem
-    assert board_reference.resolve(model, alpha, members) != board_reference.resolve(
-        model, None, members
-    )
+    assert board_reference.resolve(model, alpha, members) != board_reference.resolve(model, None, members)
 
 
 def test_the_memoised_invariant_terms_reproduce_the_full_walk_exactly(converted):
@@ -592,9 +569,7 @@ def test_the_memoised_invariant_terms_reproduce_the_full_walk_exactly(converted)
         for leader in (None, alpha, beta, *others):
             holomem = None if leader is None else leader.member
             expected = board_reference.resolve(model, leader, members)
-            assert model.power_bonus_for(members, holomem) == expected.power_bonus(
-                members
-            )
+            assert model.power_bonus_for(members, holomem) == expected.power_bonus(members)
             assert model.score_bonus_rate() == expected.score_bonus_rate()
 
     # The memo must be a cache, not a mutation: asking twice gives the same
@@ -617,12 +592,8 @@ def test_the_invariant_memo_does_not_confuse_two_cards_sharing_an_id(converted):
 
     first = model.power_bonus_for((as_alpha, *others), None)
     second = model.power_bonus_for((as_beta, *others), None)
-    assert first == board_reference.resolve(model, None, (as_alpha, *others)).power_bonus(
-        (as_alpha, *others)
-    )
-    assert second == board_reference.resolve(model, None, (as_beta, *others)).power_bonus(
-        (as_beta, *others)
-    )
+    assert first == board_reference.resolve(model, None, (as_alpha, *others)).power_bonus((as_alpha, *others))
+    assert second == board_reference.resolve(model, None, (as_beta, *others)).power_bonus((as_beta, *others))
     # Negative control: Alpha's own `member`-scope node makes these differ, so
     # an id-keyed memo would have been caught by the assertions above.
     assert first != second
@@ -745,7 +716,9 @@ def test_a_board_file_that_exists_but_does_not_parse_is_an_error(tmp_path):
     because it failed to parse is indistinguishable from one that is
     correctly zero, which is exactly what `BoardError` exists to prevent."""
     path = tmp_path / "board.json"
-    path.write_text(json.dumps({"characters": {"Alpha": [{"node": "R-1", "effects": ["nope"]}]}}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"characters": {"Alpha": [{"node": "R-1", "effects": ["nope"]}]}}), encoding="utf-8"
+    )
     with pytest.raises(BoardError):
         cli.load_board_basis(str(path))
 
@@ -832,12 +805,8 @@ def test_the_real_capture_converts_with_nothing_unresolved(build_board):
     derivation landing on the same 27 rows."""
     state = json.loads((_DUMPS / "board_state.json").read_text(encoding="utf-8"))
     skilltree = json.loads((_DUMPS / "skilltree.json").read_text(encoding="utf-8"))
-    node_master = json.loads(
-        (_DUMPS / "master_SkillTreeNode.json").read_text(encoding="utf-8")
-    )
-    document, _report, problems = build_board.build(
-        state, skilltree, node_master, level=1
-    )
+    node_master = json.loads((_DUMPS / "master_SkillTreeNode.json").read_text(encoding="utf-8"))
+    document, _report, problems = build_board.build(state, skilltree, node_master, level=1)
     assert problems == []
     board_from_mapping(document, source="<real capture>")
 
@@ -848,12 +817,11 @@ def test_the_real_capture_converts_with_nothing_unresolved(build_board):
     # machine derivations agreeing node for node) is about the conversion, not
     # about the account's current build, so freezing its input preserves it.
     state = json.loads(
-        (Path(__file__).parent / "fixtures"
-         / "board_state_2026-08-09_pre_respec.json").read_text(encoding="utf-8")
+        (Path(__file__).parent / "fixtures" / "board_state_2026-08-09_pre_respec.json").read_text(
+            encoding="utf-8"
+        )
     )
-    document, _report, problems = build_board.build(
-        state, skilltree, node_master, level=1
-    )
+    document, _report, problems = build_board.build(state, skilltree, node_master, level=1)
     assert problems == []
 
     from test_board import INA_RED_NODES

@@ -19,10 +19,10 @@ solver's own beam — but connectivity- and budget-exact by construction:
 from __future__ import annotations
 
 import heapq
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
-from hbuilder.domain.skilltree import SkillTree, ROOT_NODE
+from hbuilder.domain.skilltree import ROOT_NODE, SkillTree
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +126,4 @@ def optimize_board(
         value += sum(node_value.get(n, 0.0) for n in sorted(added_nodes))
         steps.append(added_nodes)
 
-    return BoardPlan(
-        selected=frozenset(selected), spent=spent, value=value, steps=tuple(steps)
-    )
+    return BoardPlan(selected=frozenset(selected), spent=spent, value=value, steps=tuple(steps))

@@ -19,6 +19,7 @@ web app reach the same Settings through `window.pywebview.api` (the rail's gear 
 
 It is the only part of the app that writes Settings; tools/web still writes nothing.
 """
+
 from __future__ import annotations
 
 import base64
@@ -45,11 +46,11 @@ import app_settings  # noqa: E402
 import content_store  # noqa: E402
 
 UI = HERE / "ui" / "index.html"
-VERSION_FILE = HERE / "VERSION"          # written by the build; absent in a development checkout
+VERSION_FILE = HERE / "VERSION"  # written by the build; absent in a development checkout
 LOG = paths.STATE / "server.log"
 DUMPS = paths.DUMPS
 APP_ID = "holobuilder.app"
-UPDATE_POLL_S = 600                       # one small GET every 10 min while the app is open
+UPDATE_POLL_S = 600  # one small GET every 10 min while the app is open
 LOCALLOW = app_settings.LOCALLOW
 
 
@@ -74,8 +75,9 @@ def clean_env(*, reset: bool = False) -> dict:
 def server_me(s: dict) -> dict:
     """GET auth/me with this PC's key; {} when the server cannot be asked."""
     try:
-        req = urllib.request.Request(s["server_url"].rstrip("/") + "/auth/me",
-                                     headers={"Authorization": f"Bearer {s['server_token']}"})
+        req = urllib.request.Request(
+            s["server_url"].rstrip("/") + "/auth/me", headers={"Authorization": f"Bearer {s['server_token']}"}
+        )
         with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310 -- the app's own https host
             doc = json.loads(r.read())
         return doc if isinstance(doc, dict) else {}
@@ -85,10 +87,11 @@ def server_me(s: dict) -> dict:
 
 def server_set_username(s: dict, username: str) -> dict:
     """POST auth/username -> {"ok": True, "username"} or {"ok": False, "error"}."""
-    req = urllib.request.Request(s["server_url"].rstrip("/") + "/auth/username",
-                                 data=json.dumps({"username": username}).encode(),
-                                 headers={"Authorization": f"Bearer {s['server_token']}",
-                                          "Content-Type": "application/json"})
+    req = urllib.request.Request(
+        s["server_url"].rstrip("/") + "/auth/username",
+        data=json.dumps({"username": username}).encode(),
+        headers={"Authorization": f"Bearer {s['server_token']}", "Content-Type": "application/json"},
+    )
     try:
         with urllib.request.urlopen(req, timeout=15) as r:  # noqa: S310 -- the app's own https host
             return {"ok": True, **json.loads(r.read())}
@@ -109,7 +112,7 @@ def account_failure(lines: list[str]) -> list[str]:
     if start is None:
         return lines[-12:]
     block = []
-    for ln in lines[start + 1:]:
+    for ln in lines[start + 1 :]:
         if ln.startswith("[run ] ") or ln.startswith("------"):
             break
         if ln.strip():
@@ -145,23 +148,29 @@ def update_state(local: str, remote: dict) -> str:
 
 # ------------------------------------------------------------------ this PC
 
+
 def hardware() -> dict:
     """Physical cores, threads, RAM (GB), GPU name."""
     threads = os.cpu_count() or 1
     cores = threads
-    try:   # one 32-byte SYSTEM_LOGICAL_PROCESSOR_INFORMATION per relation; Relationship 0 = core
+    try:  # one 32-byte SYSTEM_LOGICAL_PROCESSOR_INFORMATION per relation; Relationship 0 = core
         k32 = ctypes.windll.kernel32
         n = ctypes.c_ulong(0)
         k32.GetLogicalProcessorInformation(None, ctypes.byref(n))
         buf = ctypes.create_string_buffer(n.value)
         if k32.GetLogicalProcessorInformation(buf, ctypes.byref(n)):
-            cores = sum(1 for i in range(0, n.value, 32)
-                        if int.from_bytes(buf.raw[i + 8:i + 12], "little") == 0) or threads
+            cores = (
+                sum(
+                    1 for i in range(0, n.value, 32) if int.from_bytes(buf.raw[i + 8 : i + 12], "little") == 0
+                )
+                or threads
+            )
     except (AttributeError, OSError):
         pass
     ram_gb, gpu = 0.0, ""
     try:
         import client_profile  # noqa: PLC0415
+
         ram_gb = round(client_profile._ram_mb() / 1024, 1)
         gpu = client_profile.pick_gpu(client_profile._adapters()).get("name", "")
     except Exception:  # noqa: BLE001 -- cosmetic: the start screen shows what it could read
@@ -188,6 +197,7 @@ def diagnostics(s: dict, *, engine: str, log: Path = LOG) -> str:
     the settings WITHOUT the personal ones (account file path, Steam ID, access key: only
     whether they are set), the content version and the end of the engine's log, redacted."""
     import platform  # noqa: PLC0415
+
     hw = hardware()
     try:
         content = json.loads((content_store.STORE / "manifest.json").read_text("utf8"))
@@ -253,7 +263,7 @@ def holomems() -> list[dict]:
     return sorted(out.values(), key=lambda h: h["name"])
 
 
-FACES = HERE / "ui" / "faces"   # every holomem's face, 128 px webp, shipped IN the build
+FACES = HERE / "ui" / "faces"  # every holomem's face, 128 px webp, shipped IN the build
 
 
 def face_file(chr_id: str) -> Path | None:
@@ -275,9 +285,11 @@ def icon_file(chr_id: str) -> Path | None:
     try:
         out.parent.mkdir(exist_ok=True)
         from PIL import Image  # noqa: PLC0415
+
         with Image.open(src) as im:
-            im.convert("RGBA").save(out, sizes=[(16, 16), (24, 24), (32, 32), (48, 48),
-                                                 (64, 64), (128, 128), (256, 256)])
+            im.convert("RGBA").save(
+                out, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+            )
         return out
     except Exception:  # noqa: BLE001 -- no icon is a default icon, never a failed start
         return None
@@ -294,6 +306,7 @@ def clear_webview_cache_after_update(storage: Path, version: str) -> bool:
     the window has no reload key. Only the caches go: localStorage, cookies and settings stay.
     True when it cleared them."""
     import shutil  # noqa: PLC0415
+
     marker = storage / "app_version.txt"
     try:
         if marker.read_text("utf8").strip() == version:
@@ -314,15 +327,16 @@ def set_window_icon(window, path: Path | None) -> None:
     try:
         hwnd = int(str(window.native.Handle.ToInt64()))
         u32 = ctypes.windll.user32
-        for which, size in ((1, 256), (0, 32)):                     # ICON_BIG, ICON_SMALL
+        for which, size in ((1, 256), (0, 32)):  # ICON_BIG, ICON_SMALL
             h = u32.LoadImageW(None, str(path), 1, size, size, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
             if h:
-                u32.SendMessageW(hwnd, 0x80, which, h)               # WM_SETICON
+                u32.SendMessageW(hwnd, 0x80, which, h)  # WM_SETICON
     except Exception:  # noqa: BLE001
         pass
 
 
 # ------------------------------------------------------------------ the JS side's API
+
 
 class Api:
     """Every method is callable from the page as `await pywebview.api.<name>(...)`."""
@@ -333,10 +347,10 @@ class Api:
         self._window = None
         self._server: subprocess.Popen | None = None
         self.url: str | None = None
-        self.home: str | None = None          # the start screen's own URL (pywebview serves it)
+        self.home: str | None = None  # the start screen's own URL (pywebview serves it)
         self._started = False
-        self._pending: dict | None = None     # the newer version found at start or while open
-        self._dismissed: str | None = None    # the version whose notice the user closed
+        self._pending: dict | None = None  # the newer version found at start or while open
+        self._dismissed: str | None = None  # the version whose notice the user closed
         self._named = threading.Event()
 
     # -- reads
@@ -345,11 +359,13 @@ class Api:
         hm = {h["chr"]: h for h in holomems()}
         pick = hm.get(s["holomem"]) or hm.get(app_settings.NENE) or {}
         return {
-            "version": app_version(), "settings": self._public(s),
-            "problems": app_settings.validate(s), "hardware": hardware(),
-            "holomem": pick, "url": self.url,
-            "font": data_uri(paths.WEB_DIR / "fonts" / "line-seed-sans-xbd-latin.woff2",
-                             "font/woff2"),
+            "version": app_version(),
+            "settings": self._public(s),
+            "problems": app_settings.validate(s),
+            "hardware": hardware(),
+            "holomem": pick,
+            "url": self.url,
+            "font": data_uri(paths.WEB_DIR / "fonts" / "line-seed-sans-xbd-latin.woff2", "font/woff2"),
         }
 
     def holomem_list(self) -> list[dict]:
@@ -370,15 +386,16 @@ class Api:
         s = app_settings.load()
         for k, v in (new or {}).items():
             if k == "server_token" and (not v or str(v).startswith("•")):
-                continue                                     # the masked value: unchanged
+                continue  # the masked value: unchanged
             if k in app_settings.DEFAULTS:
                 s[k] = v
         problems = app_settings.validate(s)
         if problems:
             return {"ok": False, "problems": problems}
         app_settings.save(s)
-        if self._started:                    # a Steam ID typed or cleared: the next request uses it
+        if self._started:  # a Steam ID typed or cleared: the next request uses it
             import client_profile  # noqa: PLC0415
+
             client_profile.ensure(s["steam_id"])
         if self._window is not None:
             set_window_icon(self._window, icon_file(s["holomem"]))
@@ -386,6 +403,7 @@ class Api:
 
     def browse_credential(self) -> str | None:
         import webview  # noqa: PLC0415
+
         start = str(LOCALLOW) if LOCALLOW.is_dir() else str(Path.home())
         got = self._window.create_file_dialog(webview.OPEN_DIALOG, directory=start)
         return got[0] if got else None
@@ -400,20 +418,26 @@ class Api:
         s = app_settings.load()
         local = app_version()
         try:
-            req = urllib.request.Request(s["server_url"].rstrip("/") + "/app/version.json",
-                                         headers={"Authorization": f"Bearer {s['server_token']}",
-                                                  **content_store.version_header()})
+            req = urllib.request.Request(
+                s["server_url"].rstrip("/") + "/app/version.json",
+                headers={"Authorization": f"Bearer {s['server_token']}", **content_store.version_header()},
+            )
             with urllib.request.urlopen(req, timeout=10) as r:
                 remote = json.loads(r.read())
             # only the publisher's signature makes the file believable: an unsigned or altered
             # one could otherwise show a false "update required" (the installer already refuses
             # to install it; this keeps the banner honest too)
             import signing  # noqa: PLC0415
+
             signing.verify(signing.canonical(remote), remote.get("sig", ""))
         except Exception as exc:  # noqa: BLE001 -- offline is not a failed start
             return {"state": "unknown", "local": local, "error": str(exc)}
-        got = {"state": update_state(local, remote), "local": local,
-               "latest": remote.get("latest"), "notes": remote.get("notes", "")}
+        got = {
+            "state": update_state(local, remote),
+            "local": local,
+            "latest": remote.get("latest"),
+            "notes": remote.get("notes", ""),
+        }
         # held for the pages: the start screen opens the Optimizer a moment after it shows
         # the notice, so the pages carry it on (hb-shell.js asks `pending_update` on each load)
         if got["state"] in ("available", "required"):
@@ -455,14 +479,17 @@ class Api:
             self._emit(step="sync", state="run")
             store = content_store.ContentStore(
                 fetch=content_store.http_fetch({"url": s["server_url"], "token": s["server_token"]}),
-                cap=int(s["cache_mb"]) * 1024 * 1024)
+                cap=int(s["cache_mb"]) * 1024 * 1024,
+            )
             last = [0.0]
 
             def progress(e: dict) -> None:
                 if time.time() - last[0] > 0.1 or e["i"] == e["n"]:
                     last[0] = time.time()
-                    self._emit(step="sync", state="run", i=e["i"], n=e["n"],
-                               bytes=e["bytes"], total=e["total"])
+                    self._emit(
+                        step="sync", state="run", i=e["i"], n=e["n"], bytes=e["bytes"], total=e["total"]
+                    )
+
             try:
                 r = store.sync(progress)
                 self._emit(step="sync", state="done", files=r["files"], bytes=r["bytes"])
@@ -477,21 +504,34 @@ class Api:
             # every start, not only the first: the Steam ID is read off this PC's Steam, so an
             # app set up before that (or before Steam was signed in) gets it now
             import client_profile  # noqa: PLC0415
-            prof = client_profile.ensure(s["steam_id"])
-            self._emit(step="profile", state="done", **({} if prof["steam_id"] else {
-                "note": "no Steam ID found: sign in to Steam or type it in Settings"}))
 
-            if not all(p.is_file() for p in (paths.STATE / "collection.json",
-                                             paths.DATA / "owned.json", DUMPS / "board.json")):
-                self._account_refresh(s)          # a first start: the app has no account yet
+            prof = client_profile.ensure(s["steam_id"])
+            self._emit(
+                step="profile",
+                state="done",
+                **(
+                    {}
+                    if prof["steam_id"]
+                    else {"note": "no Steam ID found: sign in to Steam or type it in Settings"}
+                ),
+            )
+
+            if not all(
+                p.is_file()
+                for p in (paths.STATE / "collection.json", paths.DATA / "owned.json", DUMPS / "board.json")
+            ):
+                self._account_refresh(s)  # a first start: the app has no account yet
 
             self._emit(step="server", state="run")
             self.url = self._start_server(s)
             # the card art every page draws, into the cache while the user looks around: the
             # first visit to Collection must not wait for 300 cards one by one (~80 MB, once)
-            threading.Thread(target=store.prefetch, name="prefetch", daemon=True,
-                             args=(("tools/explorer/cards_explorer_art/",
-                                    f"{paths.DUMPS_REL}/card_images/"),)).start()
+            threading.Thread(
+                target=store.prefetch,
+                name="prefetch",
+                daemon=True,
+                args=(("tools/explorer/cards_explorer_art/", f"{paths.DUMPS_REL}/card_images/"),),
+            ).start()
             self._started = True
             self._emit(step="server", state="done", url=self.url)
             threading.Thread(target=self._watch_updates, name="updates", daemon=True).start()
@@ -502,13 +542,24 @@ class Api:
         """refresh_all --account-only, its step lines streamed to the start screen."""
         self._emit(step="account", state="run", detail="logging in…")
         proc = subprocess.Popen(
-            [sys.executable, "-u", str(paths.REFRESH_DIR / "refresh_all.py"),
-             "--account-only"], cwd=str(REPO), env=app_settings.env(s), stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-            errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            [sys.executable, "-u", str(paths.REFRESH_DIR / "refresh_all.py"), "--account-only"],
+            cwd=str(REPO),
+            env=app_settings.env(s),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
         tail: list[str] = []
-        names = {"account": "reading your cards and boards…", "inventory": "reading your items…",
-                 "board": "building your Holomem Boards…", "board_export": "laying out the boards…"}
+        names = {
+            "account": "reading your cards and boards…",
+            "inventory": "reading your items…",
+            "board": "building your Holomem Boards…",
+            "board_export": "laying out the boards…",
+        }
         for line in proc.stdout:
             tail = (tail + [line.rstrip()])[-600:]
             for step, text in names.items():
@@ -518,8 +569,11 @@ class Api:
         if not (paths.STATE / "collection.json").is_file():
             raise RuntimeError("the account could not be read:\n" + "\n".join(account_failure(tail)))
         warn = "DATE_CHANGED" in "\n".join(tail)
-        self._emit(step="account", state="done",
-                   detail="open the game once today to refresh card parameters" if warn else "read")
+        self._emit(
+            step="account",
+            state="done",
+            detail="open the game once today to refresh card parameters" if warn else "read",
+        )
 
     def _start_server(self, s: dict) -> str:
         if self._server and self._server.poll() is None:
@@ -532,10 +586,22 @@ class Api:
         log = open(LOG, "ab")
         art = paths.TOOLS / "explorer" / "cards_explorer_art"
         self._server = subprocess.Popen(
-            [sys.executable, "-u", str(paths.WEB_DIR / "server.py"), "--port", str(port),
-             "--art-dir", str(art)],
-            cwd=str(REPO), env=app_settings.env(s), stdin=subprocess.DEVNULL, stdout=log,
-            stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            [
+                sys.executable,
+                "-u",
+                str(paths.WEB_DIR / "server.py"),
+                "--port",
+                str(port),
+                "--art-dir",
+                str(art),
+            ],
+            cwd=str(REPO),
+            env=app_settings.env(s),
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
         url = f"http://127.0.0.1:{port}"
         deadline = time.time() + 90
         while time.time() < deadline:
@@ -586,9 +652,12 @@ class Api:
         setup = REPO.parent / "holobuilder-setup.exe"
         if not setup.is_file():
             return {"ok": False, "error": "this copy was not installed by holobuilder-setup.exe"}
-        subprocess.Popen([str(setup), "--update", "--pid", str(os.getpid()), "--dir", str(REPO.parent)],
-                         cwd=str(REPO.parent), env=clean_env(reset=True),
-                         creationflags=0x00000008 | 0x00000200)          # DETACHED | NEW_GROUP
+        subprocess.Popen(
+            [str(setup), "--update", "--pid", str(os.getpid()), "--dir", str(REPO.parent)],
+            cwd=str(REPO.parent),
+            env=clean_env(reset=True),
+            creationflags=0x00000008 | 0x00000200,  # DETACHED | NEW_GROUP
+        )
         self.stop()
         if self._window is not None:
             self._window.destroy()
@@ -621,7 +690,6 @@ class Api:
                 self._server.kill()
 
 
-
 def main() -> int:
     content_store.install_user_agent()
     import webview  # noqa: PLC0415
@@ -632,8 +700,16 @@ def main() -> int:
         pass
     api = Api()
     window = webview.create_window(
-        "holobuilder", url=str(UI), js_api=api, width=1440, height=900, min_size=(1200, 760),
-        background_color="#0E0D20", maximized=True, text_select=True)
+        "holobuilder",
+        url=str(UI),
+        js_api=api,
+        width=1440,
+        height=900,
+        min_size=(1200, 760),
+        background_color="#0E0D20",
+        maximized=True,
+        text_select=True,
+    )
     api._window = window
     window.events.shown += lambda: set_window_icon(window, icon_file(app_settings.load()["holomem"]))
     window.events.closed += api.stop
@@ -641,6 +717,7 @@ def main() -> int:
     def loaded() -> None:
         if api.home is None:
             api.home = window.get_current_url()
+
     window.events.loaded += loaded
     storage = paths.STATE / "webview"
     clear_webview_cache_after_update(storage, app_version())

@@ -58,7 +58,7 @@ from __future__ import annotations
 import array
 import dataclasses
 import itertools
-from typing import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from hbuilder.domain.card import Card
 from hbuilder.domain.song import SPECIAL_CUE_COUNT
@@ -104,8 +104,9 @@ def bare_leader(card: Card) -> Card:
     if len(parts) < 6:
         raise ValueError(f"card id {card.id!r} is not of the catalogue shape")
     new_id = "-".join(parts[:2] + ["5", BARE_TAG, parts[4], parts[5]])
-    return dataclasses.replace(card, id=new_id, costume_skill=None,
-                               costume_name=f"BARE ({card.costume_name})")
+    return dataclasses.replace(
+        card, id=new_id, costume_skill=None, costume_name=f"BARE ({card.costume_name})"
+    )
 
 
 def is_bare(card: Card) -> bool:
@@ -148,9 +149,9 @@ class Tables:
     types: tuple[str, ...]
     gens: tuple[str, ...]
     hols: tuple[str, ...]
-    card_t: tuple[int, ...]         # per pool card: index into `types`
-    card_gmask: tuple[int, ...]     # per pool card: generation bitmask
-    card_h: tuple[int, ...]         # per pool card: index into `hols`
+    card_t: tuple[int, ...]  # per pool card: index into `types`
+    card_gmask: tuple[int, ...]  # per pool card: generation bitmask
+    card_h: tuple[int, ...]  # per pool card: index into `hols`
     flat: array.array
     tcount: array.array
     gmask: Sequence[int]
@@ -169,7 +170,7 @@ class Tables:
         return {h: i for i, h in enumerate(self.hols)}
 
     def roster(self, i: int) -> tuple[int, ...]:
-        return tuple(self.flat[5 * i:5 * i + 5])
+        return tuple(self.flat[5 * i : 5 * i + 5])
 
     def roster_ids(self, i: int) -> tuple[str, ...]:
         return tuple(self.pool_ids[j] for j in self.roster(i))
@@ -206,12 +207,23 @@ def tabulate(reps: Sequence[Card]) -> Tables:
             gm |= card_gmask[k]
             hm |= 1 << card_h[k]
         tcount.append(tc)
-        gmask.append(gm)   # type: ignore[union-attr]
-        hmask.append(hm)   # type: ignore[union-attr]
+        gmask.append(gm)  # type: ignore[union-attr]
+        hmask.append(hm)  # type: ignore[union-attr]
         n += 1
-    return Tables(n=n, pool_ids=tuple(c.id for c in reps), types=types, gens=gens,
-                  hols=hols, card_t=card_t, card_gmask=card_gmask, card_h=card_h,
-                  flat=flat, tcount=tcount, gmask=gmask, hmask=hmask)
+    return Tables(
+        n=n,
+        pool_ids=tuple(c.id for c in reps),
+        types=types,
+        gens=gens,
+        hols=hols,
+        card_t=card_t,
+        card_gmask=card_gmask,
+        card_h=card_h,
+        flat=flat,
+        tcount=tcount,
+        gmask=gmask,
+        hmask=hmask,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -235,13 +247,16 @@ def _satisfier(tables: Tables, gate: Gate | None) -> Callable[[int], bool] | Non
         g_idx = tables.g_idx
         if target in g_idx:
             gi, gmask, flat, card_gmask = g_idx[target], tables.gmask, tables.flat, tables.card_gmask
-            return lambda i: bool((gmask[i] >> gi) & 1) and sum(
-                1 for k in flat[5 * i:5 * i + 5] if (card_gmask[k] >> gi) & 1) >= cnt
+            return lambda i: (
+                bool((gmask[i] >> gi) & 1)
+                and sum(1 for k in flat[5 * i : 5 * i + 5] if (card_gmask[k] >> gi) & 1) >= cnt
+            )
     return lambda i: True
 
 
-def candidate_tiers(order: Sequence[int], tables: Tables, leader: Card,
-                    ks: Iterable[int]) -> dict[int, set[int]]:
+def candidate_tiers(
+    order: Sequence[int], tables: Tables, leader: Card, ks: Iterable[int]
+) -> dict[int, set[int]]:
     """For each K in `ks`, the set of enumeration indices a real `leader` must
     be re-scored on: the first K of `order` (indices sorted by bare score,
     descending), the first K of `order` that satisfy the leader's outfit gate
@@ -276,14 +291,16 @@ def candidate_tiers(order: Sequence[int], tables: Tables, leader: Card,
             for k in ks:
                 if seen_own <= k:
                     cand_by_k[k].add(i)
-        if (seen_all >= kmax and (satisfies is None or seen_gate >= kmax)
-                and (not own_possible or seen_own >= kmax)):
+        if (
+            seen_all >= kmax
+            and (satisfies is None or seen_gate >= kmax)
+            and (not own_possible or seen_own >= kmax)
+        ):
             break
     return cand_by_k
 
 
-def candidate_indices(order: Sequence[int], tables: Tables, leader: Card,
-                      k: int) -> list[int]:
+def candidate_indices(order: Sequence[int], tables: Tables, leader: Card, k: int) -> list[int]:
     """The union of the three K-tiers for `leader`, as a sorted list."""
     return sorted(candidate_tiers(order, tables, leader, (k,))[k])
 
@@ -291,8 +308,12 @@ def candidate_indices(order: Sequence[int], tables: Tables, leader: Card,
 # ---------------------------------------------------------------------------
 # scoring helper
 # ---------------------------------------------------------------------------
-def score_sets(leader: Card, reps: Sequence[Card], rosters: Iterable[Sequence[int]],
-               batch_score: Callable[[Sequence[Team]], Sequence[float]]) -> list[float]:
+def score_sets(
+    leader: Card,
+    reps: Sequence[Card],
+    rosters: Iterable[Sequence[int]],
+    batch_score: Callable[[Sequence[Team]], Sequence[float]],
+) -> list[float]:
     """Score member sets (tuples of pool indices into `reps`) under `leader`
     with the injected `batch_score` (one float per team, in order) — used both
     for the bare enumeration (leader = the proxy) and the per-leader re-score."""
@@ -335,8 +356,10 @@ def extended_order(old_pool_ids: Sequence[str], new_pool_ids: Sequence[str]) -> 
         if i < 0:
             continue
         if i <= last:
-            raise ValueError(f"old pool order is not a restriction of the new pool order "
-                             f"(at {pid!r}: new index {i} after {last})")
+            raise ValueError(
+                f"old pool order is not a restriction of the new pool order "
+                f"(at {pid!r}: new index {i} after {last})"
+            )
         last = i
     return out
 
@@ -346,21 +369,26 @@ class Merge:
     """The result of `merge_scores`: the NEW enumeration's scores (in
     `legal_rosters(new pool holomems, 5)` order) and its bookkeeping."""
 
-    scores: array.array             # 'd', one per legal set of the new pool
+    scores: array.array  # 'd', one per legal set of the new pool
     n_sets: int
-    reused: int                     # old scores carried over by position
-    sets_rescored: int              # sets containing a new card, scored now
-    dropped: int                    # old scores skipped (a card left the pool)
-    old_index: tuple[int, ...]      # `extended_order(old_pool_ids, new_pool_ids)`
-    new_indices: tuple[int, ...]    # new-pool indices of the cards not in the old pool
-    dropped_ids: tuple[str, ...]    # old ids absent from the new pool
+    reused: int  # old scores carried over by position
+    sets_rescored: int  # sets containing a new card, scored now
+    dropped: int  # old scores skipped (a card left the pool)
+    old_index: tuple[int, ...]  # `extended_order(old_pool_ids, new_pool_ids)`
+    new_indices: tuple[int, ...]  # new-pool indices of the cards not in the old pool
+    dropped_ids: tuple[str, ...]  # old ids absent from the new pool
 
 
-def merge_scores(old_scores: Sequence[float], old_pool_ids: Sequence[str],
-                 new_reps: Sequence[Card],
-                 score_new_sets: Callable[[Sequence[tuple[int, ...]]], Sequence[float]], *,
-                 old_holomems: Sequence[str] | None = None, chunk: int = 20000,
-                 progress: Callable[[int, int], None] | None = None) -> Merge:
+def merge_scores(
+    old_scores: Sequence[float],
+    old_pool_ids: Sequence[str],
+    new_reps: Sequence[Card],
+    score_new_sets: Callable[[Sequence[tuple[int, ...]]], Sequence[float]],
+    *,
+    old_holomems: Sequence[str] | None = None,
+    chunk: int = 20000,
+    progress: Callable[[int, int], None] | None = None,
+) -> Merge:
     """Extend the enumeration `old_scores` (over `old_pool_ids`, in
     `legal_rosters` order) to the pool `new_reps` (its order = the new
     enumeration's): every set made only of old cards takes its OLD score by
@@ -391,8 +419,10 @@ def merge_scores(old_scores: Sequence[float], old_pool_ids: Sequence[str],
     # contain a dropped card (their holomems are needed for the walk)
     if dropped_ids:
         if old_holomems is None:
-            raise ValueError(f"{len(dropped_ids)} old card(s) left the pool "
-                             f"({dropped_ids[:3]}...); pass old_holomems to skip their sets")
+            raise ValueError(
+                f"{len(dropped_ids)} old card(s) left the pool "
+                f"({dropped_ids[:3]}...); pass old_holomems to skip their sets"
+            )
         old_hol = tuple(old_holomems)
         if len(old_hol) != len(old_ids):
             raise ValueError("old_holomems must have one entry per old pool card")
@@ -406,8 +436,10 @@ def merge_scores(old_scores: Sequence[float], old_pool_ids: Sequence[str],
                 if not any(k in dropped_pos for k in idx):
                     yield old_scores[j]
             if j + 1 != len(old_scores):
-                raise ValueError(f"old scores hold {len(old_scores)} entries, the old pool "
-                                 f"has {j + 1} legal sets")
+                raise ValueError(
+                    f"old scores hold {len(old_scores)} entries, the old pool has {j + 1} legal sets"
+                )
+
         old_iter = reusable()
     else:
         old_iter = iter(old_scores)
@@ -443,15 +475,25 @@ def merge_scores(old_scores: Sequence[float], old_pool_ids: Sequence[str],
             try:
                 scores.append(float(next(old_iter)))
             except StopIteration:
-                raise ValueError("old scores ran out before the old-only sets did "
-                                 "(the scores do not belong to this old pool)") from None
+                raise ValueError(
+                    "old scores ran out before the old-only sets did "
+                    "(the scores do not belong to this old pool)"
+                ) from None
             reused += 1
     flush()
     leftover = sum(1 for _ in old_iter)
     if leftover:
-        raise ValueError(f"{leftover} old score(s) were never placed (the scores do not "
-                         f"belong to this old pool)")
+        raise ValueError(
+            f"{leftover} old score(s) were never placed (the scores do not belong to this old pool)"
+        )
     dropped = len(old_scores) - reused
-    return Merge(scores=scores, n_sets=len(scores), reused=reused, sets_rescored=rescored,
-                 dropped=dropped, old_index=old_index, new_indices=new_indices,
-                 dropped_ids=dropped_ids)
+    return Merge(
+        scores=scores,
+        n_sets=len(scores),
+        reused=reused,
+        sets_rescored=rescored,
+        dropped=dropped,
+        old_index=old_index,
+        new_indices=new_indices,
+        dropped_ids=dropped_ids,
+    )

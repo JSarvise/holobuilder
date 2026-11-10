@@ -35,10 +35,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import run_cli  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
-import tree_optimise as to  # noqa: E402
 import build_board  # noqa: E402
+import tree_optimise as to  # noqa: E402
 
 SOCKETS = ("S-001", "S-002", "S-003", "S-004")
 
@@ -74,8 +75,7 @@ def _placement_detail(chr_id, socket, card_id, skilltree, levels):
     sx, sy = socket_pos
     covered = {(sx + dx, sy + dy) for dx, dy in area}
     buffed = sorted(
-        node for node, pos in positions.items()
-        if tuple(pos) in covered and not node.startswith("S-")
+        node for node, pos in positions.items() if tuple(pos) in covered and not node.startswith("S-")
     )
     return {
         "multiplier": round(1 + permil / 1000.0, 3),
@@ -92,9 +92,11 @@ def _owned_connect_cards() -> set[str]:
     connect_cards = set(skilltree.get("card_connect", {}))
     collection = to._load(paths.STATE / "collection.json")
     cards = collection.get("cards")
-    ids = set(cards) if isinstance(cards, dict) else {
-        (c.get("id") if isinstance(c, dict) else c) for c in (cards or [])
-    }
+    ids = (
+        set(cards)
+        if isinstance(cards, dict)
+        else {(c.get("id") if isinstance(c, dict) else c) for c in (cards or [])}
+    )
     return {cid for cid in ids if cid in connect_cards}
 
 
@@ -143,8 +145,7 @@ def optimise(
     # which is exactly the interaction this mode exists to optimise.
     # `--scenario` sets the collection state (account / my-cards-maxed /
     # full-collection-maxed) the placements are valued under.
-    oracle = to.Oracle(pool_size=pool, quiet=True, scenario=scenario,
-                       song=song, charts_path=charts_path)
+    oracle = to.Oracle(pool_size=pool, quiet=True, scenario=scenario, song=song, charts_path=charts_path)
 
     # TEAM mode: when a fixed team is given, value every placement by the score of
     # THAT team (leader + five), not the pool max -- so the sockets are optimised
@@ -154,8 +155,10 @@ def optimise(
     # where a card's shape amplifies the red/blue the team actually scores on.
     team_mode = leader_id is not None
     if team_mode:
+
         def score_state(st: dict) -> float:
             return oracle.score_team(leader_id, member_ids, st)
+
         # EVERY board is a candidate, not just the team's. A socket on the leader or
         # a member amplifies their RED/BLUE; a socket on a BENCH board amplifies that
         # board's GREEN/YELLOW, which are ACCOUNT-GLOBAL and so raise the team score
@@ -221,9 +224,12 @@ def optimise(
         if b is not None and b not in rep_by_bucket:
             rep_by_bucket[b] = card
 
-    print(f"scoring {len(slots)} sockets x {len(rep_by_bucket)} card-shapes "
-          f"({len(slots) * len(rep_by_bucket)} evals, {len(cards)} cards bucketed) "
-          f"at ~8 ms ...", file=sys.stderr)
+    print(
+        f"scoring {len(slots)} sockets x {len(rep_by_bucket)} card-shapes "
+        f"({len(slots) * len(rep_by_bucket)} evals, {len(cards)} cards bucketed) "
+        f"at ~8 ms ...",
+        file=sys.stderr,
+    )
     started = time.monotonic()
     triples: list[tuple[float, str, str, str]] = []
     for cid, socket in slots:
@@ -243,8 +249,10 @@ def optimise(
             elif b in value_by_bucket:
                 triples.append((value_by_bucket[b], cid, socket, card))
     triples.sort(reverse=True)
-    print(f"  {len(triples)} placements with positive value in "
-          f"{time.monotonic() - started:.0f}s", file=sys.stderr)
+    print(
+        f"  {len(triples)} placements with positive value in {time.monotonic() - started:.0f}s",
+        file=sys.stderr,
+    )
 
     # Greedy assignment: highest value first, one card and one socket each.
     assignment = _greedy_assign(triples)
@@ -257,13 +265,22 @@ def optimise(
     # and which board nodes the card's shape covers ("what it buffs, and to
     # how much") -- `skilltree`/`levels` already built for the bucketing above.
     placements = sorted(
-        ({"chr": cid, "socket": socket, "card": card,
-          "isolated_value": round(next(v for v, c, s, k in triples
-                                       if (c, s, k) == (cid, socket, card)), 1),
-          **({"detail": detail}
-             if (detail := _placement_detail(cid, socket, card, skilltree, levels))
-             else {})}
-         for (cid, socket), card in assignment.items()),
+        (
+            {
+                "chr": cid,
+                "socket": socket,
+                "card": card,
+                "isolated_value": round(
+                    next(v for v, c, s, k in triples if (c, s, k) == (cid, socket, card)), 1
+                ),
+                **(
+                    {"detail": detail}
+                    if (detail := _placement_detail(cid, socket, card, skilltree, levels))
+                    else {}
+                ),
+            }
+            for (cid, socket), card in assignment.items()
+        ),
         key=lambda p: -p["isolated_value"],
     )
     return {
@@ -276,8 +293,9 @@ def optimise(
         "current_worth_over_empty": round(base_current - base_empty, 1),
         "optimised_joint": round(joint, 1),
         "gain_vs_current": round(joint - base_current, 1),
-        "additivity_note": (f"sum of isolated values {marginal_sum:,.1f} vs joint over empty "
-                            f"{joint - base_empty:,.1f}"),
+        "additivity_note": (
+            f"sum of isolated values {marginal_sum:,.1f} vs joint over empty {joint - base_empty:,.1f}"
+        ),
         "recommend": "optimised" if joint > base_current else "keep_current",
         "placements": placements,
     }
@@ -286,23 +304,32 @@ def optimise(
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--pool", type=int, default=60)
-    ap.add_argument("--board-state", default=str(paths.DUMPS / "board_state.json"),
-                    help="board state to optimise sockets over. Default: the current "
-                         "boards. Pass a `tree_optimise.py --plan --dump-state` output to "
-                         "optimise sockets over the OPTIMISED boards (sockets after boards).")
+    ap.add_argument(
+        "--board-state",
+        default=str(paths.DUMPS / "board_state.json"),
+        help="board state to optimise sockets over. Default: the current "
+        "boards. Pass a `tree_optimise.py --plan --dump-state` output to "
+        "optimise sockets over the OPTIMISED boards (sockets after boards).",
+    )
     ap.add_argument("--json", default=None, help="also write the result to PATH")
     ap.add_argument(
-        "--song", default=None, metavar="MUSIC_ID",
+        "--song",
+        default=None,
+        metavar="MUSIC_ID",
         help="score placements FOR THIS SONG (per-song scorer) instead of the "
         "general account score. A solo song's singer-conditional yellow bonus is "
         "what the socket shape multiplies. Needs the chart library (see --charts).",
     )
     ap.add_argument(
-        "--charts", default=None, metavar="PATH",
+        "--charts",
+        default=None,
+        metavar="PATH",
         help="chart library for --song (default tools/recon/proxy/dumps/charts.json)",
     )
     ap.add_argument(
-        "--scenario", default="account", choices=to.SCENARIOS,
+        "--scenario",
+        default="account",
+        choices=to.SCENARIOS,
         help="collection state to value placements under (docs/dev/board-export.md): "
         "account, my-cards-maxed, full-collection-maxed. Default: account.",
     )
@@ -320,10 +347,14 @@ def main() -> None:
 
     print(f"\nbest card per socket (global score) -- boards from {Path(result['board_state']).name}")
     print(f"  empty sockets      {result['base_empty']:>12,.1f}")
-    print(f"  your placement     {result['base_current']:>12,.1f}   "
-          f"(+{result['current_worth_over_empty']:,.1f} over empty)")
-    print(f"  optimised          {result['optimised_joint']:>12,.1f}   "
-          f"({result['gain_vs_current']:+,.1f} vs yours)")
+    print(
+        f"  your placement     {result['base_current']:>12,.1f}   "
+        f"(+{result['current_worth_over_empty']:,.1f} over empty)"
+    )
+    print(
+        f"  optimised          {result['optimised_joint']:>12,.1f}   "
+        f"({result['gain_vs_current']:+,.1f} vs yours)"
+    )
     print(f"  -> recommend: {result['recommend'].upper()}")
     print(f"\n  {'value':>10}  {'character':12s} {'socket':6s} card")
     for p in result["placements"]:

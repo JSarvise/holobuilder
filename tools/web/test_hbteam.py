@@ -5,46 +5,62 @@ the score reads, and nothing else of the account (the snapshot cut to its board 
 saved without ever overwriting a file; a replayed detail is compared field by field. The route
 case uses the maxed basis and SKIPS without the gitignored dumps; the replay itself (a sandbox
 copy of the checkout, minutes) is run by hand, not here."""
+
 from __future__ import annotations
 
 import csv
 import json
 from pathlib import Path
 
-import pytest
-
 import hbteam
 import leaf_inputs  # noqa: F401  (puts tools/refresh, where team_file lives, on the path)
+import pytest
 import team_file
-from test_row_detail import SONG, _TEAM, _req, _skip_without_dumps
+from test_row_detail import _TEAM, SONG, _req, _skip_without_dumps
 
 
 def test_differences_name_every_changed_field():
-    want = {"song_est": 100.0, "member_order": ["a", "b"], "board_state": {"chr-1": {"nodes": ["G-001"]}},
-            "leaf": "ignored", "distribution": {"p50": 90.0}}
+    want = {
+        "song_est": 100.0,
+        "member_order": ["a", "b"],
+        "board_state": {"chr-1": {"nodes": ["G-001"]}},
+        "leaf": "ignored",
+        "distribution": {"p50": 90.0},
+    }
     assert hbteam.differences(want, json.loads(json.dumps(want))) == []
-    got = {**want, "song_est": 101.0, "member_order": ["b", "a"], "leaf": "other",
-           "board_state": {"chr-1": {"nodes": ["G-001", "G-002"]}}, "distribution": {}}
+    got = {
+        **want,
+        "song_est": 101.0,
+        "member_order": ["b", "a"],
+        "leaf": "other",
+        "board_state": {"chr-1": {"nodes": ["G-001", "G-002"]}},
+        "distribution": {},
+    }
     diffs = hbteam.differences(want, got)
     assert any(d.startswith(".song_est: 100.0 -> 101.0") for d in diffs)
     assert any(d.startswith(".member_order[0]") for d in diffs)
     assert any(d.startswith(".board_state.chr-1.nodes") for d in diffs)
     assert any(d.startswith(".distribution.p50") and "(absent)" in d for d in diffs)
-    assert not any(d.startswith(".leaf") for d in diffs)          # the planner's own wording
+    assert not any(d.startswith(".leaf") for d in diffs)  # the planner's own wording
     rounding: list = []
     near = {**want, "distribution": {"p50": 90.0 * (1 + 1e-15)}}
-    assert hbteam.differences(want, near, rounding=rounding) == []    # the same sum, another order
+    assert hbteam.differences(want, near, rounding=rounding) == []  # the same sum, another order
     assert rounding == [".distribution.p50"]
 
 
 def test_account_files_carry_only_what_the_score_reads(tmp_path):
     repo = tmp_path
-    snapshot = {"board_points": [{"point_id": "skill_tree_point-chr-00001", "quantity": 3}],
-                "decks": [1, 2], "missions": [3], "emblems": [4]}
+    snapshot = {
+        "board_points": [{"point_id": "skill_tree_point-chr-00001", "quantity": 3}],
+        "decks": [1, 2],
+        "missions": [3],
+        "emblems": [4],
+    }
     for rel in hbteam.ACCOUNT_FILES:
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
-        (repo / rel).write_text(json.dumps(snapshot if rel.endswith("account_snapshot_main.json")
-                                           else {"file": rel}), "utf-8")
+        (repo / rel).write_text(
+            json.dumps(snapshot if rel.endswith("account_snapshot_main.json") else {"file": rel}), "utf-8"
+        )
     (repo / "state" / "credential.json").write_text('{"secret": 1}', "utf-8")
     files = hbteam.account_files(repo)
     assert set(files) == set(hbteam.ACCOUNT_FILES)
@@ -55,9 +71,13 @@ def test_account_files_carry_only_what_the_score_reads(tmp_path):
 
 def test_save_never_overwrites_and_names_the_row(tmp_path):
     notes = {"columns": ["note", "expected_value"], "rows": [[1, 10], [2, 12]]}
-    doc = {"request": {"song": "m0342"}, "shown": {"song": 'A: "song"/b', "rank": 3},
-           "team": [{"holomem": "Usada Pekora"}], "created_unix": 1793707200,
-           "detail": {"notes": notes}}
+    doc = {
+        "request": {"song": "m0342"},
+        "shown": {"song": 'A: "song"/b', "rank": 3},
+        "team": [{"holomem": "Usada Pekora"}],
+        "created_unix": 1793707200,
+        "detail": {"notes": notes},
+    }
     first, first_csv = team_file.save(doc, tmp_path)
     second, second_csv = team_file.save(doc, tmp_path)
     assert first != second and first.is_file() and second.is_file()
@@ -76,8 +96,18 @@ def test_load_refuses_other_files(tmp_path):
     with pytest.raises(ValueError):
         hbteam.load(bad)
     newer = tmp_path / "y.hbteam"
-    newer.write_text(json.dumps({"format": hbteam.FORMAT, "format_version": hbteam.FORMAT_VERSION + 1,
-                                 "request": {}, "detail": {}, "account": {}}), "utf-8")
+    newer.write_text(
+        json.dumps(
+            {
+                "format": hbteam.FORMAT,
+                "format_version": hbteam.FORMAT_VERSION + 1,
+                "request": {},
+                "detail": {},
+                "account": {},
+            }
+        ),
+        "utf-8",
+    )
     with pytest.raises(ValueError, match="newer"):
         hbteam.load(newer)
 
@@ -96,7 +126,7 @@ def test_export_route_writes_the_rows_own_detail(web_base, tmp_path, monkeypatch
     assert path.parent == tmp_path and path.suffix == hbteam.SUFFIX
     doc = hbteam.load(path)
     assert doc["request"] == body
-    assert doc["detail"]["song_est"] == detail["song_est"]           # the AUTO row, not manual
+    assert doc["detail"]["song_est"] == detail["song_est"]  # the AUTO row, not manual
     assert doc["detail"]["distribution"]["p50"] == detail["distribution"]["p50"]
     assert "law" not in doc["detail"]["distribution"] and "timeline" not in doc["detail"]
     assert [c["id"] for c in doc["team"]] == _TEAM
@@ -113,4 +143,4 @@ def test_export_route_writes_the_rows_own_detail(web_base, tmp_path, monkeypatch
     rows = list(csv.reader(csv_path.read_text("utf-8").splitlines()))
     assert rows[0] == notes["columns"] and len(rows) - 1 == len(notes["rows"])
     assert sum(int(r[col]) for r in rows[1:]) == detail["song_est"]
-    assert all(int(r[notes["columns"].index("combo")]) == 0 for r in rows[1:])   # AUTO: no combo
+    assert all(int(r[notes["columns"].index("combo")]) == 0 for r in rows[1:])  # AUTO: no combo

@@ -5,6 +5,7 @@ and the `MODEL_VERSION` re-export.
 Read-only: it hashes files, it never writes any. Lives on the recon/web side,
 beside the dumps it hashes.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -62,9 +63,15 @@ def cfg_json(cfg) -> str:
     return json.dumps(_jsonable(cfg), sort_keys=True, separators=(",", ":"))
 
 
-def inputs_hash(cfg, basis: str, model_version: str = MODEL_VERSION, *,
-                repo: Path = REPO, collection_digest: str | None = None,
-                extra_per: dict | None = None) -> tuple[str, dict]:
+def inputs_hash(
+    cfg,
+    basis: str,
+    model_version: str = MODEL_VERSION,
+    *,
+    repo: Path = REPO,
+    collection_digest: str | None = None,
+    extra_per: dict | None = None,
+) -> tuple[str, dict]:
     """(hash, per-file digests). `basis` is "maxed" or "account"; anything
     else is treated as a path to the collection file to hash. A caller that
     already holds the collection line's digest (a generated scenario, see
@@ -86,17 +93,25 @@ def inputs_hash(cfg, basis: str, model_version: str = MODEL_VERSION, *,
         per.update(extra_per)
     cj = cfg_json(cfg)
     per["cfg"] = hashlib.sha256(cj.encode()).hexdigest()
-    lines = [f"cards={per['cards']}", f"collection={coll}", f"board={per['board']}",
-             f"charts={per['charts']}", f"skilltree={per['skilltree']}",
-             f"master_stn={per['master_stn']}", f"cfg={per['cfg']}",
-             f"model_version={model_version}"]
+    lines = [
+        f"cards={per['cards']}",
+        f"collection={coll}",
+        f"board={per['board']}",
+        f"charts={per['charts']}",
+        f"skilltree={per['skilltree']}",
+        f"master_stn={per['master_stn']}",
+        f"cfg={per['cfg']}",
+        f"model_version={model_version}",
+    ]
     return hashlib.sha256("\n".join(lines).encode()).hexdigest(), per
 
 
 def git_state(repo: Path = REPO) -> dict:
     def run(*args):
-        return subprocess.run(["git", *args], cwd=repo, capture_output=True,
-                              text=True, encoding="utf-8", errors="replace").stdout
+        return subprocess.run(
+            ["git", *args], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        ).stdout
+
     try:
         head = run("rev-parse", "HEAD").strip()
         tracked = run("status", "--porcelain", "--untracked-files=no").strip()
@@ -106,17 +121,20 @@ def git_state(repo: Path = REPO) -> dict:
         # is not what the commit says). Untracked paths are listed separately:
         # a run's own output directory is untracked until it is committed and
         # must not make the certificate read as taken on a modified tree.
-        return {"head": head, "dirty": bool(tracked),
-                "status_porcelain": tracked.splitlines(),
-                "untracked": untracked.splitlines(),
-                "diff_head_sha256": hashlib.sha256(diff.encode("utf-8")).hexdigest()}
+        return {
+            "head": head,
+            "dirty": bool(tracked),
+            "status_porcelain": tracked.splitlines(),
+            "untracked": untracked.splitlines(),
+            "diff_head_sha256": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
+        }
     except Exception as exc:  # noqa: BLE001
         return {"head": None, "dirty": None, "error": str(exc)}
 
 
-def scenario_hash(cfg, bench: dict, scenario_literal: str,
-                  model_version: str = MODEL_VERSION, *,
-                  repo: Path = REPO) -> tuple[str, dict]:
+def scenario_hash(
+    cfg, bench: dict, scenario_literal: str, model_version: str = MODEL_VERSION, *, repo: Path = REPO
+) -> tuple[str, dict]:
     """The `inputs_hash` of a GENERATED scenario — the maxed-account basis,
     whose bench (every holomem at max level, her points on what of her board
     reaches a team, level-2 Connect cards socketed) is computed, not a file on
@@ -127,13 +145,14 @@ def scenario_hash(cfg, bench: dict, scenario_literal: str,
     the bench digest on its own."""
     bench_sha = hashlib.sha256(json.dumps(bench, sort_keys=True).encode()).hexdigest()
     coll = hashlib.sha256(f"{scenario_literal};bench={bench_sha}".encode()).hexdigest()
-    return inputs_hash(cfg, "scenario", model_version, repo=repo,
-                       collection_digest=coll, extra_per={"bench": bench_sha})
+    return inputs_hash(
+        cfg, "scenario", model_version, repo=repo, collection_digest=coll, extra_per={"bench": bench_sha}
+    )
 
 
-def try_scenario_hash(cfg, bench: dict, scenario_literal: str,
-                      model_version: str = MODEL_VERSION, *,
-                      repo: Path = REPO) -> tuple[str | None, dict | None, str | None]:
+def try_scenario_hash(
+    cfg, bench: dict, scenario_literal: str, model_version: str = MODEL_VERSION, *, repo: Path = REPO
+) -> tuple[str | None, dict | None, str | None]:
     """(hash, per_file, error) — `scenario_hash` with the same tolerance
     `try_inputs_hash` has: a missing dump is reported, never a 500."""
     try:
@@ -143,8 +162,15 @@ def try_scenario_hash(cfg, bench: dict, scenario_literal: str,
         return None, None, f"{type(exc).__name__}: {exc}"
 
 
-__all__ = ["MODEL_VERSION", "INPUT_FILES", "inputs_hash", "scenario_hash",
-           "try_scenario_hash", "git_state", "cfg_json"]
+__all__ = [
+    "MODEL_VERSION",
+    "INPUT_FILES",
+    "inputs_hash",
+    "scenario_hash",
+    "try_scenario_hash",
+    "git_state",
+    "cfg_json",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -153,8 +179,9 @@ __all__ = ["MODEL_VERSION", "INPUT_FILES", "inputs_hash", "scenario_hash",
 # response (`inputs_hash: null` + `inputs_hash_error`), never a 500 and never a
 # hash over the files that happened to exist.
 # ---------------------------------------------------------------------------
-def try_inputs_hash(cfg, basis: str, model_version: str = MODEL_VERSION, *,
-                    repo: Path = REPO) -> tuple[str | None, dict | None, str | None]:
+def try_inputs_hash(
+    cfg, basis: str, model_version: str = MODEL_VERSION, *, repo: Path = REPO
+) -> tuple[str | None, dict | None, str | None]:
     """(hash, per_file, error). `error` names the missing/unreadable file."""
     try:
         h, per = inputs_hash(cfg, basis, model_version, repo=repo)
@@ -163,10 +190,17 @@ def try_inputs_hash(cfg, basis: str, model_version: str = MODEL_VERSION, *,
         return None, None, f"{type(exc).__name__}: {exc}"
 
 
-def certificate_basis(*, universe: str, basis: str, budget_kind: str,
-                      budget: int | None, uptime_model: str | None,
-                      platform: str | None, leaf: str | None = None,
-                      difficulty: str | None = None) -> dict:
+def certificate_basis(
+    *,
+    universe: str,
+    basis: str,
+    budget_kind: str,
+    budget: int | None,
+    uptime_model: str | None,
+    platform: str | None,
+    leaf: str | None = None,
+    difficulty: str | None = None,
+) -> dict:
     """The tuple a certificate must match field-for-field before it may be
     attached to a response row (the "same instant, same basis" guard, together
     with `inputs_hash`). `budget_kind`: "flat" (a per-character cap, `budget`
@@ -178,8 +212,14 @@ def certificate_basis(*, universe: str, basis: str, budget_kind: str,
     budget, singer-context) plan, the v2 objective the certificates certify)
     or "develop" (the per-team greedy re-develop, a labelled what-if). Absent
     (None) on rows that develop nothing."""
-    out = {"universe": universe, "basis": basis, "budget_kind": budget_kind,
-           "budget": budget, "uptime_model": uptime_model, "platform": platform}
+    out = {
+        "universe": universe,
+        "basis": basis,
+        "budget_kind": budget_kind,
+        "budget": budget,
+        "uptime_model": uptime_model,
+        "platform": platform,
+    }
     # `difficulty`: the chart difficulty the rows were scored on.
     # Present ONLY when it is not EXPERT, so every EXPERT basis keeps its
     # original shape (an absent field reads as EXPERT).
@@ -248,9 +288,12 @@ def normalize_difficulty(value: object) -> str:
     return name
 
 
-def charts_path_for(difficulty: str = CHART_DIFFICULTY, *,
-                    charts_path: Path | None = None,
-                    charts_all_path: Path | None = None) -> Path:
+def charts_path_for(
+    difficulty: str = CHART_DIFFICULTY,
+    *,
+    charts_path: Path | None = None,
+    charts_all_path: Path | None = None,
+) -> Path:
     """The chart file that holds `difficulty`: charts.json for EXPERT (so every
     EXPERT digest and cache key stays what it was), charts_all.json otherwise."""
     if normalize_difficulty(difficulty) == CHART_DIFFICULTY:
@@ -261,8 +304,9 @@ def charts_path_for(difficulty: str = CHART_DIFFICULTY, *,
 _DIFFICULTIES_SEEN: dict[str, tuple[float, dict[str, list[str]]]] = {}
 
 
-def available_difficulties(charts_path: Path | None = None,
-                           charts_all_path: Path | None = None) -> dict[str, list[str]]:
+def available_difficulties(
+    charts_path: Path | None = None, charts_all_path: Path | None = None
+) -> dict[str, list[str]]:
     """difficulty -> sorted music ids that have a chart at it, from the files on
     disk (EXPERT from charts.json, the rest from charts_all.json). A difficulty
     with no chart on disk is absent. Cached per file mtime."""
@@ -292,29 +336,36 @@ def available_difficulties(charts_path: Path | None = None,
     return out
 
 
-def resolve_difficulty(value: object, song: str | None = None, *,
-                       charts_path: Path | None = None,
-                       charts_all_path: Path | None = None) -> str:
+def resolve_difficulty(
+    value: object,
+    song: str | None = None,
+    *,
+    charts_path: Path | None = None,
+    charts_all_path: Path | None = None,
+) -> str:
     """`normalize_difficulty(value)`, then checked against what is ON DISK: a
     difficulty no chart file holds (or, with `song`, that this song has no
     chart at) raises ValueError naming what is available."""
     name = normalize_difficulty(value)
     if name == CHART_DIFFICULTY:
-        return name   # the default never depends on charts_all.json; callers say "no chart"
+        return name  # the default never depends on charts_all.json; callers say "no chart"
     present = available_difficulties(charts_path, charts_all_path)
     if name not in present:
-        raise ValueError(f"difficulty {name}: no chart file on disk holds it "
-                         f"(available: {', '.join(present) or 'none'}; build every "
-                         f"difficulty with `build_charts.py --all-out dumps/charts_all.json`)")
+        raise ValueError(
+            f"difficulty {name}: no chart file on disk holds it "
+            f"(available: {', '.join(present) or 'none'}; build every "
+            f"difficulty with `build_charts.py --all-out dumps/charts_all.json`)"
+        )
     if song and song not in set(present[name]):
         have = [d for d, ids in present.items() if song in set(ids)]
         raise ValueError(f"song {song!r} has no {name} chart (it has: {', '.join(have) or 'none'})")
     return name
+
+
 REFERENCE_KEY_LINES = ("cards", "collection", "board", "skilltree", "master_stn", "cfg")
 
 
-def chart_entry(song: str, *, charts_path: Path | None = None,
-                difficulty: str = CHART_DIFFICULTY):
+def chart_entry(song: str, *, charts_path: Path | None = None, difficulty: str = CHART_DIFFICULTY):
     """`song`'s chart entry in charts.json (the `charts` mapping keyed
     `<music_id>/<difficulty>`; a list of entries with `music_id` /
     `difficulty` fields is accepted too). None when the song has no chart;
@@ -329,13 +380,18 @@ def chart_entry(song: str, *, charts_path: Path | None = None,
         return hit
     if isinstance(charts, list):
         for e in charts:
-            if isinstance(e, dict) and str(e.get("music_id")) == song                     and str(e.get("difficulty") or difficulty).upper() == difficulty:
+            if (
+                isinstance(e, dict)
+                and str(e.get("music_id")) == song
+                and str(e.get("difficulty") or difficulty).upper() == difficulty
+            ):
                 return e
     return None
 
 
-def chart_digest(song: str, *, charts_path: Path | None = None,
-                 difficulty: str = CHART_DIFFICULTY) -> str | None:
+def chart_digest(
+    song: str, *, charts_path: Path | None = None, difficulty: str = CHART_DIFFICULTY
+) -> str | None:
     """sha256 of `json.dumps(entry, sort_keys=True, separators=(",", ":"))`
     over `song`'s chart entry — the ONE chart an enumeration of `song` was
     scored on. None when charts.json has no such chart. Raises (OSError,
@@ -382,9 +438,9 @@ def enumeration_key(per_file, chart_digest: str, model_version: str = MODEL_VERS
     return hashlib.sha256("\n".join(lines).encode()).hexdigest()
 
 
-def try_enumeration_keys(per_file, song: str, model_version: str = MODEL_VERSION, *,
-                         charts_path: Path | None = None
-                         ) -> tuple[str | None, str | None, str | None, str | None]:
+def try_enumeration_keys(
+    per_file, song: str, model_version: str = MODEL_VERSION, *, charts_path: Path | None = None
+) -> tuple[str | None, str | None, str | None, str | None]:
     """`(enumeration_key, reference_key, chart_digest, error)` for a run on
     `song` from its `inputs_hash` per-file digests — tolerant: no per-file
     digests / no chart for the song / an unreadable charts.json gives Nones
@@ -405,7 +461,19 @@ def try_enumeration_keys(per_file, song: str, model_version: str = MODEL_VERSION
     return enumeration_key(per_file, cd, model_version), ref, cd, None
 
 
-__all__ += ["CHARTS_PATH", "CHART_DIFFICULTY", "DIFFICULTIES", "CHARTS_ALL_PATH",
-            "normalize_difficulty", "charts_path_for", "available_difficulties",
-            "resolve_difficulty", "REFERENCE_KEY_LINES", "chart_entry",
-            "chart_digest", "reference_key", "enumeration_key", "try_enumeration_keys"]
+__all__ += [
+    "CHARTS_PATH",
+    "CHART_DIFFICULTY",
+    "DIFFICULTIES",
+    "CHARTS_ALL_PATH",
+    "normalize_difficulty",
+    "charts_path_for",
+    "available_difficulties",
+    "resolve_difficulty",
+    "REFERENCE_KEY_LINES",
+    "chart_entry",
+    "chart_digest",
+    "reference_key",
+    "enumeration_key",
+    "try_enumeration_keys",
+]

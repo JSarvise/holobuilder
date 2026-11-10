@@ -4,6 +4,7 @@ From the client: the reset dialog multiplies the number of
 nodes in the reset list by `Setting.skillTreeResetConsumptionGoldQuantity` (1000 in
 `main_Setting.json`). The free root S-001 is never in a reset list.
 """
+
 from __future__ import annotations
 
 import sys

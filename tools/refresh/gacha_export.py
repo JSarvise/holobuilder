@@ -26,6 +26,7 @@ each run, opened "wb". This is NOT the append-only store and nothing here touche
 The web server never writes; it shells out to this file and parses the `WROTE <path>`
 line this prints last.
 """
+
 from __future__ import annotations
 
 import base64
@@ -52,8 +53,7 @@ SNAPSHOT_PATH = paths.DUMPS / "account_snapshot_main.json"
 
 # The Gacha tab's aggregator, by path. `tools/web` is not a package and must not be
 # put on sys.path wholesale from a recon script -- one named module is the whole need.
-_spec = importlib.util.spec_from_file_location(
-    "gacha_view", paths.WEB_DIR / "gacha_view.py")
+_spec = importlib.util.spec_from_file_location("gacha_view", paths.WEB_DIR / "gacha_view.py")
 assert _spec and _spec.loader
 gacha_view = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gacha_view)
@@ -91,7 +91,7 @@ def day(t) -> str:
     s = _secs(t)
     if s is None:
         return "—"
-    return _dt.datetime.fromtimestamp(s, _dt.timezone.utc).strftime("%Y-%m-%d")
+    return _dt.datetime.fromtimestamp(s, _dt.UTC).strftime("%Y-%m-%d")
 
 
 # A permanent banner is not dated. On the live wire the holodori Gacha
@@ -101,30 +101,30 @@ def day(t) -> str:
 # real schedule is read the same way. An open END alone is "since <date>", because that
 # banner IS running. Two nulls and no flag stay unknown: a closed banner whose dates were
 # never captured must not be relabelled permanent. The tab's `period()` is the twin.
-FAR_FUTURE = _dt.datetime(2100, 1, 1, tzinfo=_dt.timezone.utc).timestamp()
+FAR_FUTURE = _dt.datetime(2100, 1, 1, tzinfo=_dt.UTC).timestamp()
 
 
 def period(b: dict) -> str | None:
     s, e = _secs(b.get("start_time")), _secs(b.get("end_time"))
     hidden = bool(b.get("is_end_time_hidden"))
     if s is None and e is None and not hidden:
-        return None                       # simply unknown -- say nothing
+        return None  # simply unknown -- say nothing
     s_open = s is None or s == 0
     e_open = e is None or e == 0 or hidden or e >= FAR_FUTURE
     if s_open and e_open:
         return "permanent"
     if e_open:
-        return f'since {day(b.get("start_time"))}'
+        return f"since {day(b.get('start_time'))}"
     if s_open:
-        return f'until {day(b.get("end_time"))}'
-    return f'{day(b.get("start_time"))} → {day(b.get("end_time"))}'
+        return f"until {day(b.get('end_time'))}"
+    return f"{day(b.get('start_time'))} → {day(b.get('end_time'))}"
 
 
 def stamp(t) -> str:
     s = _secs(t)
     if s is None:
         return "never"
-    return _dt.datetime.fromtimestamp(s, _dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return _dt.datetime.fromtimestamp(s, _dt.UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
 def _data_uri(raw: bytes | None, mime: str) -> str | None:
@@ -144,12 +144,14 @@ def _data_uri(raw: bytes | None, mime: str) -> str | None:
 
 def comparison(view: dict) -> dict:
     c = dict(view.get("comparison") or {})
-    return {"covered_pulls": c.get("covered_pulls", 0),
-            "observed": c.get("observed_by_rarity") or {},
-            "expected": c.get("expected_by_rarity") or {},
-            "excluded_pulls": c.get("excluded_pulls", 0),
-            "uncovered_pulls": c.get("uncovered_pulls", 0),
-            "excluded": c.get("excluded") or []}
+    return {
+        "covered_pulls": c.get("covered_pulls", 0),
+        "observed": c.get("observed_by_rarity") or {},
+        "expected": c.get("expected_by_rarity") or {},
+        "excluded_pulls": c.get("excluded_pulls", 0),
+        "uncovered_pulls": c.get("uncovered_pulls", 0),
+        "excluded": c.get("excluded") or [],
+    }
 
 
 def stars(r: str) -> str:
@@ -158,8 +160,10 @@ def stars(r: str) -> str:
     n = 0
     if r and r[0].isdigit():
         n = int(r[0])
-    return (f'<span class="rar"><span class="stars">{"<i></i>" * n}</span>'
-            f'<span class="rarn">{esc(r)}</span></span>')
+    return (
+        f'<span class="rar"><span class="stars">{"<i></i>" * n}</span>'
+        f'<span class="rarn">{esc(r)}</span></span>'
+    )
 
 
 def star_css(uri: str | None) -> str:
@@ -169,8 +173,10 @@ def star_css(uri: str | None) -> str:
     page, it never breaks it."""
     if not uri:
         return ".stars i{display:none}"
-    return (".stars{display:inline-flex;gap:1px;align-items:center}"
-            f".stars i{{width:12.6px;height:12px;background:url({uri}) center/contain no-repeat}}")
+    return (
+        ".stars{display:inline-flex;gap:1px;align-items:center}"
+        f".stars i{{width:12.6px;height:12px;background:url({uri}) center/contain no-repeat}}"
+    )
 
 
 # --- chart 1: observed vs expected, per rarity (bullet) -----------------------
@@ -178,8 +184,10 @@ def star_css(uri: str | None) -> str:
 
 def rates_chart(view: dict, cov: dict, star_uri: str | None) -> str:
     if not cov["covered_pulls"]:
-        return ('<p class="note">No banner in the store has a saved rate table, so there is '
-                'nothing to compare these pulls against.</p>')
+        return (
+            '<p class="note">No banner in the store has a saved rate table, so there is '
+            "nothing to compare these pulls against.</p>"
+        )
     rows = [(r, cov["observed"].get(r, 0), cov["expected"].get(r)) for r in RAR]
     top = max([1.0] + [float(g) for _, g, _ in rows] + [float(e or 0) for _, _, e in rows]) * 1.12
     W, ROW, PADL, PADR, TOP, BAR = 540, 34, 88, 56, 8, 18
@@ -189,8 +197,10 @@ def rates_chart(view: dict, cov: dict, star_uri: str | None) -> str:
     def x(v: float) -> float:
         return PADL + (W - PADL - PADR) * v / top
 
-    parts = [f'<svg viewBox="0 0 {W} {H}" class="chart" role="img" '
-             f'aria-label="Pulls observed per rarity against the rate tables expectation">']
+    parts = [
+        f'<svg viewBox="0 0 {W} {H}" class="chart" role="img" '
+        f'aria-label="Pulls observed per rarity against the rate tables expectation">'
+    ]
     if star_uri:
         # ONCE, in <defs>, and <use>d 12 times. Inlining the href on each <image> put
         # twelve copies of a 40 KB base64 blob in the file for one 11 px sprite.
@@ -204,63 +214,80 @@ def rates_chart(view: dict, cov: dict, star_uri: str | None) -> str:
         parts.append(f'<text x="{sx - 6:.1f}" y="{cy + 4}" text-anchor="end" class="ax">{n}</text>')
         if star_uri:
             for k in range(n):
-                parts.append(f'<use href="#star" x="{sx + k * (S + GAP):.1f}" '
-                             f'y="{cy - S / 2:.1f}"/>')
-        parts.append(f'<rect x="{PADL}" y="{cy - BAR / 2}" width="{W - PADL - PADR}" '
-                     f'height="{BAR}" rx="4" class="track"/>')
+                parts.append(f'<use href="#star" x="{sx + k * (S + GAP):.1f}" y="{cy - S / 2:.1f}"/>')
+        parts.append(
+            f'<rect x="{PADL}" y="{cy - BAR / 2}" width="{W - PADL - PADR}" '
+            f'height="{BAR}" rx="4" class="track"/>'
+        )
         w = max(3 if got > 0 else 0, x(got) - PADL)
         if w > 0:
-            parts.append(f'<rect x="{PADL}" y="{cy - BAR / 2}" width="{w:.1f}" height="{BAR}" '
-                         f'rx="4" fill="{COL[r]}"/>')
+            parts.append(
+                f'<rect x="{PADL}" y="{cy - BAR / 2}" width="{w:.1f}" height="{BAR}" rx="4" fill="{COL[r]}"/>'
+            )
         if exp is not None:
             tx = x(float(exp))
-            parts.append(f'<line x1="{tx:.1f}" x2="{tx:.1f}" y1="{cy - BAR / 2 - 4}" '
-                         f'y2="{cy + BAR / 2 + 4}" class="target"/>')
+            parts.append(
+                f'<line x1="{tx:.1f}" x2="{tx:.1f}" y1="{cy - BAR / 2 - 4}" '
+                f'y2="{cy + BAR / 2 + 4}" class="target"/>'
+            )
         label = str(got) if exp is None else f"{got} / {float(exp):.1f}"
         parts.append(f'<text x="{W - PADR + 8}" y="{cy + 4}" class="val">{esc(label)}</text>')
     parts.append("</svg>")
 
-    legend = ('<div class="legend">'
-              f'<span class="key"><i class="key-bar" style="background:linear-gradient(90deg,'
-              f'{COL["5★"]} 0 33%,{COL["4★"]} 33% 66%,{COL["3★"]} 66% 100%)"></i>'
-              "<span>observed pulls</span></span>"
-              '<span class="key"><i class="key-tick"></i>'
-              "<span>expected by the saved rate tables</span></span></div>")
+    legend = (
+        '<div class="legend">'
+        f'<span class="key"><i class="key-bar" style="background:linear-gradient(90deg,'
+        f'{COL["5★"]} 0 33%,{COL["4★"]} 33% 66%,{COL["3★"]} 66% 100%)"></i>'
+        "<span>observed pulls</span></span>"
+        '<span class="key"><i class="key-tick"></i>'
+        "<span>expected by the saved rate tables</span></span></div>"
+    )
 
-    cap = (f'compared: {num(cov["covered_pulls"])} pulls from banners with a saved rate table'
-           + (f' · excluded: ticket/tutorial pulls ({num(cov["excluded_pulls"])})'
-              if cov["excluded_pulls"] else "")
-           + (f' · no saved rates: {num(cov["uncovered_pulls"])}'
-              if cov["uncovered_pulls"] else ""))
+    cap = (
+        f"compared: {num(cov['covered_pulls'])} pulls from banners with a saved rate table"
+        + (
+            f" · excluded: ticket/tutorial pulls ({num(cov['excluded_pulls'])})"
+            if cov["excluded_pulls"]
+            else ""
+        )
+        + (f" · no saved rates: {num(cov['uncovered_pulls'])}" if cov["uncovered_pulls"] else "")
+    )
     left = ""
     if cov["excluded"]:
-        names = " · ".join(f'{x.get("gacha_name") or "(no name)"} ({x.get("kind")}, '
-                           f'{num(x.get("pulls"))})' for x in cov["excluded"])
+        names = " · ".join(
+            f"{x.get('gacha_name') or '(no name)'} ({x.get('kind')}, {num(x.get('pulls'))})"
+            for x in cov["excluded"]
+        )
         left = f'<p class="cap">left out: {esc(names)}</p>'
-    return (legend + "".join(parts) + f'<p class="cap">{esc(cap)}</p>' + left
-            + rates_table(view, cov))
+    return legend + "".join(parts) + f'<p class="cap">{esc(cap)}</p>' + left + rates_table(view, cov)
 
 
 def rates_table(view: dict, cov: dict) -> str:
     total = (view.get("totals") or {}).get("pulls") or 0
-    out = [f'<details class="table"><summary>Show the numbers ({num(cov["covered_pulls"])} '
-           "compared pulls)</summary><table><tr><th>Rarity</th><th>Observed</th><th>Share</th>"
-           "<th>Expected</th><th>Difference</th></tr>"]
+    out = [
+        f'<details class="table"><summary>Show the numbers ({num(cov["covered_pulls"])} '
+        "compared pulls)</summary><table><tr><th>Rarity</th><th>Observed</th><th>Share</th>"
+        "<th>Expected</th><th>Difference</th></tr>"
+    ]
     for r in RAR:
         got = cov["observed"].get(r, 0)
         exp = cov["expected"].get(r)
         diff = "—" if exp is None else ("+" if got - exp >= 0 else "") + f"{got - exp:.1f}"
-        out.append(f'<tr><td class="td-r"><i class="dot" style="background:{COL[r]}"></i>'
-                   f"{stars(r)}</td>"
-                   f'<td class="td-n">{num(got)}</td>'
-                   f'<td class="td-n">{pct(got, cov["covered_pulls"])}</td>'
-                   f'<td class="td-n">{"—" if exp is None else f"{exp:.1f}"}</td>'
-                   f'<td class="td-n">{esc(diff)}</td></tr>')
+        out.append(
+            f'<tr><td class="td-r"><i class="dot" style="background:{COL[r]}"></i>'
+            f"{stars(r)}</td>"
+            f'<td class="td-n">{num(got)}</td>'
+            f'<td class="td-n">{pct(got, cov["covered_pulls"])}</td>'
+            f'<td class="td-n">{"—" if exp is None else f"{exp:.1f}"}</td>'
+            f'<td class="td-n">{esc(diff)}</td></tr>'
+        )
     out.append("</table>")
-    out.append(f'<p class="cap">Observed here counts only the {num(cov["covered_pulls"])} pulls '
-               "the server compared — banners with a saved rate table, minus the ticket and "
-               "tutorial pulls, which were not bought with a rate roll. The store holds "
-               f"{num(total)} pulls in all.</p></details>")
+    out.append(
+        f'<p class="cap">Observed here counts only the {num(cov["covered_pulls"])} pulls '
+        "the server compared — banners with a saved rate table, minus the ticket and "
+        "tutorial pulls, which were not bought with a rate roll. The store holds "
+        f"{num(total)} pulls in all.</p></details>"
+    )
     return "".join(out)
 
 
@@ -274,8 +301,8 @@ def fill_days(rows: list[dict]) -> list[dict]:
         return []
     at = {r["day"]: r for r in rows}
     fmt = "%Y-%m-%d"
-    cur = _dt.datetime.strptime(rows[0]["day"], fmt).replace(tzinfo=_dt.timezone.utc)
-    last = _dt.datetime.strptime(rows[-1]["day"], fmt).replace(tzinfo=_dt.timezone.utc)
+    cur = _dt.datetime.strptime(rows[0]["day"], fmt).replace(tzinfo=_dt.UTC)
+    last = _dt.datetime.strptime(rows[-1]["day"], fmt).replace(tzinfo=_dt.UTC)
     out = []
     while cur <= last and len(out) < 4000:  # a guard, not a formality: a bad date would spin
         key = cur.strftime(fmt)
@@ -297,8 +324,10 @@ def timeline_chart(view: dict) -> str:
     def y(v: float) -> float:
         return BASE - (BASE - TOP) * v / top
 
-    parts = [f'<svg viewBox="0 0 {W} {H}" class="chart wide" role="img" '
-             f'aria-label="Pulls per day, with the days that produced a five-star marked">']
+    parts = [
+        f'<svg viewBox="0 0 {W} {H}" class="chart wide" role="img" '
+        f'aria-label="Pulls per day, with the days that produced a five-star marked">'
+    ]
     for v in (0, top):
         parts.append(f'<line x1="{PADL}" x2="{W - PADR}" y1="{y(v):.1f}" y2="{y(v):.1f}" class="grid"/>')
         parts.append(f'<text x="{PADL - 8}" y="{y(v) + 4:.1f}" text-anchor="end" class="ax">{num(v)}</text>')
@@ -311,7 +340,7 @@ def timeline_chart(view: dict) -> str:
     def cx_of(i: int) -> float:
         return PADL + i * slot + slot / 2
 
-    LBL_GAP = 42.0          # ~ the width of "08-17" plus breathing room
+    LBL_GAP = 42.0  # ~ the width of "08-17" plus breathing room
     marks = list(range(0, last_i, step))
     while marks and cx_of(last_i) - cx_of(marks[-1]) < LBL_GAP:
         marks.pop()
@@ -321,31 +350,38 @@ def timeline_chart(view: dict) -> str:
         cx = PADL + i * slot + slot / 2
         if row["pulls"] > 0:
             h = max(2.0, BASE - y(row["pulls"]))
-            parts.append(f'<rect x="{cx - bw / 2:.1f}" y="{BASE - h:.1f}" width="{bw:.1f}" '
-                         f'height="{h:.1f}" rx="4" fill="{DORI}"/>')
+            parts.append(
+                f'<rect x="{cx - bw / 2:.1f}" y="{BASE - h:.1f}" width="{bw:.1f}" '
+                f'height="{h:.1f}" rx="4" fill="{DORI}"/>'
+            )
         if row["five_star"] > 0:
             dy = (y(row["pulls"]) - 10) if row["pulls"] > 0 else BASE - 10
             parts.append(f'<circle cx="{cx:.1f}" cy="{dy:.1f}" r="5" fill="{COL["5★"]}" class="dotmark"/>')
             if row["five_star"] > 1:
-                parts.append(f'<text x="{cx:.1f}" y="{dy - 9:.1f}" text-anchor="middle" '
-                             f'class="val">×{row["five_star"]}</text>')
+                parts.append(
+                    f'<text x="{cx:.1f}" y="{dy - 9:.1f}" text-anchor="middle" '
+                    f'class="val">×{row["five_star"]}</text>'
+                )
         if i in label_at:
             last = i == last_i
             lx = min(cx + 12, W - PADR) if last else cx
             anchor = "end" if last else "middle"
-            parts.append(f'<text x="{lx:.1f}" y="{H - 12}" text-anchor="{anchor}" class="ax">'
-                         f'{esc(row["day"][5:])}</text>')
+            parts.append(
+                f'<text x="{lx:.1f}" y="{H - 12}" text-anchor="{anchor}" class="ax">'
+                f"{esc(row['day'][5:])}</text>"
+            )
     parts.append("</svg>")
 
-    legend = ('<div class="legend">'
-              f'<span class="key"><i class="key-bar" style="background:{DORI}"></i>'
-              "<span>pulls that day</span></span>"
-              f'<span class="key"><i class="key-dot" style="background:{COL["5★"]}"></i>'
-              "<span>a ★5 came out (dot = how many)</span></span></div>")
+    legend = (
+        '<div class="legend">'
+        f'<span class="key"><i class="key-bar" style="background:{DORI}"></i>'
+        "<span>pulls that day</span></span>"
+        f'<span class="key"><i class="key-dot" style="background:{COL["5★"]}"></i>'
+        "<span>a ★5 came out (dot = how many)</span></span></div>"
+    )
     tot = sum(r["pulls"] for r in rows)
     stars = sum(r["five_star"] for r in rows)
-    cap = (f'{len(rows)} days, {rows[0]["day"]} to {rows[-1]["day"]} · {num(tot)} pulls · '
-           f"{num(stars)} ★5")
+    cap = f"{len(rows)} days, {rows[0]['day']} to {rows[-1]['day']} · {num(tot)} pulls · {num(stars)} ★5"
     return legend + "".join(parts) + f'<p class="cap">{esc(cap)}</p>'
 
 
@@ -354,19 +390,26 @@ def timeline_chart(view: dict) -> str:
 
 def tiles(view: dict, cov: dict) -> str:
     totals = view.get("totals") or {}
-    out = ['<div class="tiles">',
-           f'<div class="tile"><div class="tl">Pulls</div><div class="tb">{num(totals.get("pulls"))}</div></div>']
+    out = [
+        '<div class="tiles">',
+        f'<div class="tile"><div class="tl">Pulls</div><div class="tb">{num(totals.get("pulls"))}</div></div>',
+    ]
     for r in RAR:
         got = (totals.get("by_rarity") or {}).get(r, 0)
         exp = cov["expected"].get(r)
         # The big number is EVERY pull; the small line is the expectation for the
         # compared subset only, and says so.
-        small = ("no saved rates" if exp is None or not cov["covered_pulls"]
-                 else f'expected {exp:.1f} of {num(cov["covered_pulls"])} compared')
-        out.append(f'<div class="tile" style="border-top-color:{COL[r]}">'
-                   f'<div class="tl">{stars(r)}</div>'
-                   f'<div class="tb">{num(got)} · {pct(got, totals.get("pulls") or 0)}</div>'
-                   f'<div class="ts">{esc(small)}</div></div>')
+        small = (
+            "no saved rates"
+            if exp is None or not cov["covered_pulls"]
+            else f"expected {exp:.1f} of {num(cov['covered_pulls'])} compared"
+        )
+        out.append(
+            f'<div class="tile" style="border-top-color:{COL[r]}">'
+            f'<div class="tl">{stars(r)}</div>'
+            f'<div class="tb">{num(got)} · {pct(got, totals.get("pulls") or 0)}</div>'
+            f'<div class="ts">{esc(small)}</div></div>'
+        )
     out.append("</div>")
     return "".join(out)
 
@@ -394,12 +437,15 @@ def card_grid(cards: list[dict], thumbs: dict[str, bytes], cls: dict[str, str] |
             continue
         rows.sort(key=lambda c: (not c.get("is_pickup"), -(c.get("count") or 0), c.get("card_id") or ""))
         n = sum(c.get("count") or 0 for c in rows)
-        out.append(f'<div class="sec"><h4 class="sec-h"><i class="dot" style="background:{COL[r]}">'
-                   f'</i>{stars(r)}<span>· {num(n)}</span></h4><div class="grid">')
+        out.append(
+            f'<div class="sec"><h4 class="sec-h"><i class="dot" style="background:{COL[r]}">'
+            f'</i>{stars(r)}<span>· {num(n)}</span></h4><div class="grid">'
+        )
         for c in rows:
             cid = c.get("card_id") or ""
-            rate = (f' · rate {c["rate_ppm"] / 1e5:.3f}%' if c.get("rate_ppm") is not None
-                    else " · no saved rate")
+            rate = (
+                f" · rate {c['rate_ppm'] / 1e5:.3f}%" if c.get("rate_ppm") is not None else " · no saved rate"
+            )
             title = esc(cid + rate + (" · pickup" if c.get("is_pickup") else ""))
             # A missing thumb is named, never a broken image box.
             klass = (cls or {}).get(cid)
@@ -411,8 +457,10 @@ def card_grid(cards: list[dict], thumbs: dict[str, bytes], cls: dict[str, str] |
                 img = f'<div class="noimg">{esc(cid)}</div>'
             pk = '<span class="pk">pickup</span>' if c.get("is_pickup") else ""
             box = "card pickup" if c.get("is_pickup") else "card"
-            out.append(f'<div class="{box}" title="{title}">'
-                       f'{img}<span class="count">×{num(c.get("count"))}</span>{pk}</div>')
+            out.append(
+                f'<div class="{box}" title="{title}">'
+                f'{img}<span class="count">×{num(c.get("count"))}</span>{pk}</div>'
+            )
         out.append("</div></div>")
     return "".join(out) or '<p class="note">No cards recorded here yet.</p>'
 
@@ -430,7 +478,9 @@ def _hero_bytes(path: Path, max_w: int = 1200) -> tuple[bytes, str]:
     raw = path.read_bytes()
     try:
         import io  # noqa: PLC0415
+
         from PIL import Image  # noqa: PLC0415 -- Pillow is in requirements.txt
+
         with Image.open(io.BytesIO(raw)) as im:
             if im.width > max_w:
                 height = max(1, round(im.height * max_w / im.width))
@@ -446,28 +496,32 @@ def _hero_bytes(path: Path, max_w: int = 1200) -> tuple[bytes, str]:
         return raw, ("image/webp" if raw[:4] == b"RIFF" else "image/png")
 
 
-def banner_block(b: dict, art_dir: Path, thumbs: dict[str, bytes],
-                 cls: dict[str, str] | None = None) -> str:
+def banner_block(b: dict, art_dir: Path, thumbs: dict[str, bytes], cls: dict[str, str] | None = None) -> str:
     gid = b.get("gacha_id") or ""
     art = None
     if gid and (b.get("art") or {}).get("banner"):
         # `art_ext` names WHICH file the view found (png master or the webp new banners
         # are saved as); the fallback tries both so an older view model still works.
         ext = (b.get("art_ext") or {}).get("banner")
-        for e in ([ext] if ext else ["png", "webp"]):
+        for e in [ext] if ext else ["png", "webp"]:
             p = art_dir / gid / f"banner.{e}"
             if p.is_file():
                 art = _data_uri(*_hero_bytes(p))
                 break
-    head = (f'<img class="hero" src="{art}" alt="{esc(b.get("name"))}"/>' if art
-            else f'<div class="noart">{esc(b.get("name"))}</div>')
+    head = (
+        f'<img class="hero" src="{art}" alt="{esc(b.get("name"))}"/>'
+        if art
+        else f'<div class="noart">{esc(b.get("name"))}</div>'
+    )
     pills = [f'<span class="pill">{num(b.get("pulls"))} pulls</span>']
     for r in RAR:
         got = (b.get("by_rarity") or {}).get(r, 0)
         exp = (b.get("expected_by_rarity") or {}).get(r)
         txt = f"{num(got)}" + ("" if exp is None else f" / {exp:.1f}")
-        pills.append(f'<span class="pill" style="border-color:{COL[r]}">'
-                     f'<i class="dot" style="background:{COL[r]}"></i>{stars(r)}{txt}</span>')
+        pills.append(
+            f'<span class="pill" style="border-color:{COL[r]}">'
+            f'<i class="dot" style="background:{COL[r]}"></i>{stars(r)}{txt}</span>'
+        )
     if b.get("is_alias"):
         pills.append('<span class="flag">closed · rates not saved</span>')
     elif not b.get("has_rates"):
@@ -478,31 +532,36 @@ def banner_block(b: dict, art_dir: Path, thumbs: dict[str, bytes],
     if counters.get("gacha_point") is not None:
         pills.append(f'<span class="pill dim">points {num(counters["gacha_point"])}</span>')
     if counters.get("drawn_count_total") is not None:
-        pills.append(f'<span class="pill dim">{num(counters["drawn_count_total"])} draws counted '
-                     "by the game</span>")
-    dates = (period(b) or "—") + (
-        " · live at last sync" if b.get("is_live_last_sync") else "")
-    return (f'<section class="banner">{head}'
-            f'<div class="bmeta"><div class="bname">{esc(b.get("name"))}</div>'
-            f'<div class="bdates">{esc(dates)} · {esc(gid)}</div>'
-            f'<div class="pills">{"".join(pills)}</div></div>'
-            f'{card_grid(b.get("cards") or [], thumbs, cls)}</section>')
+        pills.append(
+            f'<span class="pill dim">{num(counters["drawn_count_total"])} draws counted by the game</span>'
+        )
+    dates = (period(b) or "—") + (" · live at last sync" if b.get("is_live_last_sync") else "")
+    return (
+        f'<section class="banner">{head}'
+        f'<div class="bmeta"><div class="bname">{esc(b.get("name"))}</div>'
+        f'<div class="bdates">{esc(dates)} · {esc(gid)}</div>'
+        f'<div class="pills">{"".join(pills)}</div></div>'
+        f"{card_grid(b.get('cards') or [], thumbs, cls)}</section>"
+    )
 
 
-def unidentified_block(u: dict, thumbs: dict[str, bytes],
-                       cls: dict[str, str] | None = None) -> str:
+def unidentified_block(u: dict, thumbs: dict[str, bytes], cls: dict[str, str] | None = None) -> str:
     pills = [f'<span class="pill">{num(u.get("pulls"))} pulls</span>']
     for r in RAR:
         got = (u.get("by_rarity") or {}).get(r, 0)
         if not got:
             continue
-        pills.append(f'<span class="pill" style="border-color:{COL[r]}">'
-                     f'<i class="dot" style="background:{COL[r]}"></i>{stars(r)}{num(got)}</span>')
+        pills.append(
+            f'<span class="pill" style="border-color:{COL[r]}">'
+            f'<i class="dot" style="background:{COL[r]}"></i>{stars(r)}{num(got)}</span>'
+        )
     pills.append('<span class="flag">no banner matched — no rates to compare</span>')
-    return (f'<section class="banner"><div class="bmeta">'
-            f'<div class="bname">{esc(u.get("gacha_name") or "(no name)")}</div>'
-            f'<div class="pills">{"".join(pills)}</div></div>'
-            f'{card_grid(u.get("cards") or [], thumbs, cls)}</section>')
+    return (
+        f'<section class="banner"><div class="bmeta">'
+        f'<div class="bname">{esc(u.get("gacha_name") or "(no name)")}</div>'
+        f'<div class="pills">{"".join(pills)}</div></div>'
+        f"{card_grid(u.get('cards') or [], thumbs, cls)}</section>"
+    )
 
 
 def owned_block(view: dict, thumbs: dict[str, bytes], cls: dict[str, str] | None = None) -> str:
@@ -511,18 +570,25 @@ def owned_block(view: dict, thumbs: dict[str, bytes], cls: dict[str, str] | None
     account snapshot on this machine) says so rather than showing an empty list."""
     tut = view.get("tutorial")
     if not tut:
-        return ('<p class="note">This needs the account snapshot '
-                '(dumps/account_snapshot_main.json), which was not present when this file '
-                "was written.</p>")
+        return (
+            '<p class="note">This needs the account snapshot '
+            "(dumps/account_snapshot_main.json), which was not present when this file "
+            "was written.</p>"
+        )
     rows = tut.get("owned_not_tracked") or []
     if not rows:
         return '<p class="cap">Every owned card appears in the tracked pulls.</p>'
     n_tut = sum(1 for r in rows if r.get("is_tutorial"))
-    out = [f'<p class="cap">{num(len(rows))} owned cards are not in the tracked pulls — '
-           "acquired before the window, or from a source the history does not report"
-           + (f". {num(n_tut)} came from the tutorial's guaranteed pull and count for "
-              "nothing here.</p>" if n_tut else ".</p>"),
-           '<div class="grid owned">']
+    out = [
+        f'<p class="cap">{num(len(rows))} owned cards are not in the tracked pulls — '
+        "acquired before the window, or from a source the history does not report"
+        + (
+            f". {num(n_tut)} came from the tutorial's guaranteed pull and count for nothing here.</p>"
+            if n_tut
+            else ".</p>"
+        ),
+        '<div class="grid owned">',
+    ]
     for c in rows:
         cid = c.get("card_id") or ""
         klass = (cls or {}).get(cid)
@@ -533,10 +599,12 @@ def owned_block(view: dict, thumbs: dict[str, bytes], cls: dict[str, str] | None
         else:
             img = f'<div class="noimg">{esc(cid)}</div>'
         tag = '<span class="pk tut">tutorial · not counted</span>' if c.get("is_tutorial") else ""
-        out.append(f'<div class="card{" tutcard" if c.get("is_tutorial") else ""}" '
-                   f'title="{esc(cid)}">{img}{tag}'
-                   f'<span class="count">{stars(c.get("rarity") or "")} '
-                   f'{esc(day(c.get("acquired")))}</span></div>')
+        out.append(
+            f'<div class="card{" tutcard" if c.get("is_tutorial") else ""}" '
+            f'title="{esc(cid)}">{img}{tag}'
+            f'<span class="count">{stars(c.get("rarity") or "")} '
+            f"{esc(day(c.get('acquired')))}</span></div>"
+        )
     out.append("</div>")
     return "".join(out)
 
@@ -620,21 +688,27 @@ def render_html(view: dict, art_dir: Path, thumbs: dict[str, bytes]) -> str:
     totals = view.get("totals") or {}
     banners = view.get("banners") or []
     unid = view.get("unidentified") or []
-    body = [f"<h1>Gacha — {num(totals.get('pulls'))} pulls</h1>",
-            f'<p class="sub">Exported {esc(_dt.datetime.now().strftime("%Y-%m-%d %H:%M"))} · '
-            f"last sync {esc(stamp(view.get('last_sync')))} · "
-            f"{num(len(banners))} banners · self-contained (no network)</p>"]
+    body = [
+        f"<h1>Gacha — {num(totals.get('pulls'))} pulls</h1>",
+        f'<p class="sub">Exported {esc(_dt.datetime.now().strftime("%Y-%m-%d %H:%M"))} · '
+        f"last sync {esc(stamp(view.get('last_sync')))} · "
+        f"{num(len(banners))} banners · self-contained (no network)</p>",
+    ]
     # The tab's twin (see gacha.js): if the ONE hand-maintained file did not parse, every
     # alias silently stopped working and the export must say so, not just show fewer banners.
     if view.get("aliases_error"):
-        body.append('<p class="flag">banner_aliases.json could not be read: '
-                    f'{esc(view["aliases_error"])}</p>')
+        body.append(
+            f'<p class="flag">banner_aliases.json could not be read: {esc(view["aliases_error"])}</p>'
+        )
     if not totals.get("pulls"):
         body.append('<p class="note">No pulls in the store yet.</p>')
     else:
         body.append(tiles(view, cov))
-        body.append('<div class="chartbox"><h4>Observed vs expected, by rarity</h4>'
-                    + rates_chart(view, cov, star_uri) + "</div>")
+        body.append(
+            '<div class="chartbox"><h4>Observed vs expected, by rarity</h4>'
+            + rates_chart(view, cov, star_uri)
+            + "</div>"
+        )
         body.append('<div class="chartbox"><h4>Pulls per day</h4>' + timeline_chart(view) + "</div>")
         body.append("<h2>Banners</h2>")
         if banners:
@@ -643,17 +717,22 @@ def render_html(view: dict, art_dir: Path, thumbs: dict[str, bytes]) -> str:
             body.append('<p class="note">No banner was identified for any pull yet.</p>')
         if unid:
             body.append("<h2>Pulls whose banner was not identified</h2>")
-            body.append('<p class="cap">A pull whose banner has closed can still be attributed '
-                        "by hand: add its name to data/gacha/banner_aliases.json.</p>")
+            body.append(
+                '<p class="cap">A pull whose banner has closed can still be attributed '
+                "by hand: add its name to data/gacha/banner_aliases.json.</p>"
+            )
             body.extend(unidentified_block(u, thumbs, cls) for u in unid)
         body.append("<h2>Owned before tracking started</h2>")
-        body.append('<section class="banner"><div class="sec">'
-                    + owned_block(view, thumbs, cls) + "</div></section>")
-    return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"/>"
-            '<meta name="viewport" content="width=device-width,initial-scale=1"/>'
-            f"<title>Gacha export — {esc(day(view.get('last_sync')))}</title>"
-            f"<style>{CSS}{star_css(star_uri)}{thumb_rules}</style></head>"
-            f"<body><main>{''.join(body)}</main></body></html>\n")
+        body.append(
+            '<section class="banner"><div class="sec">' + owned_block(view, thumbs, cls) + "</div></section>"
+        )
+    return (
+        '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"/>'
+        '<meta name="viewport" content="width=device-width,initial-scale=1"/>'
+        f"<title>Gacha export — {esc(day(view.get('last_sync')))}</title>"
+        f"<style>{CSS}{star_css(star_uri)}{thumb_rules}</style></head>"
+        f"<body><main>{''.join(body)}</main></body></html>\n"
+    )
 
 
 # --- gathering the bytes ------------------------------------------------------
@@ -667,12 +746,12 @@ def collect_thumbs(view: dict, images_dir: Path) -> dict[str, bytes]:
         for c in b.get("cards") or []:
             if c.get("card_id"):
                 ids.add(c["card_id"])
-    for c in ((view.get("tutorial") or {}).get("owned_not_tracked") or []):
+    for c in (view.get("tutorial") or {}).get("owned_not_tracked") or []:
         if c.get("card_id"):
             ids.add(c["card_id"])
     out: dict[str, bytes] = {}
     for cid in sorted(ids):
-        key = cid[len("card-"):] if cid.startswith("card-") else cid
+        key = cid[len("card-") :] if cid.startswith("card-") else cid
         p = images_dir / f"img_card_thumb_{key}.webp"
         # `st_size` as well as `is_file`: one master in the dump is a 0-byte truncated
         # write, and an empty `data:` URI is a broken image rather than a named absence.
@@ -706,9 +785,11 @@ def main() -> None:
         fh.write(page.encode("utf8"))
     # ASCII on purpose: this goes to whatever console runs it, including the web
     # server's cp1252 one when the button shells out.
-    print(f"{len(view.get('banners') or [])} banners | "
-          f"{(view.get('totals') or {}).get('pulls')} pulls | {len(thumbs)} thumbs embedded | "
-          f"{out.stat().st_size / 1e6:.1f} MB")
+    print(
+        f"{len(view.get('banners') or [])} banners | "
+        f"{(view.get('totals') or {}).get('pulls')} pulls | {len(thumbs)} thumbs embedded | "
+        f"{out.stat().st_size / 1e6:.1f} MB"
+    )
     print(f"WROTE {out}")
 
 

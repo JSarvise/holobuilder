@@ -18,7 +18,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 import tree_optimise as to
 
 _REFRESH = Path(__file__).resolve().parent
@@ -26,8 +25,7 @@ _DUMPS = _REFRESH.parents[1] / "tools" / "recon" / "proxy" / "dumps"
 
 
 @pytest.mark.skipif(
-    not (_DUMPS / "skilltree.json").exists()
-    or not (_DUMPS / "master_SkillTreeNode.json").exists(),
+    not (_DUMPS / "skilltree.json").exists() or not (_DUMPS / "master_SkillTreeNode.json").exists(),
     reason="dumps/ is gitignored account data",
 )
 def test_fill_never_exceeds_a_characters_point_budget():
@@ -40,7 +38,7 @@ def test_fill_never_exceeds_a_characters_point_budget():
     points = {cid: BUDGET for cid in graphs}
     # Materials are effectively unlimited, so ONLY the point budget can bind —
     # isolating the currency under test.
-    wallet = {item: 10 ** 9 for item in to.CURRENCIES}
+    wallet = {item: 10**9 for item in to.CURRENCIES}
     # Every node is worth something, so the greedy value loop wants to buy as much
     # as it can afford on every board — precisely the pressure the budget must cap.
     values = {node: 1.0 for node in prices}
@@ -49,8 +47,16 @@ def test_fill_never_exceeds_a_characters_point_budget():
     leader_chr, member_chrs = cids[0], cids[1:6]
 
     state, _wallet, out_points, bought = to.fill_boards(
-        graphs, prices, {}, wallet, points, values,
-        leader_chr, member_chrs, song_mode=False, score_fn=None,
+        graphs,
+        prices,
+        {},
+        wallet,
+        points,
+        values,
+        leader_chr,
+        member_chrs,
+        song_mode=False,
+        score_fn=None,
     )
 
     assert bought > 0, "the fill bought nothing, so it never exercised the budget"

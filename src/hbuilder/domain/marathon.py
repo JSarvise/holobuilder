@@ -9,10 +9,11 @@ deck that matches. Their matching rule is read from the client code (see
 Nothing here is imported by the solver's hot loop; it is a separate objective over the same
 `Card` team. Third-party deps: none (stdlib only).
 """
+
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Iterable, Mapping
 
 from hbuilder.domain.card import Card
 from hbuilder.domain.schema import SchemaError
@@ -30,7 +31,16 @@ LIVE_STAMINA_MAX: int = 10
 # MarathonLiveRewardUpStaminaEffect: stamina consumed -> marathon_score_provide_count.
 # Linear ×8 through stamina 3, sub-linear after.
 MARATHON_LIVE_STAMINA_SCORE: dict[int, int] = {
-    1: 8, 2: 16, 3: 24, 4: 30, 5: 37, 6: 42, 7: 46, 8: 50, 9: 53, 10: 56,
+    1: 8,
+    2: 16,
+    3: 24,
+    4: 30,
+    5: 37,
+    6: 42,
+    7: 46,
+    8: 50,
+    9: 53,
+    10: 56,
 }
 
 # The channels an event's bonus groups are keyed on (marathon_bonus.json `kind`). A live play
@@ -111,9 +121,7 @@ class MarathonEvent:
 def live_stamina_score(stamina: int) -> int:
     """marathon_score_provide_count for a LIVE play at `stamina` consumed (master table)."""
     if stamina not in MARATHON_LIVE_STAMINA_SCORE:
-        raise ValueError(
-            f"live stamina {stamina} out of range 1..{LIVE_STAMINA_MAX}"
-        )
+        raise ValueError(f"live stamina {stamina} out of range 1..{LIVE_STAMINA_MAX}")
     return MARATHON_LIVE_STAMINA_SCORE[stamina]
 
 
@@ -126,8 +134,9 @@ def live_stamina_score(stamina: int) -> int:
 # (`Enumerable.Max` @0x658f441). The leader slot adds nothing.
 
 
-def _card_permil(card: Card, rows: Iterable[MarathonBonusRow], *, bloom: int | None,
-                 music_id: str | None) -> int:
+def _card_permil(
+    card: Card, rows: Iterable[MarathonBonusRow], *, bloom: int | None, music_id: str | None
+) -> int:
     """One card's bonus: the sum of every matching row (`CalculateBonusRatioPermil`
     @0x614b5e0). A bloom row needs the owned bloom and compares with == (never >=)."""
     total = 0
@@ -157,8 +166,9 @@ def multi_divisor(event_key: str | None) -> int:
     return MULTI_DIVISOR[kind]
 
 
-def event_points_base(score: int, bonus_permil: int, multi_score: int | None = None,
-                      divisor: int = 75_000) -> int:
+def event_points_base(
+    score: int, bonus_permil: int, multi_score: int | None = None, divisor: int = 75_000
+) -> int:
     """`ceil((120 + score/15000 + multi/divisor) * (1 + E/1000))` in exact integers
     (`divisor`: `multi_divisor(event)`, 75000 on a relay event, 60000 on a normal one).
 
@@ -173,9 +183,17 @@ def event_points_base(score: int, bonus_permil: int, multi_score: int | None = N
     return _ceil_div(total * (1000 + int(bonus_permil)), int(divisor) * 1000)
 
 
-def event_points(score: int | None, bonus_permil: int | None, *, boosts: int,
-                 length_permil: int, holopass: bool, base: int | None = None,
-                 multi_score: int | None = None, divisor: int = 75_000) -> int:
+def event_points(
+    score: int | None,
+    bonus_permil: int | None,
+    *,
+    boosts: int,
+    length_permil: int,
+    holopass: bool,
+    base: int | None = None,
+    multi_score: int | None = None,
+    divisor: int = 75_000,
+) -> int:
     """Event Pt for one play: `ceil(base * boost_count * L * (1 + HoloPass))`.
 
     `boosts` 1..10 picks the provide count (8, 16, ... 56). `length_permil` is the
@@ -197,20 +215,23 @@ def event_song_score(score: int, song_bonus_permil: int) -> int:
 OBJECTIVES = ("score", "event_points", "event_song")
 
 
-def card_bonus_table(cards: Iterable[Card], event: MarathonEvent, *, blooms: Mapping[str, int],
-                     music_id: str | None) -> tuple[tuple[int, int], ...]:
+def card_bonus_table(
+    cards: Iterable[Card], event: MarathonEvent, *, blooms: Mapping[str, int], music_id: str | None
+) -> tuple[tuple[int, int], ...]:
     """Per card, `(live permil, song permil)`: the two numbers a team's `E` (sum over the
     members) and `P` (max over the members) are made of. A search needs them per card,
     once, so they can be added up inside its loop."""
     live, music = event.rows_for(LIVE_CHANNEL), event.rows_for(MUSIC_CHANNEL)
-    return tuple((_card_permil(c, live, bloom=blooms.get(c.id), music_id=None),
-                  _card_permil(c, music, bloom=blooms.get(c.id), music_id=music_id)
-                  if music_id else 0)
-                 for c in cards)
+    return tuple(
+        (
+            _card_permil(c, live, bloom=blooms.get(c.id), music_id=None),
+            _card_permil(c, music, bloom=blooms.get(c.id), music_id=music_id) if music_id else 0,
+        )
+        for c in cards
+    )
 
 
-def event_objective(score: float, *, objective: str, live_permil: int = 0,
-                    song_permil: int = 0) -> float:
+def event_objective(score: float, *, objective: str, live_permil: int = 0, song_permil: int = 0) -> float:
     """The value a search ranks teams by — continuous, without the game's ceilings, so ties
     do not hide differences. Report with `event_points_base` / `event_song_score`.
 
@@ -256,5 +277,3 @@ def pick_chapter(keys, windows=None, now_ms: int | None = None) -> str:
         if started:
             return max(started, key=lambda k: windows[k][0])
     return keys[-1]
-
-

@@ -1,6 +1,7 @@
 """`MODEL_VERSION` is the single string every certificate folds into its
 `inputs_hash` (docs/dev/objective.md §5). The spec header must name the SAME
 string, or a certificate could claim a version the spec does not describe."""
+
 from __future__ import annotations
 
 import re
@@ -14,7 +15,7 @@ REPO = Path(__file__).resolve().parents[1]
 def test_model_version_matches_objective_v2_header():
     text = (REPO / "docs/dev/objective.md").read_text(encoding="utf-8")
     m = re.search(r'`model_version = "([^"]+)"`', text)
-    assert m, "docs/dev/objective.md must open with `model_version = \"...\"`"
+    assert m, 'docs/dev/objective.md must open with `model_version = "..."`'
     assert m.group(1) == MODEL_VERSION
 
 

@@ -72,14 +72,16 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
-import atomic_io
 import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+
+import atomic_io
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
@@ -149,9 +151,7 @@ def _probe(label: str, path: Path, extract: Callable[[Any], tuple[dict, dict]]) 
         facts, ids = extract(_load(path))
     except Exception as exc:  # a half-written or hand-broken artefact is a finding
         return Snap(label, path, exists=True, error=f"{type(exc).__name__}: {exc}")
-    facts["mtime"] = _dt.datetime.fromtimestamp(path.stat().st_mtime).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    facts["mtime"] = _dt.datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
     return Snap(label, path, exists=True, facts=facts, ids=ids)
 
 
@@ -196,9 +196,7 @@ def probe_songs() -> Snap:
     def extract(doc: Any) -> tuple[dict, dict]:
         songs = doc["songs"] if isinstance(doc, dict) else doc
         ids = {str(s.get("id")) for s in songs}
-        complete = sum(
-            1 for s in songs if all(d.get("chart_file") for d in s.get("difficulties", []))
-        )
+        complete = sum(1 for s in songs if all(d.get("chart_file") for d in s.get("difficulties", [])))
         return {"songs": len(songs), "all charts on disk": complete}, {"card": ids}
 
     return _probe("songs.json", DUMPS / "songs.json", extract)
@@ -226,12 +224,14 @@ def probe_song_titles() -> Snap:
 
     def extract(doc: Any) -> tuple[dict, dict]:
         rows = doc if isinstance(doc, list) else []
-        titles = {str(r.get("id"))[len("la-music_title-"):] for r in rows
-                  if str(r.get("id", "")).startswith("la-music_title-")}
+        titles = {
+            str(r.get("id"))[len("la-music_title-") :]
+            for r in rows
+            if str(r.get("id", "")).startswith("la-music_title-")
+        }
         return {"titles": len(titles)}, {"card": titles}
 
-    return _probe("main_LangMusic_Eng.json", DUMPS / "holodori" / "main_LangMusic_Eng.json",
-                  extract)
+    return _probe("main_LangMusic_Eng.json", DUMPS / "holodori" / "main_LangMusic_Eng.json", extract)
 
 
 def probe_song_casts() -> Snap:
@@ -248,7 +248,7 @@ def probe_song_casts() -> Snap:
 def _probe_dir(label: str, path: Path, suffix: str) -> Snap:
     if not path.is_dir():
         return Snap(label, path, False)
-    names = {n[:-len(suffix)] for n in os.listdir(path) if n.endswith(suffix)}
+    names = {n[: -len(suffix)] for n in os.listdir(path) if n.endswith(suffix)}
     return Snap(label, path, True, {"files": len(names)}, {"card": names})
 
 
@@ -257,8 +257,7 @@ def probe_jackets() -> Snap:
 
 
 def probe_card_art() -> Snap:
-    return _probe_dir("cards_explorer_art/", paths.TOOLS / "explorer" / "cards_explorer_art",
-                      ".sq.webp")
+    return _probe_dir("cards_explorer_art/", paths.TOOLS / "explorer" / "cards_explorer_art", ".sq.webp")
 
 
 def chart_cache_state() -> list[str]:
@@ -316,7 +315,7 @@ def probe_board_state() -> Snap:
         nodes = 0
         for chr_id, entry in doc.items():
             nodes += len(entry.get("nodes") or ())
-            for slot in (entry.get("slots") or {}):
+            for slot in entry.get("slots") or {}:
                 slots.add(f"{chr_id}:{slot}")
         facts = {"characters": len(doc), "filled_slots": len(slots), "nodes": nodes}
         return facts, {"slot": slots, "character": set(doc)}
@@ -415,7 +414,7 @@ def derived_artefact_drift() -> list[tuple[str, str, float]]:
         if not (derived.exists() and source.exists()):
             continue
         behind = source.stat().st_mtime - derived.stat().st_mtime
-        if behind > 60:                      # a minute of slack for one chain run
+        if behind > 60:  # a minute of slack for one chain run
             out.append((derived.name, source.name, behind / 3600.0))
     return out
 
@@ -536,9 +535,7 @@ def delta_lines(before: Snap, after: Snap) -> list[str]:
     if not out:
         rewritten = before.facts.get("mtime") != after.facts.get("mtime")
         note = "rewritten, content identical" if rewritten else "untouched"
-        counts = ", ".join(
-            f"{k} {v}" for k, v in after.facts.items() if k != "mtime"
-        )
+        counts = ", ".join(f"{k} {v}" for k, v in after.facts.items() if k != "mtime")
         out.append(f"{after.label}: no change ({note}) -- {counts}")
     return out
 
@@ -548,8 +545,8 @@ def delta_lines(before: Snap, after: Snap) -> list[str]:
 # --------------------------------------------------------------------------
 
 
-EXIT_MAINTENANCE = 3   # the game server is in maintenance: nothing ran
-EXIT_NO_KEYS = 4       # the game client's build constants are not on this PC: nothing ran
+EXIT_MAINTENANCE = 3  # the game server is in maintenance: nothing ran
+EXIT_NO_KEYS = 4  # the game client's build constants are not on this PC: nothing ran
 
 # The steps that talk to the game's API, whose messages are sealed with the client's payload
 # seed (game_keys.py). The CDN downloads and the local builds do not need it.
@@ -561,6 +558,7 @@ def missing_keys(step_names) -> bool:
     if not set(step_names) & set(API_STEPS):
         return False
     import game_keys  # noqa: PLC0415
+
     return game_keys.grpc_seed(required=False) is None
 
 
@@ -580,7 +578,7 @@ def _pyexe(args: argparse.Namespace) -> str:
     return args.python or sys.executable
 
 
-PICTURES_LOCK_MAX_S = 6 * 3600     # a picture run's lock older than this is a stopped run's leftover
+PICTURES_LOCK_MAX_S = 6 * 3600  # a picture run's lock older than this is a stopped run's leftover
 
 
 def _pictures_lock() -> Path:
@@ -596,7 +594,7 @@ def _alive(pid: int) -> bool:
         import ctypes  # noqa: PLC0415
 
         kernel = ctypes.windll.kernel32
-        handle = kernel.OpenProcess(0x1000, False, pid)       # PROCESS_QUERY_LIMITED_INFORMATION
+        handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if not handle:
             return False
         try:
@@ -660,13 +658,25 @@ def start_pictures(pyexe: str, steps: list[str], offline: bool) -> str:
             flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
         with open(log, "ab") as sink:
             # its own session on POSIX: closing the terminal (or Ctrl+C) does not stop it
-            proc = subprocess.Popen(cmd, cwd=str(REPO), env=env, stdin=subprocess.DEVNULL,
-                                    stdout=sink, stderr=subprocess.STDOUT, creationflags=flags,
-                                    close_fds=True, start_new_session=sys.platform != "win32")
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(REPO),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=sink,
+                stderr=subprocess.STDOUT,
+                creationflags=flags,
+                close_fds=True,
+                start_new_session=sys.platform != "win32",
+            )
     except Exception as exc:  # noqa: BLE001 - never fail a finished refresh over this
-        return f"pictures: could NOT start the background run ({exc!r}); run them with --only {','.join(steps)}"
-    return (f"pictures: {', '.join(steps)} running in the background (pid {proc.pid}); "
-            f"the app works meanwhile; progress in {log}")
+        return (
+            f"pictures: could NOT start the background run ({exc!r}); run them with --only {','.join(steps)}"
+        )
+    return (
+        f"pictures: {', '.join(steps)} running in the background (pid {proc.pid}); "
+        f"the app works meanwhile; progress in {log}"
+    )
 
 
 def cmd_master(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
@@ -739,11 +749,20 @@ LEVEL_TABLES = ("Card", "CardLevel", "LiveNote", "SkillTreeNode", "CharacterLeve
 # event_art step has them: song_meta runs after it
 EVENT_TITLE_TABLES = ("Poster", "LangPoster_Eng", "LangEventStoryChapter_Eng")
 SONG_META_TABLES = (
-    "Music", "LangMusic_Eng", "Poster",
+    "Music",
+    "LangMusic_Eng",
+    "Poster",
     # read by the web/app
-    "Setting", "LangItem_Eng", "LangMarathonRankingGrade_Eng", "MarathonRankingGrade",
-    "LiveDeckEvaluationRank", "LiveScoreEvaluationRank", "SkillTreeEffectValueLimit",
-    "Character", "CharacterGrouping", "SdCostume",
+    "Setting",
+    "LangItem_Eng",
+    "LangMarathonRankingGrade_Eng",
+    "MarathonRankingGrade",
+    "LiveDeckEvaluationRank",
+    "LiveScoreEvaluationRank",
+    "SkillTreeEffectValueLimit",
+    "Character",
+    "CharacterGrouping",
+    "SdCostume",
 )
 
 
@@ -786,8 +805,18 @@ def cmd_park_moves(args: argparse.Namespace) -> tuple[list[str], dict[str, str],
 
 
 def cmd_chart_lib(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "build_charts.py"), "--rebuild-caches",
-            "--all-out", str(DUMPS / "charts_all.json"), "--verify"], {}, HERE
+    return (
+        [
+            _pyexe(args),
+            str(HERE / "build_charts.py"),
+            "--rebuild-caches",
+            "--all-out",
+            str(DUMPS / "charts_all.json"),
+            "--verify",
+        ],
+        {},
+        HERE,
+    )
 
 
 def cmd_jackets(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
@@ -835,8 +864,7 @@ def cmd_ui_assets(args: argparse.Namespace) -> tuple[list[str], dict[str, str], 
 
 
 def cmd_node_master(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "master_export.py"), "SkillTreeNode",
-            "SkillTreeEffect"], {}, HERE
+    return [_pyexe(args), str(HERE / "master_export.py"), "SkillTreeNode", "SkillTreeEffect"], {}, HERE
 
 
 def cmd_skilltree(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
@@ -1195,8 +1223,7 @@ STEPS: list[Step] = [
     # from the Octo CDN once, then the export is offline. Soft.
     Step(
         "park_export",
-        "dumps/park_export/ -- Parkview's maps and spot positions (Octo CDN once; never fails "
-        "the refresh)",
+        "dumps/park_export/ -- Parkview's maps and spot positions (Octo CDN once; never fails the refresh)",
         network=True,
         probes=[],
         build=cmd_park_export,
@@ -1224,11 +1251,11 @@ def probe_event_bonus() -> Snap:
         for g in groups:
             if g.get("kind") == "music":
                 with_row.setdefault(str(g.get("group_id", "")).split("-", 1)[-1], set()).update(
-                    r.get("music_id") for r in g.get("rows") or [])
+                    r.get("music_id") for r in g.get("rows") or []
+                )
         for chapter, songs in sorted((doc.get("event_songs") or {}).items()):
             have = with_row.get(chapter, set())
-            facts[f"songs {chapter}"] = (f"{len(songs)}, {sum(m in have for m in songs)} "
-                                         "with a song bonus")
+            facts[f"songs {chapter}"] = f"{len(songs)}, {sum(m in have for m in songs)} with a song bonus"
         return facts, {"group": {g.get("group_id") for g in groups}}
 
     return _probe("marathon_bonus.json", DUMPS / "marathon_bonus.json", extract)
@@ -1345,8 +1372,7 @@ def merge_owned(account: str) -> tuple[list[str], bool]:
             ids = set(json.loads((STATE / "collection.json").read_text("utf-8"))["cards"])
             source = "state/collection.json"
         except (OSError, ValueError, KeyError, TypeError):
-            return [f"card_params.json unavailable ({params.error}) and no collection -- "
-                    "not merging"], True
+            return [f"card_params.json unavailable ({params.error}) and no collection -- not merging"], True
 
     missing = sorted(set(ids) - set(have))
     # only cards the catalogue knows: an owned id that data/cards.json lacks makes the whole
@@ -1356,27 +1382,43 @@ def merge_owned(account: str) -> tuple[list[str], bool]:
     catalogue = catalogue_records()
     later = [cid for cid in missing if catalogue is not None and cid not in catalogue]
     missing = [cid for cid in missing if cid not in later]
-    held_back = ([f"   held back until the card catalogue has it (update the app's data): {cid}"
-                  for cid in later])
+    held_back = [
+        f"   held back until the card catalogue has it (update the app's data): {cid}" for cid in later
+    ]
     original = APPEND_ONLY_OWNED.read_bytes()
     raw = json.loads(original.decode("utf-8"))
     if _owned_bytes(raw) != original:
-        return ["data/owned.json is not in this tool's own format -- refusing to"
-                " write it; merge by hand"], True
+        return [
+            "data/owned.json is not in this tool's own format -- refusing to write it; merge by hand"
+        ], True
     if not missing:
-        return (["data/owned.json already has every card the account owns"
-                 + (" that the catalogue knows" if held_back else "")] + held_back), False
+        return (
+            [
+                "data/owned.json already has every card the account owns"
+                + (" that the catalogue knows" if held_back else "")
+            ]
+            + held_back
+        ), False
 
     backup = DUMPS / "owned_before_merge.json"
     if not backup.exists():
         atomic_io.write_bytes(backup, original)
     raw["owned"] = sorted(set(have) | set(missing))
     atomic_io.write_bytes(APPEND_ONLY_OWNED, _owned_bytes(raw))
-    return ([f"data/owned.json: {'CREATED and ' if created else ''}APPENDED {len(missing)} "
-             f"card(s) the account owns (ids from {source})"]
-            + [f"   + {cid}" for cid in missing]
-            + [f"   backup of the previous file: {backup}" if not backup.exists()
-               else f"   first-run backup kept at {backup}"] + held_back, False)
+    return (
+        [
+            f"data/owned.json: {'CREATED and ' if created else ''}APPENDED {len(missing)} "
+            f"card(s) the account owns (ids from {source})"
+        ]
+        + [f"   + {cid}" for cid in missing]
+        + [
+            f"   backup of the previous file: {backup}"
+            if not backup.exists()
+            else f"   first-run backup kept at {backup}"
+        ]
+        + held_back,
+        False,
+    )
 
 
 def owned_guard(before: list[str] | None) -> tuple[list[str], bool]:
@@ -1467,25 +1509,16 @@ def _compare(
     live_ids, hand_ids = live.ids["card"], hand.ids["card"]
     missing, extra = live_ids - hand_ids, hand_ids - live_ids
 
-    lines = [
-        f"{live.label} {len(live_ids)} {live_kind} "
-        f"| {hand.label} {len(hand_ids)} {hand_kind}"
-    ]
+    lines = [f"{live.label} {len(live_ids)} {live_kind} | {hand.label} {len(hand_ids)} {hand_kind}"]
     if missing:
         lines.append("")
-        lines.append(
-            f"  ** {len(missing)} card(s) in {live.label} "
-            f"and NOT in {hand.label} **"
-        )
+        lines.append(f"  ** {len(missing)} card(s) in {live.label} and NOT in {hand.label} **")
         for cid in sorted(missing):
             lines.append(f"     + {cid}")
         lines.append(f"  {hand.label} {policy}")
         lines.append(f"  {hint}")
     if extra:
-        lines.append(
-            f"  note: {len(extra)} id(s) in {hand.label} are not in {live.label}: "
-            f"{_fmt_ids(extra)}"
-        )
+        lines.append(f"  note: {len(extra)} id(s) in {hand.label} are not in {live.label}: {_fmt_ids(extra)}")
     if not missing and not extra:
         lines.append("  in sync.")
     return lines, bool(missing)
@@ -1548,9 +1581,7 @@ def hand_merge_report(account: str = "main") -> tuple[list[str], bool]:
         # the wrong level. Reported whether or not the sets agree, because the
         # two failures are independent and the "matches" line below must not
         # hide this one.
-        drift = collection_level_drift(
-            STATE / "collection.json", DUMPS / f"account_snapshot_{account}.json"
-        )
+        drift = collection_level_drift(STATE / "collection.json", DUMPS / f"account_snapshot_{account}.json")
         if drift:
             lines.append(
                 f"  state/collection.json is STALE: {len(drift)} card field(s) "
@@ -1566,8 +1597,9 @@ def hand_merge_report(account: str = "main") -> tuple[list[str], bool]:
     stale = derived_artefact_drift()
     lines.append("")
     if stale:
-        lines.append("  DERIVED FILES ARE STALE -- rebuilt by the full chain, "
-                     "silent if you ran a single step by hand:")
+        lines.append(
+            "  DERIVED FILES ARE STALE -- rebuilt by the full chain, silent if you ran a single step by hand:"
+        )
         for derived, source, hours in stale:
             lines.append(f"     ~ {derived} is {hours:.1f} h older than {source}")
     else:
@@ -1645,9 +1677,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print the plan and the current artefact state; run nothing",
     )
-    ap.add_argument(
-        "--verbose", action="store_true", help="print full output of every step"
-    )
+    ap.add_argument("--verbose", action="store_true", help="print full output of every step")
     args = ap.parse_args(argv)
 
     # Print in UTF-8 whatever the console/pipe claims to be.
@@ -1681,7 +1711,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in only | skip:
         if name not in STEP_NAMES:
             ap.error(f"unknown step {name!r}; known: {', '.join(STEP_NAMES)}")
-    busy = pictures_busy()          # another refresh is fetching pictures: leave them to it
+    busy = pictures_busy()  # another refresh is fetching pictures: leave them to it
     if busy:
         deferred = []
 
@@ -1739,6 +1769,7 @@ def main(argv: list[str] | None = None) -> int:
     # exit code says why (EXIT_MAINTENANCE), so the page can say so instead of "partial".
     if any(selected(s)[0] and s.network for s in STEPS):
         import account_snapshot  # noqa: PLC0415
+
         if account_snapshot.in_maintenance(args.account):
             print("\nGAME IN MAINTENANCE -- the server refuses every call (IN_MAINTENANCE).")
             print("Nothing was refreshed and nothing was written; refresh again once it ends.")

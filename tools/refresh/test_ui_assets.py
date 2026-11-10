@@ -1,4 +1,5 @@
 """ui_assets.json: every picture the pages draw from /chrome/ and /ui/ has a source."""
+
 from __future__ import annotations
 
 import json
@@ -32,7 +33,7 @@ def test_every_static_ui_path_the_pages_name_has_a_source():
     for f in static.iterdir():
         if f.suffix in (".js", ".html", ".css"):
             text = f.read_text("utf-8", errors="replace")
-            text = re.sub(r"/\*.*?\*/|<!--.*?-->", "", text, flags=re.S)   # examples in comments
+            text = re.sub(r"/\*.*?\*/|<!--.*?-->", "", text, flags=re.S)  # examples in comments
             wanted |= set(re.findall(r"/(?:ui|chrome)/([a-z_]+/[A-Za-z0-9_.-]+\.(?:png|webp))", text))
     missing = sorted(w for w in wanted if w not in have)
     assert not missing, missing

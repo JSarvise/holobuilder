@@ -38,9 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # hardcoded `data/` path in `tests/`, and this module is deliberately one of the
 # few that asserts something about the real catalogue.
 CARDS_PATH = REPO_ROOT / default_paths().cards
-ENRICHED_PATH = (
-    REPO_ROOT / "tools" / "recon" / "proxy" / "dumps" / "cards_enriched.json"
-)
+ENRICHED_PATH = REPO_ROOT / "tools" / "recon" / "proxy" / "dumps" / "cards_enriched.json"
 
 
 def _catalogue() -> list[dict]:
@@ -68,12 +66,8 @@ def test_the_extraction_agrees_with_the_catalogue_on_which_cards_have_an_outfit(
 
     enriched = json.loads(ENRICHED_PATH.read_text(encoding="utf-8"))
     rows = enriched["cards"] if isinstance(enriched, dict) else enriched
-    extracted_with_outfit = {
-        row["id"] for row in rows if (row.get("costume") or {}).get("skill")
-    }
-    catalogue_with_outfit = {
-        c["id"] for c in _catalogue() if c.get("costume_skill") is not None
-    }
+    extracted_with_outfit = {row["id"] for row in rows if (row.get("costume") or {}).get("skill")}
+    catalogue_with_outfit = {c["id"] for c in _catalogue() if c.get("costume_skill") is not None}
     missing = sorted(catalogue_with_outfit - extracted_with_outfit)
     assert missing == [], (
         "the extraction dropped an outfit the catalogue has — an auto-added card "

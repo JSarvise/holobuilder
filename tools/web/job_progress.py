@@ -21,10 +21,12 @@ adds, to each `progress` event:
 
 Read-only bookkeeping; nothing here scores anything.
 """
+
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Mapping
+from collections.abc import Callable, Mapping
+from typing import Any
 
 # the per-team value keys an event may carry, most specific first
 _VALUE_KEYS = (("song_est", "song_est"), ("score", "score"), ("optimised_us", "unit_score"))
@@ -40,8 +42,7 @@ class JobProgress:
         self._projected: dict[str, float] = {}
         self.best: dict | None = None
 
-    def note_projection(self, stage: str, *, total: int | None = None,
-                        seconds: float | None = None) -> None:
+    def note_projection(self, stage: str, *, total: int | None = None, seconds: float | None = None) -> None:
         """A stage's known size (`total`, in the unit of its `evaluated` /
         `done`) and/or projected duration."""
         if total:
@@ -60,14 +61,16 @@ class JobProgress:
         for key, metric in _VALUE_KEYS:
             value = ev.get(key)
             if isinstance(value, (int, float)):
-                self._offer({"cards": list(team), "value": float(value), "metric": metric,
-                             "stage": stage})
+                self._offer({"cards": list(team), "value": float(value), "metric": metric, "stage": stage})
                 return
 
     def _offer(self, cand: dict) -> None:
         cand["provisional"] = True
-        if (self.best is None or cand.get("metric") != self.best.get("metric")
-                or cand["value"] > self.best["value"]):
+        if (
+            self.best is None
+            or cand.get("metric") != self.best.get("metric")
+            or cand["value"] > self.best["value"]
+        ):
             self.best = cand
 
     def __call__(self, ev: dict) -> None:
@@ -84,7 +87,7 @@ class JobProgress:
             ev = dict(ev)
             key = stage or "search"
             if ev.get("sub"):
-                key = f"{key}:{ev['sub']}"      # a sub-phase has its own rate
+                key = f"{key}:{ev['sub']}"  # a sub-phase has its own rate
             start = self._stage_t0.setdefault(key, now)
             spent = now - start
             done = ev.get("done") if ev.get("done") is not None else ev.get("evaluated")
@@ -98,7 +101,13 @@ class JobProgress:
                 eta, basis = max(0.0, self._projected[key] - spent), "projection"
             if total and ev.get("total") is None and ev.get("done") is None:
                 ev["total"] = total
-            ev.update({"elapsed_s": round(now - self._t0, 1), "stage_s": round(spent, 1),
-                       "eta_s": None if eta is None else round(eta, 1), "eta_basis": basis,
-                       "best_so_far": dict(self.best) if self.best else None})
+            ev.update(
+                {
+                    "elapsed_s": round(now - self._t0, 1),
+                    "stage_s": round(spent, 1),
+                    "eta_s": None if eta is None else round(eta, 1),
+                    "eta_basis": basis,
+                    "best_so_far": dict(self.best) if self.best else None,
+                }
+            )
         self._emit(ev)

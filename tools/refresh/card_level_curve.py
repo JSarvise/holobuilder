@@ -23,7 +23,11 @@
 # touches data/cards.json or data/owned.json.
 #
 # Usage: python tools/refresh/card_level_curve.py
-import sys, os, json, math, struct
+import json
+import math
+import os
+import struct
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
@@ -34,21 +38,22 @@ def _f32(value):
     """Round to IEEE-754 binary32, the way an `ss` SSE instruction does."""
     return struct.unpack("<f", struct.pack("<f", value))[0]
 
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
-from master_db import decode_record  # noqa: E402
 from master_cache import open_table  # noqa: E402
+from master_db import decode_record  # noqa: E402
 
 DUMPS = str(paths.DUMPS)
 OUT = os.path.join(DUMPS, "card_level_curve.json")
 
 # Field numbers, read off `build_cards_dataset.py`'s own decode of the same tables.
-CARDLEVEL_MULT = 3       # CardLevel field 3 -- the stat multiplier at that level
-CARDLEVEL_POWERUP = 5    # CardLevel field 5 -- live_deck_power_permyriad_up, the Member
-                         # Power-Up ladder. Purely (rarity, level); 27 groups collapse to
-                         # 3 ladders whose per-card maxima are 4 / 5 / 8 permyriad.
-CARD_LEVEL_GROUP = 6     # Card field 6  -- which CardLevel group this card follows
+CARDLEVEL_MULT = 3  # CardLevel field 3 -- the stat multiplier at that level
+CARDLEVEL_POWERUP = 5  # CardLevel field 5 -- live_deck_power_permyriad_up, the Member
+# Power-Up ladder. Purely (rarity, level); 27 groups collapse to
+# 3 ladders whose per-card maxima are 4 / 5 / 8 permyriad.
+CARD_LEVEL_GROUP = 6  # Card field 6  -- which CardLevel group this card follows
 CARD_POTENTIAL_GROUP = 14  # Card field 14 -- which CardPotential group
-CARD_RATIO = (7, 8, 9)   # Card fields 7/8/9 -- performance/technique/sense ratio, permil
+CARD_RATIO = (7, 8, 9)  # Card fields 7/8/9 -- performance/technique/sense ratio, permil
 
 
 def _s(fields, key):
@@ -170,10 +175,7 @@ def verify(curve, groups, blooms, enriched_path):
         # TWO ceilings, byte-for-byte `build_cards_dataset._max_stats`: the
         # level-scaled stat becomes an INTEGER before the bloom multiplier applies.
         # A one-ceiling form shows up as a phantom ±1 "drift" on boundary cards.
-        got = tuple(
-            math.ceil(_f32(_f32(math.ceil(_f32(_f32(r) * per_mille))) * bloom_mult))
-            for r in ratio
-        )
+        got = tuple(math.ceil(_f32(_f32(math.ceil(_f32(_f32(r) * per_mille))) * bloom_mult)) for r in ratio)
         want = (target["performance"], target["technique"], target["sense"])
         checked += 1
         if got != want:
@@ -213,8 +215,10 @@ def main():
                 continue
             same_arr = list(other.get("mult_permil") or []) == entry["mult_permil"]
             same_max = other.get("max") == entry["max_bloom"]
-            print(f"  CROSSCHECK rarity {rarity}: mult_permil {'OK' if same_arr else 'DIFFERS ' + str(other.get('mult_permil'))}"
-                  f" | max_bloom {'OK' if same_max else 'DIFFERS ' + str(other.get('max'))}")
+            print(
+                f"  CROSSCHECK rarity {rarity}: mult_permil {'OK' if same_arr else 'DIFFERS ' + str(other.get('mult_permil'))}"
+                f" | max_bloom {'OK' if same_max else 'DIFFERS ' + str(other.get('max'))}"
+            )
 
     result = verify(curve, groups, blooms, os.path.join(DUMPS, "cards_enriched.json"))
     if result is None:

@@ -1,4 +1,5 @@
 """park_map's world -> map-pixel transform (THE CALIBRATION in park_map.py)."""
+
 from __future__ import annotations
 
 import json

@@ -17,6 +17,7 @@ NOTHING here is fatal. A banner whose bundle will not fetch (a fresh clone has n
 Octo catalogue, and `octo_fetch.catalog()` raises MissingInput for it) is REPORTED and skipped;
 the sync's own summary is printed either way.
 """
+
 from __future__ import annotations
 
 import io
@@ -28,12 +29,12 @@ from hbuilder import paths  # noqa: E402
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
 KINDS = ("banner", "logo", "icon")
-EXTS = (".png", ".webp")      # .png = already-committed masters; .webp = everything new
-MAX_W = 1280                  # the widest the gallery or the popup ever paints one
+EXTS = (".png", ".webp")  # .png = already-committed masters; .webp = everything new
+MAX_W = 1280  # the widest the gallery or the popup ever paints one
 
 
 def asset_names(gacha_id: str) -> dict[str, list[str]]:
-    short = gacha_id[len("gacha-"):] if gacha_id.startswith("gacha-") else gacha_id
+    short = gacha_id[len("gacha-") :] if gacha_id.startswith("gacha-") else gacha_id
     banner_ids = [gacha_id]
     # The catalogue drops the banner's KIND segment from the banner_full name --
     # `gacha-pickup-normal-260807` -> `img_banner_full_gacha-pickup-260807`, and the same for
@@ -47,29 +48,34 @@ def asset_names(gacha_id: str) -> dict[str, list[str]]:
             # `img_banner_full_gacha-pickup-261029-free`); tried after the plain name.
             if not gacha_id.endswith("-free"):
                 banner_ids.append(gacha_id.replace(seg, "-") + "-free")
-    banners = [f"img_banner_full_{b}_lang-eng" for b in banner_ids] + [f"img_banner_full_{b}" for b in banner_ids]
-    return {"banner": banners,
-            "logo": [f"img_gacha_logo_{short}_lang-eng", f"img_gacha_logo_{short}"],
-            "icon": [f"img_gacha_group_icon_{short}_lang-eng", f"img_gacha_group_icon_{short}"]}
+    banners = [f"img_banner_full_{b}_lang-eng" for b in banner_ids] + [
+        f"img_banner_full_{b}" for b in banner_ids
+    ]
+    return {
+        "banner": banners,
+        "logo": [f"img_gacha_logo_{short}_lang-eng", f"img_gacha_logo_{short}"],
+        "icon": [f"img_gacha_group_icon_{short}_lang-eng", f"img_gacha_group_icon_{short}"],
+    }
 
 
 def missing(gacha_ids: list[str], art_dir: Path) -> list[str]:
     """Either extension counts as present: the committed `.png` masters are not re-fetched
     just because new banners are saved as `.webp`."""
-    return [g for g in gacha_ids
-            if not any((art_dir / g / f"banner{e}").is_file() for e in EXTS)]
+    return [g for g in gacha_ids if not any((art_dir / g / f"banner{e}").is_file() for e in EXTS)]
 
 
 def _default_fetch(names: list[str]) -> None:
     import octo_fetch  # noqa: PLC0415
+
     octo_fetch.fetch(names)
 
 
 def _default_extract(bundle_path: Path, name: str):
     if not bundle_path.is_file():
         return None
-    import UnityPy  # noqa: PLC0415
     import octo_crypto  # noqa: PLC0415
+    import UnityPy  # noqa: PLC0415
+
     UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
     env = UnityPy.load(io.BytesIO(octo_crypto.decrypt_bundle(bundle_path.read_bytes(), name)))
     best = None
@@ -88,6 +94,7 @@ def _default_extract(bundle_path: Path, name: str):
 def _save_webp(img, dst: Path) -> None:
     """<= MAX_W wide, WEBP q85. A resize is never an upscale."""
     from PIL import Image  # noqa: PLC0415 -- Pillow is in requirements.txt
+
     if img.width > MAX_W:
         height = max(1, round(img.height * MAX_W / img.width))
         img = img.resize((MAX_W, height), Image.LANCZOS)

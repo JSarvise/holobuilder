@@ -21,6 +21,7 @@ field.
 from __future__ import annotations
 
 import pytest
+from support.builders import FIXTURE_CARDS_PATH, FIXTURE_OWNED_PATH
 
 from hbuilder.domain.gates import RunState, resolve_team_gates
 from hbuilder.domain.loader import load_cards
@@ -31,8 +32,6 @@ from hbuilder.domain.schema import (
     SKILL_SLOT_KINDS,
 )
 from hbuilder.domain.team import build_team
-
-from support.builders import FIXTURE_CARDS_PATH, FIXTURE_OWNED_PATH
 
 CARDS_PATH = FIXTURE_CARDS_PATH
 
@@ -82,18 +81,13 @@ def test_ships_exactly_six_cards(cards):
 
 def test_all_three_slot_kinds_appear(cards):
     kinds_present = {
-        slot_kind
-        for card in cards
-        for slot_kind in SKILL_SLOT_KINDS
-        if card.skill(slot_kind) is not None
+        slot_kind for card in cards for slot_kind in SKILL_SLOT_KINDS if card.skill(slot_kind) is not None
     }
     assert kinds_present == set(SKILL_SLOT_KINDS)
 
 
 def test_all_three_condition_kinds_appear(cards):
-    kinds_present = {
-        slot.condition.kind for slot in _all_slots(cards) if slot.condition is not None
-    }
+    kinds_present = {slot.condition.kind for slot in _all_slots(cards) if slot.condition is not None}
     assert kinds_present == set(CONDITION_KINDS)
 
 
@@ -112,9 +106,7 @@ def test_dual_generation_card_fires_two_distinct_generation_gates(resolved):
     fubuki_generation_gates = [
         r
         for r in resolved
-        if r.card_id == "fubuki_01"
-        and r.gate is not None
-        and r.gate.predicate.dimension == "generation"
+        if r.card_id == "fubuki_01" and r.gate is not None and r.gate.predicate.dimension == "generation"
     ]
     assert len(fubuki_generation_gates) == 2
     assert {r.gate.fired for r in fubuki_generation_gates} == {True}
@@ -128,9 +120,7 @@ def test_a_gate_fires_with_actual_count_equal_to_threshold(resolved):
     matches = [
         r
         for r in resolved
-        if r.gate is not None
-        and r.gate.fired
-        and r.gate.actual_count == r.gate.predicate.threshold
+        if r.gate is not None and r.gate.fired and r.gate.actual_count == r.gate.predicate.threshold
     ]
     assert matches, "expected at least one gate resolving fired at exactly threshold"
 
@@ -139,19 +129,13 @@ def test_a_gate_does_not_fire_one_short_of_threshold(resolved):
     matches = [
         r
         for r in resolved
-        if r.gate is not None
-        and not r.gate.fired
-        and r.gate.actual_count == r.gate.predicate.threshold - 1
+        if r.gate is not None and not r.gate.fired and r.gate.actual_count == r.gate.predicate.threshold - 1
     ]
     assert matches, "expected at least one gate resolving not-fired one short"
 
 
 def test_a_gate_does_not_fire_with_actual_count_zero(resolved):
-    matches = [
-        r
-        for r in resolved
-        if r.gate is not None and not r.gate.fired and r.gate.actual_count == 0
-    ]
+    matches = [r for r in resolved if r.gate is not None and not r.gate.fired and r.gate.actual_count == 0]
     assert matches, "expected at least one gate whose target is absent from the team"
 
 

@@ -21,10 +21,13 @@ unverified tolerance constant.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import itertools
 from pathlib import Path
 
 import pytest
+from support.builders import FIXTURE_CARDS_PATH, make_card, make_scoring_config, make_skill
+from support.team_reference import effective_skill_instances
 
 from hbuilder.domain.card import EffectTarget, GateCondition, SlotRider, Stats
 from hbuilder.domain.gates import resolve_card_set_gates
@@ -40,11 +43,6 @@ from hbuilder.domain.scoring_config import load_scoring_config
 from hbuilder.domain.scoring_models import ACTIVATION_RATE_MODELS, STACKING_MODELS
 from hbuilder.domain.team import Team, build_team
 from hbuilder.domain.unknown import UNKNOWN
-
-import dataclasses
-
-from support.builders import FIXTURE_CARDS_PATH, make_card, make_scoring_config, make_skill
-from support.team_reference import effective_skill_instances
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCORING_PATH = REPO_ROOT / "src" / "hbuilder" / "domain" / "scoring.py"
@@ -230,24 +228,12 @@ def _undersupplied_pool():
             stats=Stats(performance=150, technique=100, sense=90),
             passive=undersupplied_skill,
         ),
-        make_card(
-            "under_01", type_="Happy", stats=Stats(performance=120, technique=110, sense=95)
-        ),
-        make_card(
-            "under_02", type_="Cute", stats=Stats(performance=100, technique=140, sense=100)
-        ),
-        make_card(
-            "under_03", type_="Cute", stats=Stats(performance=90, technique=120, sense=110)
-        ),
-        make_card(
-            "under_04", type_="Pure", stats=Stats(performance=80, technique=100, sense=130)
-        ),
-        make_card(
-            "under_05", type_="Pure", stats=Stats(performance=70, technique=90, sense=140)
-        ),
-        make_card(
-            "under_06", type_="Pure", stats=Stats(performance=60, technique=80, sense=150)
-        ),
+        make_card("under_01", type_="Happy", stats=Stats(performance=120, technique=110, sense=95)),
+        make_card("under_02", type_="Cute", stats=Stats(performance=100, technique=140, sense=100)),
+        make_card("under_03", type_="Cute", stats=Stats(performance=90, technique=120, sense=110)),
+        make_card("under_04", type_="Pure", stats=Stats(performance=80, technique=100, sense=130)),
+        make_card("under_05", type_="Pure", stats=Stats(performance=70, technique=90, sense=140)),
+        make_card("under_06", type_="Pure", stats=Stats(performance=60, technique=80, sense=150)),
     )
 
 
@@ -292,9 +278,7 @@ def test_score_card_set_is_bit_identical_to_score_fast_for_every_leader_of_every
 
 
 @pytest.mark.parametrize("stacking_key,activation_rate_key", _MODEL_COMBINATIONS)
-def test_score_card_set_is_bit_identical_to_score_with_breakdown_total(
-    stacking_key, activation_rate_key
-):
+def test_score_card_set_is_bit_identical_to_score_with_breakdown_total(stacking_key, activation_rate_key):
     cfg = _cfg_for(stacking_key, activation_rate_key)
     for pool in (_shipped_pool(), _synthetic_pool()):
         for combo, leader_index, leader, members, team in _all_arrangements(pool):
@@ -426,8 +410,10 @@ def test_leader_classes_collapse_the_pool_rather_than_scoring_every_leader():
     # 5 members (each its own class, they never merge) + shared + other + bare.
     assert len(set(keys)) == 5 + 3
     # and the six shared-outfit leaders really are ONE class, not six
-    assert len({_leader_class_key(c, member_ids, frozenset())
-                for c in leaders if c.id.startswith("shared_")}) == 1
+    assert (
+        len({_leader_class_key(c, member_ids, frozenset()) for c in leaders if c.id.startswith("shared_")})
+        == 1
+    )
 
 
 def test_a_leader_that_is_also_a_member_never_merges_with_another_leader():
@@ -476,9 +462,7 @@ def test_a_self_targeted_costume_never_merges():
     a = make_card("self_a", costume_skill=self_costume)
     b = make_card("self_b", costume_skill=self_costume)
     assert a.costume_skill == b.costume_skill
-    assert _leader_class_key(a, frozenset(), frozenset()) != _leader_class_key(
-        b, frozenset(), frozenset()
-    )
+    assert _leader_class_key(a, frozenset(), frozenset()) != _leader_class_key(b, frozenset(), frozenset())
 
 
 def test_batched_path_calls_combine_inside_the_per_leader_loop_never_before_it():
@@ -488,9 +472,7 @@ def test_batched_path_calls_combine_inside_the_per_leader_loop_never_before_it()
     leader_loops = [
         node
         for node in ast.walk(score_card_set_def)
-        if isinstance(node, ast.For)
-        and isinstance(node.target, ast.Name)
-        and node.target.id == "leader"
+        if isinstance(node, ast.For) and isinstance(node.target, ast.Name) and node.target.id == "leader"
     ]
     assert len(leader_loops) == 1, (
         "score_card_set must contain exactly one per-leader loop (`for "
@@ -503,9 +485,7 @@ def test_batched_path_calls_combine_inside_the_per_leader_loop_never_before_it()
     combine_calls = [
         node
         for node in ast.walk(score_card_set_def)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "combine"
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "combine"
     ]
     assert combine_calls, "score_card_set must call combine() at least once"
     for call in combine_calls:
@@ -539,9 +519,7 @@ def test_resolve_team_gates_delegates_and_holds_no_second_resolution_loop():
     resolve_attr_calls = [
         node
         for node in ast.walk(resolve_team_gates_def)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "resolve"
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "resolve"
     ]
     assert resolve_attr_calls == [], (
         "resolve_team_gates must hold no resolution loop of its own -- a "
@@ -591,8 +569,7 @@ def test_resolve_card_set_gates_is_independent_of_which_card_leads():
             base_costume = baseline.costume_by_card_id[card.id]
             rotated_costume = result.costume_by_card_id[card.id]
             assert _gate_signature(base_costume) == _gate_signature(rotated_costume), (
-                f"D-16: card {card.id!r}'s costume gate outcome must not "
-                "depend on which card is passed first"
+                f"D-16: card {card.id!r}'s costume gate outcome must not depend on which card is passed first"
             )
 
 

@@ -32,11 +32,15 @@
 # exists only for rarity 4/5) -- i.e. the card at max Bloom. Only rarity 4/5 cards have one.
 #
 # Needs master_cache (sqlcipher). Output: dumps/skilltree.json
-import json, os, re, sys
+import json
+import os
+import re
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 import master_cache as mc  # noqa: E402
 
@@ -52,7 +56,7 @@ S = lambda v: v - 2**64 if isinstance(v, int) and v > 2**63 else v
 #   y: Mori Calliope 5* is center_area-001, whose raw cells are +y, and in game its buff points UP.
 #   x: the six content_area-003 cards ([[-3,0],[-2,0],[-1,0]] here) buff 3 tiles to the LEFT.
 # So the extents share the node table's convention exactly, and negating y is right.
-EXTENT_SIGN = (1, -1)   # (x, y) -> (x, -y): same convention as the node positions, both axes checked in game
+EXTENT_SIGN = (1, -1)  # (x, y) -> (x, -y): same convention as the node positions, both axes checked in game
 
 # Tile types, straight from the in-game help text. `hue` is the drawing colour.
 #
@@ -71,22 +75,30 @@ BRANCHES = {
 }
 # short badge label for the buff family in an effect id's second segment
 LABEL = {
-    "all_parameter_up": "All", "all_parameter_up_permil_up": "All",
+    "all_parameter_up": "All",
+    "all_parameter_up_permil_up": "All",
     "all_parameter_up_for_character_grouping": "All",
-    "sense_up": "Sense", "sense_up_permil_up": "Sense",
-    "technique_up": "Tech", "technique_up_permil_up": "Tech",
-    "performance_up": "Perf", "performance_up_permil_up": "Perf",
+    "sense_up": "Sense",
+    "sense_up_permil_up": "Sense",
+    "technique_up": "Tech",
+    "technique_up_permil_up": "Tech",
+    "performance_up": "Perf",
+    "performance_up_permil_up": "Perf",
     "live_active_skill_activation_probability_up_permil_up": "Act.Prob",
     "live_active_skill_effect_up_permil_up": "Act.Power",
     "live_active_skill_cool_time_shorten_permil_up": "Act.CD",
     "live_special_skill_effect_up_permil_up": "Spc.Power",
     "live_passive_skill_effect_up_permil_up": "Pas.Power",
     "live_score_bonus_add_permil_up_by_music_skill_tree_character": "Score",
-    "score_up_permil_up": "Score", "life_up": "Life", "support_up": "Support",
+    "score_up_permil_up": "Score",
+    "life_up": "Life",
+    "support_up": "Support",
     "work_reward_quantity_up_permil_up": "Work",
 }
-_EFF = re.compile(r"^skill_tree_effect-(?P<name>.+?)-(?P<value>-?\d+)-skill_tree_effect_target-"
-                  r"(?P<rest>.+)$")
+_EFF = re.compile(
+    r"^skill_tree_effect-(?P<name>.+?)-(?P<value>-?\d+)-skill_tree_effect_target-"
+    r"(?P<rest>.+)$"
+)
 
 
 def icon_asset(eff_id, suffix=""):
@@ -124,8 +136,13 @@ def effect(eff_id, texts):
     name, value = m.group("name"), int(m.group("value"))
     permil = name.endswith("_permil_up")
     desc = texts.get(f"la-generated-{eff_id}-description", "")
-    return {"t": LABEL.get(name, name.replace("_", " ")), "v": value, "p": permil,
-            "tgt": m.group("rest"), "d": desc}
+    return {
+        "t": LABEL.get(name, name.replace("_", " ")),
+        "v": value,
+        "p": permil,
+        "tgt": m.group("rest"),
+        "d": desc,
+    }
 
 
 def lang(table):
@@ -185,12 +202,11 @@ def main():
         # every row except the four Connect nodes, which it puts in a category of their own (3),
         # and field 4 restates the branch numerically (R2 B3 G4 Y5, S1), matching both the
         # group-id prefix and the ui_710_ico_star_{leader,card,allmember,content} sprite names.
-        nd = nodes.setdefault(g, {"br": g[0], "lv": d.get(5, [1])[0],
-                                  "req": d.get(7, [None])[0], "chr": {}})
+        nd = nodes.setdefault(g, {"br": g[0], "lv": d.get(5, [1])[0], "req": d.get(7, [None])[0], "chr": {}})
         eff_id = d.get(6, [None])[0]
         e = effect(eff_id, eff_text)
         if e is not None:
-            e["ic"] = icon_of.get(eff_id)      # effect-type enum, kept for grouping/debugging
+            e["ic"] = icon_of.get(eff_id)  # effect-type enum, kept for grouping/debugging
             if eff_id in skill_of:
                 e["sk"] = skill_of[eff_id]
             if eff_id in trig_of:
@@ -225,8 +241,9 @@ def main():
     extents = {}
     for r in mc.rows("SkillTreeConnectEffectExtent"):
         name = r["group_id"].replace("skill_tree_connect_effect_extent-", "")
-        extents.setdefault(name, []).append([EXTENT_SIGN[0] * int(r["position_x"]),
-                                             EXTENT_SIGN[1] * int(r["position_y"])])
+        extents.setdefault(name, []).append(
+            [EXTENT_SIGN[0] * int(r["position_x"]), EXTENT_SIGN[1] * int(r["position_y"])]
+        )
     for cells in extents.values():
         cells.sort()
 
@@ -235,11 +252,18 @@ def main():
     for r in mc.rows("SkillTreeConnectEffect"):
         d = r["data"]
         lv = int(r["level"])
-        c = connect.setdefault(r["id"], {
-            "area": d.get(4, [""])[0].replace("skill_tree_connect_effect_extent-", ""),
-            "rare": r["id"].rsplit("-", 1)[-1], "levels": {}})
-        c["levels"][lv] = {"v": d.get(5, [0])[0],
-                           "d": con_text.get(f"la-generated-{r['id']}.{lv}-description", "")}
+        c = connect.setdefault(
+            r["id"],
+            {
+                "area": d.get(4, [""])[0].replace("skill_tree_connect_effect_extent-", ""),
+                "rare": r["id"].rsplit("-", 1)[-1],
+                "levels": {},
+            },
+        )
+        c["levels"][lv] = {
+            "v": d.get(5, [0])[0],
+            "d": con_text.get(f"la-generated-{r['id']}.{lv}-description", ""),
+        }
     for c in connect.values():
         c["levels"] = [c["levels"][k] for k in sorted(c["levels"])]
 
@@ -256,18 +280,26 @@ def main():
     # slot placements only from SkillTree/ConnectNode, which reports one holomem per action. So
     # `placed` is normally a subset of `unlocked`.
     board = json.load(open(BOARD, encoding="utf-8")) if os.path.exists(BOARD) else {}
-    unlocked = {c: (v if isinstance(v, list) else v.get("nodes", []))
-                for c, v in board.items()}
-    placed = {c: v["slots"] for c, v in board.items()
-              if isinstance(v, dict) and v.get("slots")}
+    unlocked = {c: (v if isinstance(v, list) else v.get("nodes", [])) for c, v in board.items()}
+    placed = {c: v["slots"] for c, v in board.items() if isinstance(v, dict) and v.get("slots")}
 
-    out = {"branches": BRANCHES, "nodes": nodes, "models": models, "members": members,
-           "extents": extents, "connect": connect, "card_connect": card_connect,
-           "unlocked": unlocked, "placed": placed}
+    out = {
+        "branches": BRANCHES,
+        "nodes": nodes,
+        "models": models,
+        "members": members,
+        "extents": extents,
+        "connect": connect,
+        "card_connect": card_connect,
+        "unlocked": unlocked,
+        "placed": placed,
+    }
     json.dump(out, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
-    print(f"{len(nodes)} nodes x {len(models)} layouts, {len(members)} members, "
-          f"{len(extents)} connect areas, {len(card_connect)} cards with a connect bonus, "
-          f"{len(unlocked)} boards captured ({len(placed)} with slot data) -> {OUT}")
+    print(
+        f"{len(nodes)} nodes x {len(models)} layouts, {len(members)} members, "
+        f"{len(extents)} connect areas, {len(card_connect)} cards with a connect bonus, "
+        f"{len(unlocked)} boards captured ({len(placed)} with slot data) -> {OUT}"
+    )
 
 
 if __name__ == "__main__":

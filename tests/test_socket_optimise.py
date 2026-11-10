@@ -31,9 +31,9 @@ def test_greedy_assign_is_highest_first_one_card_one_socket():
     so = _load()
     triples = [
         (100.0, "chr-A", "S-001", "card-X"),
-        (90.0, "chr-B", "S-002", "card-X"),   # card-X already spent account-wide -> skip
-        (80.0, "chr-A", "S-001", "card-Y"),    # chr-A/S-001 already filled -> skip
-        (70.0, "chr-B", "S-002", "card-Z"),    # both free -> take
+        (90.0, "chr-B", "S-002", "card-X"),  # card-X already spent account-wide -> skip
+        (80.0, "chr-A", "S-001", "card-Y"),  # chr-A/S-001 already filled -> skip
+        (70.0, "chr-B", "S-002", "card-Z"),  # both free -> take
     ]
     assignment = so._greedy_assign(triples)
     assert assignment == {("chr-A", "S-001"): "card-X", ("chr-B", "S-002"): "card-Z"}
@@ -45,10 +45,12 @@ def test_greedy_assign_is_highest_first_one_card_one_socket():
 def test_greedy_prefers_the_higher_value_placement_of_a_contended_card():
     so = _load()
     # card-X wanted by two sockets; the 100 placement must win, the 90 is dropped
-    assignment = so._greedy_assign([
-        (90.0, "chr-B", "S-001", "card-X"),
-        (100.0, "chr-A", "S-001", "card-X"),
-    ])
+    assignment = so._greedy_assign(
+        [
+            (90.0, "chr-B", "S-001", "card-X"),
+            (100.0, "chr-A", "S-001", "card-X"),
+        ]
+    )
     assert assignment == {("chr-A", "S-001"): "card-X"}
 
 

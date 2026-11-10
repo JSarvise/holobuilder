@@ -49,12 +49,12 @@ import argparse
 import dataclasses
 import json
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
-
 from hbuilder.domain.card import Card  # noqa: E402
 from hbuilder.domain.loader import card_from_record, load_cards  # noqa: E402
 from hbuilder.domain.schema import validate_card, validate_document  # noqa: E402
@@ -353,16 +353,13 @@ def verify(cards_path: Path, existing: list[dict], added_ids: set[str]) -> None:
     by_id = {c["id"]: c for c in written["cards"]}
     for record in existing:
         if by_id.get(record["id"]) != record:
-            raise RefusedToWrite(
-                f"existing entry {record['id']} changed on write -- restored"
-            )
+            raise RefusedToWrite(f"existing entry {record['id']} changed on write -- restored")
     if not added_ids <= set(by_id):
         raise RefusedToWrite(f"additions missing after write: {sorted(added_ids - set(by_id))}")
     loaded = load_cards(cards_path)
     if len(loaded) != len(existing) + len(added_ids):
         raise RefusedToWrite(
-            f"load_cards read {len(loaded)} cards, expected "
-            f"{len(existing) + len(added_ids)}"
+            f"load_cards read {len(loaded)} cards, expected {len(existing) + len(added_ids)}"
         )
 
 
@@ -403,9 +400,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     try:
-        result = apply_additions(
-            Path(args.cards), Path(args.draft), dry_run=args.dry_run
-        )
+        result = apply_additions(Path(args.cards), Path(args.draft), dry_run=args.dry_run)
     except RefusedToWrite as exc:
         print(f"REFUSED: {exc}")
         return 1

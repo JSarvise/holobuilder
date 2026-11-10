@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 import pytest
+from support.board_rules import MASTER_ROW_DATA_KEY
 
 from hbuilder.domain.skilltree import (
     TOTAL_BOARD_POINTS,
@@ -19,7 +20,6 @@ from hbuilder.domain.skilltree import (
     player_level_requirement,
     tree_from_mapping,
 )
-from support.board_rules import MASTER_ROW_DATA_KEY
 
 _DUMPS = Path(__file__).resolve().parents[1] / "tools" / "recon" / "proxy" / "dumps"
 
@@ -66,8 +66,10 @@ def test_tree_from_mapping_joins_the_two_sources():
     """`skilltree.json` has the node table and the geometry; the COSTS are
     master data. The join is explicit so the seam stays visible."""
     built = tree_from_mapping(
-        {"S-001": {"br": "S"}, "X": {"br": "G", "req": "cd-player_level-15",
-                                     "e": {"d": "Grants All Stats UP.", "icon": "ic"}}},
+        {
+            "S-001": {"br": "S"},
+            "X": {"br": "G", "req": "cd-player_level-15", "e": {"d": "Grants All Stats UP.", "icon": "ic"}},
+        },
         {"S-001": [0, 0], "X": [1, 0]},
         {"S-001": 0, "X": 7},
     )

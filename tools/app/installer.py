@@ -20,6 +20,7 @@ keeps in app/state/server_api.json. Every release it installs must carry the pub
 signature (signing.py). For tests: HB_SETUP_TOKEN (an approved key),
 HB_SETUP_SHORTCUTS=<dir> (shortcuts there instead of Desktop/Start), HB_SETUP_NO_REGISTRY=1.
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -47,8 +48,10 @@ DEFAULT_DIR = Path(os.path.expandvars(r"%LOCALAPPDATA%\Programs")) / APP
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\holobuilder"
 PRESERVE = ["app/state", "app/tools/recon/proxy/dumps", "app/data/owned.json", "app/data/gacha"]
 SETUP_NAME = "holobuilder-setup.exe"
-WEBVIEW2_KEYS = [r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
-                 r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"]
+WEBVIEW2_KEYS = [
+    r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+    r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+]
 WEBVIEW2_BOOTSTRAP = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 
 
@@ -63,6 +66,7 @@ def _server_url() -> str:
         return os.environ["HB_SERVER_URL"].rstrip("/")
     try:
         import _baked  # noqa: PLC0415
+
         return getattr(_baked, "SERVER_URL", "") or OFFICIAL_SERVER
     except ImportError:
         return OFFICIAL_SERVER
@@ -91,8 +95,10 @@ def setup_outdated(meta: dict) -> str | None:
     if _vkey(SETUP_VERSION) >= _vkey(meta.get("setup_min", "0")):
         return None
     where = RELEASES_URL if SERVER_URL == OFFICIAL_SERVER else "where you got this installer"
-    return (f"This installer ({SETUP_VERSION}) is out of date: download the new "
-            f"{SETUP_NAME} from {where} and run that one.")
+    return (
+        f"This installer ({SETUP_VERSION}) is out of date: download the new "
+        f"{SETUP_NAME} from {where} and run that one."
+    )
 
 
 def google_client() -> tuple[str, str]:
@@ -101,9 +107,12 @@ def google_client() -> tuple[str, str]:
     so it may ship inside the public exe (build_setup.py bakes it from state/google_oauth.json)."""
     try:
         import _baked  # noqa: PLC0415
+
         return _baked.GOOGLE_CLIENT_ID, _baked.GOOGLE_CLIENT_SECRET
     except ImportError:
-        conf = json.loads((Path(__file__).resolve().parents[2] / "state" / "google_oauth.json").read_text("utf8"))
+        conf = json.loads(
+            (Path(__file__).resolve().parents[2] / "state" / "google_oauth.json").read_text("utf8")
+        )
         return conf["client_id"], conf["client_secret"]
 
 
@@ -131,21 +140,33 @@ def google_id_token(open_browser=None, timeout: float = 300) -> str:
             if q.get("state", [""])[0] == state:
                 got.update({k: v[0] for k, v in q.items()})
             ok = "code" in got
-            body = (("<h2>Signed in. You can go back to holobuilder setup.</h2>" if ok else
-                     "<h2>Sign-in was not completed. Go back to holobuilder setup and try again.</h2>")
-                    ).encode()
+            body = (
+                "<h2>Signed in. You can go back to holobuilder setup.</h2>"
+                if ok
+                else "<h2>Sign-in was not completed. Go back to holobuilder setup and try again.</h2>"
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(b"<body style='font-family:sans-serif;background:#0E0D20;color:#F3F2FF;"
-                             b"display:grid;place-items:center;height:90vh'>" + body)
+            self.wfile.write(
+                b"<body style='font-family:sans-serif;background:#0E0D20;color:#F3F2FF;"
+                b"display:grid;place-items:center;height:90vh'>" + body
+            )
 
     srv = HTTPServer(("127.0.0.1", 0), H)
     redirect = f"http://127.0.0.1:{srv.server_address[1]}"
-    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode({
-        "client_id": cid, "redirect_uri": redirect, "response_type": "code",
-        "scope": "openid email profile", "state": state, "code_challenge": challenge,
-        "code_challenge_method": "S256", "prompt": "select_account"})
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(
+        {
+            "client_id": cid,
+            "redirect_uri": redirect,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "state": state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "prompt": "select_account",
+        }
+    )
     (open_browser or webbrowser.open)(url)
     srv.timeout = 1
     deadline = time.time() + timeout
@@ -154,17 +175,32 @@ def google_id_token(open_browser=None, timeout: float = 300) -> str:
     srv.server_close()
     if "code" not in got:
         raise RuntimeError(f"Google sign-in did not complete ({got.get('error', 'timed out')})")
-    req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urlencode({
-        "code": got["code"], "client_id": cid, "client_secret": csecret, "redirect_uri": redirect,
-        "grant_type": "authorization_code", "code_verifier": verifier}).encode())
+    req = urllib.request.Request(
+        "https://oauth2.googleapis.com/token",
+        data=urlencode(
+            {
+                "code": got["code"],
+                "client_id": cid,
+                "client_secret": csecret,
+                "redirect_uri": redirect,
+                "grant_type": "authorization_code",
+                "code_verifier": verifier,
+            }
+        ).encode(),
+    )
     with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310 -- google
         return json.loads(r.read())["id_token"]
 
 
 def post(route: str, doc: dict, token: str = "") -> dict:
-    req = urllib.request.Request(SERVER_URL + "/" + route, data=json.dumps(doc).encode(),
-                                 headers={"Content-Type": "application/json",
-                                          **({"Authorization": f"Bearer {token}"} if token else {})})
+    req = urllib.request.Request(
+        SERVER_URL + "/" + route,
+        data=json.dumps(doc).encode(),
+        headers={
+            "Content-Type": "application/json",
+            **({"Authorization": f"Bearer {token}"} if token else {}),
+        },
+    )
     try:
         with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310 -- our own host
             return json.loads(r.read())
@@ -241,6 +277,7 @@ def preserve_moves(old_root: Path, new_root: Path) -> list[tuple[Path, Path]]:
 
 def webview2_ok() -> bool:
     import winreg  # noqa: PLC0415
+
     for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
         for key in WEBVIEW2_KEYS:
             try:
@@ -269,19 +306,25 @@ def ps_quote(s: str) -> str:
 
 def make_shortcut(lnk: Path, target: Path, args: str, workdir: Path, icon: Path) -> None:
     lnk.parent.mkdir(parents=True, exist_ok=True)
-    script = (f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut({ps_quote(str(lnk))});"
-              f"$s.TargetPath={ps_quote(str(target))};$s.Arguments={ps_quote(args)};"
-              f"$s.WorkingDirectory={ps_quote(str(workdir))};$s.IconLocation={ps_quote(str(icon) + ',0')};"
-              f"$s.Description='holobuilder';$s.Save()")
-    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], check=True,
-                   capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    script = (
+        f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut({ps_quote(str(lnk))});"
+        f"$s.TargetPath={ps_quote(str(target))};$s.Arguments={ps_quote(args)};"
+        f"$s.WorkingDirectory={ps_quote(str(workdir))};$s.IconLocation={ps_quote(str(icon) + ',0')};"
+        f"$s.Description='holobuilder';$s.Save()"
+    )
+    subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+        check=True,
+        capture_output=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
 
 
 def shortcut_dirs() -> list[Path]:
     if os.environ.get("HB_SETUP_SHORTCUTS"):
         return [Path(os.environ["HB_SETUP_SHORTCUTS"])]
     buf = ctypes.create_unicode_buffer(260)
-    ctypes.windll.shell32.SHGetFolderPathW(None, 0x10, None, 0, buf)          # CSIDL_DESKTOPDIRECTORY
+    ctypes.windll.shell32.SHGetFolderPathW(None, 0x10, None, 0, buf)  # CSIDL_DESKTOPDIRECTORY
     desktop = Path(buf.value)
     start = Path(os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs"))
     return [desktop, start]
@@ -291,15 +334,20 @@ def register(d: Path, version: str) -> None:
     if os.environ.get("HB_SETUP_NO_REGISTRY") == "1":
         return
     import winreg  # noqa: PLC0415
+
     size_kb = sum(p.stat().st_size for p in d.rglob("*") if p.is_file()) // 1024
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY) as k:
         for name, kind, val in [
-            ("DisplayName", winreg.REG_SZ, "holobuilder"), ("DisplayVersion", winreg.REG_SZ, version),
-            ("Publisher", winreg.REG_SZ, "holobuilder"), ("InstallLocation", winreg.REG_SZ, str(d)),
+            ("DisplayName", winreg.REG_SZ, "holobuilder"),
+            ("DisplayVersion", winreg.REG_SZ, version),
+            ("Publisher", winreg.REG_SZ, "holobuilder"),
+            ("InstallLocation", winreg.REG_SZ, str(d)),
             ("DisplayIcon", winreg.REG_SZ, str(d / "app" / "tools" / "app" / "ui" / "app.ico")),
             ("UninstallString", winreg.REG_SZ, f'"{d / SETUP_NAME}" --uninstall'),
-            ("EstimatedSize", winreg.REG_DWORD, size_kb), ("NoModify", winreg.REG_DWORD, 1),
-            ("NoRepair", winreg.REG_DWORD, 1)]:
+            ("EstimatedSize", winreg.REG_DWORD, size_kb),
+            ("NoModify", winreg.REG_DWORD, 1),
+            ("NoRepair", winreg.REG_DWORD, 1),
+        ]:
             winreg.SetValueEx(k, name, 0, kind, val)
 
 
@@ -307,6 +355,7 @@ def unregister() -> None:
     if os.environ.get("HB_SETUP_NO_REGISTRY") == "1":
         return
     import winreg  # noqa: PLC0415
+
     try:
         winreg.DeleteKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY)
     except OSError:
@@ -315,6 +364,7 @@ def unregister() -> None:
 
 def registered_dir() -> Path | None:
     import winreg  # noqa: PLC0415
+
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY) as k:
             return Path(winreg.QueryValueEx(k, "InstallLocation")[0])
@@ -324,7 +374,7 @@ def registered_dir() -> Path | None:
 
 def wait_pid(pid: int, timeout: float = 60) -> None:
     k32 = ctypes.windll.kernel32
-    h = k32.OpenProcess(0x00100000, False, pid)                                # SYNCHRONIZE
+    h = k32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
     if h:
         k32.WaitForSingleObject(h, int(timeout * 1000))
         k32.CloseHandle(h)
@@ -369,9 +419,16 @@ class Api:
                 error = f"the holobuilder server did not answer ({exc})"
         if latest and self.mode != "update":
             error = setup_outdated(latest) or error
-        return {"mode": self.mode, "dir": self.dir, "installed": installed_version(d),
-                "latest": latest, "error": error, "free_gb": round(free_gb(d), 1),
-                "default_dir": str(DEFAULT_DIR), "status": status}
+        return {
+            "mode": self.mode,
+            "dir": self.dir,
+            "installed": installed_version(d),
+            "latest": latest,
+            "error": error,
+            "free_gb": round(free_gb(d), 1),
+            "default_dir": str(DEFAULT_DIR),
+            "status": status,
+        }
 
     def sign_in(self) -> dict:
         threading.Thread(target=self._sign_in, name="sign-in", daemon=True).start()
@@ -390,7 +447,7 @@ class Api:
                 self._named.wait()
                 r = {**r, "username": self._username, "name": self._username}
             self._emit(step="auth", state=r["status"], name=r["name"], email=r["email"])
-            while r["status"] == "pending":         # the admin approves; ask every 10 s
+            while r["status"] == "pending":  # the admin approves; ask every 10 s
                 time.sleep(10)
                 r = {**r, **me(self._token)}
             if r["status"] == "approved":
@@ -408,6 +465,7 @@ class Api:
 
     def choose_dir(self) -> str | None:
         import webview  # noqa: PLC0415
+
         got = self._window.create_file_dialog(webview.FOLDER_DIALOG, directory=str(Path(self.dir).parent))
         if got:
             p = Path(got[0])
@@ -428,13 +486,14 @@ class Api:
             if self.pid:
                 self._emit(step="wait", state="run")
                 wait_pid(self.pid)
-                time.sleep(1.0)                    # the engine's own exit, after the window's
+                time.sleep(1.0)  # the engine's own exit, after the window's
                 self._emit(step="wait", state="done")
 
             self._emit(step="pc", state="run")
             meta = self._latest or json.loads(get(url, token, "app/version.json").read())
             import signing  # noqa: PLC0415
-            signing.verify(signing.canonical(meta), meta.get("sig", ""))   # BadSignature: refuse
+
+            signing.verify(signing.canonical(meta), meta.get("sig", ""))  # BadSignature: refuse
             if self.mode != "update" and setup_outdated(meta):
                 raise RuntimeError(setup_outdated(meta))
             need = meta.get("size", 50e6) * 4 / 1e9
@@ -459,8 +518,13 @@ class Api:
                     got += len(chunk)
                     if time.time() - last > 0.1:
                         last = time.time()
-                        self._emit(step="download", state="run", bytes=got, total=total,
-                                   rate=got / max(time.time() - t0, 1e-3))
+                        self._emit(
+                            step="download",
+                            state="run",
+                            bytes=got,
+                            total=total,
+                            rate=got / max(time.time() - t0, 1e-3),
+                        )
             if meta.get("sha256") and h.hexdigest() != meta["sha256"]:
                 raise RuntimeError("the download arrived damaged (sha256 mismatch); try again")
             self._emit(step="download", state="done", bytes=got, total=total, version=meta["latest"])
@@ -498,7 +562,7 @@ class Api:
             api = state / "server_api.json"
             if not api.exists():
                 api.write_text(json.dumps({"url": url, "token": token}, indent=1), "utf8")
-            if FROZEN:                              # a copy of this exe, for updates and removal
+            if FROZEN:  # a copy of this exe, for updates and removal
                 me = Path(sys.executable)
                 if me.resolve() != (d / SETUP_NAME).resolve():
                     shutil.copy2(me, d / SETUP_NAME)
@@ -507,8 +571,13 @@ class Api:
             self._emit(step="shortcuts", state="run")
             icon = d / "app" / "tools" / "app" / "ui" / "app.ico"
             for folder in shortcut_dirs():
-                make_shortcut(folder / "holobuilder.lnk", d / "runtime" / "pythonw.exe",
-                              f'"{d / "app" / "tools" / "app" / "launcher.py"}"', d, icon)
+                make_shortcut(
+                    folder / "holobuilder.lnk",
+                    d / "runtime" / "pythonw.exe",
+                    f'"{d / "app" / "tools" / "app" / "launcher.py"}"',
+                    d,
+                    icon,
+                )
             register(d, meta["latest"])
             self._emit(step="shortcuts", state="done")
             shutil.rmtree(work, ignore_errors=True)
@@ -518,8 +587,12 @@ class Api:
 
     def launch(self) -> None:
         d = Path(self.dir)
-        subprocess.Popen([str(d / "runtime" / "pythonw.exe"), str(d / "app" / "tools" / "app" / "launcher.py")],
-                         cwd=str(d), env=clean_env(), creationflags=0x00000008 | 0x00000200)  # DETACHED | NEW_GROUP
+        subprocess.Popen(
+            [str(d / "runtime" / "pythonw.exe"), str(d / "app" / "tools" / "app" / "launcher.py")],
+            cwd=str(d),
+            env=clean_env(),
+            creationflags=0x00000008 | 0x00000200,  # DETACHED | NEW_GROUP
+        )
         self._window.destroy()
 
     def close(self) -> None:
@@ -536,10 +609,18 @@ class Api:
             # the app, its engine and workers all run d\runtime\python*.exe: close them first,
             # or Windows keeps their files and the folder cannot go
             runtime = str(d / "runtime").replace("'", "''")
-            subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                            "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "
-                            f"'{runtime}\\*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"],
-                           capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "
+                    f"'{runtime}\\*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}",
+                ],
+                capture_output=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
             time.sleep(1.0)
             for folder in shortcut_dirs():
                 (folder / "holobuilder.lnk").unlink(missing_ok=True)
@@ -548,8 +629,11 @@ class Api:
                 shutil.rmtree(d / part, ignore_errors=True)
             self._emit(step="remove", state="done")
             # this exe cannot delete itself while it runs: cmd removes the folder after we exit
-            subprocess.Popen(f'cmd /c ping -n 6 127.0.0.1 >nul & rmdir /s /q "{d}"', shell=True,
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            subprocess.Popen(
+                f'cmd /c ping -n 6 127.0.0.1 >nul & rmdir /s /q "{d}"',
+                shell=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
             self._emit(step="removed")
         except Exception as exc:  # noqa: BLE001
             self._emit(step="error", message=f"{type(exc).__name__}: {exc}")
@@ -557,7 +641,7 @@ class Api:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    system_trust.use_system_trust()             # before any HTTPS request (Google, our server)
+    system_trust.use_system_trust()  # before any HTTPS request (Google, our server)
     # our own agent: the server sits behind Cloudflare, whose browser checks stop Python's
     opener = urllib.request.build_opener()
     opener.addheaders = [("User-Agent", "holobuilder-setup")]
@@ -571,10 +655,17 @@ def main(argv: list[str] | None = None) -> int:
         pass
     ensure_webview2()
     import webview  # noqa: PLC0415
+
     api = Api(mode, pid, folder)
     window = webview.create_window(
-        "holobuilder setup" if mode != "uninstall" else "Remove holobuilder", url=str(UI), js_api=api,
-        width=1280, height=780, min_size=(1100, 700), background_color="#0E0D20")
+        "holobuilder setup" if mode != "uninstall" else "Remove holobuilder",
+        url=str(UI),
+        js_api=api,
+        width=1280,
+        height=780,
+        min_size=(1100, 700),
+        background_color="#0E0D20",
+    )
     api._window = window
     webview.start(private_mode=True)
     return 0

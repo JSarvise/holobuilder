@@ -7,6 +7,7 @@ pinned leader list) hold for every reported team, and it is deterministic.
 Recall on a real account (agreement with `two_stage.search_song`) needs real
 data and is not tested here.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -39,15 +40,21 @@ def _world(count: int, seed: int):
     model feature explains, and noise."""
     rng = random.Random(seed)
     holomems = max(6, count * 3 // 4)
-    cards = [SimpleNamespace(
-        id=f"card-{i:03d}", member=f"Chr{i % holomems}", type=rng.choice(TYPES),
-        generations=frozenset(rng.sample(GENERATIONS, rng.choice([1, 1, 2]))),
-        strength=rng.uniform(0.6, 1.4), boost=rng.uniform(0.0, 0.3),
-        gate=rng.choice([None, ("type", rng.choice(TYPES), 3),
-                         ("generation", rng.choice(GENERATIONS), 2)]))
-        for i in range(count)]
-    synergy = {p: rng.choice([0.0, 0.0, 0.0, 0.08, 0.2])
-               for p in itertools.combinations(range(count), 2)}
+    cards = [
+        SimpleNamespace(
+            id=f"card-{i:03d}",
+            member=f"Chr{i % holomems}",
+            type=rng.choice(TYPES),
+            generations=frozenset(rng.sample(GENERATIONS, rng.choice([1, 1, 2]))),
+            strength=rng.uniform(0.6, 1.4),
+            boost=rng.uniform(0.0, 0.3),
+            gate=rng.choice(
+                [None, ("type", rng.choice(TYPES), 3), ("generation", rng.choice(GENERATIONS), 2)]
+            ),
+        )
+        for i in range(count)
+    ]
+    synergy = {p: rng.choice([0.0, 0.0, 0.0, 0.08, 0.2]) for p in itertools.combinations(range(count), 2)}
     affinity = {(li, i): rng.uniform(-0.04, 0.04) for li in range(count) for i in range(count)}
 
     def fires(gate, s):
@@ -79,8 +86,7 @@ def _world(count: int, seed: int):
         calls.append(list(pairs))
         return [exact(li, s) for li, s in pairs]
 
-    legal = [s for s in itertools.combinations(range(count), 5)
-             if len({cards[i].member for i in s}) == 5]
+    legal = [s for s in itertools.combinations(range(count), 5) if len({cards[i].member for i in s}) == 5]
     return cards, exact, score_pairs, legal, calls
 
 
@@ -95,8 +101,9 @@ def _truth(cards, exact, legal, leaders, ok=lambda li, s: True):
 @pytest.mark.parametrize("seed", [1, 2, 3])
 def test_finds_the_true_best_team_and_every_score_is_exact(seed):
     cards, exact, score_pairs, legal, _calls = _world(18, seed)
-    out = joint_search.search(cards, cards, score_pairs, gate_of=_gate_of, seed=seed,
-                              initial_sets=300, step=200, polish=10)
+    out = joint_search.search(
+        cards, cards, score_pairs, gate_of=_gate_of, seed=seed, initial_sets=300, step=200, polish=10
+    )
     best_value, best_li, best_set = _truth(cards, exact, legal, range(len(cards)))
     assert out["ranking"][0][0] == best_value
     assert (out["ranking"][0][1], out["ranking"][0][2]) == (best_li, best_set)
@@ -110,8 +117,9 @@ def test_finds_the_true_best_team_and_every_score_is_exact(seed):
 def test_required_cards_are_in_every_reported_team_and_the_best_of_them_is_found():
     cards, exact, score_pairs, legal, _calls = _world(18, 4)
     require = (2, 7)
-    out = joint_search.search(cards, cards, score_pairs, gate_of=_gate_of, require=require,
-                              initial_sets=300, step=200, polish=10)
+    out = joint_search.search(
+        cards, cards, score_pairs, gate_of=_gate_of, require=require, initial_sets=300, step=200, polish=10
+    )
     assert all(set(require) <= set(s) for _v, _li, s in out["ranking"])
     best = _truth(cards, exact, legal, range(len(cards)), lambda li, s: set(require) <= set(s))
     assert out["ranking"][0][0] == best[0]
@@ -123,34 +131,50 @@ def test_allowed_filter_and_a_pinned_leader_list():
     def no_overlap(li, s):
         return all(cards[i].member != cards[li].member for i in s)
 
-    out = joint_search.search(cards, cards, score_pairs, gate_of=_gate_of, allowed=no_overlap,
-                              initial_sets=300, step=200, polish=10)
+    out = joint_search.search(
+        cards, cards, score_pairs, gate_of=_gate_of, allowed=no_overlap, initial_sets=300, step=200, polish=10
+    )
     assert all(no_overlap(li, s) for _v, li, s in out["ranking"])
     assert out["ranking"][0][0] == _truth(cards, exact, legal, range(len(cards)), no_overlap)[0]
 
-    pinned = [cards[3]]                                   # one leader: index 0 of `leaders`
-    out = joint_search.search(cards, pinned, lambda pairs: [exact(3, s) for _li, s in pairs],
-                              gate_of=_gate_of, initial_sets=300, step=200, polish=10)
+    pinned = [cards[3]]  # one leader: index 0 of `leaders`
+    out = joint_search.search(
+        cards,
+        pinned,
+        lambda pairs: [exact(3, s) for _li, s in pairs],
+        gate_of=_gate_of,
+        initial_sets=300,
+        step=200,
+        polish=10,
+    )
     assert {li for _v, li, _s in out["ranking"]} == {0}
     assert out["ranking"][0][0] == max(exact(3, s) for s in legal)
 
 
 def test_deterministic_and_scores_each_pair_once():
     cards, _exact, score_pairs, _legal, calls = _world(16, 6)
-    a = joint_search.search(cards, cards, score_pairs, gate_of=_gate_of, seed=9,
-                            initial_sets=200, step=150, polish=5)
+    a = joint_search.search(
+        cards, cards, score_pairs, gate_of=_gate_of, seed=9, initial_sets=200, step=150, polish=5
+    )
     pairs = [p for batch in calls for p in batch]
     assert len(pairs) == len(set(pairs)) == a["stats"]["exact_evals"]
-    b = joint_search.search(cards, cards, score_pairs, gate_of=_gate_of, seed=9,
-                            initial_sets=200, step=150, polish=5)
+    b = joint_search.search(
+        cards, cards, score_pairs, gate_of=_gate_of, seed=9, initial_sets=200, step=150, polish=5
+    )
     assert a["ranking"] == b["ranking"]
 
 
 def test_a_non_finite_score_is_refused():
     cards, _exact, _score_pairs, _legal, _calls = _world(12, 7)
     with pytest.raises(ValueError):
-        joint_search.search(cards, cards, lambda pairs: [float("nan")] * len(pairs),
-                            gate_of=_gate_of, initial_sets=50, step=50)
+        joint_search.search(
+            cards,
+            cards,
+            lambda pairs: [float("nan")] * len(pairs),
+            gate_of=_gate_of,
+            initial_sets=50,
+            step=50,
+        )
 
 
 @pytest.mark.parametrize("count, seed", [(20, 8), (24, 15), (28, 2), (28, 5), (28, 12)])
@@ -161,8 +185,17 @@ def test_every_set_among_the_best_teams_was_scored_under_every_leader(count, see
     # what finds the best sets: each of these seeds exposes the failure
     cards, _exact, score_pairs, _legal, _calls = _world(count, seed)
     polish = 4
-    out = joint_search.search(cards, cards, score_pairs, gate_of=_gate_of, seed=seed,
-                              initial_sets=60, step=40, polish=polish, max_rounds=2)
+    out = joint_search.search(
+        cards,
+        cards,
+        score_pairs,
+        gate_of=_gate_of,
+        seed=seed,
+        initial_sets=60,
+        step=40,
+        polish=polish,
+        max_rounds=2,
+    )
     leaders_of: dict = {}
     for _v, li, s in out["ranking"]:
         leaders_of.setdefault(s, set()).add(li)
@@ -185,8 +218,9 @@ def test_climb_scores_exactly_improves_on_its_start_and_tries_every_leader_on_it
     for _v, _li, s in ranking[:4]:
         assert leaders_of[s] == set(range(len(cards)))
     # the filters hold for every reported pair
-    out = joint_search.climb(cards, cards, score_pairs, start, require=(start[0][1][0],),
-                             neighbours=3, polish=4)
+    out = joint_search.climb(
+        cards, cards, score_pairs, start, require=(start[0][1][0],), neighbours=3, polish=4
+    )
     assert all(start[0][1][0] in s for _v, _li, s in out["ranking"])
 
 
@@ -201,8 +235,18 @@ def test_a_gated_leader_is_tried_where_its_gate_would_fire(count, seed):
     for i in (count - 1, count - 2):
         cards[i].generations = frozenset({"RARE"})
     cards[0].gate, cards[0].boost = ("generation", "RARE", 2), 0.9
-    out = joint_search.search(cards, cards, score_pairs, gate_of=_gate_of, seed=seed,
-                              initial_sets=60, step=40, polish=4, max_rounds=2, gate_samples=0)
+    out = joint_search.search(
+        cards,
+        cards,
+        score_pairs,
+        gate_of=_gate_of,
+        seed=seed,
+        initial_sets=60,
+        step=40,
+        polish=4,
+        max_rounds=2,
+        gate_samples=0,
+    )
     assert out["ranking"][0][0] == _truth(cards, exact, legal, range(len(cards)))[0]
 
 
@@ -222,11 +266,17 @@ def _stat_world(count: int, seed: int):
     for i in range(count):
         lean = rng.choice(STATS)
         stats = {s: rng.uniform(3000, 5000) + (2500 if s == lean else 0) for s in STATS}
-        cards.append(SimpleNamespace(
-            id=f"card-{i:03d}", member=f"Chr{i % holomems}", type=rng.choice(TYPES + ["Happy"]),
-            generations=frozenset([rng.choice(STAT_GENERATIONS)]), strength=rng.uniform(0.85, 1.15),
-            stats=SimpleNamespace(**stats, total=lambda stats=stats: sum(stats.values())),
-            outfit=("technique", 0.8, ("type", rng.choice(TYPES + ["Happy"]), 2))))
+        cards.append(
+            SimpleNamespace(
+                id=f"card-{i:03d}",
+                member=f"Chr{i % holomems}",
+                type=rng.choice(TYPES + ["Happy"]),
+                generations=frozenset([rng.choice(STAT_GENERATIONS)]),
+                strength=rng.uniform(0.85, 1.15),
+                stats=SimpleNamespace(**stats, total=lambda stats=stats: sum(stats.values())),
+                outfit=("technique", 0.8, ("type", rng.choice(TYPES + ["Happy"]), 2)),
+            )
+        )
     for i in (count - 1, count - 2):
         cards[i].generations = frozenset({"RARE"})
         cards[i].stats.performance += 2500
@@ -235,8 +285,10 @@ def _stat_world(count: int, seed: int):
 
     def fires(gate, s):
         kind, target, need = gate
-        return sum((cards[i].type == target) if kind == "type" else (target in cards[i].generations)
-                   for i in s) >= need
+        return (
+            sum((cards[i].type == target) if kind == "type" else (target in cards[i].generations) for i in s)
+            >= need
+        )
 
     def exact(li: int, s) -> float:
         value = 100_000.0
@@ -250,8 +302,7 @@ def _stat_world(count: int, seed: int):
             value *= 1.0 + boost * sum(getattr(cards[i].stats, stat) for i in s) / total
         return float(math.ceil(value))
 
-    legal = [s for s in itertools.combinations(range(count), 5)
-             if len({cards[i].member for i in s}) == 5]
+    legal = [s for s in itertools.combinations(range(count), 5) if len({cards[i].member for i in s}) == 5]
     return cards, exact, legal
 
 
@@ -264,6 +315,7 @@ def _stat_tilt(cards):
         if stat not in by_stat:
             by_stat[stat] = tuple(0.45 * (getattr(c.stats, stat) / c.stats.total() - 1 / 3) for c in cards)
         return by_stat[stat]
+
     return tilt_of
 
 
@@ -277,9 +329,19 @@ def test_a_leader_whose_region_no_other_leader_shares_is_seeded_and_climbed(coun
     cards, exact, legal = _stat_world(count, seed)
     truth = max((exact(li, s), li, s) for li in range(len(cards)) for s in legal)
     assert truth[1] == 0
-    out = joint_search.search(cards, cards, lambda pairs: [exact(li, s) for li, s in pairs],
-                              gate_of=lambda c: c.outfit[2], tilt_of=_stat_tilt(cards), seed=seed,
-                              initial_sets=60, step=40, polish=4, max_rounds=2, gate_samples=0)
+    out = joint_search.search(
+        cards,
+        cards,
+        lambda pairs: [exact(li, s) for li, s in pairs],
+        gate_of=lambda c: c.outfit[2],
+        tilt_of=_stat_tilt(cards),
+        seed=seed,
+        initial_sets=60,
+        step=40,
+        polish=4,
+        max_rounds=2,
+        gate_samples=0,
+    )
     assert out["ranking"][0][0] == truth[0]
     assert all(v == exact(li, s) for v, li, s in out["ranking"])
     assert out["stats"]["region_seeds"] > 0
@@ -320,8 +382,7 @@ def test_paired_swaps_reach_a_team_two_swaps_away_that_no_single_swap_improves()
     start = [(0, (0, 1, 2, 3, 4))]
     plain = joint_search.climb(cards, leaders, score_pairs, start, neighbours=1, polish=1)
     assert not {8, 9} <= set(plain["ranking"][0][2])
-    paired = joint_search.climb(cards, leaders, score_pairs, start, neighbours=1, polish=1,
-                                pair_moves=20)
+    paired = joint_search.climb(cards, leaders, score_pairs, start, neighbours=1, polish=1, pair_moves=20)
     best = paired["ranking"][0]
     assert {8, 9} <= set(best[2]) and best[0] == max(value(s) for s in itertools.combinations(range(12), 5))
 
@@ -360,10 +421,13 @@ def test_search_song_with_a_many_scorer_gives_the_same_rows_in_one_call_per_roun
     b = joint_search.search_song(cards, cards, with_many, **options)
     assert single == [] and grouped, "the many path made every call"
     assert len(grouped) < calls_plain
-    assert [(r["position"], r["best"], r["members"], r["ranking"]) for r in a["rows"]] == \
-        [(r["position"], r["best"], r["members"], r["ranking"]) for r in b["rows"]]
+    assert [(r["position"], r["best"], r["members"], r["ranking"]) for r in a["rows"]] == [
+        (r["position"], r["best"], r["members"], r["ranking"]) for r in b["rows"]
+    ]
+
     def counts(stats):
         return {k: v for k, v in stats.items() if "seconds" not in k}
+
     assert counts(a["stats"]) == counts(b["stats"])
     # the event objective's wrapper passes `many` through with the objective applied
     bonus = [(10 * (k % 3), 5 * (k % 2)) for k in range(len(cards))]
@@ -372,5 +436,7 @@ def test_search_song_with_a_many_scorer_gives_the_same_rows_in_one_call_per_roun
         w_many = two_stage.objective_scorer(with_many, bonus, objective)
         assert not hasattr(w_plain, "many") and hasattr(w_many, "many")
         sets = [(0, 1, 2, 3, 4), (1, 2, 3, 4, 5)]
-        assert w_many.many([(cards[0], sets), (cards[1], sets[:1])]) == \
-            [w_plain(cards[0], sets), w_plain(cards[1], sets[:1])]
+        assert w_many.many([(cards[0], sets), (cards[1], sets[:1])]) == [
+            w_plain(cards[0], sets),
+            w_plain(cards[1], sets[:1]),
+        ]

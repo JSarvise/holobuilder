@@ -30,6 +30,7 @@ Usage:
     python tree_budget.py               # curve + cost + verdict
     python tree_budget.py --board       # price dumps/board_state.json
 """
+
 import collections
 import json
 import os
@@ -39,6 +40,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import MissingInput  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 DUMPS = str(paths.DUMPS)
 
@@ -60,6 +62,7 @@ def level_grants(group_id="level-group-1"):
     Without a SQLCipher library (`master_cache.can_decrypt`), from the synced export
     `holodori/main_CharacterLevel.json` (field 11 is `skillTreePointQuantity`)."""
     import master_cache as mc
+
     if not mc.can_decrypt():
         return level_grants_from_export(group_id)
     out = {}
@@ -76,8 +79,9 @@ def level_grants_from_export(group_id="level-group-1", path=None):
     try:
         rows = json.loads(Path(path).read_text("utf8"))
     except FileNotFoundError:
-        raise MissingInput(f"missing {path}: the board budget needs the game's sqlcipher.dll "
-                           "or this synced export") from None
+        raise MissingInput(
+            f"missing {path}: the board budget needs the game's sqlcipher.dll or this synced export"
+        ) from None
     out = {}
     for row in rows:
         data = row.get("data") or {}
@@ -116,6 +120,7 @@ def level_from_points(total, curve=None):
 # --------------------------------------------------------------------------- node costs
 def node_rows():
     import master_cache as mc
+
     return mc.rows("SkillTreeNode", "SELECT * FROM SkillTreeNode")
 
 
@@ -195,13 +200,15 @@ def report_curve():
 def report_cost():
     by = nodes_by_group()
     import master_cache as mc
+
     chars = [_field(c, 1) for c in mc.rows("Character", "SELECT * FROM Character") if _field(c, 21)]
     seen = collections.Counter(board_cost(c, by) for c in chars)
     print("\nSkillTreeNode -- one character's whole board")
     print("  %d rows / %d groups" % (sum(len(v) for v in by.values()), len(by)))
     for (n, pts), how_many in seen.most_common():
-        print("  %d of %d playable characters: %d nodes, %d points (field 9)"
-              % (how_many, len(chars), n, pts))
+        print(
+            "  %d of %d playable characters: %d nodes, %d points (field 9)" % (how_many, len(chars), n, pts)
+        )
     return seen
 
 
@@ -211,8 +218,10 @@ def report_verdict():
     print("\nVERDICT")
     print("  budget at character level 50 : %d" % have)
     print("  cost of the whole board      : %d" % need)
-    print("  shortfall                    : %d points (%.1f%% of the board unaffordable by cost)"
-          % (need - have, 100.0 * (need - have) / need))
+    print(
+        "  shortfall                    : %d points (%.1f%% of the board unaffordable by cost)"
+        % (need - have, 100.0 * (need - have) / need)
+    )
 
 
 def report_board():

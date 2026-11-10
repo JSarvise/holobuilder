@@ -46,7 +46,7 @@ REFRESH_DIR = TOOLS / "refresh"
 # The derived data: what the refresh writes and the solver and the web read.
 DUMPS_REL = "tools/recon/proxy/dumps"
 DUMPS = REPO / DUMPS_REL
-HOLODORI = DUMPS / "holodori"          # the master tables as JSON (main_<Table>.json)
+HOLODORI = DUMPS / "holodori"  # the master tables as JSON (main_<Table>.json)
 
 # The checkout's own virtual environment (setup.cmd / setup.sh create it).
 VENV = REPO / ".venv"
@@ -81,7 +81,8 @@ def _check_main_tree() -> None:
             if folder != REPO:
                 raise CheckoutMismatch(
                     f"hbuilder was imported from {REPO} but the script runs from {folder}: "
-                    f"put {folder / 'src'} first on sys.path before importing hbuilder")
+                    f"put {folder / 'src'} first on sys.path before importing hbuilder"
+                )
             return
 
 
@@ -89,8 +90,8 @@ _check_main_tree()
 
 # ---------------------------------------------------------------------------- the game on this PC
 GAME_DIR_NAME = "hololiveDreams"
-STEAM_APP_ID = "4282500"                  # hololive Dreams on Steam (its appmanifest_<id>.acf)
-_MARKER = "hololive-Dreams_Data"          # present in every install
+STEAM_APP_ID = "4282500"  # hololive Dreams on Steam (its appmanifest_<id>.acf)
+_MARKER = "hololive-Dreams_Data"  # present in every install
 _WINDOWS_CANDIDATES = (
     r"C:\Program Files (x86)\Steam\steamapps\common\hololiveDreams",
     r"D:\Steam\steamapps\common\hololiveDreams",
@@ -114,10 +115,13 @@ def steam_roots(platform: str = sys.platform, home: Path | None = None) -> list[
         root = steam_path()
         return ([root] if root else []) + [os.path.expandvars(r"%ProgramFiles(x86)%\Steam")]
     home = Path.home() if home is None else home
-    return [str(home / ".steam" / "steam"), str(home / ".steam" / "root"),
-            str(home / ".local" / "share" / "Steam"),
-            str(home / ".var" / "app" / "com.valvesoftware.Steam" / ".local" / "share" / "Steam"),
-            str(home / "snap" / "steam" / "common" / ".local" / "share" / "Steam")]
+    return [
+        str(home / ".steam" / "steam"),
+        str(home / ".steam" / "root"),
+        str(home / ".local" / "share" / "Steam"),
+        str(home / ".var" / "app" / "com.valvesoftware.Steam" / ".local" / "share" / "Steam"),
+        str(home / "snap" / "steam" / "common" / ".local" / "share" / "Steam"),
+    ]
 
 
 def _same_folder_key(path: str) -> str:
@@ -132,8 +136,9 @@ def steam_libraries(roots: list[str] | None = None) -> list[str]:
     seen: set[str] = set()
     for root in steam_roots() if roots is None else roots:
         try:
-            with open(os.path.join(root, "steamapps", "libraryfolders.vdf"),
-                      encoding="utf-8", errors="replace") as fh:
+            with open(
+                os.path.join(root, "steamapps", "libraryfolders.vdf"), encoding="utf-8", errors="replace"
+            ) as fh:
                 found = library_paths(fh.read())
         except OSError:
             continue
@@ -150,8 +155,9 @@ def proton_game_data(library: str) -> Path:
     return Path(library, "steamapps", "compatdata", STEAM_APP_ID, *_PROTON_APPDATA, *_LOCALLOW_GAME)
 
 
-def _game_data_dir(platform: str = sys.platform, environ=None, home: Path | None = None,
-                   libraries=None) -> Path:
+def _game_data_dir(
+    platform: str = sys.platform, environ=None, home: Path | None = None, libraries=None
+) -> Path:
     """The game's own data folder: `<LocalLow>/QualiArts, Inc_/hololive-Dreams`.
     `LOCALAPPDATA`, when set, wins on every platform: LocalLow is its sibling (a test points that
     variable elsewhere to isolate it). Windows: under the user's AppData. Linux: inside the game's
@@ -228,8 +234,7 @@ def game_root() -> str:
             return cand
     raise MissingInput(
         "hololiveDreams install not found. Set HOLODREAMS_DIR to the game root "
-        "(the folder that contains hololive-Dreams_Data). Tried:\n  "
-        + "\n  ".join(tried)
+        "(the folder that contains hololive-Dreams_Data). Tried:\n  " + "\n  ".join(tried)
     )
 
 
@@ -297,17 +302,20 @@ def sqlcipher_dll() -> str:
 
     found = first(([env] if env else []) + list(_CANDIDATES))
     if found is None and not no_game():
-        found = first(_library_installs())      # Steam's own list, only when needed
+        found = first(_library_installs())  # Steam's own list, only when needed
     if found is not None:
         return found
     raise FileNotFoundError(
         "sqlcipher.dll not found. Set HOLODREAMS_DIR to the game root "
         "(the folder ...\\common\\hololiveDreams) or HOLODREAMS_SQLCIPHER to the dll. Tried:\n  "
-        + "\n  ".join(tried))
+        + "\n  ".join(tried)
+    )
 
 
-SQLCIPHER_INSTALL_HINT = ("install SQLCipher (Debian/Ubuntu: sudo apt install libsqlcipher1; "
-                          "Fedora and Arch: the sqlcipher package)")
+SQLCIPHER_INSTALL_HINT = (
+    "install SQLCipher (Debian/Ubuntu: sudo apt install libsqlcipher1; "
+    "Fedora and Arch: the sqlcipher package)"
+)
 
 
 def sqlcipher_library(platform: str = sys.platform, find=None) -> str:
@@ -328,5 +336,6 @@ def sqlcipher_library(platform: str = sys.platform, find=None) -> str:
     found = find("sqlcipher")
     if found:
         return found
-    raise FileNotFoundError(f"libsqlcipher not found: {SQLCIPHER_INSTALL_HINT}, or set "
-                            "HOLODREAMS_SQLCIPHER to the library file")
+    raise FileNotFoundError(
+        f"libsqlcipher not found: {SQLCIPHER_INSTALL_HINT}, or set HOLODREAMS_SQLCIPHER to the library file"
+    )

@@ -31,6 +31,7 @@ Writes nothing (tools/web/test_no_writes.py walks this file too).
 
     python -m pytest tools/web/test_maxed_account_basis.py
 """
+
 from __future__ import annotations
 
 import json
@@ -39,17 +40,21 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-
 from hbweb import basis, config
+
 from hbuilder.inputs import load_inputs
 
 REPO = Path(__file__).resolve().parents[2]
 
 # a reference roster recommended on this basis by an external tool
 HD_LEADER = "card-00022-5-uniq-0063-00"
-HD_MEMBERS = ["card-00007-5-uniq-0008-00", "card-00022-5-uniq-0063-00",
-              "card-00021-5-uniq-0017-00", "card-00006-5-uniq-0007-00",
-              "card-06005-5-uniq-0061-00"]
+HD_MEMBERS = [
+    "card-00007-5-uniq-0008-00",
+    "card-00022-5-uniq-0063-00",
+    "card-00021-5-uniq-0017-00",
+    "card-00006-5-uniq-0007-00",
+    "card-06005-5-uniq-0061-00",
+]
 HD_TEAM = [HD_LEADER, *HD_MEMBERS]
 # the Noel + Kobo Kanaeru "Rain-Dance Oracle" variant (a 1-swap variant of
 # the reference roster)
@@ -62,18 +67,26 @@ KOBO_TEAM = [HD_LEADER, *HD_MEMBERS[:4], "card-03009-5-uniq-0041-00"]
 # Do NOT pin a reference figure re-derived from this tool's own output: an
 # external implementation is what makes a comparison non-circular.
 PARITY_BASIS = {"deck_power": "modelled"}
-TOLERANCE = 5           # the across mean is a float over every chart
+TOLERANCE = 5  # the across mean is a float over every chart
 
 
 def _dumps_present() -> bool:
     d = REPO / "tools/recon/proxy/dumps"
-    return all((d / n).is_file() for n in (
-        "skilltree.json", "master_SkillTreeNode.json", "charts.json",
-        "board.json", "holodori/main_Poster.json"))
+    return all(
+        (d / n).is_file()
+        for n in (
+            "skilltree.json",
+            "master_SkillTreeNode.json",
+            "charts.json",
+            "board.json",
+            "holodori/main_Poster.json",
+        )
+    )
 
 
 pytestmark = pytest.mark.skipif(
-    not _dumps_present(), reason="gitignored dumps/ absent (skilltree, master, charts, poster)")
+    not _dumps_present(), reason="gitignored dumps/ absent (skilltree, master, charts, poster)"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -81,8 +94,7 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 def _post(url: str, obj: dict, timeout: float = 900.0) -> tuple[int, dict]:
     data = json.dumps(obj).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8"))
@@ -127,11 +139,9 @@ def test_parse_budget_reads_real_max_and_a_clamped_number():
 
 def _scenario():
     """The scenario the routes read, built the way `basis.apply_basis` builds it."""
-    cards, owned, cfg, _prov = load_inputs(
-        config.CARDS_PATH, config.OWNED_PATH)
+    cards, owned, cfg, _prov = load_inputs(config.CARDS_PATH, config.OWNED_PATH)
     try:
-        cards, collection_basis, cfg, scenario = basis.apply_basis(
-            cards, owned, cfg, "maxed-account")
+        cards, collection_basis, cfg, scenario = basis.apply_basis(cards, owned, cfg, "maxed-account")
     except basis.MaxedAccountUnavailable as exc:
         pytest.skip(str(exc))
     return cards, cfg, collection_basis, scenario
@@ -157,8 +167,11 @@ def test_bench_is_54_boards_at_max_level_with_level_2_sockets():
         nodes = {r["node"] for r in rows}
         # the four Connect sockets (S-00x) hold a card and are written as
         # `connect_multiplier` on the nodes they cover
-        wanted = {n for n in precompute.bench_reach_nodes(skilltree, node_master, member["chr"])
-                  if not n.startswith("S-")}
+        wanted = {
+            n
+            for n in precompute.bench_reach_nodes(skilltree, node_master, member["chr"])
+            if not n.startswith("S-")
+        }
         assert wanted <= nodes <= set(skilltree["models"][member["model"]]), name
         assert sum(costs.get(n, 0) for n in nodes) <= scenario.points, name
         assert any(r.get("connect_multiplier", 1) > 1 for r in rows), f"{name}: no socket reached a node"
@@ -172,11 +185,11 @@ def test_bench_is_54_boards_at_max_level_with_level_2_sockets():
     assert scenario.board_model is not None
     assert len(scenario.board_model.characters) == 54
     # the same catalogue-wide, level-2 Connect pool the parity probe used
-    assert len(scenario.connect_cards) == 150   # every 4★/5★ of the 204 (204 - 54 three-stars)
+    assert len(scenario.connect_cards) == 150  # every 4★/5★ of the 204 (204 - 54 three-stars)
     # cached per process: a second build at the same cfg IS the same object
     _c2, _cfg2, _b2, again = basis.apply_basis(
-        *load_inputs(config.CARDS_PATH, config.OWNED_PATH)[:3],
-        "maxed-account")
+        *load_inputs(config.CARDS_PATH, config.OWNED_PATH)[:3], "maxed-account"
+    )
     assert again is scenario
 
 
@@ -198,12 +211,23 @@ def test_the_max_level_bench_scores_a_team_exactly_as_the_whole_tree_does(monkey
     skilltree = config.read_json(config.SKILLTREE_PATH)
     node_master = config.read_json(config.NODE_MASTER_PATH)
     models = skilltree["models"]
-    monkeypatch.setattr(precompute, "maxed_account_board_state", lambda *a, **k: {
-        m["chr"]: {"nodes": sorted(models[m["model"]]), "slots": {}}
-        for m in skilltree["members"] if m.get("model") in models})
+    monkeypatch.setattr(
+        precompute,
+        "maxed_account_board_state",
+        lambda *a, **k: {
+            m["chr"]: {"nodes": sorted(models[m["model"]]), "slots": {}}
+            for m in skilltree["members"]
+            if m.get("model") in models
+        },
+    )
     whole = precompute.maxed_account_bench(
-        cards, dataclasses.replace(cfg, board=None), (HD_LEADER, tuple(HD_MEMBERS)),
-        skilltree=skilltree, node_master=node_master, connect_cards=scenario.connect_cards)
+        cards,
+        dataclasses.replace(cfg, board=None),
+        (HD_LEADER, tuple(HD_MEMBERS)),
+        skilltree=skilltree,
+        node_master=node_master,
+        connect_cards=scenario.connect_cards,
+    )
     assert set(whole) == set(scenario.bench)
     for name, rows in scenario.bench.items():
         full = {r["node"]: r for r in whole[name]}
@@ -220,8 +244,12 @@ def test_the_max_level_bench_scores_a_team_exactly_as_the_whole_tree_does(monkey
     name_by_chr = {m["chr"]: m["name"] for m in skilltree["members"]}
 
     def total(bench):
-        board = board_from_mapping({"characters": {n: list(r) for n, r in bench.items() if n not in on_team},
-                                    "name_by_chr": name_by_chr})
+        board = board_from_mapping(
+            {
+                "characters": {n: list(r) for n, r in bench.items() if n not in on_team},
+                "name_by_chr": name_by_chr,
+            }
+        )
         return score_team_on_chart(team, chart, dataclasses.replace(cfg, board=board)).total_score
 
     assert total(scenario.bench) == total(whole)
@@ -229,13 +257,14 @@ def test_the_max_level_bench_scores_a_team_exactly_as_the_whole_tree_does(monkey
 
 def test_certificate_meta_hashes_the_scenario_the_way_the_probes_do():
     """`_certificate_meta(..., scenario=)` = `certificate.scenario_hash`."""
-    import certificate as cert_mod
     import dataclasses
+
+    import certificate as cert_mod
+
     cards, cfg, collection_basis, scenario = _scenario()
     meta = basis.certificate_meta(cfg, "maxed-account", scenario=scenario)
     assert meta.get("inputs_hash_error") is None, meta
-    h, per = cert_mod.scenario_hash(
-        dataclasses.replace(cfg, board=None), scenario.bench, scenario.literal)
+    h, per = cert_mod.scenario_hash(dataclasses.replace(cfg, board=None), scenario.bench, scenario.literal)
     assert meta["inputs_hash"] == h
     assert "bench" in per
     # and it is NOT the plain maxed hash: the scenario line differs
@@ -245,11 +274,19 @@ def test_certificate_meta_hashes_the_scenario_the_way_the_probes_do():
 
 
 def _across_compare(web_base):
-    status, doc = _post(web_base + "/api/compare",
-                        {"teams": [HD_TEAM, KOBO_TEAM], "basis": "maxed-account",
-                         "board": "develop", "budget": "max", "across": True,
-                         "platform": "mobile", "uptime_model": "finite",
-                         **PARITY_BASIS})
+    status, doc = _post(
+        web_base + "/api/compare",
+        {
+            "teams": [HD_TEAM, KOBO_TEAM],
+            "basis": "maxed-account",
+            "board": "develop",
+            "budget": "max",
+            "across": True,
+            "platform": "mobile",
+            "uptime_model": "finite",
+            **PARITY_BASIS,
+        },
+    )
     _skip_if_503(status, doc)
     assert status == 200, doc
     return doc
@@ -258,16 +295,30 @@ def _across_compare(web_base):
 def test_compare_default_budget_is_the_max_level_points_and_captured_is_the_bench(web_base):
     """No `budget` -> the max-level points on this basis; board "captured" -> the bench
     (every holomem at max level), which is the scenario's own "current" board."""
-    status, doc = _post(web_base + "/api/compare",
-                        {"teams": [HD_TEAM, KOBO_TEAM], "basis": "maxed-account",
-                         "board": "develop", "platform": "mobile", "uptime_model": "finite"})
+    status, doc = _post(
+        web_base + "/api/compare",
+        {
+            "teams": [HD_TEAM, KOBO_TEAM],
+            "basis": "maxed-account",
+            "board": "develop",
+            "platform": "mobile",
+            "uptime_model": "finite",
+        },
+    )
     _skip_if_503(status, doc)
     assert status == 200, doc
     assert doc["assumptions"]["budget"] == basis.maxed_account_budget()
     assert doc["certificate_basis"]["basis"] == "maxed-account"
-    status, cap = _post(web_base + "/api/compare",
-                        {"teams": [HD_TEAM, KOBO_TEAM], "basis": "maxed-account",
-                         "board": "captured", "platform": "mobile", "uptime_model": "finite"})
+    status, cap = _post(
+        web_base + "/api/compare",
+        {
+            "teams": [HD_TEAM, KOBO_TEAM],
+            "basis": "maxed-account",
+            "board": "captured",
+            "platform": "mobile",
+            "uptime_model": "finite",
+        },
+    )
     assert status == 200, cap
     assert cap["certificate_basis"]["basis"] == "maxed-account"
     assert cap["certificate_basis"]["budget_kind"] == "captured"

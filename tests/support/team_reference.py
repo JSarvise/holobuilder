@@ -4,6 +4,7 @@
 tables and in the same order; the tests compare the two so the product's order
 and membership stay pinned to this plain definition.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -51,14 +52,16 @@ def effective_skill_instances(team: Team) -> tuple[SkillInstance, ...]:
     leader = team.leader
     if leader.costume_skill is not None:
         instances.append(
-            SkillInstance(card_id=leader.id, slot_kind="costume", source="costume",
-                          skill=leader.costume_skill)
+            SkillInstance(
+                card_id=leader.id, slot_kind="costume", source="costume", skill=leader.costume_skill
+            )
         )
         rider_slot = scored_costume_rider_slot(leader.costume_skill)
         if rider_slot is not None:
             instances.append(
-                SkillInstance(card_id=leader.id, slot_kind="costume", source="costume_rider",
-                              skill=rider_slot)
+                SkillInstance(
+                    card_id=leader.id, slot_kind="costume", source="costume_rider", skill=rider_slot
+                )
             )
     for member in team.members:
         instances.extend(normal_instances(member))

@@ -11,6 +11,7 @@ It only acts when the golden runner sets its variables, so it is inert anywhere 
 * ``HB_GOLDEN_OFFLINE=1``: any network connection other than loopback raises, so a golden run
   can never reach the game's servers or the CDN.
 """
+
 from __future__ import annotations
 
 import os
@@ -49,7 +50,7 @@ def _install_clock(start: float) -> None:
 
         @classmethod
         def utcnow(cls):
-            return real_datetime.fromtimestamp(fake_time(), _dt.timezone.utc).replace(tzinfo=None)
+            return real_datetime.fromtimestamp(fake_time(), _dt.UTC).replace(tzinfo=None)
 
         @classmethod
         def today(cls):

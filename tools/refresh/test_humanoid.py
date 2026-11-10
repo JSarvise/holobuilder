@@ -3,6 +3,7 @@ A synthetic straight T-pose (Unity space, facing +Z, left = -X, every local rota
 stands in for the chibi rig, so nothing here needs the game's bundles.
     python -m pytest tools/refresh/test_humanoid.py
 """
+
 from __future__ import annotations
 
 import math
@@ -86,8 +87,20 @@ def test_left_and_right_mirror_each_other():
     # a quaternion (x, y, z, w) mirrors to (x, -y, -z, w))
     axes = _axes()
     mus = [0.0] * 95
-    for i, v in ((39, 0.7), (40, -0.4), (41, 0.3), (48, 0.7), (49, -0.4), (50, 0.3),
-                 (21, -0.8), (22, 0.2), (29, -0.8), (30, 0.2), (24, 0.5), (32, 0.5)):
+    for i, v in (
+        (39, 0.7),
+        (40, -0.4),
+        (41, 0.3),
+        (48, 0.7),
+        (49, -0.4),
+        (50, 0.3),
+        (21, -0.8),
+        (22, 0.2),
+        (29, -0.8),
+        (30, 0.2),
+        (24, 0.5),
+        (32, 0.5),
+    ):
         mus[i] = v
     loc = H.muscles_to_local(axes, mus)
     for bone in ("UpperArm", "UpperLeg", "LowerLeg"):
@@ -107,8 +120,8 @@ def test_baking_the_build_pose_keeps_the_skeleton_where_it_is():
     g = H.globals_of(nodes, parent)
     com, _q = H.body_of({b: g[n][0] for b, n in human.items()})
     frame = [0.0] * 137
-    frame[6] = 1.0                                    # MotionQ identity
-    frame[7:10] = [c / com[1] for c in com]           # RootT = the build-pose body / human scale
+    frame[6] = 1.0  # MotionQ identity
+    frame[7:10] = [c / com[1] for c in com]  # RootT = the build-pose body / human scale
     frame[10:14] = [0.0, 0.0, 0.0, 1.0]
     frame[42:137] = mus
     out = H.bake(nodes, parent, human, [frame, frame])
@@ -139,7 +152,7 @@ def test_the_games_twist_split_moves_forearm_twist_to_the_hand_and_keeps_the_han
     for b in ("LeftHand", "RightHand", "LeftFoot", "RightFoot"):
         assert _angle(gp[human[b]][1], gs[human[b]][1]) < 1e-6, b
     for b in ("LeftLowerArm", "RightLowerArm", "LeftLowerLeg", "RightLowerLeg"):
-        assert abs(H.local_to_muscles(axes, {b: split[b]})[b][0]) < 1e-6, b     # no twist left
-        assert _angle(plain[b], split[b]) > 1.0, b                              # it did move
+        assert abs(H.local_to_muscles(axes, {b: split[b]})[b][0]) < 1e-6, b  # no twist left
+        assert _angle(plain[b], split[b]) > 1.0, b  # it did move
     for b in ("LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg"):
-        assert _angle(plain[b], split[b]) < 1e-9, b                             # split 1.0: untouched
+        assert _angle(plain[b], split[b]) < 1e-9, b  # split 1.0: untouched

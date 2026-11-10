@@ -27,6 +27,7 @@ is used), starts tools/web/server.py on
 127.0.0.1 with the same account settings, so the pages' Refresh button works too, and opens
 the browser once it answers.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -53,19 +54,25 @@ REFRESH = paths.REFRESH_DIR
 KERNEL = paths.WEB_DIR / "kernel"
 SERVER = paths.WEB_DIR / "server.py"
 STATE = paths.STATE
-LOCAL = STATE / "local.json"             # this folder's own choices: the account's region
+LOCAL = STATE / "local.json"  # this folder's own choices: the account's region
 DUMPS = paths.DUMPS
 DEFAULT_PORT = 8731
-REGIONS = ("us", "as", "jp")             # the order a region is looked for: worldwide ones first
-PACKAGES = (("Crypto", "pycryptodome"), ("UnityPy", "UnityPy"), ("h2", "h2"),
-            ("highspy", "highspy"), ("PIL", "pillow"), ("requests", "requests"))
+REGIONS = ("us", "as", "jp")  # the order a region is looked for: worldwide ones first
+PACKAGES = (
+    ("Crypto", "pycryptodome"),
+    ("UnityPy", "UnityPy"),
+    ("h2", "h2"),
+    ("highspy", "highspy"),
+    ("PIL", "pillow"),
+    ("requests", "requests"),
+)
 KERNELS = ("notewalk", "connect", "surrogate", "cdvar")
 WINLIBS = "winget install BrechtSanders.WinLibs.POSIX.UCRT"
 WINDOWS = sys.platform == "win32"
 # The oldest Python holobuilder runs on (pyproject.toml's requires-python): the compiled board
 # assembly replays the built-in sum() as 3.12 compensates it. 3.13 is the tested one.
 MIN_PYTHON = (3, 12)
-MARKS = {True: "ok", False: "X ", None: "--"}       # ready / blocks the local route / not yet
+MARKS = {True: "ok", False: "X ", None: "--"}  # ready / blocks the local route / not yet
 
 for _path in (paths.APP_DIR, REFRESH, KERNEL):
     if str(_path) not in sys.path:
@@ -104,16 +111,23 @@ def find_credential(env=None, folder: Path = app_settings.LOCALLOW) -> tuple[Pat
     named = (env.get("HB_CREDENTIAL_FILE") or "").strip()
     if named:
         path = Path(named)
-        return (path, "HB_CREDENTIAL_FILE") if path.is_file() else \
-            (None, f"HB_CREDENTIAL_FILE names no file: {path}")
+        return (
+            (path, "HB_CREDENTIAL_FILE")
+            if path.is_file()
+            else (None, f"HB_CREDENTIAL_FILE names no file: {path}")
+        )
     hits = app_settings.credential_files(folder)
     if len(hits) == 1:
         return hits[0], "the game's own folder"
     if hits:
-        return None, (f"{len(hits)} files in {shown(folder)} look like an account file: set "
-                      "HB_CREDENTIAL_FILE to the one of the account you play")
-    return None, (f"no account file in {shown(folder)}: start the game on this PC once and get past "
-                  "its title screen, or set HB_CREDENTIAL_FILE")
+        return None, (
+            f"{len(hits)} files in {shown(folder)} look like an account file: set "
+            "HB_CREDENTIAL_FILE to the one of the account you play"
+        )
+    return None, (
+        f"no account file in {shown(folder)}: start the game on this PC once and get past "
+        "its title screen, or set HB_CREDENTIAL_FILE"
+    )
 
 
 def region_host(region: str | None = None, env=None, remembered: dict | None = None) -> str | None:
@@ -162,10 +176,17 @@ def ensure_profile() -> bool:
     except client_profile.ProfileUnavailable as exc:
         print(f"  [X] client profile: {exc}")
         return False
-    what = ("put here by hand or captured from the game, kept as it is" if got["captured"]
-            else "written from this PC's hardware" if got["written"] else "current")
-    print(f"  client profile: {what}"
-          + ("" if got["steam_id"] else " (no Steam ID found: sign in to Steam for the next refresh)"))
+    what = (
+        "put here by hand or captured from the game, kept as it is"
+        if got["captured"]
+        else "written from this PC's hardware"
+        if got["written"]
+        else "current"
+    )
+    print(
+        f"  client profile: {what}"
+        + ("" if got["steam_id"] else " (no Steam ID found: sign in to Steam for the next refresh)")
+    )
     return True
 
 
@@ -175,11 +196,13 @@ def ensure_keys(host: str) -> bool:
     import game_keys  # noqa: PLC0415
 
     if game_keys.grpc_seed(required=False) is not None:
-        if game_keys.check(host) is not False:     # current, or the server could not say
+        if game_keys.check(host) is not False:  # current, or the server could not say
             print(f"  game constants: on this PC ({game_keys.source()})")
             return True
-        print("  game constants: the ones on this PC no longer open the server's answers "
-              "(a game update?); finding them again")
+        print(
+            "  game constants: the ones on this PC no longer open the server's answers "
+            "(a game update?); finding them again"
+        )
     else:
         print("  game constants: not on this PC yet; finding them in your game install")
     return game_keys.find(host) == 0
@@ -210,8 +233,10 @@ def refresh(args: argparse.Namespace, extra: list[str]) -> int:
     try:
         print(f"  game install: {shown(paths.game_root())}")
     except MissingInput:
-        print("  [X] hololive Dreams is not installed where Steam keeps games; install it, or set "
-              "HOLODREAMS_DIR to the folder that holds hololive-Dreams_Data")
+        print(
+            "  [X] hololive Dreams is not installed where Steam keeps games; install it, or set "
+            "HOLODREAMS_DIR to the folder that holds hololive-Dreams_Data"
+        )
         return 1
     credential, how = find_credential()
     if credential is None:
@@ -247,7 +272,7 @@ def refresh(args: argparse.Namespace, extra: list[str]) -> int:
     env = child_env(credential, host)
     try:
         code, seen = _stream(cmd, env)
-        if code not in (3, 4):        # maintenance, no constants: the gacha read is refused too
+        if code not in (3, 4):  # maintenance, no constants: the gacha read is refused too
             # the pull history and its banners, as the pages' Refresh reads them after the refresh
             print("\n--- your pull history (gacha_sync.py) ---")
             gacha, more = _stream([sys.executable, "-u", str(REFRESH / "gacha_sync.py")], env)
@@ -263,20 +288,30 @@ def refresh(args: argparse.Namespace, extra: list[str]) -> int:
     elif "DATE_CHANGED" in seen:
         from hbuilder import game_day  # noqa: PLC0415
 
-        print("The game's day has changed since this account last opened the game "
-              f"({game_day.reset_hour():02d}:00 JST):")
+        print(
+            "The game's day has changed since this account last opened the game "
+            f"({game_day.reset_hour():02d}:00 JST):"
+        )
         print(f"open the game once, then run {launcher('refresh')} again. Everything else above is current.")
     else:
-        print(f"The refresh ended with exit code {code}: see the lines above, and "
-              "docs/troubleshooting.md.")
+        print(f"The refresh ended with exit code {code}: see the lines above, and docs/troubleshooting.md.")
     return code
 
 
 def _stream(cmd: list[str], env: dict) -> tuple[int, str]:
     """Run `cmd`, echoing its output as it comes -> (exit code, the words worth reacting to)."""
-    proc = subprocess.Popen(cmd, cwd=str(REPO), env=env, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                            encoding="utf-8", errors="replace", bufsize=1)
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(REPO),
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
     seen = set()
     for line in proc.stdout:
         sys.stdout.write(line)
@@ -318,8 +353,7 @@ def ours(server: dict | None, repo: Path = REPO) -> bool:
     if not server:
         return False
     try:
-        return os.path.normcase(os.path.realpath(server["repo"])) == \
-            os.path.normcase(os.path.realpath(repo))
+        return os.path.normcase(os.path.realpath(server["repo"])) == os.path.normcase(os.path.realpath(repo))
     except (OSError, TypeError, ValueError):
         return False
 
@@ -331,10 +365,9 @@ def claim_port(port: int, *, tries: int = 20) -> int | None:
         return port
     server = server_on(port)
     if ours(server):
-        print(f"  port {port}: stopping an earlier holobuilder server of this folder "
-              f"(PID {server['pid']})")
+        print(f"  port {port}: stopping an earlier holobuilder server of this folder (PID {server['pid']})")
         try:
-            os.kill(server["pid"], signal.SIGTERM)       # TerminateProcess on Windows
+            os.kill(server["pid"], signal.SIGTERM)  # TerminateProcess on Windows
         except OSError:
             pass
     else:
@@ -373,16 +406,17 @@ def start(args: argparse.Namespace) -> int:
     if credential is None:
         print(f"  [!] account file: {how}; the pages' Refresh button needs it")
     if first_refresh():
-        print(f"  [!] no game data in this folder yet: run {launcher('refresh')} first, or the pages stay empty")
+        print(
+            f"  [!] no game data in this folder yet: run {launcher('refresh')} first, or the pages stay empty"
+        )
     port = claim_port(args.port)
     if port is None:
         return 1
     url = f"http://127.0.0.1:{port}/optimizer"
     env = child_env(credential, region_host(args.region))
     if args.park_scan:
-        env["HB_PARK_SCAN"] = "1"           # the Park page's "Scan all areas" (park_scan.py)
-    proc = subprocess.Popen([sys.executable, "-u", str(SERVER), "--port", str(port)], cwd=str(REPO),
-                            env=env)
+        env["HB_PARK_SCAN"] = "1"  # the Park page's "Scan all areas" (park_scan.py)
+    proc = subprocess.Popen([sys.executable, "-u", str(SERVER), "--port", str(port)], cwd=str(REPO), env=env)
     try:
         if wait_until_up(url, proc):
             print(f"\n  holobuilder is at {url}   (close this window or press Ctrl+C to stop it)\n")
@@ -420,7 +454,7 @@ def shown(path, home: str | None = None, windows: bool = WINDOWS) -> str:
     if not home:
         return text
     if text.lower().startswith(home.lower()) if windows else text.startswith(home):
-        return ("%USERPROFILE%" if windows else "~") + text[len(home):]
+        return ("%USERPROFILE%" if windows else "~") + text[len(home) :]
     return text
 
 
@@ -436,34 +470,62 @@ def check(_args: argparse.Namespace | None = None) -> int:
             print(f"  {'':<20}{fix}")
 
     py = sys.version_info[:2]
-    row(py >= MIN_PYTHON, "Python", f"{platform.python_version()} ({shown(sys.executable)})"
+    row(
+        py >= MIN_PYTHON,
+        "Python",
+        f"{platform.python_version()} ({shown(sys.executable)})"
         + ("" if py == (3, 13) else "; the project is tested on 3.13")
         + ("" if py >= MIN_PYTHON else "; too old: 3.12 or newer is needed"),
-        "" if py >= MIN_PYTHON else f"install Python 3.13 (python.org) and run {launcher('setup')} again")
+        "" if py >= MIN_PYTHON else f"install Python 3.13 (python.org) and run {launcher('setup')} again",
+    )
     missing = [pip for mod, pip in PACKAGES if importlib.util.find_spec(mod) is None]
-    row(not missing, "packages", "installed" if not missing else "missing: " + ", ".join(missing),
-        "" if not missing else f"run {launcher('setup')} again (it installs them)")
+    row(
+        not missing,
+        "packages",
+        "installed" if not missing else "missing: " + ", ".join(missing),
+        "" if not missing else f"run {launcher('setup')} again (it installs them)",
+    )
     gcc = shutil.which("gcc")
     if gcc is None:
-        row(False, "C compiler", "gcc is not on the PATH: the team search needs it",
+        row(
+            False,
+            "C compiler",
+            "gcc is not on the PATH: the team search needs it",
             f"install WinLibs ({WINLIBS} or winlibs.com), open a new window, run setup.cmd again"
-            if WINDOWS else "install gcc (Debian/Ubuntu: sudo apt install gcc), run ./setup.sh again")
+            if WINDOWS
+            else "install gcc (Debian/Ubuntu: sudo apt install gcc), run ./setup.sh again",
+        )
     else:
         err = build_kernels()
-        row(err is None, "C compiler", f"gcc ({shown(gcc)}): " + ("search kernels built" if err is None
-                                                          else f"a kernel did not build: {err}"))
+        row(
+            err is None,
+            "C compiler",
+            f"gcc ({shown(gcc)}): "
+            + ("search kernels built" if err is None else f"a kernel did not build: {err}"),
+        )
     try:
         row(True, "game install", shown(paths.game_root()))
     except MissingInput:
-        row(False, "game install", "hololive Dreams not found in this PC's Steam libraries",
-            "install it from Steam, or set HOLODREAMS_DIR to the folder that holds hololive-Dreams_Data")
+        row(
+            False,
+            "game install",
+            "hololive Dreams not found in this PC's Steam libraries",
+            "install it from Steam, or set HOLODREAMS_DIR to the folder that holds hololive-Dreams_Data",
+        )
     credential, how = find_credential()
-    row(True if credential else False, "account file",
-        f"found in {how} (read in place, never copied)" if credential else how)
+    row(
+        True if credential else False,
+        "account file",
+        f"found in {how} (read in place, never copied)" if credential else how,
+    )
     import game_keys  # noqa: PLC0415
+
     src = game_keys.source()
-    row(True if src else None, "game constants",
-        f"on this PC ({src})" if src else f"not yet: {launcher('refresh')} finds them in your game install")
+    row(
+        True if src else None,
+        "game constants",
+        f"on this PC ({src})" if src else f"not yet: {launcher('refresh')} finds them in your game install",
+    )
     host = region_host()
     row(True if host else None, "region", host or f"not yet: the first {launcher('refresh')} finds it")
     built = not first_refresh() and (STATE / "collection.json").is_file()
@@ -475,8 +537,9 @@ def check(_args: argparse.Namespace | None = None) -> int:
     elif built:
         print(f"Ready: {start_} opens holobuilder; {refresh_} reads your account again.")
     else:
-        print(f"Ready for the first refresh: run {refresh_} (it takes a while the first time), "
-              f"then {start_}.")
+        print(
+            f"Ready for the first refresh: run {refresh_} (it takes a while the first time), then {start_}."
+        )
     return 1 if blocking else 0
 
 
@@ -485,44 +548,67 @@ def setup(_args: argparse.Namespace | None = None) -> int:
     `check` with the .venv's interpreter. Safe to run again: an existing .venv is updated."""
     print("\n  holobuilder setup\n  =================\n")
     if sys.version_info < MIN_PYTHON:
-        print(f"  [X] Python {platform.python_version()} is too old: 3.12 or newer is needed "
-              "(3.13 is the version the project is tested on).")
+        print(
+            f"  [X] Python {platform.python_version()} is too old: 3.12 or newer is needed "
+            "(3.13 is the version the project is tested on)."
+        )
         return 1
     print(f"  Python {platform.python_version()}  ({shown(sys.executable)})")
     venv_py = paths.venv_python(paths.VENV)
     old = venv_version(venv_py) if venv_py.is_file() else MIN_PYTHON
     if old is None or old < MIN_PYTHON:
-        print("  .venv " + (f"runs Python {old[0]}.{old[1]}, too old" if old else "does not start")
-              + ": making it again with this Python ...")
+        print(
+            "  .venv "
+            + (f"runs Python {old[0]}.{old[1]}, too old" if old else "does not start")
+            + ": making it again with this Python ..."
+        )
         subprocess.run([sys.executable, "-m", "venv", "--clear", str(paths.VENV)], cwd=str(REPO))
     elif venv_py.is_file():
         print("  .venv is already here: bringing its packages up to date")
     else:
         print("  creating .venv ...")
         subprocess.run([sys.executable, "-m", "venv", str(paths.VENV)], cwd=str(REPO))
-    if not venv_py.is_file() or subprocess.run(
-            [str(venv_py), "-m", "pip", "--version"], cwd=str(REPO), capture_output=True).returncode:
+    if (
+        not venv_py.is_file()
+        or subprocess.run(
+            [str(venv_py), "-m", "pip", "--version"], cwd=str(REPO), capture_output=True
+        ).returncode
+    ):
         print("  [X] .venv could not be created (see the message above).")
         if not WINDOWS:
-            print("      On Debian or Ubuntu: sudo apt install python3-venv, delete the .venv folder "
-                  "and run ./setup.sh again.")
+            print(
+                "      On Debian or Ubuntu: sudo apt install python3-venv, delete the .venv folder "
+                "and run ./setup.sh again."
+            )
         return 1
     print("\n  installing the packages (a few minutes the first time) ...\n")
-    pip = subprocess.run([str(venv_py), "-m", "pip", "install", "--disable-pip-version-check",
-                          "-e", ".", "-r", "requirements.txt"], cwd=str(REPO))
+    pip = subprocess.run(
+        [
+            str(venv_py),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "-e",
+            ".",
+            "-r",
+            "requirements.txt",
+        ],
+        cwd=str(REPO),
+    )
     if pip.returncode:
         print("\n  [X] The packages did not install (see pip's message above).")
         return 1
     print()
-    return subprocess.run([str(venv_py), str(Path(__file__).resolve()), "check"],
-                          cwd=str(REPO)).returncode
+    return subprocess.run([str(venv_py), str(Path(__file__).resolve()), "check"], cwd=str(REPO)).returncode
 
 
 def venv_version(venv_py: Path) -> tuple[int, int] | None:
     """The (major, minor) of the Python a .venv runs, or None when it does not answer."""
     try:
-        out = subprocess.run([str(venv_py), "-c", "import sys; print(*sys.version_info[:2])"],
-                             capture_output=True, text=True)
+        out = subprocess.run(
+            [str(venv_py), "-c", "import sys; print(*sys.version_info[:2])"], capture_output=True, text=True
+        )
         major, minor = (int(x) for x in out.stdout.split())
     except (OSError, ValueError):
         return None
@@ -534,29 +620,41 @@ def too_old() -> bool:
     is older than MIN_PYTHON."""
     if sys.version_info >= MIN_PYTHON:
         return False
-    print(f"  [X] This folder's .venv runs Python {platform.python_version()}: holobuilder needs "
-          f"3.12 or newer. Install Python 3.13 (python.org) and run {launcher('setup')} again: "
-          "it makes .venv again with it.")
+    print(
+        f"  [X] This folder's .venv runs Python {platform.python_version()}: holobuilder needs "
+        f"3.12 or newer. Install Python 3.13 (python.org) and run {launcher('setup')} again: "
+        "it makes .venv again with it."
+    )
     return True
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_local.py", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("setup", help="create .venv, install the packages, then check (what setup.cmd "
-                                 "and setup.sh run)")
+    sub.add_parser(
+        "setup", help="create .venv, install the packages, then check (what setup.cmd and setup.sh run)"
+    )
     sub.add_parser("check", help="what this PC has, and what is missing (setup runs it)")
-    r = sub.add_parser("refresh", help="read the game and your account (any other option goes to "
-                                       "refresh_all.py; its --help lists them)")
-    r.add_argument("--region", choices=sorted(REGION_HOSTS),
-                   help="the server your account lives on (found by itself the first time)")
+    r = sub.add_parser(
+        "refresh",
+        help="read the game and your account (any other option goes to "
+        "refresh_all.py; its --help lists them)",
+    )
+    r.add_argument(
+        "--region",
+        choices=sorted(REGION_HOSTS),
+        help="the server your account lives on (found by itself the first time)",
+    )
     s = sub.add_parser("start", help="start the local web app on 127.0.0.1 and open it")
     s.add_argument("--port", type=int, default=DEFAULT_PORT)
     s.add_argument("--no-browser", action="store_true", help="do not open the browser")
     s.add_argument("--region", choices=sorted(REGION_HOSTS), help="as for refresh")
-    s.add_argument("--park-scan", action="store_true",
-                   help="turn on the Park page's 'Scan all areas': it logs into your account, "
-                        "enters every Park area with Free Chats and goes back to yours")
+    s.add_argument(
+        "--park-scan",
+        action="store_true",
+        help="turn on the Park page's 'Scan all areas': it logs into your account, "
+        "enters every Park area with Free Chats and goes back to yours",
+    )
     args, extra = ap.parse_known_args(argv)
     if extra and args.cmd != "refresh":
         ap.error("unrecognized arguments: " + " ".join(extra))

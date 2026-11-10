@@ -24,27 +24,23 @@ the reordering the rewrite promises not to introduce.
 
 from __future__ import annotations
 
+import dataclasses
 import random
 
 import pytest
-
-import dataclasses
+from support.builders import make_scoring_config
 
 from hbuilder.domain.card import Card, Stats
 from hbuilder.domain.scoring import _FIXED_TARGET, STAT_NAMES, _stat_sum
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.scoring_models import STACKING_MODELS
 
-from support.builders import make_scoring_config
-
 
 def config_with(stacking: str) -> ScoringConfig:
     """`make_scoring_config` exposes no `stacking_model` override, and adding one
     would reach every test module that imports it. `dataclasses.replace` over the
     same default config is local to this file and does the same thing."""
-    return dataclasses.replace(
-        make_scoring_config(), stacking_model=STACKING_MODELS[stacking]
-    )
+    return dataclasses.replace(make_scoring_config(), stacking_model=STACKING_MODELS[stacking])
 
 
 def gather_stat_sum(
@@ -88,8 +84,7 @@ def make_member(index: int, performance: int, technique: int, sense: int) -> Car
 
 
 MEMBERS = tuple(
-    make_member(index, 1000 + index * 37, 900 + index * 53, 800 + index * 71)
-    for index in range(5)
+    make_member(index, 1000 + index * 37, 900 + index * 53, 800 + index * 71) for index in range(5)
 )
 IDS = tuple(card.id for card in MEMBERS)
 
@@ -153,9 +148,7 @@ ADVERSARIAL_CASES: tuple[tuple[str, list], ...] = (
 )
 
 
-@pytest.mark.parametrize(
-    "label,stat_entries", ADVERSARIAL_CASES, ids=[case[0] for case in ADVERSARIAL_CASES]
-)
+@pytest.mark.parametrize("label,stat_entries", ADVERSARIAL_CASES, ids=[case[0] for case in ADVERSARIAL_CASES])
 def test_the_scatter_equals_the_gather_bit_for_bit(label, stat_entries):
     """Under the shipped additive stacking. Float addition is not
     associative, so a bucket combined in a different order can still differ in
@@ -182,8 +175,14 @@ def test_the_scatter_equals_the_gather_over_randomised_entry_shapes():
         stat_entries = []
         for _ in range(rng.randrange(0, 8)):
             names = rng.choice(
-                [("performance",), ("technique",), ("sense",), STAT_NAMES,
-                 ("performance", "sense"), ("technique", "sense")]
+                [
+                    ("performance",),
+                    ("technique",),
+                    ("sense",),
+                    STAT_NAMES,
+                    ("performance", "sense"),
+                    ("technique", "sense"),
+                ]
             )
             reach = frozenset(rng.sample(IDS, rng.randrange(0, len(IDS) + 1)))
             stat_entries.append(entry(round(rng.uniform(-0.5, 0.9), 4), names, reach))

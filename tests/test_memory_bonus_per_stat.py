@@ -51,10 +51,10 @@ def test_unset_permil_stays_none_and_zero_is_a_real_zero():
 
 def test_one_member_rounds_up_each_of_its_three_stats():
     """One member, three stats, at R=52. HAND-COMPUTED:
-        ceil(100 * 52 / 1000) = ceil(5.2)  = 6
-        ceil(200 * 52 / 1000) = ceil(10.4) = 11
-        ceil(300 * 52 / 1000) = ceil(15.6) = 16
-        total = 33
+    ceil(100 * 52 / 1000) = ceil(5.2)  = 6
+    ceil(200 * 52 / 1000) = ceil(10.4) = 11
+    ceil(300 * 52 / 1000) = ceil(15.6) = 16
+    total = 33
     """
     assert memory_bonus_per_stat([(100, 200, 300)], 52) == 6 + 11 + 16
     assert memory_bonus_per_stat([(100, 200, 300)], 52) == 33
@@ -123,9 +123,7 @@ def test_model_function_is_bit_exact_against_captured_server_rows():
     every row. Non-circular: the target is the wire figure, not the model's own code."""
     from hbuilder.domain.collection import stat_basis_from_mapping
 
-    basis = stat_basis_from_mapping(
-        json.loads(CURVE_PATH.read_text(encoding="utf-8"))
-    )
+    basis = stat_basis_from_mapping(json.loads(CURVE_PATH.read_text(encoding="utf-8")))
     col = json.loads(COLLECTION_PATH.read_text(encoding="utf-8"))
     cards_col = col["cards"]
     t = min(col["player"]["posters"], 50)

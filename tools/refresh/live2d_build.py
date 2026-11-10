@@ -31,6 +31,7 @@ re-fetched). Output: tools/recon/proxy/dumps/live2d/ (gitignored):
     python live2d_build.py --cards card-00022-5-uniq-0063-00 ...
 Nothing here writes data/ or state/.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -56,21 +57,23 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 BUILD_VERSION = 1
-BLEND = {0: "Overwrite", 1: "Add", 2: "Multiply"}          # CubismParameterBlendMode
-COMP = {0: "X", 1: "Y", 2: "Angle"}                        # CubismPhysicsSourceComponent
-IDLE_01 = 10                                               # enums.CharacterMotionType
+BLEND = {0: "Overwrite", 1: "Add", 2: "Multiply"}  # CubismParameterBlendMode
+COMP = {0: "X", 1: "Y", 2: "Angle"}  # CubismPhysicsSourceComponent
+IDLE_01 = 10  # enums.CharacterMotionType
 WEBP_QUALITY = 92
 
 
 def _unity():
     warnings.filterwarnings("ignore")
     import UnityPy  # noqa: PLC0415
+
     UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
     return UnityPy
 
 
 def load(name: str):
     import octo_crypto  # noqa: PLC0415
+
     raw = open(os.path.join(FETCHED, name + ".bundle"), "rb").read()
     return _unity().load(octo_crypto.decrypt_bundle(raw, name))
 
@@ -84,7 +87,7 @@ def dump_json(path: str, obj) -> None:
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
     try:
         os.replace(tmp, path)
-    except PermissionError:          # Windows: the other writer holds it -- its copy is the same
+    except PermissionError:  # Windows: the other writer holds it -- its copy is the same
         os.remove(tmp)
 
 
@@ -137,8 +140,17 @@ def read_model(name: str) -> dict:
             mbs.append(o.read_typetree())
         elif tn == "Texture2D":
             tex.append(o.read())
-    m = {"params": [], "parts": [], "blink": [], "mouth": [], "pose": [], "hit": [], "moc": None,
-         "rig": None, "tex": sorted(tex, key=lambda t: t.m_Name)}
+    m = {
+        "params": [],
+        "parts": [],
+        "blink": [],
+        "mouth": [],
+        "pose": [],
+        "hit": [],
+        "moc": None,
+        "rig": None,
+        "tex": sorted(tex, key=lambda t: t.m_Name),
+    }
     for t in mbs:
         cls = scripts.get(t["m_Script"]["m_PathID"], "?")
         go = gos.get(t["m_GameObject"]["m_PathID"])
@@ -171,27 +183,58 @@ def physics3(rig: dict) -> dict:
     for i, s in enumerate(rig["SubRigs"], 1):
         pid = f"PhysicsSetting{i}"
         dictionary.append({"Id": pid, "Name": s["Name"]})
-        inputs = [{"Source": {"Target": "Parameter", "Id": x["SourceId"]}, "Weight": x["Weight"],
-                   "Type": COMP[x["SourceComponent"]], "Reflect": bool(x["IsInverted"])} for x in s["Input"]]
-        outputs = [{"Destination": {"Target": "Parameter", "Id": x["DestinationId"]},
-                    "VertexIndex": x["ParticleIndex"], "Scale": x["AngleScale"], "Weight": x["Weight"],
-                    "Type": COMP[x["SourceComponent"]], "Reflect": bool(x["IsInverted"])} for x in s["Output"]]
-        verts = [{"Position": {"X": v["InitialPosition"]["x"], "Y": v["InitialPosition"]["y"]},
-                  "Mobility": v["Mobility"], "Delay": v["Delay"], "Acceleration": v["Acceleration"],
-                  "Radius": v["Radius"]} for v in s["Particles"]]
+        inputs = [
+            {
+                "Source": {"Target": "Parameter", "Id": x["SourceId"]},
+                "Weight": x["Weight"],
+                "Type": COMP[x["SourceComponent"]],
+                "Reflect": bool(x["IsInverted"]),
+            }
+            for x in s["Input"]
+        ]
+        outputs = [
+            {
+                "Destination": {"Target": "Parameter", "Id": x["DestinationId"]},
+                "VertexIndex": x["ParticleIndex"],
+                "Scale": x["AngleScale"],
+                "Weight": x["Weight"],
+                "Type": COMP[x["SourceComponent"]],
+                "Reflect": bool(x["IsInverted"]),
+            }
+            for x in s["Output"]
+        ]
+        verts = [
+            {
+                "Position": {"X": v["InitialPosition"]["x"], "Y": v["InitialPosition"]["y"]},
+                "Mobility": v["Mobility"],
+                "Delay": v["Delay"],
+                "Acceleration": v["Acceleration"],
+                "Radius": v["Radius"],
+            }
+            for v in s["Particles"]
+        ]
         nz = s["Normalization"]
-        norm = {k: {"Minimum": nz[k]["Minimum"], "Default": nz[k]["Default"], "Maximum": nz[k]["Maximum"]}
-                for k in ("Position", "Angle")}
+        norm = {
+            k: {"Minimum": nz[k]["Minimum"], "Default": nz[k]["Default"], "Maximum": nz[k]["Maximum"]}
+            for k in ("Position", "Angle")
+        }
         n_in += len(inputs)
         n_out += len(outputs)
         n_v += len(verts)
-        settings.append({"Id": pid, "Input": inputs, "Output": outputs, "Vertices": verts,
-                         "Normalization": norm})
-    meta = {"PhysicsSettingCount": len(settings), "TotalInputCount": n_in, "TotalOutputCount": n_out,
-            "VertexCount": n_v,
-            "EffectiveForces": {"Gravity": {"X": rig["Gravity"]["x"], "Y": rig["Gravity"]["y"]},
-                                "Wind": {"X": rig["Wind"]["x"], "Y": rig["Wind"]["y"]}},
-            "PhysicsDictionary": dictionary}
+        settings.append(
+            {"Id": pid, "Input": inputs, "Output": outputs, "Vertices": verts, "Normalization": norm}
+        )
+    meta = {
+        "PhysicsSettingCount": len(settings),
+        "TotalInputCount": n_in,
+        "TotalOutputCount": n_out,
+        "VertexCount": n_v,
+        "EffectiveForces": {
+            "Gravity": {"X": rig["Gravity"]["x"], "Y": rig["Gravity"]["y"]},
+            "Wind": {"X": rig["Wind"]["x"], "Y": rig["Wind"]["y"]},
+        },
+        "PhysicsDictionary": dictionary,
+    }
     if rig.get("Fps"):
         meta["Fps"] = rig["Fps"]
     return {"Version": 3, "Meta": meta, "PhysicsSettings": settings}
@@ -202,10 +245,15 @@ def exp3(name: str) -> dict:
         if o.type.name == "MonoBehaviour":
             t = o.read_typetree()
             if "Parameters" in t and "FadeInTime" in t:
-                return {"Type": "Live2D Expression", "FadeInTime": t["FadeInTime"],
-                        "FadeOutTime": t["FadeOutTime"],
-                        "Parameters": [{"Id": p["Id"], "Value": p["Value"], "Blend": BLEND[p["Blend"]]}
-                                       for p in t["Parameters"]]}
+                return {
+                    "Type": "Live2D Expression",
+                    "FadeInTime": t["FadeInTime"],
+                    "FadeOutTime": t["FadeOutTime"],
+                    "Parameters": [
+                        {"Id": p["Id"], "Value": p["Value"], "Blend": BLEND[p["Blend"]]}
+                        for p in t["Parameters"]
+                    ],
+                }
     raise ValueError(f"{name}: no CubismExpressionData")
 
 
@@ -226,8 +274,9 @@ def streamed_keys(sc: dict) -> dict:
 
 def curve_segments(keys, t_end):
     """A streamed curve as motion3 Segments: each cubic key is an exact Bezier segment."""
-    keys = sorted((k for k in keys if math.isfinite(k[0]) and -1e-4 <= k[0] <= t_end + 1e-4),
-                  key=lambda k: k[0])
+    keys = sorted(
+        (k for k in keys if math.isfinite(k[0]) and -1e-4 <= k[0] <= t_end + 1e-4), key=lambda k: k[0]
+    )
     if not keys:
         return None, 0
     t0, a, b, c, d = keys[0]
@@ -272,7 +321,7 @@ def motion3(name: str, hashes: dict) -> tuple[dict, list]:
             if "baseAnimation" in t:
                 define = t
     hashes = dict(hashes)
-    for b in (define or {}).get("baseAnimation", {}).get("bindings", []):   # self-describing names
+    for b in (define or {}).get("baseAnimation", {}).get("bindings", []):  # self-describing names
         hashes.setdefault(zlib.crc32(b["path"].encode()), b["path"])
     mc = clip["m_MuscleClip"]
     c = mc["m_Clip"].get("data", mc["m_Clip"])
@@ -319,14 +368,23 @@ def motion3(name: str, hashes: dict) -> tuple[dict, list]:
         v = cc["data"][j]
         if tg:
             curves.append((tg, [0.0, v, 0, dur, v], 1))
-    out = {"Version": 3,
-           "Meta": {"Duration": dur, "Fps": clip["m_SampleRate"], "Loop": bool(mc["m_LoopTime"]),
-                    "AreBeziersRestricted": True, "CurveCount": len(curves),
-                    "TotalSegmentCount": sum(n for _, _, n in curves),
-                    "TotalPointCount": sum(1 + sum({0: 1, 1: 3, 2: 1, 3: 1}[t] for t in _seg_types(seg))
-                                           for _, seg, _ in curves),
-                    "UserDataCount": 0, "TotalUserDataSize": 0},
-           "Curves": [{"Target": t[0], "Id": t[1], "Segments": seg} for t, seg, _ in curves]}
+    out = {
+        "Version": 3,
+        "Meta": {
+            "Duration": dur,
+            "Fps": clip["m_SampleRate"],
+            "Loop": bool(mc["m_LoopTime"]),
+            "AreBeziersRestricted": True,
+            "CurveCount": len(curves),
+            "TotalSegmentCount": sum(n for _, _, n in curves),
+            "TotalPointCount": sum(
+                1 + sum({0: 1, 1: 3, 2: 1, 3: 1}[t] for t in _seg_types(seg)) for _, seg, _ in curves
+            ),
+            "UserDataCount": 0,
+            "TotalUserDataSize": 0,
+        },
+        "Curves": [{"Target": t[0], "Id": t[1], "Segments": seg} for t, seg, _ in curves],
+    }
     if define:
         out["Meta"]["FadeInTime"] = define.get("fadeInTime", 0.5)
         out["Meta"]["FadeOutTime"] = define.get("fadeOutTime", 0.5)
@@ -359,13 +417,24 @@ def build_outfit(asset: str, motion: str | None, expression: str | None) -> dict
         groups = {}
         for go, t in m["pose"]:
             groups.setdefault(t["GroupIndex"], []).append(
-                (t["PartIndex"], {"Id": go, "Link": list(t.get("Link", []))}))
-        dump_json(os.path.join(folder, "pose3.json"),
-                  {"Type": "Live2D Pose", "FadeInTime": 0.5,
-                   "Groups": [[x for _, x in sorted(g)] for _, g in sorted(groups.items())]})
+                (t["PartIndex"], {"Id": go, "Link": list(t.get("Link", []))})
+            )
+        dump_json(
+            os.path.join(folder, "pose3.json"),
+            {
+                "Type": "Live2D Pose",
+                "FadeInTime": 0.5,
+                "Groups": [[x for _, x in sorted(g)] for _, g in sorted(groups.items())],
+            },
+        )
         refs["Pose"] = "pose3.json"
-    entry = {"model": f"models/{asset}/model3.json", "motion": None, "expression": None,
-             "pose_parts": len(m["pose"]), "textures": len(textures)}
+    entry = {
+        "model": f"models/{asset}/model3.json",
+        "motion": None,
+        "expression": None,
+        "pose_parts": len(m["pose"]),
+        "textures": len(textures),
+    }
     if expression and os.path.exists(os.path.join(FETCHED, expression + ".bundle")):
         path = os.path.join(OUT, "expressions", expression + ".exp3.json")
         if not os.path.exists(path):
@@ -382,14 +451,25 @@ def build_outfit(asset: str, motion: str | None, expression: str | None) -> dict
         path = os.path.join(OUT, "motions", motion + ".motion3.json")
         if not os.path.exists(path):
             dump_json(path, data)
-        refs["Motions"] = {"Idle": [{"File": f"../../motions/{motion}.motion3.json",
-                                     "FadeInTime": data["Meta"].get("FadeInTime", 0.5),
-                                     "FadeOutTime": data["Meta"].get("FadeOutTime", 0.5)}]}
+        refs["Motions"] = {
+            "Idle": [
+                {
+                    "File": f"../../motions/{motion}.motion3.json",
+                    "FadeInTime": data["Meta"].get("FadeInTime", 0.5),
+                    "FadeOutTime": data["Meta"].get("FadeOutTime", 0.5),
+                }
+            ]
+        }
         entry.update(motion=motion, motion_unknown_bindings=len(unknown), motion_absent_ids=absent)
-    model3 = {"Version": 3, "FileReferences": refs,
-              "Groups": [{"Target": "Parameter", "Name": "EyeBlink", "Ids": m["blink"]},
-                         {"Target": "Parameter", "Name": "LipSync", "Ids": m["mouth"]}],
-              "HitAreas": [{"Id": go, "Name": nm} for go, nm in m["hit"]]}
+    model3 = {
+        "Version": 3,
+        "FileReferences": refs,
+        "Groups": [
+            {"Target": "Parameter", "Name": "EyeBlink", "Ids": m["blink"]},
+            {"Target": "Parameter", "Name": "LipSync", "Ids": m["mouth"]},
+        ],
+        "HitAreas": [{"Id": go, "Name": nm} for go, nm in m["hit"]],
+    }
     dump_json(os.path.join(folder, "model3.json"), model3)
     return entry
 
@@ -418,8 +498,12 @@ def main(argv=None) -> int:
     g.add_argument("--all", action="store_true", help="every outfit with a model in the catalogue")
     g.add_argument("--cards", nargs="+", help="these card ids' outfits")
     ap.add_argument("--rebuild", action="store_true", help="convert again even when built")
-    ap.add_argument("--workers", type=int, default=0,
-                    help="parallel conversions (default: every thread but one; 1 = one by one)")
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="parallel conversions (default: every thread but one; 1 = one by one)",
+    )
     args = ap.parse_args(argv)
 
     import octo_fetch  # noqa: PLC0415
@@ -449,7 +533,7 @@ def main(argv=None) -> int:
         asset = info["asset"]
         mdl = f"live2d_mdl_{asset}"
         if mdl not in catalogue:
-            continue                                   # an outfit the game ships no model for
+            continue  # an outfit the game ships no model for
         motion, expression = idle.get(info["chr"], (None, None))
         if expression and info["expression"] and not expression.endswith("_" + info["expression"]):
             expression = expression.rsplit("_", 1)[0] + "_" + info["expression"]
@@ -461,8 +545,13 @@ def main(argv=None) -> int:
         octo_fetch.fetch(names)
     built = failed = 0
     errors = {}
-    todo = list(dict.fromkeys((asset, motion, expression) for _cos, asset, motion, expression in plan
-                              if args.rebuild or asset not in models))
+    todo = list(
+        dict.fromkeys(
+            (asset, motion, expression)
+            for _cos, asset, motion, expression in plan
+            if args.rebuild or asset not in models
+        )
+    )
     # Each outfit converts on its own (CPU-bound, ~11 s, mostly the 4096^2 WebP), so they run
     # side by side in processes; the files are the same as one by one (one at a time, the 200
     # outfits of a first refresh take ~37 min).
@@ -471,6 +560,7 @@ def main(argv=None) -> int:
         results = [_build_one(job) for job in todo]
     else:
         from concurrent.futures import ProcessPoolExecutor  # noqa: PLC0415
+
         with ProcessPoolExecutor(max_workers=workers) as pool:
             results = list(pool.map(_build_one, todo))
     for (asset, _motion, _expression), (entry, error) in zip(todo, results):
@@ -480,13 +570,21 @@ def main(argv=None) -> int:
         else:
             errors[asset] = error
             failed += 1
-    by_card = {card: costumes[cos]["asset"] for card, cos in cards.items()
-               if costumes[cos]["asset"] in models}
-    index = {"version": BUILD_VERSION, "written": int(time.time()), "models": models,
-             "by_card": by_card, "errors": errors}
+    by_card = {
+        card: costumes[cos]["asset"] for card, cos in cards.items() if costumes[cos]["asset"] in models
+    }
+    index = {
+        "version": BUILD_VERSION,
+        "written": int(time.time()),
+        "models": models,
+        "by_card": by_card,
+        "errors": errors,
+    }
     dump_json(index_path, index)
-    print(f"{built} built, {failed} failed, {len(models)} models in the index, "
-          f"{len(by_card)} cards with a figure -> {OUT}")
+    print(
+        f"{built} built, {failed} failed, {len(models)} models in the index, "
+        f"{len(by_card)} cards with a figure -> {OUT}"
+    )
     for asset, why in errors.items():
         print(f"  FAILED {asset}: {why}")
     return 1 if failed and not built else 0

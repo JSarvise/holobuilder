@@ -14,6 +14,7 @@ answers are canonical JSON with the run-dependent fields (timings, job ids, stam
 ``freeze.py``; every run also leaves ``timings.json`` (wall-clock per case and per stage) and
 the server's file-access log.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,18 +30,41 @@ import sandbox  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 
 # --------------------------------------------------------------------------- the sample
-SONG = "m0342"                       # an EXPERT chart of the frozen event's song list
+SONG = "m0342"  # an EXPERT chart of the frozen event's song list
 EVENT = "marathon_event-normal-008-chapter-01"
-PLAN = {"level": "account", "bloom": "account", "keep_higher": False, "sp_training": "account",
-        "all_invited": False, "no_refund": False, "branches": "GBRY", "targets": [],
-        "boards": "plan", "max_points": False, "infinite": False, "max_resets": None,
-        "reset_min_gain": 0.01}
+PLAN = {
+    "level": "account",
+    "bloom": "account",
+    "keep_higher": False,
+    "sp_training": "account",
+    "all_invited": False,
+    "no_refund": False,
+    "branches": "GBRY",
+    "targets": [],
+    "boards": "plan",
+    "max_points": False,
+    "infinite": False,
+    "max_resets": None,
+    "reset_min_gain": 0.01,
+}
 PLAY = {"difficulty": "EXPERT", "platform": "mobile", "auto": False}
 
 # Fields that differ between two runs of the same code on the same input. `plan_optimal` is not
 # compared but asserted (`plan_checks`): every exact board plan must have solved to optimality.
-STRIP_KEYS = {"seconds", "timings", "written", "elapsed_ms", "elapsed_s", "stage_s", "eta_s",
-              "eta_basis", "job_id", "seeded", "polish_seconds", "plan_optimal"}
+STRIP_KEYS = {
+    "seconds",
+    "timings",
+    "written",
+    "elapsed_ms",
+    "elapsed_s",
+    "stage_s",
+    "eta_s",
+    "eta_basis",
+    "job_id",
+    "seeded",
+    "polish_seconds",
+    "plan_optimal",
+}
 # the requests whose answers rest on an exact plan within the account's materials
 PLAN_ROUTES = ("/api/row-detail", "/api/board-plan-account")
 
@@ -62,9 +86,19 @@ def _search_all_maxed():
 
 
 def _event_run(song: str, basis: str):
-    body = {"objective": "event_points", "song": song, "difficulty": "EXPERT", "boosts": 3,
-            "holopass": True, "top": 5, "certify": False, "basis": basis, "event": EVENT,
-            "platform": "mobile", "auto": False}
+    body = {
+        "objective": "event_points",
+        "song": song,
+        "difficulty": "EXPERT",
+        "boosts": 3,
+        "holopass": True,
+        "top": 5,
+        "certify": False,
+        "basis": basis,
+        "event": EVENT,
+        "platform": "mobile",
+        "auto": False,
+    }
     if basis == "account":
         body["assumptions"] = PLAN
     return body
@@ -95,8 +129,12 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def _post(base: str, route: str, body: dict, timeout: float = 900) -> tuple[int, dict]:
-    req = urllib.request.Request(base + route, data=json.dumps(body).encode("utf-8"),
-                                 headers={"Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(
+        base + route,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
     try:
         with _OPENER.open(req, timeout=timeout) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8"))
@@ -153,8 +191,9 @@ def normalise(doc):
 
 def _plan_flags(doc) -> list:
     if isinstance(doc, dict):
-        return ([doc["plan_optimal"]] if "plan_optimal" in doc else []) + \
-            [f for k, v in doc.items() for f in _plan_flags(v)]
+        return ([doc["plan_optimal"]] if "plan_optimal" in doc else []) + [
+            f for k, v in doc.items() for f in _plan_flags(v)
+        ]
     if isinstance(doc, list):
         return [f for v in doc for f in _plan_flags(v)]
     return []
@@ -165,8 +204,7 @@ def plan_checks(name: str, req: dict, docs: list) -> list[str]:
     plan-based follow-up carries `plan_optimal`, and no plan anywhere stopped on the time limit
     (its numbers would depend on the machine's load)."""
     # Highlight rows keep the quick plan per chart: the exact plan is per song and is not run
-    planned = ((req.get("assumptions") or {}).get("boards") == "plan"
-               and req.get("song") != "highlight")
+    planned = (req.get("assumptions") or {}).get("boards") == "plan" and req.get("song") != "highlight"
     bad = []
     for case, doc, _s in docs:
         flags = _plan_flags(doc)
@@ -203,8 +241,13 @@ def _cards(row: dict) -> list[str]:
 
 
 def _detail_body(req: dict, row: dict, song: str) -> dict:
-    body = {"song": song, "difficulty": req["difficulty"], "basis": req["basis"], "cards": _cards(row),
-            "refine": row.get("refined")}
+    body = {
+        "song": song,
+        "difficulty": req["difficulty"],
+        "basis": req["basis"],
+        "cards": _cards(row),
+        "refine": row.get("refined"),
+    }
     if row.get("member_order"):
         body["member_order"] = [_id(c) for c in row["member_order"]]
     if "assumptions" in req:
@@ -218,8 +261,13 @@ def _follow_ups(base: str, name: str, req: dict, payload: dict, kinds, out: list
     def call(label: str, route: str, body: dict):
         t = time.perf_counter()
         status, doc = _post(base, route, body)
-        out.append((f"{name}.{label}", {"route": route, "request": body, "status": status,
-                                        "response": doc}, round(time.perf_counter() - t, 3)))
+        out.append(
+            (
+                f"{name}.{label}",
+                {"route": route, "request": body, "status": status, "response": doc},
+                round(time.perf_counter() - t, 3),
+            )
+        )
         return doc
 
     if "detail" in kinds and rows:
@@ -227,13 +275,24 @@ def _follow_ups(base: str, name: str, req: dict, payload: dict, kinds, out: list
         detail = call("row_detail_timeline", "/api/row-detail", {**b, "timeline": True})
         call("row_detail_distribution", "/api/row-detail", {**b, "distribution": True})
         if "board_plan" in kinds and isinstance(detail, dict) and detail.get("board_state") is not None:
-            call("board_plan_account", "/api/board-plan-account",
-                 {"cards": _cards(rows[0]), "song": req["song"], "assumptions": req["assumptions"],
-                  "board_state": detail.get("board_state"), "bench_slots": detail.get("bench_slots")})
+            call(
+                "board_plan_account",
+                "/api/board-plan-account",
+                {
+                    "cards": _cards(rows[0]),
+                    "song": req["song"],
+                    "assumptions": req["assumptions"],
+                    "board_state": detail.get("board_state"),
+                    "bench_slots": detail.get("bench_slots"),
+                },
+            )
     if "detail_all" in kinds and rows:
         songs = _get(base, f"/api/songs?difficulty={req['difficulty']}")
-        listed = [s for s in songs.get("songs") or []
-                  if s.get("notes") is not None or s.get("difficulty_level") is not None]
+        listed = [
+            s
+            for s in songs.get("songs") or []
+            if s.get("notes") is not None or s.get("difficulty_level") is not None
+        ]
         first = listed[0].get("music_id") if listed else None
         if first:
             b = _detail_body(req, rows[0], first)
@@ -241,35 +300,85 @@ def _follow_ups(base: str, name: str, req: dict, payload: dict, kinds, out: list
             call("row_detail_first_song", "/api/row-detail", {**b, "timeline": True})
     if "compare" in kinds and len(rows) >= 2:
         teams = [{"cards": _cards(r), "overrides": [None] * 6} for r in rows[:2]]
-        call("versus_compare", "/api/compare",
-             {"teams": teams, "basis": req["basis"], "board": "develop", "difficulty": req["difficulty"],
-              "platform": "mobile", "uptime_model": "finite", "auto": False, "song": req["song"],
-              "distribution": True})
+        call(
+            "versus_compare",
+            "/api/compare",
+            {
+                "teams": teams,
+                "basis": req["basis"],
+                "board": "develop",
+                "difficulty": req["difficulty"],
+                "platform": "mobile",
+                "uptime_model": "finite",
+                "auto": False,
+                "song": req["song"],
+                "distribution": True,
+            },
+        )
         for i, r in enumerate(rows[:2]):
-            call(f"versus_timeline_{i}", "/api/timeline",
-                 {"song": req["song"], "cards": _cards(r), "board": True, "basis": req["basis"],
-                  "difficulty": req["difficulty"], "platform": "mobile", "uptime_model": "finite",
-                  "auto": False})
+            call(
+                f"versus_timeline_{i}",
+                "/api/timeline",
+                {
+                    "song": req["song"],
+                    "cards": _cards(r),
+                    "board": True,
+                    "basis": req["basis"],
+                    "difficulty": req["difficulty"],
+                    "platform": "mobile",
+                    "uptime_model": "finite",
+                    "auto": False,
+                },
+            )
     if "now" in kinds and rows:
-        call("optimizer_now_compare", "/api/compare",
-             {"basis": "account", "song": req["song"], "across": False, "platform": "mobile",
-              "uptime_model": "finite", "auto": False, "assume_level": None, "assume_bloom": None,
-              "difficulty": req["difficulty"], "board": "captured",
-              "teams": [{"cards": _cards(rows[0])}, {"cards": _cards(rows[0])}]})
+        call(
+            "optimizer_now_compare",
+            "/api/compare",
+            {
+                "basis": "account",
+                "song": req["song"],
+                "across": False,
+                "platform": "mobile",
+                "uptime_model": "finite",
+                "auto": False,
+                "assume_level": None,
+                "assume_bloom": None,
+                "difficulty": req["difficulty"],
+                "board": "captured",
+                "teams": [{"cards": _cards(rows[0])}, {"cards": _cards(rows[0])}],
+            },
+        )
     if "points" in kinds and rows:
         best = rows[0]
         for label, extra in (("event_points", {}), ("event_points_multi", {"multi_score": 9_000_000})):
-            call(label, "/api/event/points",
-                 {"score": int(best["score"]), "live_permil": int(best["live_permil"]), "event": EVENT,
-                  "boosts": req["boosts"], "length_permil": int(payload["length_permil"]),
-                  "holopass": req["holopass"], **extra})
+            call(
+                label,
+                "/api/event/points",
+                {
+                    "score": int(best["score"]),
+                    "live_permil": int(best["live_permil"]),
+                    "event": EVENT,
+                    "boosts": req["boosts"],
+                    "length_permil": int(payload["length_permil"]),
+                    "holopass": req["holopass"],
+                    **extra,
+                },
+            )
         # the event page's row detail and board plan for its best row
         b = _detail_body(req, best, req["song"])
         call("row_detail", "/api/row-detail", {**b, "timeline": True, "distribution": False})
         if "assumptions" in req and best.get("board_state") is not None:
-            call("board_plan_account", "/api/board-plan-account",
-                 {"cards": _cards(best), "song": req["song"], "assumptions": req["assumptions"],
-                  "board_state": best.get("board_state"), "bench_slots": best.get("bench_slots")})
+            call(
+                "board_plan_account",
+                "/api/board-plan-account",
+                {
+                    "cards": _cards(best),
+                    "song": req["song"],
+                    "assumptions": req["assumptions"],
+                    "board_state": best.get("board_state"),
+                    "bench_slots": best.get("bench_slots"),
+                },
+            )
 
 
 # --------------------------------------------------------------------------- a run
@@ -296,8 +405,13 @@ def run(code: Path, frozen: Path, out: Path, workers: int | None, only: set[str]
                     raise RuntimeError(f"{name}: {route} answered {status}: {started}")
                 payload, events = _stream(server.base, started["job_id"], t0)
                 wall = round(time.perf_counter() - t0, 3)
-                docs = [(name, {"route": route, "request": req, "result": payload,
-                                "plan": started.get("plan")}, wall)]
+                docs = [
+                    (
+                        name,
+                        {"route": route, "request": req, "result": payload, "plan": started.get("plan")},
+                        wall,
+                    )
+                ]
                 _follow_ups(server.base, name, req, payload or {}, kinds, docs)
             finally:
                 server.stop()
@@ -307,19 +421,31 @@ def run(code: Path, frozen: Path, out: Path, workers: int | None, only: set[str]
             for case, doc, seconds in docs:
                 (out / f"{case}.json").write_text(_canon(normalise(doc)), encoding="utf-8")
                 timings["cases"][case] = {"wall_s": seconds}
-            timings["cases"][name].update({
-                "server_boot_s": boot, "events": events,
-                # the server's own wall-clock stage timers (stripped from the compared output)
-                "server_timings": (payload or {}).get("timings"),
-                "server_seconds": (payload or {}).get("seconds")})
+            timings["cases"][name].update(
+                {
+                    "server_boot_s": boot,
+                    "events": events,
+                    # the server's own wall-clock stage timers (stripped from the compared output)
+                    "server_timings": (payload or {}).get("timings"),
+                    "server_seconds": (payload or {}).get("seconds"),
+                }
+            )
             failed = [c for c, d, _ in docs[1:] if not 200 <= d.get("status", 0) < 300]
             failed += plan_checks(name, req, docs)
-            if payload is None:     # the job ended with an error event (its message is in events)
-                failed.insert(0, name + " (job: " + "; ".join(
-                    str(e.get("message")) for e in events if e.get("type") == "error") + ")")
+            if payload is None:  # the job ended with an error event (its message is in events)
+                failed.insert(
+                    0,
+                    name
+                    + " (job: "
+                    + "; ".join(str(e.get("message")) for e in events if e.get("type") == "error")
+                    + ")",
+                )
             timings["failed_requests"] = timings.get("failed_requests", []) + failed
-            print(f"{name}: {wall:.1f}s (+{len(docs) - 1} follow-ups)"
-                  + (f"  FAILED REQUESTS: {failed}" if failed else ""), flush=True)
+            print(
+                f"{name}: {wall:.1f}s (+{len(docs) - 1} follow-ups)"
+                + (f"  FAILED REQUESTS: {failed}" if failed else ""),
+                flush=True,
+            )
     finally:
         sandbox.remove(box)
     (out / "timings.json").write_text(json.dumps(timings, indent=1), encoding="utf-8")
@@ -383,8 +509,10 @@ def _without_fingerprints(doc):
 def _graft_fingerprints(old, new):
     """`old` with every fingerprint value taken from `new`, nothing else touched."""
     if isinstance(old, dict) and isinstance(new, dict):
-        return {k: (new[k] if k in FINGERPRINT_KEYS and k in new else
-                    _graft_fingerprints(v, new.get(k))) for k, v in old.items()}
+        return {
+            k: (new[k] if k in FINGERPRINT_KEYS and k in new else _graft_fingerprints(v, new.get(k)))
+            for k, v in old.items()
+        }
     if isinstance(old, list) and isinstance(new, list) and len(old) == len(new):
         return [_graft_fingerprints(u, v) for u, v in zip(old, new)]
     return old
@@ -424,13 +552,16 @@ def missing_inputs(box: Path, audit_log: Path) -> list[str]:
     snapshot lacks (or a probe the code makes on purpose -- read the list, do not assume)."""
     box_s = str(box).lower()
     seen = set()
-    lines = [line for log in sorted(audit_log.parent.glob(audit_log.name + ".*"))
-             for line in log.read_text("utf-8", "replace").splitlines()]
+    lines = [
+        line
+        for log in sorted(audit_log.parent.glob(audit_log.name + ".*"))
+        for line in log.read_text("utf-8", "replace").splitlines()
+    ]
     for line in lines:
         parts = line.split("\t")
         if len(parts) >= 4 and parts[1] == "open" and "r" in parts[2] and parts[3].lower().startswith(box_s):
             if not Path(parts[3]).exists() and "__pycache__" not in parts[3]:
-                seen.add(Path(parts[3][len(box_s):].lstrip("\\/")).as_posix())
+                seen.add(Path(parts[3][len(box_s) :].lstrip("\\/")).as_posix())
     return sorted(seen)
 
 
@@ -452,9 +583,14 @@ def audit(frozen: Path, run_dir: Path) -> dict:
             elif low.startswith(frozen_s):
                 if kind == "open" and any(c in mode for c in "wax+"):
                     report["wrote_snapshot"].add(path)
-            elif (Path(path).is_absolute() and "hbgold_" not in low and low != "nul"
-                  and not any(seg in low for seg in ("python", "site-packages", r"\windows" + "\\",
-                                                     r"\temp" + "\\"))):
+            elif (
+                Path(path).is_absolute()
+                and "hbgold_" not in low
+                and low != "nul"
+                and not any(
+                    seg in low for seg in ("python", "site-packages", r"\windows" + "\\", r"\temp" + "\\")
+                )
+            ):
                 report["outside"].add(path)
     return {k: sorted(v) for k, v in report.items()}
 
@@ -471,8 +607,11 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--out", type=Path)
         p.add_argument("--expected", type=Path)
         if cmd != "record":
-            p.add_argument("--serial", action="store_true",
-                           help="one worker, the planned-board searches only (SERIAL_GROUPS)")
+            p.add_argument(
+                "--serial",
+                action="store_true",
+                help="one worker, the planned-board searches only (SERIAL_GROUPS)",
+            )
     p = sub.add_parser("diff")
     p.add_argument("a", type=Path)
     p.add_argument("b", type=Path)

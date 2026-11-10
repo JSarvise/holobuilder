@@ -4,6 +4,7 @@ Resetting costs 1,000 Hologold per node (read from the game binary), so "how man
 this plan take off the boards" is a real constraint, the same knob the community tool
 holodori.best exposes as a reset limit. `max_resets=None` allows a free rebuild.
 """
+
 from __future__ import annotations
 
 import sys
@@ -17,8 +18,14 @@ for _p in (HERE, REPO / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-TEAM = ["card-04001-5-uniq-0042-00", "card-00023-5-uniq-0019-00", "card-04003-5-uniq-0044-00",
-        "card-00031-5-uniq-0025-00", "card-03002-5-uniq-0034-00", "card-04001-5-uniq-0042-00"]
+TEAM = [
+    "card-04001-5-uniq-0042-00",
+    "card-00023-5-uniq-0019-00",
+    "card-04003-5-uniq-0044-00",
+    "card-00031-5-uniq-0025-00",
+    "card-03002-5-uniq-0034-00",
+    "card-04001-5-uniq-0042-00",
+]
 
 
 def _needs_data():
@@ -37,8 +44,8 @@ def solved():
     out = {}
     for limit in (0, 5):
         out[limit] = board_plan_solver.solve_team_board(
-            scenario="account", song="m0334", pool=1, for_team=TEAM,
-            develop_bench=False, max_resets=limit)
+            scenario="account", song="m0334", pool=1, for_team=TEAM, develop_bench=False, max_resets=limit
+        )
     return owned, out
 
 
@@ -63,8 +70,14 @@ def test_a_small_reset_budget_is_never_exceeded(solved):
 
 
 # A real account's team: Lui leading Nene, Botan, Moona, Zeta, Kaela; Kobo on the bench
-BENCH_TEAM = ["card-00036-5-uniq-0078-00", "card-00031-5-uniq-0025-00", "card-00032-4-cmmn-0000-00",
-              "card-03002-5-uniq-0034-00", "card-03007-5-uniq-0039-00", "card-03008-5-uniq-0095-00"]
+BENCH_TEAM = [
+    "card-00036-5-uniq-0078-00",
+    "card-00031-5-uniq-0025-00",
+    "card-00032-4-cmmn-0000-00",
+    "card-03002-5-uniq-0034-00",
+    "card-03007-5-uniq-0039-00",
+    "card-03008-5-uniq-0095-00",
+]
 KOBO = "chr-03009"
 
 
@@ -111,6 +124,7 @@ def test_a_bench_blue_branch_pays_for_the_team_before_the_team_resets(monkeypatc
             u = dict(unspent_now())
             u[KOBO] = u.get(KOBO, 0) - pts
             return u
+
         return owned, balance, unspent
 
     scores = {}
@@ -120,14 +134,18 @@ def test_a_bench_blue_branch_pays_for_the_team_before_the_team_resets(monkeypatc
         monkeypatch.setattr(to, "balance_from_disk", balance)
         monkeypatch.setattr(to, "_character_points", unspent)
         plan = board_plan_solver.solve_team_board(
-            scenario="account", song=None, pool=1, for_team=BENCH_TEAM,
-            develop_bench=True, reset_min_gain=gain)
+            scenario="account",
+            song=None,
+            pool=1,
+            for_team=BENCH_TEAM,
+            develop_bench=True,
+            reset_min_gain=gain,
+        )
         assert plan
-        oracle = to.Oracle(pool_size=1, song=None, charts_path=None, scenario="account",
-                           uptime_model="finite")
+        oracle = to.Oracle(
+            pool_size=1, song=None, charts_path=None, scenario="account", uptime_model="finite"
+        )
         o = owned()
-        full = {c: sorted(set((plan.get(c) or {}).get("nodes") or o.get(c) or []) | {to.ROOT})
-                for c in o}
-        scores[holding] = oracle.score_team(BENCH_TEAM[0], tuple(BENCH_TEAM[1:]),
-                                            oracle.state_from(full))
+        full = {c: sorted(set((plan.get(c) or {}).get("nodes") or o.get(c) or []) | {to.ROOT}) for c in o}
+        scores[holding] = oracle.score_team(BENCH_TEAM[0], tuple(BENCH_TEAM[1:]), oracle.state_from(full))
     assert scores[True] >= scores[False] * (1 - 1e-6), scores

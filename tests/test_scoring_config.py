@@ -68,23 +68,17 @@ def test_probability_tiers_missing_a_tier_name_is_rejected_naming_probability_ti
 
 
 def test_probability_tier_value_below_zero_is_rejected_naming_probability_tiers_and_tier():
-    errors = validate_scoring_config(
-        {"probability_tiers": {"Low": -0.1, "Medium": 0.55, "High": 0.75}}
-    )
+    errors = validate_scoring_config({"probability_tiers": {"Low": -0.1, "Medium": 0.55, "High": 0.75}})
     assert any(e.startswith("probability_tiers") and "Low" in e for e in errors)
 
 
 def test_probability_tier_value_above_one_is_rejected_naming_probability_tiers_and_tier():
-    errors = validate_scoring_config(
-        {"probability_tiers": {"Low": 0.35, "Medium": 0.55, "High": 1.5}}
-    )
+    errors = validate_scoring_config({"probability_tiers": {"Low": 0.35, "Medium": 0.55, "High": 1.5}})
     assert any(e.startswith("probability_tiers") and "High" in e for e in errors)
 
 
 def test_misspelled_probability_tier_key_is_rejected_naming_the_unknown_key():
-    errors = validate_scoring_config(
-        {"probability_tiers": {"Loww": 0.35, "Medium": 0.55, "High": 0.75}}
-    )
+    errors = validate_scoring_config({"probability_tiers": {"Loww": 0.35, "Medium": 0.55, "High": 0.75}})
     assert any("Loww" in e for e in errors)
     assert any("'Low'" in e for e in errors)
 
@@ -104,9 +98,7 @@ def test_family_weights_missing_a_family_is_rejected_naming_family_weights_and_t
         }
     }
     errors = validate_scoring_config(doc)
-    assert any(
-        e.startswith("family_weights") and "judgment_enhancement" in e for e in errors
-    )
+    assert any(e.startswith("family_weights") and "judgment_enhancement" in e for e in errors)
 
 
 def test_non_numeric_family_weight_is_rejected_naming_family_weights_and_the_family():
@@ -121,18 +113,14 @@ def test_non_numeric_family_weight_is_rejected_naming_family_weights_and_the_fam
         }
     }
     errors = validate_scoring_config(doc)
-    assert any(
-        e.startswith("family_weights") and "score_support" in e for e in errors
-    )
+    assert any(e.startswith("family_weights") and "score_support" in e for e in errors)
 
 
 def test_nonzero_activation_rate_up_family_weight_is_rejected_as_an_inert_knob():
     weights = dict(DEFAULT_CONFIG["family_weights"])
     weights["activation_rate_up"] = 0.5
     errors = validate_scoring_config({"family_weights": weights})
-    assert any(
-        e.startswith("family_weights") and "activation_rate_up" in e for e in errors
-    )
+    assert any(e.startswith("family_weights") and "activation_rate_up" in e for e in errors)
 
 
 def test_activation_rate_up_family_weight_of_exactly_zero_is_accepted():
@@ -146,9 +134,7 @@ def test_misspelled_family_weight_key_is_rejected_naming_the_unknown_key():
     weights = dict(DEFAULT_CONFIG["family_weights"])
     weights["score_suport"] = 1.0
     errors = validate_scoring_config({"family_weights": weights})
-    assert any(
-        e.startswith("family_weights") and "score_suport" in e for e in errors
-    )
+    assert any(e.startswith("family_weights") and "score_suport" in e for e in errors)
 
 
 # --- special.expected_fires_per_run rejection ---------------------------------
@@ -166,21 +152,14 @@ def test_unknown_model_stacking_name_is_rejected_naming_model_stacking_and_accep
     errors = validate_scoring_config(
         {"model": {"stacking": "geometric", "activation_rate": "multiplicative"}}
     )
-    assert any(
-        e.startswith("model.stacking") and "'geometric'" in e and "['additive']" in e
-        for e in errors
-    )
+    assert any(e.startswith("model.stacking") and "'geometric'" in e and "['additive']" in e for e in errors)
     assert not any("was removed" in e for e in errors)
 
 
 def test_unknown_model_activation_rate_name_is_rejected_naming_model_activation_rate_and_accepted_names():
-    errors = validate_scoring_config(
-        {"model": {"stacking": "additive", "activation_rate": "logarithmic"}}
-    )
+    errors = validate_scoring_config({"model": {"stacking": "additive", "activation_rate": "logarithmic"}})
     assert any(
-        e.startswith("model.activation_rate")
-        and "'logarithmic'" in e
-        and "['multiplicative']" in e
+        e.startswith("model.activation_rate") and "'logarithmic'" in e and "['multiplicative']" in e
         for e in errors
     )
     assert not any("was removed" in e for e in errors)
@@ -199,9 +178,7 @@ def test_a_removed_stacking_model_is_rejected_naming_it_and_the_shipped_rule():
 
 
 def test_a_removed_activation_rate_model_is_rejected_naming_it_and_the_shipped_rule():
-    errors = validate_scoring_config(
-        {"model": {"stacking": "additive", "activation_rate": "pp"}}
-    )
+    errors = validate_scoring_config({"model": {"stacking": "additive", "activation_rate": "pp"}})
     assert any(
         e.startswith("model.activation_rate")
         and "'pp' was removed" in e
@@ -236,10 +213,7 @@ def test_unknown_model_active_uptime_name_is_rejected_naming_it_and_accepted_nam
     errors = validate_scoring_config(
         {"model": {"stacking": "additive", "activation_rate": "pp", "active_uptime": "instant"}}
     )
-    assert any(
-        e.startswith("model.active_uptime") and "finite" in e and "steady" in e
-        for e in errors
-    )
+    assert any(e.startswith("model.active_uptime") and "finite" in e and "steady" in e for e in errors)
 
 
 def test_model_active_uptime_is_OPTIONAL_a_block_omitting_it_is_accepted_and_reads_finite():
@@ -252,9 +226,7 @@ def test_model_active_uptime_is_OPTIONAL_a_block_omitting_it_is_accepted_and_rea
 
 def test_model_active_uptime_steady_is_accepted_and_reaches_the_config(tmp_path: Path):
     path = tmp_path / "config.json"
-    doc = {
-        "model": {"stacking": "additive", "activation_rate": "multiplicative", "active_uptime": "steady"}
-    }
+    doc = {"model": {"stacking": "additive", "activation_rate": "multiplicative", "active_uptime": "steady"}}
     path.write_text(json.dumps(doc), encoding="utf-8")
     assert load_scoring_config(path).active_uptime_model == "steady"
 
@@ -285,9 +257,7 @@ def test_config_file_with_partial_model_object_raises_schema_error_not_key_error
 
 
 def test_non_numeric_assumed_run_state_dimension_is_rejected_naming_it():
-    errors = validate_scoring_config(
-        {"assumed_run_state": {"life": "yes", "combo": 100}}
-    )
+    errors = validate_scoring_config({"assumed_run_state": {"life": "yes", "combo": 100}})
     assert any(e.startswith("assumed_run_state") and "life" in e for e in errors)
 
 
@@ -300,9 +270,7 @@ def test_boolean_assumed_run_state_dimension_is_rejected_rather_than_coerced():
     well-formed. That is the migration failure this rejection exists to
     prevent.
     """
-    errors = validate_scoring_config(
-        {"assumed_run_state": {"life": True, "combo": 100}}
-    )
+    errors = validate_scoring_config({"assumed_run_state": {"life": True, "combo": 100}})
     assert any(e.startswith("assumed_run_state") and "life" in e for e in errors)
 
 
@@ -316,9 +284,7 @@ def test_unmapped_assumed_run_state_key_is_rejected_naming_assumed_run_state_and
             }
         }
     )
-    assert any(
-        e.startswith("assumed_run_state") and "extra_life_up" in e for e in errors
-    )
+    assert any(e.startswith("assumed_run_state") and "extra_life_up" in e for e in errors)
 
 
 # --- reference_run_seconds rejection ------------------------------------------
@@ -350,7 +316,7 @@ def test_malformed_config_file_raises_schema_error_naming_the_field_not_falling_
 
 
 def test_repo_root_config_json_passes_validate_scoring_config_with_empty_errors():
-    with open("config.json", "r", encoding="utf-8") as fh:
+    with open("config.json", encoding="utf-8") as fh:
         doc = json.load(fh)
     assert validate_scoring_config(doc) == []
 

@@ -26,16 +26,21 @@ sitting in `cards_enriched.json`, which is the cross-check that they are being r
 
     python card_caps.py
 """
-import json, os, sys, collections
+
+import collections
+import json
+import os
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 from master_cache import rows  # noqa: E402
 
 OUT = os.path.join(paths.DUMPS, "card_caps.json")
-POTENTIAL_STAT_EFFECT = 4      # the effect type whose value is the stat multiplier, in permil
+POTENTIAL_STAT_EFFECT = 4  # the effect type whose value is the stat multiplier, in permil
 
 
 def _one(rec, field, default=None):
@@ -68,7 +73,7 @@ def potential():
     """{'3': {'max': 5, 'mult_permil': [0, 0, 50, ...], 'effects': [...]}, ...} by rarity."""
     by_rarity = collections.defaultdict(dict)
     for r in rows("CardPotential"):
-        grp = r["group_id"]                       # card_potential_grp-rarity_5
+        grp = r["group_id"]  # card_potential_grp-rarity_5
         rarity = grp.rsplit("_", 1)[-1]
         n = int(r["upgrade_count"])
         by_rarity[rarity][n] = (int(_one(r["data"], 3, 0)), int(_one(r["data"], 4, 0)))
@@ -104,8 +109,10 @@ def main():
     for rarity in sorted(pot):
         grp = f"rarity_{rarity}-attribute_1"
         p = pot[rarity]
-        print(f"  {rarity}*  nivel {lv.get(grp)}  bloom max {p['max']}"
-              f"  mult x{1 + p['mult_permil'][-1] / 1000:.2f}")
+        print(
+            f"  {rarity}*  nivel {lv.get(grp)}  bloom max {p['max']}"
+            f"  mult x{1 + p['mult_permil'][-1] / 1000:.2f}"
+        )
 
 
 if __name__ == "__main__":

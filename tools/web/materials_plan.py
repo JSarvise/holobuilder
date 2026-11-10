@@ -17,6 +17,7 @@ The work runs inside the engine's RefinePool workers (`plan_and_score`), which
 already hold the leaf context, or in the server process when the pool has one worker;
 the solver is recon-side (`highspy`), imported on first use. Nothing here writes a file.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -49,6 +50,7 @@ def bench_from_plan(solved: dict, team_chrs: set[str]) -> dict:
     every planned off-team board replaced (`precompute_optimisations.
     developed_bench_characters` does the same around a nominal team)."""
     import build_board  # noqa: PLC0415
+
     from hbuilder.domain.collection import caps_by_rarity_from_mapping  # noqa: PLC0415
 
     state = {k: dict(v) for k, v in _read("board_state.json").items()}
@@ -57,8 +59,13 @@ def bench_from_plan(solved: dict, team_chrs: set[str]) -> dict:
             state[chr_id] = {**state.get(chr_id, {}), "nodes": plan["nodes"]}
     collection = json.loads((paths.STATE / "collection.json").read_text("utf-8"))
     document, _report, _problems = build_board.build(
-        state, _read("skilltree.json"), _read("master_SkillTreeNode.json"), level=None,
-        collection=collection, caps_by_rarity=caps_by_rarity_from_mapping(_read("card_caps.json")))
+        state,
+        _read("skilltree.json"),
+        _read("master_SkillTreeNode.json"),
+        level=None,
+        collection=collection,
+        caps_by_rarity=caps_by_rarity_from_mapping(_read("card_caps.json")),
+    )
     return document.get("characters") or {}
 
 
@@ -88,9 +95,20 @@ def judged_opts(opts: dict, assumptions, difficulty: str, leaf, levels=None) -> 
     run is played (on the leaf's own config) and the level ranges. Held under these, a plan
     is never served to a request whose leaf would have picked another one."""
     cfg = leaf.cfg
-    return {**opts, "judge": json.dumps(
-        [assumptions.key(), str(difficulty), cfg.platform, bool(cfg.song_auto),
-         cfg.run_state.combo, levels], default=str)}
+    return {
+        **opts,
+        "judge": json.dumps(
+            [
+                assumptions.key(),
+                str(difficulty),
+                cfg.platform,
+                bool(cfg.song_auto),
+                cfg.run_state.combo,
+                levels,
+            ],
+            default=str,
+        ),
+    }
 
 
 def _plan_stamp() -> tuple:
@@ -104,8 +122,16 @@ def _plan_stamp() -> tuple:
     return bps._account_stamp() + tuple(p.stat().st_mtime_ns if p.exists() else 0 for p in files)
 
 
-def plan_for(leader_id: str, member_ids, song, opts: dict, should_stop=None, judge=None,
-             scored: dict | None = None, parallel: bool = False):
+def plan_for(
+    leader_id: str,
+    member_ids,
+    song,
+    opts: dict,
+    should_stop=None,
+    judge=None,
+    scored: dict | None = None,
+    parallel: bool = False,
+):
     """`(team board state, off-team bench characters, the whole plan {chr: {nodes}})`
     of the plan within the wallet, or None when the wallet cannot fund one. The
     whole plan matters for its cost: a from-scratch plan resets EVERY board (the
@@ -142,16 +168,28 @@ def plan_for(leader_id: str, member_ids, song, opts: dict, should_stop=None, jud
     # each judged candidate's (plan, bench, score): the one kept needs neither again
     judged: list = []
     if judge is not None:
+
         def rate(board):
             bench = bench_from_plan(board, team_chrs)
             value = judge({c: v for c, v in board.items() if c in team_chrs}, bench)
             judged.append((board, bench, value))
             return value
+
     solved = bps.solve_team_board(
-        scenario="account", song=song, pool=1, for_team=[leader_id, *member_ids],
-        develop_bench=True, include_sockets=False, should_stop=should_stop,
-        statuses=statuses, judge=rate, parallel_candidates=parallel,
-        candidates=FIRST if first else "all", levels_out=levels if first else None, **solve_opts)
+        scenario="account",
+        song=song,
+        pool=1,
+        for_team=[leader_id, *member_ids],
+        develop_bench=True,
+        include_sockets=False,
+        should_stop=should_stop,
+        statuses=statuses,
+        judge=rate,
+        parallel_candidates=parallel,
+        candidates=FIRST if first else "all",
+        levels_out=levels if first else None,
+        **solve_opts,
+    )
     # a plan any of whose MILPs stopped on the time limit depends on the machine's load:
     # held here, but flagged so `plan_and_score` never carries it into a search, and every
     # answer that uses it says so (`plan_optimal`)
@@ -160,8 +198,11 @@ def plan_for(leader_id: str, member_ids, song, opts: dict, should_stop=None, jud
         out = None
     else:
         kept = next(((bench, value) for board, bench, value in judged if board is solved), None)
-        out = ({c: v for c, v in solved.items() if c in team_chrs},
-               kept[0] if kept else bench_from_plan(solved, team_chrs), solved)
+        out = (
+            {c: v for c, v in solved.items() if c in team_chrs},
+            kept[0] if kept else bench_from_plan(solved, team_chrs),
+            solved,
+        )
         if kept and scored is not None:
             scored["score"] = kept[1]
     _hold(key, (stamp, out, limited, levels) if first else (stamp, out, limited))
@@ -181,8 +222,9 @@ def _hold(key, entry) -> None:
 
 def _loose(opts_json: str) -> str:
     """A plan's options without its judge (`judged_opts`)."""
-    return json.dumps({k: v for k, v in json.loads(opts_json).items() if k != "judge"},
-                      sort_keys=True, default=str)
+    return json.dumps(
+        {k: v for k, v in json.loads(opts_json).items() if k != "judge"}, sort_keys=True, default=str
+    )
 
 
 def held_plan(leader_id, member_ids, song, opts):
@@ -201,9 +243,16 @@ def held_plan(leader_id, member_ids, song, opts):
         team = (key[0], frozenset(key[1]), key[2])
         loose = "judge" not in opts and opts.get("candidates") != FIRST
         want = _loose(key[3]) if loose else key[3]
-        held = next((entry for k, entry in reversed(_PLANS.items())
-                     if entry[0] == stamp and (k[0], frozenset(k[1]), k[2]) == team
-                     and (_loose(k[3]) if loose else k[3]) == want), None)
+        held = next(
+            (
+                entry
+                for k, entry in reversed(_PLANS.items())
+                if entry[0] == stamp
+                and (k[0], frozenset(k[1]), k[2]) == team
+                and (_loose(k[3]) if loose else k[3]) == want
+            ),
+            None,
+        )
     return held
 
 
@@ -239,10 +288,18 @@ def leaf_judge(leaf, by_id, tree_for, budget_for, leader_id, member_ids, chart_i
     from hbuilder.solver import parallel_refine as pr  # noqa: PLC0415
 
     def judge(team_state, bench):
-        ctx = dataclasses.replace(leaf, board_state=team_state, bench_characters=bench,
-                                  socket_bench=True)
-        return float(pr.evaluate(ctx, by_id, tree_for, budget_for,
-                                 (leader_id, tuple(member_ids), chart_indices), plan_cache=None))
+        ctx = dataclasses.replace(leaf, board_state=team_state, bench_characters=bench, socket_bench=True)
+        return float(
+            pr.evaluate(
+                ctx,
+                by_id,
+                tree_for,
+                budget_for,
+                (leader_id, tuple(member_ids), chart_indices),
+                plan_cache=None,
+            )
+        )
+
     return judge
 
 
@@ -279,9 +336,15 @@ def plan_and_score(item, local=None):
         if carried is not None and carried[0] == _plan_stamp():
             _hold(_plan_key(leader_id, member_ids, song, opts), carried)
         scored: dict = {}
-        planned = plan_for(leader_id, member_ids, song, opts, should_stop=should_stop,
-                           judge=leaf_judge(leaf, by_id, tree_for, budget_for, leader_id,
-                                            member_ids, chart_indices), scored=scored)
+        planned = plan_for(
+            leader_id,
+            member_ids,
+            song,
+            opts,
+            should_stop=should_stop,
+            judge=leaf_judge(leaf, by_id, tree_for, budget_for, leader_id, member_ids, chart_indices),
+            scored=scored,
+        )
         if planned is None:
             return index, None, None, "the wallet cannot fund a plan for this team", None
         team_state, bench, _whole = planned
@@ -289,12 +352,16 @@ def plan_and_score(item, local=None):
         value = scored.get("score")
         if value is None:
             # the bench's root sockets chosen with the team's (each card once, account-wide)
-            ctx = dataclasses.replace(leaf, board_state=team_state, bench_characters=bench,
-                                      socket_bench=True)
-            value = pr.evaluate(ctx, by_id, tree_for, budget_for,
-                                (leader_id, tuple(member_ids), chart_indices), plan_cache=None)
-        return (index, float(value), team_state, None,
-                held_plan(leader_id, member_ids, song, opts))
+            ctx = dataclasses.replace(leaf, board_state=team_state, bench_characters=bench, socket_bench=True)
+            value = pr.evaluate(
+                ctx,
+                by_id,
+                tree_for,
+                budget_for,
+                (leader_id, tuple(member_ids), chart_indices),
+                plan_cache=None,
+            )
+        return (index, float(value), team_state, None, held_plan(leader_id, member_ids, song, opts))
     # SystemExit too: it would end the worker, and `imap_unordered` waits for a lost task
     # forever -- a search that never returns and cannot be cancelled
     except (Exception, SystemExit) as exc:  # noqa: BLE001 - one team failing is a row note, not a dead search
@@ -317,18 +384,27 @@ def refine_and_score(item, local=None):
             return index, candidate, None, None, False
         statuses: list[str] = []
         board = bps.solve_candidate(
-            candidate, first[1][2], first[3], scenario="account", song=song, pool=1,
-            for_team=[leader_id, *member_ids], develop_bench=True, should_stop=should_stop,
-            statuses=statuses, **{k: v for k, v in opts.items() if k not in _NOT_SOLVER_OPTS})
+            candidate,
+            first[1][2],
+            first[3],
+            scenario="account",
+            song=song,
+            pool=1,
+            for_team=[leader_id, *member_ids],
+            develop_bench=True,
+            should_stop=should_stop,
+            statuses=statuses,
+            **{k: v for k, v in opts.items() if k not in _NOT_SOLVER_OPTS},
+        )
         if board is None:
             return index, candidate, None, None, False
         team_chrs = {"chr-" + c.split("-")[1] for c in (leader_id, *member_ids)}
         team_state = {c: v for c, v in board.items() if c in team_chrs}
         bench = bench_from_plan(board, team_chrs)
-        score = leaf_judge(leaf, by_id, tree_for, budget_for, leader_id, member_ids,
-                           chart_indices)(team_state, bench)
-        return (index, candidate, score, (team_state, bench, board),
-                any(s != "kOptimal" for s in statuses))
+        score = leaf_judge(leaf, by_id, tree_for, budget_for, leader_id, member_ids, chart_indices)(
+            team_state, bench
+        )
+        return (index, candidate, score, (team_state, bench, board), any(s != "kOptimal" for s in statuses))
     except (Exception, SystemExit):  # noqa: BLE001 - a candidate is an improvement, never a failure
         return index, candidate, None, None, False
 
@@ -363,8 +439,11 @@ class _BestCandidate:
             self.best[index] = (score, -rank, (first[0], planned, bool(limited or first[2])))
 
     def refined(self) -> dict:
-        return {index: (score, entry[1][0], entry) for index, (score, _r, entry) in self.best.items()
-                if entry is not None}
+        return {
+            index: (score, entry[1][0], entry)
+            for index, (score, _r, entry) in self.best.items()
+            if entry is not None
+        }
 
 
 def refine_rows(pool, rows, cancel=None, progress=None) -> dict:
@@ -383,8 +462,7 @@ def refine_rows(pool, rows, cancel=None, progress=None) -> dict:
     return acc.refined()
 
 
-def plan_and_refine(pool, items, *, opts, shown: int, rank, cancel=None, progress=None,
-                    on_plan=None) -> dict:
+def plan_and_refine(pool, items, *, opts, shown: int, rank, cancel=None, progress=None, on_plan=None) -> dict:
     """`dispatch` (each team's first plan; `items` as there) and then `refine_rows` for the
     `shown` best planned rows, OVERLAPPED: a row's candidates start as soon as it is certain
     to be among the rows shown -- fewer than `shown` rows can still rank above it: those
@@ -403,9 +481,13 @@ def plan_and_refine(pool, items, *, opts, shown: int, rank, cancel=None, progres
     item_of = {it[0]: it for it in items}
     got: dict = {}
     started: set = set()
-    state = {"pending": len(items), "done": 0, "queued": 0,
-             "total": len(items) + len(bps.other_candidates(items[0][3]) if items else ())
-             * min(shown, len(items))}
+    state = {
+        "pending": len(items),
+        "done": 0,
+        "queued": 0,
+        "total": len(items)
+        + len(bps.other_candidates(items[0][3]) if items else ()) * min(shown, len(items)),
+    }
 
     def ready() -> list:
         """The candidate tasks of every row now certain to be shown."""
@@ -416,8 +498,7 @@ def plan_and_refine(pool, items, *, opts, shown: int, rank, cancel=None, progres
                 continue
             started.add(k)
             value, held = got[k]
-            new += [(refine_and_score, it)
-                    for it in acc.add_row((k, *item_of[k][1:5], opts, held, value))]
+            new += [(refine_and_score, it) for it in acc.add_row((k, *item_of[k][1:5], opts, held, value))]
         return new
 
     def more(task, out) -> list:
@@ -498,13 +579,19 @@ def _dispatch_tasks(pool, pending, cancel=None, more=None):
             # on the pool's own context (a shared pool's worker activates it first)
             submit = getattr(pool, "submit", None)
             if submit is not None:
-                submit(task, (*it, generation),
-                       callback=lambda out, task=task: done.put((task, out)),
-                       error_callback=done.put)
+                submit(
+                    task,
+                    (*it, generation),
+                    callback=lambda out, task=task: done.put((task, out)),
+                    error_callback=done.put,
+                )
             else:
-                workers.apply_async(task, ((*it, generation),),
-                                    callback=lambda out, task=task: done.put((task, out)),
-                                    error_callback=done.put)
+                workers.apply_async(
+                    task,
+                    ((*it, generation),),
+                    callback=lambda out, task=task: done.put((task, out)),
+                    error_callback=done.put,
+                )
             in_flight += 1
         while True:
             if cancel is not None and cancel.is_set():

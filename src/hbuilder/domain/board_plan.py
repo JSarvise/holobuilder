@@ -28,22 +28,32 @@ import itertools
 import math
 import os
 import sys
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Callable, Mapping, Sequence
 
-from hbuilder.domain.team import Team
-from hbuilder.domain.skilltree import SkillTree, tree_from_mapping
 from hbuilder.domain.board import (
-    parse_effect_id, SONG_ALL_CAP_PERMIL, STAT_NAMES, _GENERATION_BY_GROUPING, _GROUPING_RE,
-    board_from_mapping, BoardBase, BoardDigest, BoardModel, BoardNode, CharacterBoard,
+    _GENERATION_BY_GROUPING,
+    _GROUPING_RE,
+    SONG_ALL_CAP_PERMIL,
+    STAT_NAMES,
+    BoardBase,
+    BoardDigest,
+    BoardModel,
+    BoardNode,
+    CharacterBoard,
+    board_from_mapping,
+    parse_effect_id,
 )
-from hbuilder.domain.skilltree import ROOT_NODE
-from hbuilder.domain.card import Card
 from hbuilder.domain.board_optimizer import BoardPlan, _available, _cheapest_bundles, optimize_board
+from hbuilder.domain.card import Card
 from hbuilder.domain.scoring import (
-    score_with_breakdown, deck_screen_unit_score, UNIT_SCORE_K,
+    UNIT_SCORE_K,
+    deck_screen_unit_score,
+    score_with_breakdown,
 )
 from hbuilder.domain.scoring_config import ScoringConfig
+from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, tree_from_mapping
+from hbuilder.domain.team import Team
 
 
 def node_costs_from_master(master_rows: Sequence[Mapping]) -> dict[str, int]:
@@ -86,9 +96,7 @@ def model_for_character(skilltree_json: Mapping, holomem_chr: str) -> str | None
     return None
 
 
-def _grouping_node_value(
-    override: Mapping, member_cards, d_us_per_power: float
-) -> float:
+def _grouping_node_value(override: Mapping, member_cards, d_us_per_power: float) -> float:
     """A character-grouping green (G-008/011/021), valued from skilltree's EXACT
     per-character override: it grants +v to every stat of the team members in
     THIS character's own grouping (`chr[chr_id]` carries both the value and which
@@ -120,8 +128,9 @@ NO_GROUPING = "no-grouping"
 NO_GROUPING_VALUE = -1e-6
 
 
-def grouping_room(skilltree: Mapping, bench_characters: Mapping | None,
-                  name_by_chr: Mapping[str, str]) -> dict[str, dict[str, float]]:
+def grouping_room(
+    skilltree: Mapping, bench_characters: Mapping | None, name_by_chr: Mapping[str, str]
+) -> dict[str, dict[str, float]]:
     """`{chr: {node: share in [0, 1]}}`: how much of each character's G-008/011/021 chain
     still counts, the cap less what the OTHER boards of her grouping already supply
     (`bench_characters`, the boards the leaf scores the off-team holomems with: the
@@ -154,13 +163,14 @@ def grouping_room(skilltree: Mapping, bench_characters: Mapping | None,
     return room
 
 
-def grouping_supply(skilltree: Mapping, bench_characters: Mapping | None,
-                    name_by_chr: Mapping[str, str]) -> dict[str, dict[str, float]]:
+def grouping_supply(
+    skilltree: Mapping, bench_characters: Mapping | None, name_by_chr: Mapping[str, str]
+) -> dict[str, dict[str, float]]:
     """`{grouping: {chr: amount}}`: the generation greens each board of
     `bench_characters` gives its grouping, Connect-scaled as the scorer reads them."""
     nodes = skilltree.get("nodes", {})
     chr_by_name = {v: k for k, v in (name_by_chr or {}).items()}
-    supply: dict[str, dict[str, float]] = {}       # grouping -> {chr: owned amount}
+    supply: dict[str, dict[str, float]] = {}  # grouping -> {chr: owned amount}
     for name, rows in (bench_characters or {}).items():
         cid = chr_by_name.get(name)
         if cid is None:
@@ -171,12 +181,13 @@ def grouping_supply(skilltree: Mapping, bench_characters: Mapping | None,
                 over = ((nodes.get(nid) or {}).get("chr") or {}).get(cid)
                 if over:
                     per = supply.setdefault(over.get("tgt", ""), {})
-                    per[cid] = per.get(cid, 0.0) + float(over.get("v") or 0) * float(row.get("connect_multiplier") or 1.0)
+                    per[cid] = per.get(cid, 0.0) + float(over.get("v") or 0) * float(
+                        row.get("connect_multiplier") or 1.0
+                    )
     return supply
 
 
-def _apply_grouping_room(values: dict[str, float], skilltree: Mapping | None,
-                         own_chr: str) -> None:
+def _apply_grouping_room(values: dict[str, float], skilltree: Mapping | None, own_chr: str) -> None:
     room = ((skilltree or {}).get(GROUPING_ROOM_KEY) or {}).get(own_chr)
     if not room:
         return
@@ -260,7 +271,8 @@ def compile_node_recipes(
         # read as a grouping they would be worth 0 to her plan and sockets.
         override = (
             skilltree_nodes.get(node_id, {}).get("chr", {}).get(own_chr)
-            if skilltree_nodes is not None else None
+            if skilltree_nodes is not None
+            else None
         )
         if override and "tgt" in override:
             out.append((node_id, override, ()))
@@ -295,7 +307,7 @@ def node_values_from_recipes(
     recipes, in recipe order. Bit-identical to `power_node_values`' own loop:
     the same accumulation order per effect, the same `max` over variants."""
     d_us_per_power = (1.0 + bonus_permil / 1000.0) * k_constant
-    d_us_per_bonus = overall_power * k_constant   # per unit of score-bonus rate
+    d_us_per_bonus = overall_power * k_constant  # per unit of score-bonus rate
     # per unit of the SONG's score rate (a yellow): it multiplies every note
     # (`song.py`, `* (1.0 + board_score_rate)`), i.e. the whole Unit Score
     # P * K * (1 + b), not a summand of the deck screen's Score Bonus. Priced at
@@ -361,8 +373,7 @@ def node_values_from_recipes(
                 # (`song.py`, `song_score_bonus_for`), so on a solo or group song
                 # they are worth 0 (otherwise the leaf buys them as leftovers).
                 if eff.song_scope in ("solo", "group"):
-                    scope_weight = (singer_weight if song_scope in ("", eff.song_scope)
-                                    else 0.0)
+                    scope_weight = singer_weight if song_scope in ("", eff.song_scope) else 0.0
                 else:
                     scope_weight = 0.0 if song_scope in ("solo", "group") else 1.0
                 row += eff.value * d_us_per_song * scope_weight
@@ -431,13 +442,18 @@ def power_node_values(
     raise one member's occupancy, worth about that member's share `pool /
     MEMBER_COUNT * V`. A leader that fields no active (a pure outfit-leader) owns
     no share, so its own-card active channels are valued at zero."""
-    recipes = compile_node_recipes(
-        node_effect_ids, skilltree["nodes"] if skilltree else None, own_chr)
+    recipes = compile_node_recipes(node_effect_ids, skilltree["nodes"] if skilltree else None, own_chr)
     values = node_values_from_recipes(
-        recipes, is_leader=is_leader, own_card=own_card, member_cards=member_cards,
-        bonus_permil=bonus_permil, overall_power=overall_power,
-        k_constant=k_constant, active_pool_rate=active_pool_rate,
-        singer_weight=singer_weight, song_scope=song_scope,
+        recipes,
+        is_leader=is_leader,
+        own_card=own_card,
+        member_cards=member_cards,
+        bonus_permil=bonus_permil,
+        overall_power=overall_power,
+        k_constant=k_constant,
+        active_pool_rate=active_pool_rate,
+        singer_weight=singer_weight,
+        song_scope=song_scope,
     )
     _apply_grouping_room(values, skilltree, own_chr)
     # CONNECT: a socketed card multiplies the nodes in its shape; the socket
@@ -473,17 +489,29 @@ def bench_node_values(
     roster a plan cache values at). Connect multipliers are then applied to the
     kept values, so a socket is placed for what a bench board really lifts."""
     values = power_node_values(
-        node_effect_ids, is_leader=False, own_card=None, member_cards=member_cards,
-        bonus_permil=bonus_permil, overall_power=overall_power,
-        k_constant=k_constant, active_pool_rate=0.0,
+        node_effect_ids,
+        is_leader=False,
+        own_card=None,
+        member_cards=member_cards,
+        bonus_permil=bonus_permil,
+        overall_power=overall_power,
+        k_constant=k_constant,
+        active_pool_rate=0.0,
         skilltree={"nodes": skilltree["nodes"]} if skilltree else None,
-        model_id="", own_chr=own_chr, singer_weight=0.0 if cast is None else 1.0,
+        model_id="",
+        own_chr=own_chr,
+        singer_weight=0.0 if cast is None else 1.0,
         song_scope=song_scope_of(cast),
     )
-    values = {n: (v if n.startswith("G") or (
-                  skilltree and bench_yellow_pays(yellow_scope(skilltree, n, own_chr), own_chr, cast))
-                  else 0.0)
-              for n, v in values.items()}
+    values = {
+        n: (
+            v
+            if n.startswith("G")
+            or (skilltree and bench_yellow_pays(yellow_scope(skilltree, n, own_chr), own_chr, cast))
+            else 0.0
+        )
+        for n, v in values.items()
+    }
     _apply_grouping_room(values, skilltree, own_chr)
     if skilltree and model_id:
         for node_id, m in _connect_multipliers(skilltree, model_id, values).items():
@@ -543,7 +571,7 @@ def optimize_team_boards(
     by_chr = {"chr-" + m.id.split("-")[1]: m for m in members}
     seen: set[str] = set()
     plans: dict[str, BoardPlan] = {}
-    values_by_chr: dict[str, tuple] = {}   # members holding a generation chain
+    values_by_chr: dict[str, tuple] = {}  # members holding a generation chain
     total = 0.0
     for card, is_leader in [(leader, True), *[(m, False) for m in members]]:
         chr_id = "chr-" + card.id.split("-")[1]
@@ -563,11 +591,13 @@ def optimize_team_boards(
             k_constant=k_constant,
             active_pool_rate=active_pool_rate,
             skilltree=skilltree,
-            model_id=(model_for_character(skilltree, "chr-" + card.id.split("-")[1])
-                      or "") if skilltree else "",
+            model_id=(model_for_character(skilltree, "chr-" + card.id.split("-")[1]) or "")
+            if skilltree
+            else "",
             own_chr="chr-" + card.id.split("-")[1],
-            singer_weight=(singer_weight if is_leader
-                           else singer_weight_for(singers or frozenset(), chr_id, False)),
+            singer_weight=(
+                singer_weight if is_leader else singer_weight_for(singers or frozenset(), chr_id, False)
+            ),
             song_scope=song_scope_of(singers),
         )
         plan = optimize_board(tree, budget_for(card), values, player_level=player_level)
@@ -577,8 +607,7 @@ def optimize_team_boards(
                 values_by_chr[chr_id] = (card, tree, values)
         plans[card.id] = plan
         total += plan.value
-    for card in sorted((values_by_chr[c][0] for c in values_by_chr),
-                       key=lambda c: (budget_for(c), c.id)):
+    for card in sorted((values_by_chr[c][0] for c in values_by_chr), key=lambda c: (budget_for(c), c.id)):
         if not _chain_is_surplus(card, plans, members, leader, skilltree):
             continue
         _card, tree, values = values_by_chr[_chr_of(card)]
@@ -603,12 +632,11 @@ def optimize_team_boards(
 # the per-song objective becomes a pure function of the roster.
 # ---------------------------------------------------------------------------
 
-PLAN_ROLE_LEADER = "leader"                # leads, no card of hers among the members
+PLAN_ROLE_LEADER = "leader"  # leads, no card of hers among the members
 PLAN_ROLE_LEADER_MEMBER = "leader+member"  # leads AND fields a member card
 PLAN_ROLE_MEMBER = "member"
 PLAN_ROLE_BENCH = "bench"
-PLAN_ROLES = (PLAN_ROLE_LEADER, PLAN_ROLE_LEADER_MEMBER, PLAN_ROLE_MEMBER,
-              PLAN_ROLE_BENCH)
+PLAN_ROLES = (PLAN_ROLE_LEADER, PLAN_ROLE_LEADER_MEMBER, PLAN_ROLE_MEMBER, PLAN_ROLE_BENCH)
 
 
 def _chr_of(card: Card) -> str:
@@ -658,12 +686,11 @@ def plan_key(card: Card, role: str, budget: int, sings: bool | str) -> tuple:
         raise ValueError(f"unknown plan role {role!r}; expected one of {PLAN_ROLES}")
     uses_blues = role in (PLAN_ROLE_MEMBER, PLAN_ROLE_LEADER_MEMBER)
     leads = role in (PLAN_ROLE_LEADER, PLAN_ROLE_LEADER_MEMBER)
-    context = (sings if isinstance(sings, str) and sings else bool(sings))
+    context = sings if isinstance(sings, str) and sings else bool(sings)
     # a bench plan keeps its singer context too: an off-team singer's yellows pay on
     # her song (`singer_bench_characters`)
     sung = leads or uses_blues or role == PLAN_ROLE_BENCH
-    return (_chr_of(card), role, int(budget), context if sung else False,
-            card.id if uses_blues else "")
+    return (_chr_of(card), role, int(budget), context if sung else False, card.id if uses_blues else "")
 
 
 # `PlanCache._team_boards` is emptied when it reaches this many developed
@@ -721,6 +748,8 @@ def selected_plan_key(chr_id: str, selected) -> tuple:
     refinement changed): the board and its nodes in the set's own order -- the order
     `assembled_for` lists them in, so equal keys are equal assemblies."""
     return (SELECTED_PLAN, chr_id, tuple(selected))
+
+
 _NO_MULTS: frozenset = frozenset()
 
 
@@ -800,8 +829,7 @@ class PlanCache:
             self._bench_rows = {}
 
     @classmethod
-    def from_team(cls, team: Team, cfg: ScoringConfig, *,
-                  player_level: int | None = None) -> "PlanCache":
+    def from_team(cls, team: Team, cfg: ScoringConfig, *, player_level: int | None = None) -> PlanCache:
         """A cache whose nominal context is `team`'s board-off standing: its
         five members as the reached roster, its Overall Power / Score Bonus as
         the linearisation point, its bare ACTIVE pool for the pool channels."""
@@ -809,7 +837,8 @@ class PlanCache:
         ds = deck_screen_unit_score(bd)
         return cls(
             nominal_members=tuple(team.members),
-            overall_power=ds.overall_power, bonus_permil=ds.score_bonus_permil,
+            overall_power=ds.overall_power,
+            bonus_permil=ds.score_bonus_permil,
             active_pool_rate=bd.active_pool / (1.0 + bd.combined_support_rate),
             player_level=player_level,
         )
@@ -821,13 +850,20 @@ class PlanCache:
         chr_id = _chr_of(card)
         others = tuple(m for m in self.nominal_members if _chr_of(m) != chr_id)
         if role in (PLAN_ROLE_MEMBER, PLAN_ROLE_LEADER_MEMBER):
-            return (card, *others[:max(0, len(self.nominal_members) - 1)])
+            return (card, *others[: max(0, len(self.nominal_members) - 1)])
         return others
 
     def plan_for(
-        self, card: Card, role: str, budget: int, sings: bool, *,
-        tree: SkillTree, node_effect_ids: Mapping[str, list[str]],
-        skilltree: Mapping | None, no_grouping: bool = False,
+        self,
+        card: Card,
+        role: str,
+        budget: int,
+        sings: bool,
+        *,
+        tree: SkillTree,
+        node_effect_ids: Mapping[str, list[str]],
+        skilltree: Mapping | None,
+        no_grouping: bool = False,
     ) -> BoardPlan:
         """The cached plan for `plan_key(card, role, budget, sings)`, computed
         at the nominal context on a miss. `no_grouping`: the variant that buys no
@@ -850,22 +886,35 @@ class PlanCache:
         reached = self._reached_for(card, role)
         if role == PLAN_ROLE_BENCH:
             # sings: her song's scope (or True, not known) -- her yellows of it pay
-            cast = None if not key[3] else (
-                SongCast({chr_id}, key[3]) if isinstance(key[3], str) else frozenset({chr_id}))
+            cast = (
+                None
+                if not key[3]
+                else (SongCast({chr_id}, key[3]) if isinstance(key[3], str) else frozenset({chr_id}))
+            )
             values = bench_node_values(
-                node_effect_ids, member_cards=reached,
-                bonus_permil=self.bonus_permil, overall_power=self.overall_power,
-                k_constant=self.k_constant, skilltree=skilltree,
-                model_id=model_id, own_chr=chr_id, cast=cast,
+                node_effect_ids,
+                member_cards=reached,
+                bonus_permil=self.bonus_permil,
+                overall_power=self.overall_power,
+                k_constant=self.k_constant,
+                skilltree=skilltree,
+                model_id=model_id,
+                own_chr=chr_id,
+                cast=cast,
             )
         else:
             values = power_node_values(
                 node_effect_ids,
                 is_leader=role in (PLAN_ROLE_LEADER, PLAN_ROLE_LEADER_MEMBER),
-                own_card=card, member_cards=reached,
-                bonus_permil=self.bonus_permil, overall_power=self.overall_power,
-                k_constant=self.k_constant, active_pool_rate=self.active_pool_rate,
-                skilltree=skilltree, model_id=model_id, own_chr=chr_id,
+                own_card=card,
+                member_cards=reached,
+                bonus_permil=self.bonus_permil,
+                overall_power=self.overall_power,
+                k_constant=self.k_constant,
+                active_pool_rate=self.active_pool_rate,
+                skilltree=skilltree,
+                model_id=model_id,
+                own_chr=chr_id,
                 singer_weight=1.0 if key[3] else 0.0,
                 song_scope=key[3] if isinstance(key[3], str) else "",
             )
@@ -891,19 +940,20 @@ class PlanCache:
         for card_id, (offsets, permil) in (connect_cards or {}).items():
             groups.setdefault((tuple(tuple(o) for o in offsets), permil), []).append(card_id)
         self._connect_groups = tuple(
-            (offsets, permil, tuple(sorted(ids))) for (offsets, permil), ids in groups.items())
+            (offsets, permil, tuple(sorted(ids))) for (offsets, permil), ids in groups.items()
+        )
 
     def recipes_for(self, chr_id: str, node_effect_ids, skilltree) -> tuple:
         """`compile_node_recipes` for one character, compiled once."""
         r = self._recipes.get(chr_id)
         if r is None:
-            r = compile_node_recipes(
-                node_effect_ids, skilltree["nodes"] if skilltree else None, chr_id)
+            r = compile_node_recipes(node_effect_ids, skilltree["nodes"] if skilltree else None, chr_id)
             self._recipes[chr_id] = r
         return r
 
-    def needed_recipes(self, key: tuple, asm: "AssembledPlan", chr_id: str,
-                       node_effect_ids, skilltree) -> tuple:
+    def needed_recipes(
+        self, key: tuple, asm: AssembledPlan, chr_id: str, node_effect_ids, skilltree
+    ) -> tuple:
         """`recipes_for(chr_id)` restricted to the nodes plan `key`'s Connect
         assignment reads (`asm.needed`; `None` = every node), in recipe order
         — filtered once per plan instead of once per team."""
@@ -972,8 +1022,9 @@ class PlanCache:
             entry[3] = BoardBase(entry[2])
         return entry[3]
 
-    def team_board(self, key: tuple, holomem: str, asm: "AssembledPlan",
-                   cmult: Mapping[str, float]) -> tuple[CharacterBoard, BoardDigest]:
+    def team_board(
+        self, key: tuple, holomem: str, asm: AssembledPlan, cmult: Mapping[str, float]
+    ) -> tuple[CharacterBoard, BoardDigest]:
         """One developed board — plan `key`'s nodes (`asm`, which
         `assembled_for` returned for that key) under the Connect multipliers
         the team-wide assignment gave them — and its digest, reused whenever
@@ -1000,8 +1051,9 @@ class PlanCache:
         self._team_boards[cache_key] = hit
         return hit
 
-    def assembled_for(self, key: tuple, cplan: BoardPlan, chr_id: str, *,
-                      skilltree: Mapping, node_effect_ids, connect_cards) -> "AssembledPlan":
+    def assembled_for(
+        self, key: tuple, cplan: BoardPlan, chr_id: str, *, skilltree: Mapping, node_effect_ids, connect_cards
+    ) -> AssembledPlan:
         """The team-invariant half of `board_model_from_plan` for one plan:
         its node list with parsed effects (in node id order, `plan_node_order`), and
         the socket entries the team-wide Connect assignment scores — computed once
@@ -1041,8 +1093,11 @@ class PlanCache:
                         entries.append((socket, permil, tuple(covered), card_ids))
                         needed.update(covered)
         asm = AssembledPlan(
-            nodes=tuple(nodes), model_id=model_id, entries=tuple(entries),
-            needed=tuple(sorted(needed)) if connect_cards is not None else None)
+            nodes=tuple(nodes),
+            model_id=model_id,
+            entries=tuple(entries),
+            needed=tuple(sorted(needed)) if connect_cards is not None else None,
+        )
         if len(self.assembled) >= _ASSEMBLED_MAX:
             self.assembled.clear()
             self._needed_recipes.clear()
@@ -1101,8 +1156,15 @@ def cached_team_plan(
         else:
             role, card = PLAN_ROLE_LEADER, leader
         lead_sings = sings_key(sings, lead_chr, True)
-        plan = cache.plan_for(card, role, budget_for(leader), lead_sings, tree=tree,
-                              node_effect_ids=node_effect_ids, skilltree=skilltree)
+        plan = cache.plan_for(
+            card,
+            role,
+            budget_for(leader),
+            lead_sings,
+            tree=tree,
+            node_effect_ids=node_effect_ids,
+            skilltree=skilltree,
+        )
         plans[leader.id] = plan
         keys[leader.id] = plan_key(card, role, budget_for(leader), lead_sings)
         total += plan.value
@@ -1113,8 +1175,15 @@ def cached_team_plan(
         if tree is None:
             continue
         m_sings = sings_key(sings, _chr_of(m), False)
-        plan = cache.plan_for(m, PLAN_ROLE_MEMBER, budget_for(m), m_sings, tree=tree,
-                              node_effect_ids=node_effect_ids, skilltree=skilltree)
+        plan = cache.plan_for(
+            m,
+            PLAN_ROLE_MEMBER,
+            budget_for(m),
+            m_sings,
+            tree=tree,
+            node_effect_ids=node_effect_ids,
+            skilltree=skilltree,
+        )
         plans[m.id] = plan
         keys[m.id] = plan_key(m, PLAN_ROLE_MEMBER, budget_for(m), m_sings)
         total += plan.value
@@ -1123,15 +1192,23 @@ def cached_team_plan(
     # 900). A member whose chain lies wholly in the surplus adds nothing with it: she
     # is re-planned without it (a cached variant), the fewest-points board first --
     # those points are dearest there (e.g. a Lv40 Iofi would otherwise half-buy her blues)
-    for m in sorted((m for m in members if m.id in plans and _chr_of(m) != lead_chr),
-                    key=lambda m: (budget_for(m), m.id)):
+    for m in sorted(
+        (m for m in members if m.id in plans and _chr_of(m) != lead_chr), key=lambda m: (budget_for(m), m.id)
+    ):
         if not _chain_is_surplus(m, plans, members, leader, skilltree):
             continue
         tree = tree_for(m)
         m_sings = sings_key(sings, _chr_of(m), False)
-        plan = cache.plan_for(m, PLAN_ROLE_MEMBER, budget_for(m), m_sings, tree=tree,
-                              node_effect_ids=node_effect_ids, skilltree=skilltree,
-                              no_grouping=True)
+        plan = cache.plan_for(
+            m,
+            PLAN_ROLE_MEMBER,
+            budget_for(m),
+            m_sings,
+            tree=tree,
+            node_effect_ids=node_effect_ids,
+            skilltree=skilltree,
+            no_grouping=True,
+        )
         total += plan.value - plans[m.id].value
         plans[m.id] = plan
         keys[m.id] = plan_key(m, PLAN_ROLE_MEMBER, budget_for(m), m_sings) + (NO_GROUPING,)
@@ -1176,16 +1253,24 @@ def singer_bench_characters(
         tree = tree_for(card) if card is not None else None
         if tree is None or not name:
             continue
-        plan = cache.plan_for(card, PLAN_ROLE_BENCH, budget_for(card), scope or True, tree=tree,
-                              node_effect_ids=node_effect_ids, skilltree=skilltree)
-        kept = {e.get("node"): float(e.get("connect_multiplier") or 1.0)
-                for e in (bench_characters.get(name) or ())}
+        plan = cache.plan_for(
+            card,
+            PLAN_ROLE_BENCH,
+            budget_for(card),
+            scope or True,
+            tree=tree,
+            node_effect_ids=node_effect_ids,
+            skilltree=skilltree,
+        )
+        kept = {
+            e.get("node"): float(e.get("connect_multiplier") or 1.0)
+            for e in (bench_characters.get(name) or ())
+        }
         rows = []
         for node in sorted(plan.selected):
             effect = _effect_string_for(skilltree, node, chr_id, node_effect_ids)
             if effect:
-                rows.append({"node": node, "effects": [effect],
-                             "connect_multiplier": kept.get(node, 1.0)})
+                rows.append({"node": node, "effects": [effect], "connect_multiplier": kept.get(node, 1.0)})
         out[name] = rows
     _hold(_SINGER_BENCH, key, (bench_characters, cache, out))
     return out
@@ -1200,6 +1285,7 @@ def forget_plan_cache(cache: PlanCache) -> None:
 
 def _grouping_cap() -> int:
     from .board import GROUPING_ALL_CAP  # noqa: PLC0415
+
     return GROUPING_ALL_CAP
 
 
@@ -1217,8 +1303,7 @@ def _grouping_chain(selected, chr_id: str, skilltree: Mapping | None) -> dict[st
     return out
 
 
-def _grouping_supply(tgt: str, plans: Mapping, members, leader: Card,
-                     skilltree: Mapping | None) -> float:
+def _grouping_supply(tgt: str, plans: Mapping, members, leader: Card, skilltree: Mapping | None) -> float:
     """What grouping `tgt` receives from the team's planned boards plus the off-team
     boards (`GROUPING_ROOM_KEY`'s source: the leaf's bench, `grouping_supply`)."""
     cards = {c.id: c for c in (leader, *members)}
@@ -1230,15 +1315,16 @@ def _grouping_supply(tgt: str, plans: Mapping, members, leader: Card,
     return total + sum(v for c, v in bench.items() if c not in team_chrs)
 
 
-def _chain_is_surplus(card: Card, plans: Mapping, members, leader: Card,
-                      skilltree: Mapping | None) -> bool:
+def _chain_is_surplus(card: Card, plans: Mapping, members, leader: Card, skilltree: Mapping | None) -> bool:
     """Every grouping this card's board feeds would still reach the cap without it."""
     chain = _grouping_chain(plans[card.id].selected, _chr_of(card), skilltree)
     if not chain:
         return False
     cap = _grouping_cap()
-    return all(_grouping_supply(tgt, plans, members, leader, skilltree) - amount >= cap
-               for tgt, amount in chain.items())
+    return all(
+        _grouping_supply(tgt, plans, members, leader, skilltree) - amount >= cap
+        for tgt, amount in chain.items()
+    )
 
 
 def board_points_from_snapshot(snapshot: Mapping) -> dict[str, int]:
@@ -1256,18 +1342,21 @@ def board_points_from_snapshot(snapshot: Mapping) -> dict[str, int]:
         if not pid.startswith(prefix):
             continue
         q = row.get("quantity")
-        out[pid[len(prefix):]] = int(q) if isinstance(q, int) else 0
+        out[pid[len(prefix) :]] = int(q) if isinstance(q, int) else 0
     return out
 
 
-def _effect_string_for(skilltree: Mapping, node_id: str, chr_id: str,
-                       node_effect_ids: Mapping[str, list[str]]) -> str | None:
+def _effect_string_for(
+    skilltree: Mapping, node_id: str, chr_id: str, node_effect_ids: Mapping[str, list[str]]
+) -> str | None:
     """The effect id string for one node on one character's board: the chr
     override for a grouping green, else the node's single master effect."""
     override = skilltree["nodes"].get(node_id, {}).get("chr", {}).get(chr_id)
     if override and "tgt" in override and "v" in override:
-        return (f"skill_tree_effect-all_parameter_up_for_character_grouping-"
-                f"{int(override['v'])}-skill_tree_effect_target-{override['tgt']}")
+        return (
+            f"skill_tree_effect-all_parameter_up_for_character_grouping-"
+            f"{int(override['v'])}-skill_tree_effect_target-{override['tgt']}"
+        )
     effs = node_effect_ids.get(node_id, [])
     return effs[0] if effs else None
 
@@ -1277,11 +1366,11 @@ class SocketPlacement:
     """One real Connect placement the develop re-score decided on: this card,
     on this character's socket, at the multiplier its resolved level grants."""
 
-    chr: str            # "chr-00031"
-    socket: str         # "S-001".."S-004"
-    card: str           # placed card id
-    multiplier: float   # 1 + permil/1000 at the card's resolved level
-    value: float        # linearised Unit-Score lift of the placement
+    chr: str  # "chr-00031"
+    socket: str  # "S-001".."S-004"
+    card: str  # placed card id
+    multiplier: float  # 1 + permil/1000 at the card's resolved level
+    value: float  # linearised Unit-Score lift of the placement
 
 
 # One candidate Connect placement the team-wide assignment chooses among:
@@ -1312,20 +1401,20 @@ def _max_weight_matching(
         return {}
     ncol = len(weights[0])
     caps = list(capacities) if capacities is not None else [1] * ncol
-    m = ncol + 1                          # + the dummy column (index ncol)
+    m = ncol + 1  # + the dummy column (index ncol)
     caps.append(n)
     inf = float("inf")
-    cost = [[-w for w in row] + [0.0] for row in weights]   # minimise -weight
-    u = [0.0] * n                          # row potentials
-    v = [0.0] * m                          # column potentials
-    matched: list[list[int]] = [[] for _ in range(m)]   # rows on column j
+    cost = [[-w for w in row] + [0.0] for row in weights]  # minimise -weight
+    u = [0.0] * n  # row potentials
+    v = [0.0] * m  # column potentials
+    matched: list[list[int]] = [[] for _ in range(m)]  # rows on column j
     col_of_row = [-1] * n
     for r in range(n):
         # Dijkstra from row r over the columns, reduced costs c - u - v >= 0;
         # a column with spare capacity ends the path.
         minv = [inf] * m
-        way_col = [-1] * m     # predecessor column on the path (-1 = row r itself)
-        way_row = [-1] * m     # the row the path came through
+        way_col = [-1] * m  # predecessor column on the path (-1 = row r itself)
+        way_row = [-1] * m  # the row the path came through
         used = [False] * m
         cr = cost[r]
         ur = u[r]
@@ -1366,7 +1455,7 @@ def _max_weight_matching(
                             way_col[j] = j1
                             way_row[j] = i
         j = j1
-        while True:                        # augment along the found path
+        while True:  # augment along the found path
             i = way_row[j]
             pj = way_col[j]
             matched[j].append(i)
@@ -1436,12 +1525,13 @@ def _connect_assignment_exact(
             weights[i][j] = gain
             at[(i, j)] = t
     match = _max_weight_matching(weights, [len(k) for k in col_keys])
-    return _placements_from_matched([at[(i, j)] for i, j in match.items()],
-                                    incumbent=incumbent)
+    return _placements_from_matched([at[(i, j)] for i, j in match.items()], incumbent=incumbent)
 
 
 def _placements_from_matched(
-    matched: Sequence[ConnectTriple], *, name_cards: bool = True,
+    matched: Sequence[ConnectTriple],
+    *,
+    name_cards: bool = True,
     incumbent: Mapping[tuple[str, str], str] | None = None,
 ) -> tuple[dict[str, dict[str, float]], list[SocketPlacement]]:
     """The matched placements as `(multipliers per character and node, the
@@ -1478,9 +1568,11 @@ def _placements_from_matched(
         m = mults.setdefault(chr_id, {})
         for node in covered:
             m[node] = max(m.get(node, 1.0), 1.0 + permil / 1000.0)
-        placements.append(SocketPlacement(
-            chr=chr_id, socket=socket, card=card_id,
-            multiplier=1.0 + permil / 1000.0, value=gain))
+        placements.append(
+            SocketPlacement(
+                chr=chr_id, socket=socket, card=card_id, multiplier=1.0 + permil / 1000.0, value=gain
+            )
+        )
     return mults, placements
 
 
@@ -1505,8 +1597,7 @@ def _team_connect_assignment(
         groups: dict[tuple, list[str]] = {}
         for card_id, (offsets, permil) in connect_cards.items():
             groups.setdefault((tuple(tuple(o) for o in offsets), permil), []).append(card_id)
-        shape_groups = [(offsets, permil, tuple(sorted(ids)))
-                        for (offsets, permil), ids in groups.items()]
+        shape_groups = [(offsets, permil, tuple(sorted(ids))) for (offsets, permil), ids in groups.items()]
         if len(_CONNECT_GEOMETRY) > 64:
             _CONNECT_GEOMETRY.clear()
         held = _CONNECT_GEOMETRY[id(connect_cards)] = (connect_cards, shape_groups, {})
@@ -1615,7 +1706,11 @@ def bench_sockets_from_state(state: Mapping | None) -> dict[str, dict[str, str |
     out = {}
     for chr_id, entry in (state or {}).items():
         slots = dict((entry or {}).get("slots") or {})
-        unlocked = {"S-001", *slots, *(n for n in (entry or {}).get("nodes") or () if str(n).startswith("S-"))}
+        unlocked = {
+            "S-001",
+            *slots,
+            *(n for n in (entry or {}).get("nodes") or () if str(n).startswith("S-")),
+        }
         out[chr_id] = {s: slots.get(s) for s in sorted(unlocked)}
     return out
 
@@ -1633,15 +1728,31 @@ def _bench_bought(bench_characters, name_by_chr) -> dict[str, frozenset] | None:
     hit = _held(_BENCH_BOUGHT, key)
     if hit is None or hit[0] is not bench_characters or hit[1] is not name_by_chr:
         by_name = {name: chr_id for chr_id, name in name_by_chr.items()}
-        hit = _hold(_BENCH_BOUGHT, key, (bench_characters, name_by_chr, {
-            by_name[name]: frozenset(e.get("node") for e in rows if e.get("node"))
-            for name, rows in bench_characters.items() if name in by_name}))
+        hit = _hold(
+            _BENCH_BOUGHT,
+            key,
+            (
+                bench_characters,
+                name_by_chr,
+                {
+                    by_name[name]: frozenset(e.get("node") for e in rows if e.get("node"))
+                    for name, rows in bench_characters.items()
+                    if name in by_name
+                },
+            ),
+        )
     return hit[2]
 
 
-def held_bench_cards(bench_sockets: Mapping[str, Mapping[str, str | None]] | None,
-                     team_chrs, skilltree: Mapping, connect_cards, *,
-                     cast=None, bought: Mapping[str, frozenset] | None = None) -> frozenset[str]:
+def held_bench_cards(
+    bench_sockets: Mapping[str, Mapping[str, str | None]] | None,
+    team_chrs,
+    skilltree: Mapping,
+    connect_cards,
+    *,
+    cast=None,
+    bought: Mapping[str, frozenset] | None = None,
+) -> frozenset[str]:
     """The cards an OFF-TEAM board's socket holds (`bench_sockets`, chr -> {socket:
     card}) where they lift a node of that board that reaches the team, already
     multiplied in `bench_characters`: a GREEN, or a YELLOW the song pays (`bench_yellow_pays` with `cast`, the song's singers: the
@@ -1656,12 +1767,12 @@ def held_bench_cards(bench_sockets: Mapping[str, Mapping[str, str | None]] | Non
         return frozenset()
     key = (id(bench_sockets), id(connect_cards), id(bought))
     hit = _held(_GREEN_HOLDERS, key)
-    if hit is None or hit[0] is not bench_sockets or hit[1] is not connect_cards \
-            or hit[2] is not bought:
+    if hit is None or hit[0] is not bench_sockets or hit[1] is not connect_cards or hit[2] is not bought:
         holders = []
         for chr_id, slots in bench_sockets.items():
             positions = (skilltree.get("models", {}) or {}).get(
-                model_for_character(skilltree, chr_id) or "", {})
+                model_for_character(skilltree, chr_id) or "", {}
+            )
             pos_to_node = {tuple(p): n for n, p in positions.items()}
             owned = None if bought is None else bought.get(chr_id, frozenset())
             for socket, card in (slots or {}).items():
@@ -1669,22 +1780,40 @@ def held_bench_cards(bench_sockets: Mapping[str, Mapping[str, str | None]] | Non
                 spos = positions.get(socket)
                 if entry is None or spos is None:
                     continue
-                lifted = [n for dx, dy in entry[0]
-                          if (n := str(pos_to_node.get((spos[0] + dx, spos[1] + dy), "")))
-                          and (owned is None or n in owned)]
+                lifted = [
+                    n
+                    for dx, dy in entry[0]
+                    if (n := str(pos_to_node.get((spos[0] + dx, spos[1] + dy), "")))
+                    and (owned is None or n in owned)
+                ]
                 green = any(n.startswith("G-") for n in lifted)
                 scopes = frozenset(s for n in lifted if (s := yellow_scope(skilltree, n, chr_id)))
                 if green or scopes:
                     holders.append((chr_id, card, green, scopes))
         hit = _hold(_GREEN_HOLDERS, key, (bench_sockets, connect_cards, bought, tuple(holders)))
-    return frozenset(card for chr_id, card, green, scopes in hit[3]
-                     if chr_id not in team_chrs
-                     and (green or any(bench_yellow_pays(s, chr_id, cast) for s in scopes)))
+    return frozenset(
+        card
+        for chr_id, card, green, scopes in hit[3]
+        if chr_id not in team_chrs and (green or any(bench_yellow_pays(s, chr_id, cast) for s in scopes))
+    )
 
 
-def _bench_socket_rows(chars, names, team_chrs, skilltree, node_effect_ids, members, *,
-                       overall_power, bonus_permil, k_constant, connect_cards, per_char,
-                       bench_sockets=None, cast=None):
+def _bench_socket_rows(
+    chars,
+    names,
+    team_chrs,
+    skilltree,
+    node_effect_ids,
+    members,
+    *,
+    overall_power,
+    bonus_permil,
+    k_constant,
+    connect_cards,
+    per_char,
+    bench_sockets=None,
+    cast=None,
+):
     """Add every BENCH board's root socket (`S-001`, free on any board) to the Connect
     matching (`per_char`, in place) and return `{chr: (holomem, nodes an S-001 shape can
     reach)}` for the boards added. Keeping the bench's own sockets unoptimised lets a
@@ -1715,23 +1844,37 @@ def _bench_socket_rows(chars, names, team_chrs, skilltree, node_effect_ids, memb
         else:
             open_sockets = {"S-001"}
             pos_to_node = {tuple(p): n for n, p in positions.items()}
-            cover = frozenset(pos_to_node[(root[0] + dx, root[1] + dy)]
-                              for shape in shapes for dx, dy in shape
-                              if (root[0] + dx, root[1] + dy) in pos_to_node)
+            cover = frozenset(
+                pos_to_node[(root[0] + dx, root[1] + dy)]
+                for shape in shapes
+                for dx, dy in shape
+                if (root[0] + dx, root[1] + dy) in pos_to_node
+            )
         selected = frozenset(e["node"] for e in entries if e.get("node")) | open_sockets
         values = bench_node_values(
-            node_effect_ids, member_cards=members, bonus_permil=bonus_permil,
-            overall_power=overall_power, k_constant=k_constant,
-            skilltree={"nodes": skilltree["nodes"]}, model_id="", own_chr=chr_id, cast=cast)
+            node_effect_ids,
+            member_cards=members,
+            bonus_permil=bonus_permil,
+            overall_power=overall_power,
+            k_constant=k_constant,
+            skilltree={"nodes": skilltree["nodes"]},
+            model_id="",
+            own_chr=chr_id,
+            cast=cast,
+        )
         # only the open sockets: the matching skips a socket not in `selected` except S-001
-        per_char[chr_id] = ({n: p for n, p in positions.items()
-                             if not n.startswith("S") or n in open_sockets}, selected, values)
+        per_char[chr_id] = (
+            {n: p for n, p in positions.items() if not n.startswith("S") or n in open_sockets},
+            selected,
+            values,
+        )
         rows[chr_id] = (name, cover)
     return rows
 
 
-def _yellow_permil(skilltree: Mapping, node_id: str, chr_id: str, cast,
-                   node_effect_ids: Mapping[str, list[str]]) -> float:
+def _yellow_permil(
+    skilltree: Mapping, node_id: str, chr_id: str, cast, node_effect_ids: Mapping[str, list[str]]
+) -> float:
     """The song-bonus permil a bought yellow node adds to THIS song (0 for a node the
     song does not pay: another scope, a board outside the cast, not a yellow)."""
     if not bench_yellow_pays(yellow_scope(skilltree, node_id, chr_id), chr_id, cast):
@@ -1747,23 +1890,23 @@ def _yellow_permil(skilltree: Mapping, node_id: str, chr_id: str, cast,
 _YELLOW_PERMIL_MEMO: dict = {}
 
 
-def _yellow_permil_memo(skilltree: Mapping, node_id: str, chr_id: str, cast,
-                        node_effect_ids: Mapping[str, list[str]]) -> float:
+def _yellow_permil_memo(
+    skilltree: Mapping, node_id: str, chr_id: str, cast, node_effect_ids: Mapping[str, list[str]]
+) -> float:
     """`_yellow_permil`, remembered per (inputs, node, board, cast): the leaf's fast
     path asks it for every bought node of every team."""
-    key = (id(skilltree), id(node_effect_ids), node_id, chr_id, cast,
-           getattr(cast, "scope", None))
+    key = (id(skilltree), id(node_effect_ids), node_id, chr_id, cast, getattr(cast, "scope", None))
     hit = _YELLOW_PERMIL_MEMO.get(key)
     if hit is None:
         if len(_YELLOW_PERMIL_MEMO) > 200_000:
             _YELLOW_PERMIL_MEMO.clear()
-        hit = _YELLOW_PERMIL_MEMO[key] = _yellow_permil(skilltree, node_id, chr_id, cast,
-                                                       node_effect_ids)
+        hit = _YELLOW_PERMIL_MEMO[key] = _yellow_permil(skilltree, node_id, chr_id, cast, node_effect_ids)
     return hit
 
 
-def _song_bonus_over_cap(team_rows, bench_characters, names: Mapping[str, str], *, cast,
-                         skilltree: Mapping, node_effect_ids) -> bool:
+def _song_bonus_over_cap(
+    team_rows, bench_characters, names: Mapping[str, str], *, cast, skilltree: Mapping, node_effect_ids
+) -> bool:
     """Whether a team's paying yellows -- its own bought nodes at their Connect
     multipliers (`team_rows`: `(chr_id, selected nodes, multipliers)`) plus the
     off-team boards' (`bench_characters`) -- exceed `SONG_ALL_CAP_PERMIL`. Below it
@@ -1786,8 +1929,9 @@ def _song_bonus_over_cap(team_rows, bench_characters, names: Mapping[str, str], 
             continue
         for e in rows:
             if e.get("node"):
-                total += _yellow_permil_memo(skilltree, e["node"], chr_id, cast,
-                                             node_effect_ids) * float(e.get("connect_multiplier") or 1.0)
+                total += _yellow_permil_memo(skilltree, e["node"], chr_id, cast, node_effect_ids) * float(
+                    e.get("connect_multiplier") or 1.0
+                )
     return total > SONG_ALL_CAP_PERMIL + 1e-9
 
 
@@ -1795,8 +1939,17 @@ def _song_bonus_over_cap(team_rows, bench_characters, names: Mapping[str, str], 
 CAPPED_ROUNDS = 6
 
 
-def _yellow_capped_assignment(per_char, connect_cards, *, cast, skilltree, node_effect_ids,
-                              fixed_rows=(), rounds: int = CAPPED_ROUNDS, incumbent=None):
+def _yellow_capped_assignment(
+    per_char,
+    connect_cards,
+    *,
+    cast,
+    skilltree,
+    node_effect_ids,
+    fixed_rows=(),
+    rounds: int = CAPPED_ROUNDS,
+    incumbent=None,
+):
     """`_team_connect_assignment` under the song bonus's per-song cap
     (`SONG_ALL_CAP_PERMIL`, `BoardModel.song_score_bonus_for`): the linear node values
     price every yellow permil at full worth, but past the cap a yellow adds nothing.
@@ -1811,16 +1964,19 @@ def _yellow_capped_assignment(per_char, connect_cards, *, cast, skilltree, node_
     yellow lift CAPPED at the room -- not the last one that fits: scaling only down,
     m0198 (Ina + Kiara, 80 permil bought) drops Ina's yellow card for Kiara's alone,
     leaving 6 permil of room unused, -0.40 % on every team."""
+
     def paying(rows):
         return {n: p for n in rows if (p := _yellow_permil(skilltree, n, chr_id, cast, node_effect_ids))}
+
     room = SONG_ALL_CAP_PERMIL
     for chr_id, e in fixed_rows:
         if chr_id and e.get("node"):
             room -= _yellow_permil(skilltree, e["node"], chr_id, cast, node_effect_ids) * float(
-                e.get("connect_multiplier") or 1.0)
+                e.get("connect_multiplier") or 1.0
+            )
     yellow = {}
     for chr_id, (_positions, selected, _values) in per_char.items():
-        if (rows := paying(selected)):
+        if rows := paying(selected):
             yellow[chr_id] = rows
             room -= sum(rows.values())
     result = _team_connect_assignment(per_char, connect_cards, incumbent)
@@ -1829,8 +1985,11 @@ def _yellow_capped_assignment(per_char, connect_cards, *, cast, skilltree, node_
     room = max(room, 0.0)
 
     def lift_of(res):
-        return sum((res[0].get(chr_id, {}).get(n, 1.0) - 1.0) * p
-                   for chr_id, rows in yellow.items() for n, p in rows.items())
+        return sum(
+            (res[0].get(chr_id, {}).get(n, 1.0) - 1.0) * p
+            for chr_id, rows in yellow.items()
+            for n, p in rows.items()
+        )
 
     def worth(res):
         # the matching's gain on the UNSCALED values, its yellow part capped at the room
@@ -1854,9 +2013,14 @@ def _yellow_capped_assignment(per_char, connect_cards, *, cast, skilltree, node_
     low, high = 0.0, 1.0
     scale = room / lift
     for _ in range(rounds):
-        scaled = {chr_id: (positions, selected,
-                           {n: (v * scale if n in yellow.get(chr_id, ()) else v) for n, v in values.items()})
-                  for chr_id, (positions, selected, values) in per_char.items()}
+        scaled = {
+            chr_id: (
+                positions,
+                selected,
+                {n: (v * scale if n in yellow.get(chr_id, ()) else v) for n, v in values.items()},
+            )
+            for chr_id, (positions, selected, values) in per_char.items()
+        }
         candidate = _team_connect_assignment(scaled, connect_cards, incumbent)
         c_lift = lift_of(candidate)
         key = (worth(candidate), -c_lift)
@@ -1908,9 +2072,9 @@ def _fixed_connect_placements(
                 if node and node in selected:
                     gain += values.get(node, 0.0) * permil / 1000.0
                     m[node] = max(m.get(node, 1.0), multiplier)
-            placements.append(SocketPlacement(
-                chr=chr_id, socket=socket, card=card_id,
-                multiplier=multiplier, value=gain))
+            placements.append(
+                SocketPlacement(chr=chr_id, socket=socket, card=card_id, multiplier=multiplier, value=gain)
+            )
     return mults, placements
 
 
@@ -1967,15 +2131,17 @@ def _env_kernel(env: str) -> Callable | None:
             module = _KERNEL_MODULES.get(file_name)
             if module is None:
                 module_spec = importlib.util.spec_from_file_location(
-                    "_hbuilder_kernel_" + os.path.splitext(os.path.basename(file_name))[0],
-                    file_name)
+                    "_hbuilder_kernel_" + os.path.splitext(os.path.basename(file_name))[0], file_name
+                )
                 module = importlib.util.module_from_spec(module_spec)
                 module_spec.loader.exec_module(module)
                 _KERNEL_MODULES[file_name] = module
             kernel = getattr(module, attribute)
         except Exception as exc:  # noqa: BLE001 - any failure means "use Python"
-            print(f"kernel {spec!r} could not be loaded ({exc!r}); "
-                  "this step continues on the Python path", file=sys.stderr)
+            print(
+                f"kernel {spec!r} could not be loaded ({exc!r}); this step continues on the Python path",
+                file=sys.stderr,
+            )
     _ENV_KERNELS[env] = (spec, kernel)
     return kernel
 
@@ -2001,9 +2167,11 @@ def _held_view(asm: AssembledPlan, held: frozenset) -> AssembledPlan:
     key = (id(asm), held)
     hit = _HELD_VIEWS.get(key)
     if hit is None or hit[0] is not asm:
-        entries = tuple((socket, permil, covered, kept)
-                        for socket, permil, covered, card_ids in asm.entries
-                        if (kept := tuple(c for c in card_ids if c not in held)))
+        entries = tuple(
+            (socket, permil, covered, kept)
+            for socket, permil, covered, card_ids in asm.entries
+            if (kept := tuple(c for c in card_ids if c not in held))
+        )
         if len(_HELD_VIEWS) > 50_000:
             _HELD_VIEWS.clear()
         hit = _HELD_VIEWS[key] = (asm, replace(asm, entries=entries))
@@ -2011,10 +2179,17 @@ def _held_view(asm: AssembledPlan, held: frozenset) -> AssembledPlan:
 
 
 def _cached_connect_assignment(
-    inputs: Sequence[ConnectInput], members: tuple[Card, ...], *,
-    overall_power: float, bonus_permil: float, k_constant: float,
-    active_pool_rate: float, name_cards: bool = True, held: frozenset = frozenset(),
-    song_scope: str = "", incumbent: Mapping[tuple[str, str], str] | None = None,
+    inputs: Sequence[ConnectInput],
+    members: tuple[Card, ...],
+    *,
+    overall_power: float,
+    bonus_permil: float,
+    k_constant: float,
+    active_pool_rate: float,
+    name_cards: bool = True,
+    held: frozenset = frozenset(),
+    song_scope: str = "",
+    incumbent: Mapping[tuple[str, str], str] | None = None,
 ) -> tuple[dict[str, dict[str, float]], list[SocketPlacement]]:
     """The team-wide REAL socketing on the plan cache: the base node values
     (grouping on, connect OFF — only for the nodes the assignment reads; the
@@ -2039,10 +2214,14 @@ def _cached_connect_assignment(
     kernel = None if (incumbent and name_cards) else _connect_kernel()
     if kernel is not None:
         matched = kernel(
-            [(i[0], _held_view(i[1], held), *i[2:]) if held else i
-             for i in inputs if i[1].model_id], members,
-            overall_power=overall_power, bonus_permil=bonus_permil,
-            k_constant=k_constant, active_pool_rate=active_pool_rate, song_scope=song_scope)
+            [(i[0], _held_view(i[1], held), *i[2:]) if held else i for i in inputs if i[1].model_id],
+            members,
+            overall_power=overall_power,
+            bonus_permil=bonus_permil,
+            k_constant=k_constant,
+            active_pool_rate=active_pool_rate,
+            song_scope=song_scope,
+        )
         if matched is not None:
             return _placements_from_matched(matched, name_cards=name_cards)
     per_char = []
@@ -2050,23 +2229,32 @@ def _cached_connect_assignment(
         if not asm.model_id:
             continue
         base = node_values_from_recipes(
-            recipes, is_leader=is_leader, own_card=card, member_cards=members,
-            bonus_permil=bonus_permil, overall_power=overall_power,
-            k_constant=k_constant, active_pool_rate=active_pool_rate,
-            singer_weight=singer_weight, song_scope=song_scope,
+            recipes,
+            is_leader=is_leader,
+            own_card=card,
+            member_cards=members,
+            bonus_permil=bonus_permil,
+            overall_power=overall_power,
+            k_constant=k_constant,
+            active_pool_rate=active_pool_rate,
+            singer_weight=singer_weight,
+            song_scope=song_scope,
         )
         entries = asm.entries
         if held:
-            entries = [(socket, permil, covered, kept)
-                       for socket, permil, covered, card_ids in entries
-                       if (kept := tuple(c for c in card_ids if c not in held))]
+            entries = [
+                (socket, permil, covered, kept)
+                for socket, permil, covered, card_ids in entries
+                if (kept := tuple(c for c in card_ids if c not in held))
+            ]
         per_char.append((chr_id, entries, base))
     return _team_connect_assignment_grouped(per_char, incumbent if name_cards else None)
 
 
 def _team_connect_assignment_grouped(
-    per_char: Sequence[tuple[str, Sequence[tuple[str, int, tuple[str, ...], tuple[str, ...]]],
-                             Mapping[str, float]]],
+    per_char: Sequence[
+        tuple[str, Sequence[tuple[str, int, tuple[str, ...], tuple[str, ...]]], Mapping[str, float]]
+    ],
     incumbent: Mapping[tuple[str, str], str] | None = None,
 ) -> tuple[dict[str, dict[str, float]], list[SocketPlacement]]:
     """`_team_connect_assignment` over PRE-COMPUTED socket entries (the plan
@@ -2176,56 +2364,108 @@ def board_model_from_plan(
     members = tuple(members)
     if fixed_slots is not None or socket_bench:
         plan_cache = None
-    names: dict[str, str] = {
-        "chr-" + card.id.split("-")[1]: card.member for card in (*members, leader)
-    }
+    names: dict[str, str] = {"chr-" + card.id.split("-")[1]: card.member for card in (*members, leader)}
     if name_by_chr:
         names = {**dict(name_by_chr), **names}
     team_chrs = {"chr-" + card.id.split("-")[1] for card in (*members, leader)}
     # the song's singers when known (a frozenset); a bare leader flag says nothing
     # about the bench, so no bench yellow is counted then
     cast = sings if isinstance(sings, (set, frozenset)) else None
-    held = (frozenset() if socket_bench or fixed_slots is not None
-            else held_bench_cards(bench_sockets, team_chrs, skilltree, connect_cards, cast=cast,
-                                  bought=_bench_bought(bench_characters, name_by_chr)))
+    held = (
+        frozenset()
+        if socket_bench or fixed_slots is not None
+        else held_bench_cards(
+            bench_sockets,
+            team_chrs,
+            skilltree,
+            connect_cards,
+            cast=cast,
+            bought=_bench_bought(bench_characters, name_by_chr),
+        )
+    )
     # the account's own placements: on a tie a card stays where it is
-    incumbent = {(chr_id, socket): card for chr_id, slots in (bench_sockets or {}).items()
-                 for socket, card in (slots or {}).items() if card}
-    if plan_cache is not None and cast is not None and connect_cards is not None \
-            and bench_characters is not None and (kernel := _board_kernel()) is not None:
+    incumbent = {
+        (chr_id, socket): card
+        for chr_id, slots in (bench_sockets or {}).items()
+        for socket, card in (slots or {}).items()
+        if card
+    }
+    if (
+        plan_cache is not None
+        and cast is not None
+        and connect_cards is not None
+        and bench_characters is not None
+        and (kernel := _board_kernel()) is not None
+    ):
         # the compiled assembly: the same model as the two paths below, or None to run them
         model = _board_model_by_kernel(
-            kernel, plan, leader, members, skilltree, node_effect_ids, names,
-            overall_power=overall_power, bonus_permil=bonus_permil, k_constant=k_constant,
-            active_pool_rate=active_pool_rate, connect_cards=connect_cards,
-            placements_out=placements_out, bench_characters=bench_characters,
-            name_by_chr=name_by_chr, sings=sings, cache=plan_cache, cast=cast, held=held,
-            incumbent=incumbent)
+            kernel,
+            plan,
+            leader,
+            members,
+            skilltree,
+            node_effect_ids,
+            names,
+            overall_power=overall_power,
+            bonus_permil=bonus_permil,
+            k_constant=k_constant,
+            active_pool_rate=active_pool_rate,
+            connect_cards=connect_cards,
+            placements_out=placements_out,
+            bench_characters=bench_characters,
+            name_by_chr=name_by_chr,
+            sings=sings,
+            cache=plan_cache,
+            cast=cast,
+            held=held,
+            incumbent=incumbent,
+        )
         if model is not None:
             return model
-    if plan_cache is not None and plan.plan_keys and not (
-            connect_cards is not None and cast is not None
-            and _song_bonus_over_cap(_team_yellow_rows(plan, leader, members), bench_characters,
-                                     names, cast=cast, skilltree=skilltree,
-                                     node_effect_ids=node_effect_ids)):
+    if (
+        plan_cache is not None
+        and plan.plan_keys
+        and not (
+            connect_cards is not None
+            and cast is not None
+            and _song_bonus_over_cap(
+                _team_yellow_rows(plan, leader, members),
+                bench_characters,
+                names,
+                cast=cast,
+                skilltree=skilltree,
+                node_effect_ids=node_effect_ids,
+            )
+        )
+    ):
         # (over the cap with every multiplier at 1 -- Connect multipliers are >= 1, so the
         # fast path's own check after its matching would say so too: skip that matching)
         fast = _board_model_from_cache(
-            plan, leader, members, skilltree, node_effect_ids, names,
-            overall_power=overall_power, bonus_permil=bonus_permil,
-            k_constant=k_constant, active_pool_rate=active_pool_rate,
-            connect_cards=connect_cards, placements_out=placements_out,
-            bench_characters=bench_characters, sings=sings, cache=plan_cache, held=held,
-            incumbent=incumbent)
+            plan,
+            leader,
+            members,
+            skilltree,
+            node_effect_ids,
+            names,
+            overall_power=overall_power,
+            bonus_permil=bonus_permil,
+            k_constant=k_constant,
+            active_pool_rate=active_pool_rate,
+            connect_cards=connect_cards,
+            placements_out=placements_out,
+            bench_characters=bench_characters,
+            sings=sings,
+            cache=plan_cache,
+            held=held,
+            incumbent=incumbent,
+        )
         if fast is not None:
             return fast
         # the song bonus is over its cap: only the capped matching below is right
-    connect_all = connect_cards           # the plan cache's assembly key (`assembled_for`)
+    connect_all = connect_cards  # the plan cache's assembly key (`assembled_for`)
     if held and connect_cards is not None:
         connect_cards = {k: v for k, v in connect_cards.items() if k not in held}
-    chars: dict[str, list] = {
-        name: list(nodes) for name, nodes in (bench_characters or {}).items()
-    }
+    chars: dict[str, list] = {name: list(nodes) for name, nodes in (bench_characters or {}).items()}
     seen: set[str] = set()
     # (card, chr_id, model_id, cplan, base) in build order; chars assembled after
     # the team-wide assignment is known. ONE entry per CHARACTER (one board per
@@ -2252,45 +2492,76 @@ def board_model_from_plan(
             # recipes, compiled once per character by the plan cache
             plan_cache._sync_sources(node_effect_ids, skilltree, connect_all)
             base = node_values_from_recipes(
-                plan_cache.recipes_for(chr_id, node_effect_ids, skilltree), is_leader=is_leader,
-                own_card=own, member_cards=members, bonus_permil=bonus_permil,
-                overall_power=overall_power, k_constant=k_constant,
+                plan_cache.recipes_for(chr_id, node_effect_ids, skilltree),
+                is_leader=is_leader,
+                own_card=own,
+                member_cards=members,
+                bonus_permil=bonus_permil,
+                overall_power=overall_power,
+                k_constant=k_constant,
                 active_pool_rate=active_pool_rate,
                 singer_weight=singer_weight_for(sings, chr_id, is_leader),
-                song_scope=song_scope_of(sings))
+                song_scope=song_scope_of(sings),
+            )
         else:
             base = power_node_values(
-                node_effect_ids, is_leader=is_leader, own_card=own, member_cards=members,
-                bonus_permil=bonus_permil, overall_power=overall_power,
-                k_constant=k_constant, active_pool_rate=active_pool_rate,
-                skilltree={"nodes": skilltree["nodes"]}, model_id="", own_chr=chr_id,
+                node_effect_ids,
+                is_leader=is_leader,
+                own_card=own,
+                member_cards=members,
+                bonus_permil=bonus_permil,
+                overall_power=overall_power,
+                k_constant=k_constant,
+                active_pool_rate=active_pool_rate,
+                skilltree={"nodes": skilltree["nodes"]},
+                model_id="",
+                own_chr=chr_id,
                 singer_weight=singer_weight_for(sings, chr_id, is_leader),
                 song_scope=song_scope_of(sings),
             )
         ctx.append((card, chr_id, model_id, cplan, base))
     if connect_cards is not None:
         per_char = {
-            chr_id: (skilltree.get("models", {}).get(model_id, {}),
-                     cplan.selected, base)
-            for _card, chr_id, model_id, cplan, base in ctx if model_id
+            chr_id: (skilltree.get("models", {}).get(model_id, {}), cplan.selected, base)
+            for _card, chr_id, model_id, cplan, base in ctx
+            if model_id
         }
         bench_rows: dict[str, tuple[str, frozenset]] = {}
         if fixed_slots is None and socket_bench and bench_characters:
             bench_rows = _bench_socket_rows(
-                chars, names, set(per_char), skilltree, node_effect_ids, members,
-                overall_power=overall_power, bonus_permil=bonus_permil, k_constant=k_constant,
-                connect_cards=connect_cards, per_char=per_char, bench_sockets=bench_sockets,
-                cast=cast)
+                chars,
+                names,
+                set(per_char),
+                skilltree,
+                node_effect_ids,
+                members,
+                overall_power=overall_power,
+                bonus_permil=bonus_permil,
+                k_constant=k_constant,
+                connect_cards=connect_cards,
+                per_char=per_char,
+                bench_sockets=bench_sockets,
+                cast=cast,
+            )
         if fixed_slots is not None:
-            mults_by_chr, placements = _fixed_connect_placements(
-                per_char, connect_cards, fixed_slots)
+            mults_by_chr, placements = _fixed_connect_placements(per_char, connect_cards, fixed_slots)
         elif cast is not None:
             inverse = {name: chr_id for chr_id, name in names.items()}
-            fixed = [(inverse.get(name), e) for name, rows in chars.items()
-                     if inverse.get(name) not in per_char for e in rows]
+            fixed = [
+                (inverse.get(name), e)
+                for name, rows in chars.items()
+                if inverse.get(name) not in per_char
+                for e in rows
+            ]
             mults_by_chr, placements = _yellow_capped_assignment(
-                per_char, connect_cards, cast=cast, skilltree=skilltree,
-                node_effect_ids=node_effect_ids, fixed_rows=fixed, incumbent=incumbent)
+                per_char,
+                connect_cards,
+                cast=cast,
+                skilltree=skilltree,
+                node_effect_ids=node_effect_ids,
+                fixed_rows=fixed,
+                incumbent=incumbent,
+            )
         else:
             mults_by_chr, placements = _team_connect_assignment(per_char, connect_cards, incumbent)
         # the bench boards' sockets re-assigned in the same matching: drop what the
@@ -2299,21 +2570,29 @@ def board_model_from_plan(
         for chr_id, (name, cover) in bench_rows.items():
             cmult = mults_by_chr.get(chr_id, {})
             chars[name] = [
-                dict(e, connect_multiplier=cmult.get(e["node"], 1.0)
-                     if cover is None or e.get("node") in cover else e.get("connect_multiplier", 1.0))
-                for e in chars[name]]
+                dict(
+                    e,
+                    connect_multiplier=cmult.get(e["node"], 1.0)
+                    if cover is None or e.get("node") in cover
+                    else e.get("connect_multiplier", 1.0),
+                )
+                for e in chars[name]
+            ]
         if placements_out is not None:
             placements_out.extend(placements)
     else:
         mults_by_chr = {
-            chr_id: (_connect_multipliers(skilltree, model_id, base)
-                     if model_id else {})
+            chr_id: (_connect_multipliers(skilltree, model_id, base) if model_id else {})
             for _card, chr_id, model_id, _cplan, base in ctx
         }
     # with the plan cache, a team board whose plan it holds is built from its assembly
     # (`team_board`, as on the fast path) instead of from these lists
-    cached = (plan_cache is not None and bench_characters is not None
-              and bool(plan.plan_keys) and all(card.id in plan.plan_keys for card, *_ in ctx))
+    cached = (
+        plan_cache is not None
+        and bench_characters is not None
+        and bool(plan.plan_keys)
+        and all(card.id in plan.plan_keys for card, *_ in ctx)
+    )
     for card, chr_id, _model_id, cplan, _base in ctx:
         if cached:
             break
@@ -2325,8 +2604,9 @@ def board_model_from_plan(
             effstr = _effect_string_for(skilltree, node_id, chr_id, node_effect_ids)
             if effstr is None:
                 continue
-            nodes.append({"node": node_id, "effects": [effstr],
-                          "connect_multiplier": cmult.get(node_id, 1.0)})
+            nodes.append(
+                {"node": node_id, "effects": [effstr], "connect_multiplier": cmult.get(node_id, 1.0)}
+            )
         chars[card.member] = nodes
     if plan_cache is not None and bench_characters is not None:
         # the plain path with a plan cache at hand (the song bonus over its cap, or a
@@ -2338,17 +2618,28 @@ def board_model_from_plan(
         for card, chr_id, _model_id, cplan, _base in ctx:
             if cached:
                 key = plan.plan_keys[card.id]
-                asm = plan_cache.assembled_for(key, cplan, chr_id, skilltree=skilltree,
-                                               node_effect_ids=node_effect_ids,
-                                               connect_cards=connect_all)
+                asm = plan_cache.assembled_for(
+                    key,
+                    cplan,
+                    chr_id,
+                    skilltree=skilltree,
+                    node_effect_ids=node_effect_ids,
+                    connect_cards=connect_all,
+                )
                 boards[card.member], digests[card.member] = plan_cache.team_board(
-                    key, card.member, asm, mults_by_chr.get(chr_id, {}))
+                    key, card.member, asm, mults_by_chr.get(chr_id, {})
+                )
                 continue
             boards[card.member] = board_from_mapping(
-                {"characters": {card.member: chars[card.member]}}).characters[card.member]
+                {"characters": {card.member: chars[card.member]}}
+            ).characters[card.member]
             digests.pop(card.member, None)
-        return BoardModel(characters=boards, name_by_chr=dict(names), _digests=digests,
-                          _base=plan_cache.bench_base(bench_characters))
+        return BoardModel(
+            characters=boards,
+            name_by_chr=dict(names),
+            _digests=digests,
+            _base=plan_cache.bench_base(bench_characters),
+        )
     return board_from_mapping({"characters": chars, "name_by_chr": names})
 
 
@@ -2367,11 +2658,24 @@ def _team_yellow_rows(plan: TeamBoardPlan, leader: Card, members: Sequence[Card]
 
 
 def _board_model_from_cache(
-    plan: TeamBoardPlan, leader: Card, members: tuple[Card, ...], skilltree: Mapping,
-    node_effect_ids: Mapping[str, list[str]], names: dict[str, str], *,
-    overall_power: float, bonus_permil: float, k_constant: float,
-    active_pool_rate: float, connect_cards, placements_out, bench_characters,
-    sings: bool, cache: PlanCache, held: frozenset = frozenset(), incumbent=None,
+    plan: TeamBoardPlan,
+    leader: Card,
+    members: tuple[Card, ...],
+    skilltree: Mapping,
+    node_effect_ids: Mapping[str, list[str]],
+    names: dict[str, str],
+    *,
+    overall_power: float,
+    bonus_permil: float,
+    k_constant: float,
+    active_pool_rate: float,
+    connect_cards,
+    placements_out,
+    bench_characters,
+    sings: bool,
+    cache: PlanCache,
+    held: frozenset = frozenset(),
+    incumbent=None,
 ) -> BoardModel:
     """`board_model_from_plan`'s fast path — see its docstring. `held`: cards on the
     off-team boards' sockets, kept out of the team's matching (`held_bench_cards`).
@@ -2392,26 +2696,50 @@ def _board_model_from_cache(
             continue
         seen.add(chr_id)
         asm = cache.assembled_for(
-            plan.plan_keys[card.id], cplan, chr_id, skilltree=skilltree,
-            node_effect_ids=node_effect_ids, connect_cards=connect_cards)
-        recipes = cache.needed_recipes(
-            plan.plan_keys[card.id], asm, chr_id, node_effect_ids, skilltree)
+            plan.plan_keys[card.id],
+            cplan,
+            chr_id,
+            skilltree=skilltree,
+            node_effect_ids=node_effect_ids,
+            connect_cards=connect_cards,
+        )
+        recipes = cache.needed_recipes(plan.plan_keys[card.id], asm, chr_id, node_effect_ids, skilltree)
         ctx.append((card, chr_id, asm))
-        inputs.append((chr_id, asm, recipes, is_leader,
-                       member_by_chr.get(chr_id, card) if is_leader else card,
-                       singer_weight_for(sings, chr_id, is_leader)))
+        inputs.append(
+            (
+                chr_id,
+                asm,
+                recipes,
+                is_leader,
+                member_by_chr.get(chr_id, card) if is_leader else card,
+                singer_weight_for(sings, chr_id, is_leader),
+            )
+        )
     if connect_cards is not None:
         mults_by_chr, placements = _cached_connect_assignment(
-            inputs, members, overall_power=overall_power, bonus_permil=bonus_permil,
-            k_constant=k_constant, active_pool_rate=active_pool_rate,
-            name_cards=placements_out is not None, held=held, song_scope=song_scope_of(sings),
-            incumbent=incumbent)
+            inputs,
+            members,
+            overall_power=overall_power,
+            bonus_permil=bonus_permil,
+            k_constant=k_constant,
+            active_pool_rate=active_pool_rate,
+            name_cards=placements_out is not None,
+            held=held,
+            song_scope=song_scope_of(sings),
+            incumbent=incumbent,
+        )
         cast = sings if isinstance(sings, (set, frozenset)) else None
         if cast is not None and _song_bonus_over_cap(
-                [(chr_id, plan.per_character[card.id].selected, mults_by_chr.get(chr_id, {}))
-                 for card, chr_id, _asm in ctx],
-                bench_characters, names, cast=cast, skilltree=skilltree,
-                node_effect_ids=node_effect_ids):
+            [
+                (chr_id, plan.per_character[card.id].selected, mults_by_chr.get(chr_id, {}))
+                for card, chr_id, _asm in ctx
+            ],
+            bench_characters,
+            names,
+            cast=cast,
+            skilltree=skilltree,
+            node_effect_ids=node_effect_ids,
+        ):
             return None
         if placements_out is not None:
             placements_out.extend(placements)
@@ -2420,39 +2748,47 @@ def _board_model_from_cache(
         for chr_id, asm, recipes, is_leader, card, singer_weight in inputs:
             # base node values (grouping on, connect OFF) to place the sockets
             base = node_values_from_recipes(
-                recipes, is_leader=is_leader, own_card=card, member_cards=members,
-                bonus_permil=bonus_permil, overall_power=overall_power,
-                k_constant=k_constant, active_pool_rate=active_pool_rate,
-                singer_weight=singer_weight, song_scope=song_scope_of(sings),
+                recipes,
+                is_leader=is_leader,
+                own_card=card,
+                member_cards=members,
+                bonus_permil=bonus_permil,
+                overall_power=overall_power,
+                k_constant=k_constant,
+                active_pool_rate=active_pool_rate,
+                singer_weight=singer_weight,
+                song_scope=song_scope_of(sings),
             )
-            mults_by_chr[chr_id] = (
-                _connect_multipliers(skilltree, asm.model_id, base)
-                if asm.model_id else {})
+            mults_by_chr[chr_id] = _connect_multipliers(skilltree, asm.model_id, base) if asm.model_id else {}
     chars: dict[str, CharacterBoard] = dict(cache.bench_boards(bench_characters))
     digests: dict[str, BoardDigest] = dict(cache.bench_digests(bench_characters))
     for card, chr_id, asm in ctx:
         chars[card.member], digests[card.member] = cache.team_board(
-            plan.plan_keys[card.id], card.member, asm, mults_by_chr.get(chr_id, {}))
-    return BoardModel(characters=chars, name_by_chr=dict(names), _digests=digests,
-                      _base=cache.bench_base(bench_characters))
-
+            plan.plan_keys[card.id], card.member, asm, mults_by_chr.get(chr_id, {})
+        )
+    return BoardModel(
+        characters=chars, name_by_chr=dict(names), _digests=digests, _base=cache.bench_base(bench_characters)
+    )
 
 
 _PAYING_YELLOWS: dict = {}
 
 
-def _paying_yellows(selected: frozenset, chr_id: str, cast, skilltree: Mapping,
-                    node_effect_ids) -> tuple[tuple[tuple[str, float], ...], float]:
+def _paying_yellows(
+    selected: frozenset, chr_id: str, cast, skilltree: Mapping, node_effect_ids
+) -> tuple[tuple[tuple[str, float], ...], float]:
     """One board's paying yellows on this song as `(rows, their sum)`: the `(node,
     permil)` of `_yellow_capped_assignment`'s `paying(selected)` in the set's own order,
     and their sum as it takes it. Remembered per (set, board, cast)."""
-    key = (id(selected), chr_id, cast, getattr(cast, "scope", None), id(skilltree),
-           id(node_effect_ids))
+    key = (id(selected), chr_id, cast, getattr(cast, "scope", None), id(skilltree), id(node_effect_ids))
     hit = _PAYING_YELLOWS.get(key)
     if hit is not None and hit[0] is selected and hit[1] is skilltree and hit[2] is node_effect_ids:
         return hit[3]
-    rows = tuple((n, p) for n in plan_node_order(selected)
-                 if (p := _yellow_permil(skilltree, n, chr_id, cast, node_effect_ids)))
+    rows = tuple(
+        (n, p)
+        for n in plan_node_order(selected)
+        if (p := _yellow_permil(skilltree, n, chr_id, cast, node_effect_ids))
+    )
     value = (rows, sum(p for _n, p in rows))
     if len(_PAYING_YELLOWS) > 50_000:
         _PAYING_YELLOWS.clear()
@@ -2463,17 +2799,29 @@ def _paying_yellows(selected: frozenset, chr_id: str, cast, skilltree: Mapping,
 _BENCH_YELLOWS: dict = {}
 
 
-def _bench_yellow_rows(bench_characters: Mapping, name_by_chr: Mapping[str, str], cast,
-                       skilltree: Mapping, node_effect_ids) -> tuple[tuple[str, float], ...]:
+def _bench_yellow_rows(
+    bench_characters: Mapping, name_by_chr: Mapping[str, str], cast, skilltree: Mapping, node_effect_ids
+) -> tuple[tuple[str, float], ...]:
     """The off-team boards' paying yellows as `(chr id, permil x Connect multiplier)` in
     the bench's order, the rows worth 0 left out: what `_song_bonus_over_cap` and
     `_yellow_capped_assignment`'s room read from `bench_characters` (both skip the rows of
     a board on the team). Remembered per (bench, roster, cast)."""
-    key = (id(bench_characters), id(name_by_chr), cast, getattr(cast, "scope", None),
-           id(skilltree), id(node_effect_ids))
+    key = (
+        id(bench_characters),
+        id(name_by_chr),
+        cast,
+        getattr(cast, "scope", None),
+        id(skilltree),
+        id(node_effect_ids),
+    )
     hit = _BENCH_YELLOWS.get(key)
-    if hit is not None and hit[0] is bench_characters and hit[1] is name_by_chr \
-            and hit[2] is skilltree and hit[3] is node_effect_ids:
+    if (
+        hit is not None
+        and hit[0] is bench_characters
+        and hit[1] is name_by_chr
+        and hit[2] is skilltree
+        and hit[3] is node_effect_ids
+    ):
         return hit[4]
     inverse = {name: chr_id for chr_id, name in name_by_chr.items()}
     rows = []
@@ -2483,23 +2831,39 @@ def _bench_yellow_rows(bench_characters: Mapping, name_by_chr: Mapping[str, str]
             continue
         for e in entries:
             if e.get("node"):
-                value = _yellow_permil_memo(skilltree, e["node"], chr_id, cast,
-                                            node_effect_ids) * float(e.get("connect_multiplier") or 1.0)
+                value = _yellow_permil_memo(skilltree, e["node"], chr_id, cast, node_effect_ids) * float(
+                    e.get("connect_multiplier") or 1.0
+                )
                 if value:
                     rows.append((chr_id, value))
     if len(_BENCH_YELLOWS) > 512:
         _BENCH_YELLOWS.clear()
-    hit = _BENCH_YELLOWS[key] = (bench_characters, name_by_chr, skilltree, node_effect_ids,
-                                 tuple(rows))
+    hit = _BENCH_YELLOWS[key] = (bench_characters, name_by_chr, skilltree, node_effect_ids, tuple(rows))
     return hit[4]
 
 
 def _board_model_by_kernel(
-    kernel: Callable, plan: TeamBoardPlan, leader: Card, members: tuple[Card, ...],
-    skilltree: Mapping, node_effect_ids: Mapping[str, list[str]], names: dict[str, str], *,
-    overall_power: float, bonus_permil: float, k_constant: float, active_pool_rate: float,
-    connect_cards, placements_out, bench_characters, name_by_chr, sings, cache: PlanCache,
-    cast, held: frozenset, incumbent: Mapping,
+    kernel: Callable,
+    plan: TeamBoardPlan,
+    leader: Card,
+    members: tuple[Card, ...],
+    skilltree: Mapping,
+    node_effect_ids: Mapping[str, list[str]],
+    names: dict[str, str],
+    *,
+    overall_power: float,
+    bonus_permil: float,
+    k_constant: float,
+    active_pool_rate: float,
+    connect_cards,
+    placements_out,
+    bench_characters,
+    name_by_chr,
+    sings,
+    cache: PlanCache,
+    cast,
+    held: frozenset,
+    incumbent: Mapping,
 ) -> BoardModel | None:
     """`board_model_from_plan` with the Connect matching from `BOARD_KERNEL`: the plan
     cache's team boards under the multipliers it chose, over the cached bench -- the model
@@ -2517,8 +2881,8 @@ def _board_model_by_kernel(
     matching only when the cards are named (`tie_first`), as the plan cache's matching
     applies them, so a team below the cap gets the fast path's sockets."""
     if not name_by_chr or any(
-            name_by_chr.get("chr-" + card.id.split("-")[1]) != card.member
-            for card in (leader, *members)):
+        name_by_chr.get("chr-" + card.id.split("-")[1]) != card.member for card in (leader, *members)
+    ):
         return None
     name_cards = placements_out is not None
     seen: set[str] = set()
@@ -2538,39 +2902,62 @@ def _board_model_by_kernel(
         seen.add(chr_id)
         # a plan the cache did not make (the activation refinement's) is assembled by its nodes
         key = plan.plan_keys.get(card.id) or selected_plan_key(chr_id, cplan.selected)
-        asm = cache.assembled_for(key, cplan, chr_id, skilltree=skilltree,
-                                  node_effect_ids=node_effect_ids, connect_cards=connect_cards)
+        asm = cache.assembled_for(
+            key,
+            cplan,
+            chr_id,
+            skilltree=skilltree,
+            node_effect_ids=node_effect_ids,
+            connect_cards=connect_cards,
+        )
         if not asm.model_id:
             return None
         recipes = cache.needed_recipes(key, asm, chr_id, node_effect_ids, skilltree)
         ctx.append((card, chr_id, asm, key))
-        inputs.append((chr_id, _held_view(asm, held) if held else asm, recipes, is_leader,
-                       member_by_chr.get(chr_id, card) if is_leader else card,
-                       singer_weight_for(sings, chr_id, is_leader)))
+        inputs.append(
+            (
+                chr_id,
+                _held_view(asm, held) if held else asm,
+                recipes,
+                is_leader,
+                member_by_chr.get(chr_id, card) if is_leader else card,
+                singer_weight_for(sings, chr_id, is_leader),
+            )
+        )
         yellows.append(_paying_yellows(cplan.selected, chr_id, cast, skilltree, node_effect_ids))
     matched = kernel(
-        inputs, members, overall_power=overall_power, bonus_permil=bonus_permil,
-        k_constant=k_constant, active_pool_rate=active_pool_rate, song_scope=song_scope_of(sings),
+        inputs,
+        members,
+        overall_power=overall_power,
+        bonus_permil=bonus_permil,
+        k_constant=k_constant,
+        active_pool_rate=active_pool_rate,
+        song_scope=song_scope_of(sings),
         yellows=yellows,
         bench=_bench_yellow_rows(bench_characters, name_by_chr, cast, skilltree, node_effect_ids),
-        cap=SONG_ALL_CAP_PERMIL, rounds=CAPPED_ROUNDS, incumbent=incumbent or None,
-        tie_factor=1.0 + INCUMBENT_TIE, tie_first=name_cards,
+        cap=SONG_ALL_CAP_PERMIL,
+        rounds=CAPPED_ROUNDS,
+        incumbent=incumbent or None,
+        tie_factor=1.0 + INCUMBENT_TIE,
+        tie_first=name_cards,
         # the Python flow the plan takes: the fast path's checks for a plan the cache made,
         # the plain path (`_yellow_capped_assignment` at once) for one it did not
-        checks=bool(plan.plan_keys))
+        checks=bool(plan.plan_keys),
+    )
     if matched is None:
         return None
-    mults_by_chr, placements = _placements_from_matched(matched, name_cards=name_cards,
-                                                        incumbent=incumbent)
+    mults_by_chr, placements = _placements_from_matched(matched, name_cards=name_cards, incumbent=incumbent)
     if placements_out is not None:
         placements_out.extend(placements)
     chars: dict[str, CharacterBoard] = dict(cache.bench_boards(bench_characters))
     digests: dict[str, BoardDigest] = dict(cache.bench_digests(bench_characters))
     for card, chr_id, asm, key in ctx:
         chars[card.member], digests[card.member] = cache.team_board(
-            key, card.member, asm, mults_by_chr.get(chr_id, {}))
-    return BoardModel(characters=chars, name_by_chr=dict(names), _digests=digests,
-                      _base=cache.bench_base(bench_characters))
+            key, card.member, asm, mults_by_chr.get(chr_id, {})
+        )
+    return BoardModel(
+        characters=chars, name_by_chr=dict(names), _digests=digests, _base=cache.bench_base(bench_characters)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2644,35 +3031,58 @@ def optimize_and_rerank(
             leader_sings = bool(leader_sings)
         if plan_cache is not None:
             plan = cached_team_plan(
-                team.leader, team.members, cache=plan_cache, tree_for=tree_for,
-                budget_for=budget_for, node_effect_ids=node_effect_ids,
-                skilltree=skilltree, sings=leader_sings,
+                team.leader,
+                team.members,
+                cache=plan_cache,
+                tree_for=tree_for,
+                budget_for=budget_for,
+                node_effect_ids=node_effect_ids,
+                skilltree=skilltree,
+                sings=leader_sings,
             )
         else:
             plan = optimize_team_boards(
-                team.leader, team.members, tree_for=tree_for, budget_for=budget_for,
-                node_effect_ids=node_effect_ids, overall_power=ds.overall_power,
-                bonus_permil=ds.score_bonus_permil, k_constant=UNIT_SCORE_K,
-                active_pool_rate=bare_pool, skilltree=skilltree,
+                team.leader,
+                team.members,
+                tree_for=tree_for,
+                budget_for=budget_for,
+                node_effect_ids=node_effect_ids,
+                overall_power=ds.overall_power,
+                bonus_permil=ds.score_bonus_permil,
+                k_constant=UNIT_SCORE_K,
+                active_pool_rate=bare_pool,
+                skilltree=skilltree,
                 singer_weight=singer_weight_for(leader_sings, _chr_of(team.leader), True),
                 singers=leader_sings if isinstance(leader_sings, (set, frozenset)) else None,
             )
         placements: list[SocketPlacement] = []
         board = board_model_from_plan(
-            plan, team.leader, team.members, skilltree, node_effect_ids,
-            overall_power=ds.overall_power, bonus_permil=ds.score_bonus_permil,
-            k_constant=UNIT_SCORE_K, active_pool_rate=bare_pool,
-            connect_cards=connect_cards, placements_out=placements,
-            bench_characters=bench_characters, name_by_chr=name_by_chr,
-            sings=leader_sings, plan_cache=plan_cache, bench_sockets=bench_sockets,
+            plan,
+            team.leader,
+            team.members,
+            skilltree,
+            node_effect_ids,
+            overall_power=ds.overall_power,
+            bonus_permil=ds.score_bonus_permil,
+            k_constant=UNIT_SCORE_K,
+            active_pool_rate=bare_pool,
+            connect_cards=connect_cards,
+            placements_out=placements,
+            bench_characters=bench_characters,
+            name_by_chr=name_by_chr,
+            sings=leader_sings,
+            plan_cache=plan_cache,
+            bench_sockets=bench_sockets,
         )
-        opt_us = deck_screen_unit_score(
-            score_with_breakdown(team, replace(cfg_off, board=board))
-        ).unit_score
+        opt_us = deck_screen_unit_score(score_with_breakdown(team, replace(cfg_off, board=board))).unit_score
         rows.append(
             BoardOptimisedTeam(
-                team=team, board_off_us=ds.unit_score, optimised_us=opt_us,
-                plan=plan, board=board, sockets=tuple(placements),
+                team=team,
+                board_off_us=ds.unit_score,
+                optimised_us=opt_us,
+                plan=plan,
+                board=board,
+                sockets=tuple(placements),
             )
         )
     rows.sort(key=lambda r: r.optimised_us, reverse=True)
@@ -2688,7 +3098,8 @@ def activation_node_ids(skilltree: Mapping) -> frozenset[str]:
     """Node ids whose effect is an activation-timing family
     (`ACTIVATION_EFFECT_TYPES`), read from the skill-tree dump's `nodes[*].e.t`."""
     return frozenset(
-        node_id for node_id, meta in (skilltree.get("nodes") or {}).items()
+        node_id
+        for node_id, meta in (skilltree.get("nodes") or {}).items()
         if ((meta or {}).get("e") or {}).get("t") in ACTIVATION_EFFECT_TYPES
     )
 
@@ -2697,13 +3108,15 @@ def cooldown_node_ids(skilltree: Mapping) -> frozenset[str]:
     """Node ids whose effect is the ACTIVE's activation frequency (`Act.CD`, the cooldown
     shortening), read from the skill-tree dump's `nodes[*].e.t`."""
     return frozenset(
-        node_id for node_id, meta in (skilltree.get("nodes") or {}).items()
+        node_id
+        for node_id, meta in (skilltree.get("nodes") or {}).items()
         if ((meta or {}).get("e") or {}).get("t") == "Act.CD"
     )
 
 
-def _with_cooldown_subset(tree: SkillTree, selected: frozenset[str], family: frozenset[str],
-                          want: frozenset[str], available) -> frozenset[str] | None:
+def _with_cooldown_subset(
+    tree: SkillTree, selected: frozenset[str], family: frozenset[str], want: frozenset[str], available
+) -> frozenset[str] | None:
     """`selected` with its `family` nodes replaced by `want`: the family nodes not wanted are
     dropped, each wanted node is bought with its cheapest path. `None` when the drop leaves
     bought nodes cut off from the root (the board would come apart), or a wanted node
@@ -2781,8 +3194,11 @@ def cooldown_count_axes(
                 if count not in best_by_count or key < best_by_count[count][0]:
                     best_by_count[count] = (key, sel)
             # no axis for a member with one count, or whose own board is not among them
-            states = ([(count, best_by_count[count][1]) for count in sorted(best_by_count)]
-                      if len(best_by_count) >= 2 and here in best_by_count else [])
+            states = (
+                [(count, best_by_count[count][1]) for count in sorted(best_by_count)]
+                if len(best_by_count) >= 2 and here in best_by_count
+                else []
+            )
             if memo is not None:
                 memo[key_m] = states
         if states:
@@ -2790,9 +3206,13 @@ def cooldown_count_axes(
     return axes
 
 
-def plan_with_counts(plan: TeamBoardPlan, axes: Sequence[tuple], combo: Sequence[int],
-                     cards_by_id: Mapping[str, Card],
-                     tree_for: Callable[[Card], SkillTree | None]) -> TeamBoardPlan:
+def plan_with_counts(
+    plan: TeamBoardPlan,
+    axes: Sequence[tuple],
+    combo: Sequence[int],
+    cards_by_id: Mapping[str, Card],
+    tree_for: Callable[[Card], SkillTree | None],
+) -> TeamBoardPlan:
     """`plan` with each axis of `cooldown_count_axes` at the state `combo` names (an index
     into that member's counts). It carries no `plan_keys`: it is assembled by its nodes."""
     per = dict(plan.per_character)
@@ -2801,8 +3221,9 @@ def plan_with_counts(plan: TeamBoardPlan, axes: Sequence[tuple], combo: Sequence
         old = plan.per_character[card_id]
         if sel != old.selected:
             tree = tree_for(cards_by_id[card_id])
-            per[card_id] = BoardPlan(selected=sel, spent=tree.cost_of(sel - {ROOT_NODE}),
-                                     value=old.value, steps=old.steps)
+            per[card_id] = BoardPlan(
+                selected=sel, spent=tree.cost_of(sel - {ROOT_NODE}), value=old.value, steps=old.steps
+            )
     return replace(plan, per_character=per, plan_keys={})
 
 
@@ -2847,13 +3268,18 @@ def refine_cooldown_counts(
     combination is kept only when the score is strictly higher, so ties keep the start
     and the result is never worse. Returns `(plan, its score, the changes made)`."""
     current = start_value if start_value is not None else score(plan)
-    axes = cooldown_count_axes(plan, cards_by_id, tree_for=tree_for, budget_for=budget_for,
-                               cooldown_nodes=cooldown_nodes, member_ids=member_ids,
-                               player_level=player_level)
+    axes = cooldown_count_axes(
+        plan,
+        cards_by_id,
+        tree_for=tree_for,
+        budget_for=budget_for,
+        cooldown_nodes=cooldown_nodes,
+        member_ids=member_ids,
+        player_level=player_level,
+    )
     if not axes:
         return plan, current, []
-    start = tuple(next(i for i, (c, _s) in enumerate(states) if c == here)
-                  for _cid, states, here in axes)
+    start = tuple(next(i for i, (c, _s) in enumerate(states) if c == here) for _cid, states, here in axes)
     best, best_value = start, current
     ranges = [range(len(states)) for _cid, states, _here in axes]
 
@@ -2874,8 +3300,12 @@ def refine_cooldown_counts(
                     one = tuple(k if b == a else start[b] for b in range(len(axes)))
                     row.append(cooldown_of(plan_for(one))[card_id])
             state_cd.append(row)
-        values = screen([{card_id: state_cd[a][k] for a, ((card_id, _s, _h), k)
-                          in enumerate(zip(axes, combo))} for combo in combos])
+        values = screen(
+            [
+                {card_id: state_cd[a][k] for a, ((card_id, _s, _h), k) in enumerate(zip(axes, combo))}
+                for combo in combos
+            ]
+        )
         # best first, ties in enumeration order; only these are scored on their own board
         screened = sorted(zip(values, combos), key=lambda vc: -vc[0])
         combos = [combo for _v, combo in screened[:verify]]
@@ -2885,8 +3315,11 @@ def refine_cooldown_counts(
             best, best_value = combo, value
     if best == start:
         return plan, current, []
-    changes = [f"{card_id} Act.CD {states[s][0]}->{states[b][0]}"
-               for (card_id, states, _here), s, b in zip(axes, start, best) if s != b]
+    changes = [
+        f"{card_id} Act.CD {states[s][0]}->{states[b][0]}"
+        for (card_id, states, _here), s, b in zip(axes, start, best)
+        if s != b
+    ]
     return plan_for(best), best_value, changes
 
 
@@ -2949,10 +3382,18 @@ def refine_activation_nodes(
                 if spent + added_cost <= budget:
                     candidates.append((f"+{node}", selected | added))
             for label, nodes in candidates:
-                trial = replace(plan, per_character={
-                    **plan.per_character,
-                    card_id: BoardPlan(selected=nodes, spent=tree.cost_of(nodes - {ROOT_NODE}),
-                                       value=current.value, steps=current.steps)})
+                trial = replace(
+                    plan,
+                    per_character={
+                        **plan.per_character,
+                        card_id: BoardPlan(
+                            selected=nodes,
+                            spent=tree.cost_of(nodes - {ROOT_NODE}),
+                            value=current.value,
+                            steps=current.steps,
+                        ),
+                    },
+                )
                 value = score(trial)
                 if value > best:
                     plan, best = trial, value
@@ -2981,8 +3422,8 @@ def develop_refined_team(
     player_level: int | None = None,
     bench_sockets: Mapping[str, Mapping[str, str | None]] | None = None,
     cooldown_counts: bool = False,
-    charts_score_variants: Callable[[BoardModel, Sequence[Mapping[str, float]]],
-                                    Sequence[float]] | None = None,
+    charts_score_variants: Callable[[BoardModel, Sequence[Mapping[str, float]]], Sequence[float]]
+    | None = None,
 ) -> tuple[BoardOptimisedTeam, float, list[str]]:
     """`optimize_and_rerank`'s develop for ONE team, then
     `refine_activation_nodes` on `charts_score(board)` — the caller's real
@@ -3003,10 +3444,19 @@ def develop_refined_team(
     ds = deck_screen_unit_score(bd)
     bare_pool = bd.active_pool / (1.0 + bd.combined_support_rate)
     start = optimize_and_rerank(
-        [team], cfg, tree_for=tree_for, budget_for=budget_for, node_effect_ids=node_effect_ids,
-        skilltree=skilltree, connect_cards=connect_cards, bench_characters=bench_characters,
-        name_by_chr=name_by_chr, plan_cache=plan_cache, sings=sings,
-        bench_sockets=bench_sockets)[0]
+        [team],
+        cfg,
+        tree_for=tree_for,
+        budget_for=budget_for,
+        node_effect_ids=node_effect_ids,
+        skilltree=skilltree,
+        connect_cards=connect_cards,
+        bench_characters=bench_characters,
+        name_by_chr=name_by_chr,
+        plan_cache=plan_cache,
+        sings=sings,
+        bench_sockets=bench_sockets,
+    )[0]
 
     def assemble(plan: TeamBoardPlan, placements: list | None = None) -> BoardModel | None:
         if plan is start.plan:
@@ -3014,21 +3464,36 @@ def develop_refined_team(
                 placements.extend(start.sockets)
             return start.board
         return board_model_from_plan(
-            plan, team.leader, team.members, skilltree, node_effect_ids,
-            overall_power=ds.overall_power, bonus_permil=ds.score_bonus_permil,
-            k_constant=UNIT_SCORE_K, active_pool_rate=bare_pool,
-            connect_cards=connect_cards, placements_out=placements,
-            bench_characters=bench_characters, name_by_chr=name_by_chr, sings=sings,
+            plan,
+            team.leader,
+            team.members,
+            skilltree,
+            node_effect_ids,
+            overall_power=ds.overall_power,
+            bonus_permil=ds.score_bonus_permil,
+            k_constant=UNIT_SCORE_K,
+            active_pool_rate=bare_pool,
+            connect_cards=connect_cards,
+            placements_out=placements,
+            bench_characters=bench_characters,
+            name_by_chr=name_by_chr,
+            sings=sings,
             bench_sockets=bench_sockets,
             # a refined plan carries no `plan_keys` (`refine_activation_nodes`): the
             # compiled assembly takes it by its nodes, the Python's plain path otherwise
-            plan_cache=plan_cache)
+            plan_cache=plan_cache,
+        )
 
     cards = {c.id: c for c in (team.leader, *team.members)}
     plan, value, moves = refine_activation_nodes(
-        start.plan, cards, tree_for=tree_for, budget_for=budget_for,
+        start.plan,
+        cards,
+        tree_for=tree_for,
+        budget_for=budget_for,
         activation_nodes=activation_node_ids(skilltree),
-        score=lambda p: charts_score(assemble(p)), player_level=player_level)
+        score=lambda p: charts_score(assemble(p)),
+        player_level=player_level,
+    )
     if cooldown_counts:
         members_by_id = {c.id: c for c in team.members}
         # the board `value` was measured on: the start's own when nothing moved
@@ -3036,39 +3501,53 @@ def develop_refined_team(
 
         def cooldown_of(p: TeamBoardPlan) -> dict[str, float]:
             board = base if p is plan else assemble(p)
-            return {cid: board.uptime_for(c.member)[1] if board is not None else 0.0
-                    for cid, c in members_by_id.items()}
+            return {
+                cid: board.uptime_for(c.member)[1] if board is not None else 0.0
+                for cid, c in members_by_id.items()
+            }
 
         def screen(variants: Sequence[Mapping[str, float]]) -> list[float]:
-            by_holomem = [{members_by_id[cid].member: cd for cid, cd in v.items()}
-                          for v in variants]
+            by_holomem = [{members_by_id[cid].member: cd for cid, cd in v.items()} for v in variants]
             if charts_score_variants is not None:
                 return list(charts_score_variants(base, by_holomem))
             return [charts_score(base.with_cooldowns(v)) for v in by_holomem]
 
         plan, value, changes = refine_cooldown_counts(
-            plan, cards, tree_for=tree_for, budget_for=budget_for,
+            plan,
+            cards,
+            tree_for=tree_for,
+            budget_for=budget_for,
             cooldown_nodes=cooldown_node_ids(skilltree),
             member_ids=frozenset(members_by_id),
-            score=lambda p: charts_score(assemble(p)), start_value=value,
+            score=lambda p: charts_score(assemble(p)),
+            start_value=value,
             player_level=player_level,
             cooldown_of=cooldown_of if base is not None else None,
-            screen=screen if base is not None else None)
+            screen=screen if base is not None else None,
+        )
         moves = moves + changes
-    if not moves:              # unchanged: keep the start exactly (its plan-cache board)
+    if not moves:  # unchanged: keep the start exactly (its plan-cache board)
         return start, value, moves
     placements: list[SocketPlacement] = []
     board = assemble(plan, placements)
     opt_us = deck_screen_unit_score(score_with_breakdown(team, replace(cfg_off, board=board))).unit_score
-    return (BoardOptimisedTeam(team=team, board_off_us=ds.unit_score, optimised_us=opt_us,
-                               plan=plan, board=board, sockets=tuple(placements)),
-            value, moves)
+    return (
+        BoardOptimisedTeam(
+            team=team,
+            board_off_us=ds.unit_score,
+            optimised_us=opt_us,
+            plan=plan,
+            board=board,
+            sockets=tuple(placements),
+        ),
+        value,
+        moves,
+    )
 
 
-def develop_and_refine(team: Team, cfg: ScoringConfig, charts_score: Callable[[BoardModel], float],
-                       **kwargs) -> tuple[BoardModel | None, TeamBoardPlan, float, list[str]]:
+def develop_and_refine(
+    team: Team, cfg: ScoringConfig, charts_score: Callable[[BoardModel], float], **kwargs
+) -> tuple[BoardModel | None, TeamBoardPlan, float, list[str]]:
     """`develop_refined_team` as `(board, plan, charts_score(board), moves)`."""
     bt, value, moves = develop_refined_team(team, cfg, charts_score, **kwargs)
     return bt.board, bt.plan, value, moves
-
-

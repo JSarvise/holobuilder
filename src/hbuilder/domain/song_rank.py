@@ -10,8 +10,8 @@ deterministic.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
-from typing import Sequence
 
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.song import (
@@ -30,9 +30,7 @@ __all__ = [
 ]
 
 
-def _score_one(
-    team: Team, chart: SongChart, cfg: ScoringConfig
-) -> SongScore:
+def _score_one(team: Team, chart: SongChart, cfg: ScoringConfig) -> SongScore:
     """`score_song_detailed` for a team whose leader is already fixed.
 
     A `Team` is (leader, members); the per-song scorer takes members and a
@@ -52,12 +50,14 @@ def _score_one(
     Overall Power carries the board's power half, so a cache keyed by team alone
     would be WRONG there). Cache by (team, board) if it ever matters."""
     deck_power = (
-        overall_power_for(tuple(team.members), team.leader, cfg)
-        if cfg.song_absolute_deck_power
-        else None
+        overall_power_for(tuple(team.members), team.leader, cfg) if cfg.song_absolute_deck_power else None
     )
     scores = score_song_detailed(
-        tuple(team.members), (team.leader,), chart, cfg, deck_power=deck_power,
+        tuple(team.members),
+        (team.leader,),
+        chart,
+        cfg,
+        deck_power=deck_power,
         # The AUTO judgement column. `cfg.song_auto`'s own comment records the
         # half of the premise that is easy to forget (combo).
         auto=cfg.song_auto,
@@ -65,9 +65,7 @@ def _score_one(
     return scores[0]
 
 
-def score_team_on_chart(
-    team: Team, chart: SongChart, cfg: ScoringConfig
-) -> SongScore:
+def score_team_on_chart(team: Team, chart: SongChart, cfg: ScoringConfig) -> SongScore:
     """The ONE per-song figure for a (leader, members) team on `cfg`'s board.
 
     Public name for `_score_one`, for callers outside the ranking paths (the web
@@ -79,42 +77,46 @@ def score_team_on_chart(
     return _score_one(team, chart, cfg)
 
 
-def score_team_notes(
-    team: Team, chart: SongChart, cfg: ScoringConfig
-) -> tuple[SongScore, list]:
+def score_team_notes(team: Team, chart: SongChart, cfg: ScoringConfig) -> tuple[SongScore, list]:
     """`score_team_on_chart` and its note-by-note breakdown at the best slot order
     (`song.NoteRow`s, `score_song_detailed(note_rows=)`): the same deck power and AUTO
     premise, so the rows' `expected_value`s add up to the row's `total_score` exactly. It
     walks the 120 orders in Python: for an export, not a search."""
     deck_power = (
-        overall_power_for(tuple(team.members), team.leader, cfg)
-        if cfg.song_absolute_deck_power
-        else None
+        overall_power_for(tuple(team.members), team.leader, cfg) if cfg.song_absolute_deck_power else None
     )
     rows: dict = {}
     (score,) = score_song_detailed(
-        tuple(team.members), (team.leader,), chart, cfg, deck_power=deck_power,
-        auto=cfg.song_auto, note_rows=rows,
+        tuple(team.members),
+        (team.leader,),
+        chart,
+        cfg,
+        deck_power=deck_power,
+        auto=cfg.song_auto,
+        note_rows=rows,
     )
     return score, rows[team.leader.id]
 
 
-def score_team_orders(
-    team: Team, chart: SongChart, cfg: ScoringConfig
-) -> dict[tuple[str, ...], float]:
+def score_team_orders(team: Team, chart: SongChart, cfg: ScoringConfig) -> dict[tuple[str, ...], float]:
     """The team's total on `chart` at EVERY slot order, `{member_order: total}` -- the
     same call `score_team_on_chart` makes (`_score_one`'s deck power and AUTO column),
     its 120 orders recorded by the scorer's reference walk (`score_song_detailed`,
     `order_totals`). Its max is `score_team_on_chart`'s total. ~100x the cost of one
     score: for choosing ONE order across several songs, not for a search."""
     deck_power = (
-        overall_power_for(tuple(team.members), team.leader, cfg)
-        if cfg.song_absolute_deck_power
-        else None
+        overall_power_for(tuple(team.members), team.leader, cfg) if cfg.song_absolute_deck_power else None
     )
     got: dict = {}
-    score_song_detailed(tuple(team.members), (team.leader,), chart, cfg,
-                        deck_power=deck_power, auto=cfg.song_auto, order_totals=got)
+    score_song_detailed(
+        tuple(team.members),
+        (team.leader,),
+        chart,
+        cfg,
+        deck_power=deck_power,
+        auto=cfg.song_auto,
+        order_totals=got,
+    )
     return {order: total for (_leader, order), total in got.items()}
 
 
@@ -136,6 +138,7 @@ def score_team_ceiling(
     free = _score_one(team, chart, cfg_max)
     if tuple(free.member_order) == tuple(member_order):
         return free.total_score
-    law = run_score_distribution(tuple(team.members), team.leader, chart, cfg_max,
-                                 member_order, free.deck_power)
+    law = run_score_distribution(
+        tuple(team.members), team.leader, chart, cfg_max, member_order, free.deck_power
+    )
     return law["expected_total"]

@@ -10,6 +10,7 @@ Each run directory gives one column; stage times come from the server's own stag
 median of each figure: the searches with the server's stage timers, the event searches with
 their stage events, and every follow-up request.
 """
+
 from __future__ import annotations
 
 import json
@@ -51,6 +52,7 @@ def median_tables(runs: list[dict]) -> None:
 
     def col(case, pick):
         return [pick(r["cases"][case]) for r in runs if case in r["cases"]]
+
     searches = [c for c in names if "." not in c and col(c, lambda x: x.get("server_timings"))[0]]
     events = [c for c in names if "." not in c and c not in searches]
     requests = [c for c in names if "." in c]
@@ -59,8 +61,9 @@ def median_tables(runs: list[dict]) -> None:
     print("|---|---:|" + "---:|" * len(SEARCH_STAGES))
     for c in searches:
         cells = [_median(col(c, lambda x: x["wall_s"]))]
-        cells += [_median(col(c, lambda x, s=s: (x.get("server_timings") or {}).get(s)))
-                  for s in SEARCH_STAGES]
+        cells += [
+            _median(col(c, lambda x, s=s: (x.get("server_timings") or {}).get(s))) for s in SEARCH_STAGES
+        ]
         print(f"| {c} | " + " | ".join(cells) + " |")
     print("\n| Case | Wall | " + " | ".join(EVENT_STAGES) + " |")
     print("|---|---:|" + "---:|" * len(EVENT_STAGES))

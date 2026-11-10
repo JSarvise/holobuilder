@@ -13,6 +13,7 @@ ranking decides the series: `points` -> marathon_score_ranking_rank_reward, `tot
 Challenge) -> total_music_highest_score_reward. Files already on disk are never fetched again.
 Never fails the refresh: a medal that cannot be had is reported and skipped.
 """
+
 from __future__ import annotations
 
 import io
@@ -22,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 DUMPS = paths.DUMPS
 OUT = DUMPS / "event_art"
@@ -57,22 +59,28 @@ def wanted(chs: dict[str, str], emblem_assets: dict[str, str], grades: list[str]
 
 def main() -> int:
     from master_cache import rows  # noqa: PLC0415
+
     grades = [r["id"].split("-", 1)[1] for r in rows("MarathonRankingGrade")]
-    assets = {r["id"]: (r["data"].get(3) or [""])[0] for r in rows("Emblem")
-              if r["id"].startswith(("emblem-marathon_score", "emblem-total_music"))}
+    assets = {
+        r["id"]: (r["data"].get(3) or [""])[0]
+        for r in rows("Emblem")
+        if r["id"].startswith(("emblem-marathon_score", "emblem-total_music"))
+    }
     todo = {f: a for f, a in wanted(chapters(), assets, grades).items() if not (OUT / f).is_file()}
     print(f"event emblems: {len(todo)} to fetch")
     if not todo:
         return 0
     import park_map  # noqa: PLC0415  (the Octo fetch + bundle plumbing)
+
     OUT.mkdir(parents=True, exist_ok=True)
     done = failed = 0
     for fname, asset in sorted(todo.items()):
         for bundle in (f"img_emb_{asset}_lang-eng", f"img_emb_{asset}"):
             try:
                 park_map.ensure([bundle])
-                tex = next(o.read() for o in park_map._load_bundle(bundle).objects
-                           if o.type.name == "Texture2D")
+                tex = next(
+                    o.read() for o in park_map._load_bundle(bundle).objects if o.type.name == "Texture2D"
+                )
             except Exception:  # noqa: BLE001 -- try the next name, then report
                 continue
             im = tex.image.convert("RGBA")

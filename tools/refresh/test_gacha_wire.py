@@ -1,10 +1,12 @@
 from __future__ import annotations
+
 import sys
 from pathlib import Path
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import gacha_wire as gw  # noqa: E402
 import account_snapshot as snap  # noqa: E402
+import gacha_wire as gw  # noqa: E402
 
 
 def _s(fn, s):  # length-delimited field
@@ -19,9 +21,12 @@ def test_decode_history_two_identical_lines_survive():
     h = _s(1, "Duo") + _s(2, "card-x") + _v(3, 1000)
     payload = _s(1, h) + _s(1, h)
     out = gw.decode(payload, gw.HIST_RESP)
-    assert out == {"histories": [
-        {"gacha_name": "Duo", "card_id": "card-x", "draw_time": 1000},
-        {"gacha_name": "Duo", "card_id": "card-x", "draw_time": 1000}]}
+    assert out == {
+        "histories": [
+            {"gacha_name": "Duo", "card_id": "card-x", "draw_time": 1000},
+            {"gacha_name": "Duo", "card_id": "card-x", "draw_time": 1000},
+        ]
+    }
 
 
 def test_decode_list_flattens_groups_and_repeated_strings():

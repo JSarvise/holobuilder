@@ -18,9 +18,10 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-import atomic_io
 import sys
 from pathlib import Path
+
+import atomic_io
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
@@ -71,16 +72,21 @@ def _describe_effect(eff: dict) -> str | None:
     return None
 
 
-def build(*, gain: bool, pool: int, embed_icons: bool = False,
-          scenario: str = "account", song: str | None = None,
-          charts_path: str | None = None,
-          board_state_path: str | None = None) -> dict:
+def build(
+    *,
+    gain: bool,
+    pool: int,
+    embed_icons: bool = False,
+    scenario: str = "account",
+    song: str | None = None,
+    charts_path: str | None = None,
+    board_state_path: str | None = None,
+) -> dict:
     # `board_state_path` overrides the live capture — a test pinning a property
     # of a HISTORICAL board state (e.g. the frozen pre-respec fixture) passes
     # the snapshot it means, instead of silently drifting with the account.
     skilltree = to._load(to.DUMPS / "skilltree.json")
-    board = to._load(Path(board_state_path) if board_state_path
-                     else to.DUMPS / "board_state.json")
+    board = to._load(Path(board_state_path) if board_state_path else to.DUMPS / "board_state.json")
     prices = to._prices()
     unspent = to._character_points()
     nodes_meta = skilltree["nodes"]
@@ -102,7 +108,7 @@ def build(*, gain: bool, pool: int, embed_icons: bool = False,
         # target -> cheapest chain of UNOWNED nodes reaching it, on the real graph.
         paths = to.cheapest_paths(owned, graph, prices, max_nodes=len(positions))
 
-        gains: dict[str, float] = {}       # `gain` stays in the export's shape, null
+        gains: dict[str, float] = {}  # `gain` stays in the export's shape, null
 
         node_objs = []
         for nid, pos in positions.items():
@@ -116,49 +122,55 @@ def build(*, gain: bool, pool: int, embed_icons: bool = False,
             else:
                 path = list(paths.get(nid, ()))
                 state = "buyable" if len(path) == 1 else ("locked" if path else "unreachable")
-            node_objs.append({
-                "id": nid,
-                "branch": meta.get("br"),
-                "star": meta.get("lv"),
-                "pos": pos,
-                "effect": _describe_effect(eff),
-                "effect_icon": eff.get("icon"),
-                "cost": prices.get(nid, {}),
-                "unlock_path": path,
-                "unlock_points": sum(prices.get(n, {}).get("points", 0) for n in path),
-                "gain": gains.get(nid),
-                "state": state,
-            })
+            node_objs.append(
+                {
+                    "id": nid,
+                    "branch": meta.get("br"),
+                    "star": meta.get("lv"),
+                    "pos": pos,
+                    "effect": _describe_effect(eff),
+                    "effect_icon": eff.get("icon"),
+                    "cost": prices.get(nid, {}),
+                    "unlock_path": path,
+                    "unlock_points": sum(prices.get(n, {}).get("points", 0) for n in path),
+                    "gain": gains.get(nid),
+                    "state": state,
+                }
+            )
 
         socket_objs = []
         for sid in SOCKETS:
             if sid not in positions:
                 continue
             placed = slots.get(sid)
-            socket_objs.append({
-                "socket": sid,
-                "pos": positions[sid],
-                "point_cost": prices.get(sid, {}).get("points", 0),
-                "placed_card": placed,
-                "connect_effect": card_connect.get(placed) if placed else None,
-            })
+            socket_objs.append(
+                {
+                    "socket": sid,
+                    "pos": positions[sid],
+                    "point_cost": prices.get(sid, {}).get("points", 0),
+                    "placed_card": placed,
+                    "connect_effect": card_connect.get(placed) if placed else None,
+                }
+            )
 
         spent = sum(prices.get(n, {}).get("points", 0) for n in owned)
         held = unspent.get(cid)
-        characters.append({
-            "chr": cid,
-            "name": member.get("name", "?"),
-            "model": member["model"],
-            "icon": _icon_for(cid, embed_icons),
-            "points": {
-                "unspent": held,
-                "spent_on_owned": spent,
-                "granted": (held + spent) if held is not None else None,
-            },
-            "owned_count": len(owned),
-            "nodes": node_objs,
-            "sockets": socket_objs,
-        })
+        characters.append(
+            {
+                "chr": cid,
+                "name": member.get("name", "?"),
+                "model": member["model"],
+                "icon": _icon_for(cid, embed_icons),
+                "points": {
+                    "unspent": held,
+                    "spent_on_owned": spent,
+                    "granted": (held + spent) if held is not None else None,
+                },
+                "owned_count": len(owned),
+                "nodes": node_objs,
+                "sockets": socket_objs,
+            }
+        )
 
     return {
         "schema": SCHEMA,
@@ -181,26 +193,34 @@ def build(*, gain: bool, pool: int, embed_icons: bool = False,
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--embed-icons", action="store_true",
-                    help="inline each icon as a data: URI (self-contained JSON) instead of a ref")
-    ap.add_argument("--scenario", default="account", choices=to.SCENARIOS,
-                    help="the collection state named in the export: account, my-cards-maxed, "
-                         "full-collection-maxed. Default: account.")
+    ap.add_argument(
+        "--embed-icons",
+        action="store_true",
+        help="inline each icon as a data: URI (self-contained JSON) instead of a ref",
+    )
+    ap.add_argument(
+        "--scenario",
+        default="account",
+        choices=to.SCENARIOS,
+        help="the collection state named in the export: account, my-cards-maxed, "
+        "full-collection-maxed. Default: account.",
+    )
     ap.add_argument("--out", default=str(to.DUMPS / "board_export.json"))
     args = ap.parse_args()
 
     doc = build(gain=False, pool=1, embed_icons=args.embed_icons, scenario=args.scenario)
     atomic_io.write_text(
-        Path(args.out),
-        json.dumps(doc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+        Path(args.out), json.dumps(doc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
     )
     chars = len(doc["characters"])
     nodes = sum(len(c["nodes"]) for c in doc["characters"])
     buyable = sum(1 for c in doc["characters"] for n in c["nodes"] if n["state"] == "buyable")
     icons = sum(1 for c in doc["characters"] if c["icon"])
-    print(f"{chars} characters, {nodes} nodes ({buyable} buyable), {icons} icons -> {args.out} "
-          f"(icons={'embed' if args.embed_icons else 'ref'})",
-          file=sys.stderr)
+    print(
+        f"{chars} characters, {nodes} nodes ({buyable} buyable), {icons} icons -> {args.out} "
+        f"(icons={'embed' if args.embed_icons else 'ref'})",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":

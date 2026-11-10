@@ -28,6 +28,7 @@ Sources and confidence:
 
 Read-only: nothing here writes a file.
 """
+
 from __future__ import annotations
 
 import re
@@ -125,8 +126,7 @@ def covered_nodes(positions: Mapping[str, list], socket_pos: list, cells: list) 
     """The board nodes inside a Connect shape anchored at `socket_pos`."""
     sx, sy = socket_pos
     hit = {(sx + dx, sy + dy) for dx, dy in cells}
-    return sorted(n for n, p in positions.items()
-                  if not n.startswith(SOCKET_PREFIX) and (p[0], p[1]) in hit)
+    return sorted(n for n, p in positions.items() if not n.startswith(SOCKET_PREFIX) and (p[0], p[1]) in hit)
 
 
 def annotate(doc: dict, skilltree: Mapping, collection: Mapping | None, *, maxed: bool = False) -> dict:
@@ -143,8 +143,7 @@ def annotate(doc: dict, skilltree: Mapping, collection: Mapping | None, *, maxed
     doc["connect_cards"] = catalogue
     for ch in doc.get("characters") or []:
         cid = ch.get("chr")
-        positions = models.get(ch.get("model")) or {
-            n["id"]: n["pos"] for n in ch.get("nodes") or []}
+        positions = models.get(ch.get("model")) or {n["id"]: n["pos"] for n in ch.get("nodes") or []}
         permil_by_node: dict[str, int] = {}
         source_by_node: dict[str, list[str]] = {}
         for sock in ch.get("sockets") or []:
@@ -154,9 +153,15 @@ def annotate(doc: dict, skilltree: Mapping, collection: Mapping | None, *, maxed
                 sock["connect"] = None
                 continue
             covers = covered_nodes(positions, sock.get("pos") or positions.get(sock["socket"]), info["cells"])
-            sock["connect"] = {"card": card, "level": info["level"], "level_basis": info["level_basis"],
-                               "permil": info["permil"], "area": info["area"], "text": info["text"],
-                               "covers": covers}
+            sock["connect"] = {
+                "card": card,
+                "level": info["level"],
+                "level_basis": info["level_basis"],
+                "permil": info["permil"],
+                "area": info["area"],
+                "text": info["text"],
+                "covers": covers,
+            }
             for nid in covers:
                 permil_by_node[nid] = permil_by_node.get(nid, 0) + info["permil"]
                 source_by_node.setdefault(nid, []).append(sock["socket"])

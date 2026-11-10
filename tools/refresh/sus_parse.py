@@ -31,7 +31,10 @@
 #
 #   python sus_parse.py --verify [dir]      reproduce every header count on every chart
 #   python sus_parse.py <file.sus>          summarise one chart
-import collections, os, re, sys
+import collections
+import os
+import re
+import sys
 from fractions import Fraction
 from pathlib import Path
 
@@ -56,8 +59,7 @@ class Note:
         self.time, self.attr = None, None
 
     def __repr__(self):
-        return (f"<{self.chan}{self.kind} lane{self.lane} "
-                f"beat{float(self.beat):.3f} t{self.time:.3f}s>")
+        return f"<{self.chan}{self.kind} lane{self.lane} beat{float(self.beat):.3f} t{self.time:.3f}s>"
 
 
 class Chart:
@@ -77,11 +79,11 @@ def _b62(c):
     """One case-SENSITIVE base-62 digit: 0-9, then a-z, then A-Z."""
     o = ord(c)
     if 48 <= o <= 57:
-        return o - 48          # '0'-'9' ->  0-9
+        return o - 48  # '0'-'9' ->  0-9
     if 97 <= o <= 122:
-        return o - 87          # 'a'-'z' -> 10-35
+        return o - 87  # 'a'-'z' -> 10-35
     if 65 <= o <= 90:
-        return o - 29          # 'A'-'Z' -> 36-61
+        return o - 29  # 'A'-'Z' -> 36-61
     return 0
 
 
@@ -100,11 +102,11 @@ def _slots(data):
     LONG_RELAY and FULL_COMBO on every chart."""
     out, i = [], 0
     while i + 1 < len(data):
-        if data[i:i + 2] == "0x" and i + 4 <= len(data):
+        if data[i : i + 2] == "0x" and i + 4 <= len(data):
             out.extend([None] * (_b62(data[i + 2]) * 62 + _b62(data[i + 3])))
             i += 4
         else:
-            out.append(data[i:i + 2])
+            out.append(data[i : i + 2])
             i += 2
     return out
 
@@ -114,7 +116,7 @@ def _cells(data):
     slots = _slots(data)
     n = len(slots)
     for i, cell in enumerate(slots):
-        if cell and cell[0] != "0":     # '0' in the type position means no note
+        if cell and cell[0] != "0":  # '0' in the type position means no note
             yield Fraction(i, n), cell
 
 
@@ -148,7 +150,7 @@ def parse(text):
                     if cell and cell != "00":
                         bpmgrid[measure][Fraction(i, len(slots))] = cell.lstrip("0") or "0"
             elif chan[0] in (SHORT, LONG, ATTR):
-                grid[(measure, chan)].update(_cells(data))   # exact repeats collapse, rest kept
+                grid[(measure, chan)].update(_cells(data))  # exact repeats collapse, rest kept
             continue
         m = HEADER.match(line)
         if m and m.group(2) is not None:
@@ -192,8 +194,7 @@ def _assemble(header, grid, bpmgrid, bpmdef, lengths):
         lane = int(chan[1], 36)
         slide = chan[2] if len(chan) > 2 else None
         for frac, cell in sorted(cells):
-            notes.append(Note(starts[measure] + frac * length, lane, chan[0],
-                              cell[0], cell[1], slide))
+            notes.append(Note(starts[measure] + frac * length, lane, chan[0], cell[0], cell[1], slide))
     notes.sort(key=lambda n: (n.beat, n.lane, n.chan))
     _set_times(notes, bpms)
     _attach_attributes(notes)
@@ -229,7 +230,7 @@ def _attach_attributes(notes):
         note.attr = attrs.get((note.beat, note.lane))
 
 
-FLICK_ATTR = "1"           # channel-5 attribute that makes a note a flick
+FLICK_ATTR = "1"  # channel-5 attribute that makes a note a flick
 HOLD_TICK = Fraction(1, 2)  # a hold scores a "continue" note every half beat
 
 
@@ -283,7 +284,7 @@ def classify(chart):
     for n in chart.notes:
         if n.chan == SHORT:
             if (n.beat, n.lane) in slide_at:
-                continue                                    # duplicate of the slide note
+                continue  # duplicate of the slide note
             out.append(("FLICK" if n.attr == FLICK_ATTR else "NORMAL", n))
         elif n.chan == LONG:
             if n.kind == "1":
@@ -295,7 +296,7 @@ def classify(chart):
             # type 4/5 are control points: they shape the slide but score nothing
 
     for start, end in holds(chart):
-        beat = (start.beat // HOLD_TICK + 1) * HOLD_TICK     # next half beat of the song grid
+        beat = (start.beat // HOLD_TICK + 1) * HOLD_TICK  # next half beat of the song grid
         while beat < end.beat:
             tick = Note(beat, start.lane, LONG, "c", start.width, start.slide)
             out.append(("LONG_CONTINUE", tick))
@@ -319,8 +320,7 @@ def tally(chart):
     return collections.Counter(kind for kind, _ in classify(chart))
 
 
-CATEGORIES = ("NORMAL", "FLICK", "LONG_START", "LONG_END", "LONG_FLICK_END",
-              "LONG_RELAY", "LONG_CONTINUE")
+CATEGORIES = ("NORMAL", "FLICK", "LONG_START", "LONG_END", "LONG_FLICK_END", "LONG_RELAY", "LONG_CONTINUE")
 
 
 def verify(paths):
@@ -375,8 +375,16 @@ def flick_report(src):
         h = headers_only(os.path.join(src, fn))
         total = int(h.get("TOTAL_NOTE_COUNT", 0))
         flicks = int(h.get("FLICK_NOTE_COUNT", 0)) + int(h.get("LONG_FLICK_END_NOTE_COUNT", 0))
-        rows.append((flicks / total if total else 0.0, flicks, total, h.get("MUSIC_ID", "?"),
-                     h.get("SCORE_LEVEL", "?"), fn))
+        rows.append(
+            (
+                flicks / total if total else 0.0,
+                flicks,
+                total,
+                h.get("MUSIC_ID", "?"),
+                h.get("SCORE_LEVEL", "?"),
+                fn,
+            )
+        )
     rows.sort(reverse=True)
     print(f"{len(rows)} charts, ranked by share of notes that score differently\n")
     print(f"{'chart':30} {'lvl':>4} {'flick':>6} {'total':>6} {'share':>7}")
@@ -384,8 +392,10 @@ def flick_report(src):
         print(f"{fn[:30]:30} {lvl:>4} {flicks:6} {total:6} {share:6.1%}")
     zero = sum(1 for r in rows if not r[1])
     print(f"\n  {zero} charts have no such notes at all -- identical on both platforms")
-    print(f"  median share {sorted(r[0] for r in rows)[len(rows) // 2]:.1%}, "
-          f"max {rows[0][0]:.1%} ({rows[0][5]})")
+    print(
+        f"  median share {sorted(r[0] for r in rows)[len(rows) // 2]:.1%}, "
+        f"max {rows[0][0]:.1%} ({rows[0][5]})"
+    )
 
 
 def main():
@@ -420,8 +430,10 @@ def main():
     full_combo = sum(t[c] for c in CATEGORIES)
     stated = chart.count("FULL_COMBO_NOTE_COUNT")
     verdict = "agrees" if full_combo == stated else f"DISAGREES with header {stated}"
-    print(f"{chart.header.get('MUSIC_ID')}  level {chart.header.get('SCORE_LEVEL')}  "
-          f"{chart.duration:.1f}s  {full_combo} scored notes ({verdict})")
+    print(
+        f"{chart.header.get('MUSIC_ID')}  level {chart.header.get('SCORE_LEVEL')}  "
+        f"{chart.duration:.1f}s  {full_combo} scored notes ({verdict})"
+    )
     print(f"  bpm changes: {[(float(b), v) for b, v in chart.bpms]}")
     print(f"  tally: {dict(sorted(t.items()))}")
     print("  header counts:")

@@ -9,14 +9,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-if sys.version_info < (3, 12):  # the oldest Python holobuilder runs on (pyproject.toml)
+if sys.version_info < (3, 12):  # noqa: UP036 -- the oldest Python holobuilder runs on (pyproject.toml)
     raise SystemExit(f"holobuilder needs Python 3.12 or newer; this is {sys.version.split()[0]}")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 
 from hbuilder.solver.parallel import one_blas_thread  # noqa: E402
 
-one_blas_thread()   # before anything imports numpy: ~480 MB less in this process and each worker
+one_blas_thread()  # before anything imports numpy: ~480 MB less in this process and each worker
 
 from hbweb.router import BIND_HOST, DEFAULT_PORT, Handler, ThreadingServer, build_parser, main  # noqa: E402
 

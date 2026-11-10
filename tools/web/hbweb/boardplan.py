@@ -10,7 +10,7 @@ place the sockets the plan chose, and mark what changes. Read-only.
 from __future__ import annotations
 
 import time
-from typing import Mapping
+from collections.abc import Mapping
 
 import board_values
 
@@ -28,14 +28,13 @@ def _maxed_complete_state(precompute, team: dict, ids: list) -> dict:
     import leaf_inputs  # noqa: PLC0415
 
     targets = leaf_inputs.maxed_bench_targets(ids)
-    now = precompute.board_export.build(gain=False, pool=1,
-                                        scenario=basis.SCENARIO_BY_BASIS["maxed"])
+    now = precompute.board_export.build(gain=False, pool=1, scenario=basis.SCENARIO_BY_BASIS["maxed"])
     state = {}
     for ch in now.get("characters", []):
         c = ch["chr"]
         nodes = {n["id"]: n for n in ch.get("nodes", [])}
         extra = set((targets.get(c) or {}).get("nodes") or [])
-        if c in team:                       # its sockets are its row's
+        if c in team:  # its sockets are its row's
             extra = {i for i in extra if not i.startswith("S-")}
         want = set((team.get(c) or {}).get("nodes") or []) | extra
         owned = {i for i, n in nodes.items() if n.get("state") == "owned"}
@@ -52,10 +51,11 @@ def over_points(doc: Mapping, budget: int) -> list[dict]:
     `{chr, name, points}`. A maxed account's complete board (`_maxed_complete_state`) keeps
     every node the account already holds, since it resets nothing, so an account that
     bought nodes off the scoring paths can need more points than a max-level holomem holds."""
-    return [{"chr": c["chr"], "name": c.get("name") or c["chr"], "points": c["plan"]["point_cost"]}
-            for c in doc.get("characters", [])
-            if (c.get("plan") or {}).get("point_cost") is not None
-            and c["plan"]["point_cost"] > budget]
+    return [
+        {"chr": c["chr"], "name": c.get("name") or c["chr"], "points": c["plan"]["point_cost"]}
+        for c in doc.get("characters", [])
+        if (c.get("plan") or {}).get("point_cost") is not None and c["plan"]["point_cost"] > budget
+    ]
 
 
 def serve_board_doc(h) -> None:
@@ -83,22 +83,32 @@ def serve_board_doc(h) -> None:
         return
     precompute = basis.load_precompute()
     if precompute is None or not hasattr(precompute, "board_export"):
-        h.reply_json(503, {"error": (
-            "could not import board_export via precompute_optimisations "
-            "(needs the packages of requirements.txt; setup.cmd or setup.sh installs them).")})
+        h.reply_json(
+            503,
+            {
+                "error": (
+                    "could not import board_export via precompute_optimisations "
+                    "(needs the packages of requirements.txt; setup.cmd or setup.sh installs them)."
+                )
+            },
+        )
         return
     try:
         # the team's sockets are the plan's; one it left empty keeps the account's card
         # when the plan uses that card nowhere (`settle_slots`)
-        state = {c: {"nodes": list((st or {}).get("nodes") or []), "slots": dict((st or {}).get("slots") or {})}
-                 for c, st in board_state.items() if isinstance(st, dict)}
+        state = {
+            c: {"nodes": list((st or {}).get("nodes") or []), "slots": dict((st or {}).get("slots") or {})}
+            for c, st in board_state.items()
+            if isinstance(st, dict)
+        }
         complete = bool(body.get("complete")) and basis_name == "maxed"
         if complete:
             state = _maxed_complete_state(precompute, state, ids)
             flat_budget = basis.maxed_account_budget()
         else:
-            settle_slots(state, config.read_json(config.BOARD_STATE_PATH) or {}, set(state),
-                         connect_groups(precompute))
+            settle_slots(
+                state, config.read_json(config.BOARD_STATE_PATH) or {}, set(state), connect_groups(precompute)
+            )
         doc = board_doc_for(precompute, state, ids, basis_name, flat_budget)
         if complete:
             doc["over_points"] = over_points(doc, flat_budget)
@@ -113,9 +123,13 @@ def _plan_account_state(body: Mapping, whole: Mapping, captured: Mapping) -> tup
     six boards (`board_state`) over them, and the bench sockets the detail re-chose
     (`bench_slots`, `row_detail._bench_slots`); `chosen` = the boards whose sockets
     the plan re-chose."""
-    state = {chr_id: {"nodes": list((plan or {}).get("nodes") or []),
-                      "slots": dict((captured.get(chr_id) or {}).get("slots") or {})}
-             for chr_id, plan in whole.items()}
+    state = {
+        chr_id: {
+            "nodes": list((plan or {}).get("nodes") or []),
+            "slots": dict((captured.get(chr_id) or {}).get("slots") or {}),
+        }
+        for chr_id, plan in whole.items()
+    }
     for chr_id, st in (body.get("board_state") or {}).items():
         if isinstance(st, dict):
             state[chr_id] = {"nodes": list(st.get("nodes") or []), "slots": dict(st.get("slots") or {})}
@@ -164,8 +178,7 @@ def serve_board_plan_account(h) -> None:
             # a Highlight row on the whole pool: its plan values the yellows on every
             # pool song (`row_detail.pool_detail`'s `plan_pool`, the same plan)
             opts["song_pool"] = body["song_pool"]
-        planned = materials_plan.plan_for(ids[0], ids[1:], body.get("song") or None, opts,
-                                          parallel=True)
+        planned = materials_plan.plan_for(ids[0], ids[1:], body.get("song") or None, opts, parallel=True)
         if planned is None:
             h.reply_json(422, {"error": "the wallet cannot fund a plan for this team"})
             return
@@ -176,13 +189,16 @@ def serve_board_plan_account(h) -> None:
         doc = board_doc_for(precompute, state, ids, "account", flat)
         team = {"chr-" + c.split("-")[1] for c in ids}
         doc["team_chrs"] = sorted(team)
-        doc["changed"] = sorted(c["chr"] for c in doc.get("characters", [])
-                                if (c.get("plan") or {}).get("to_buy") or (c.get("plan") or {}).get("to_sell")
-                                or (c.get("plan") or {}).get("socket_changes"))
+        doc["changed"] = sorted(
+            c["chr"]
+            for c in doc.get("characters", [])
+            if (c.get("plan") or {}).get("to_buy")
+            or (c.get("plan") or {}).get("to_sell")
+            or (c.get("plan") or {}).get("socket_changes")
+        )
         doc["assumptions"] = a.describe()
         # False: a MILP of the plan stopped on the solver's time limit
-        doc["plan_optimal"] = materials_plan.plan_optimal(ids[0], ids[1:],
-                                                          body.get("song") or None, opts)
+        doc["plan_optimal"] = materials_plan.plan_optimal(ids[0], ids[1:], body.get("song") or None, opts)
     except Exception as exc:  # noqa: BLE001
         h.reply_error(exc)
         return
@@ -203,16 +219,23 @@ def settle_slots(state: dict, captured: Mapping, chosen: set, group_of: Mapping 
       score, so an empty socket there means "nothing to gain", not "take the card out"
       (no move shown for it). A socket the plan resets loses its card."""
     if group_of:
-        where = {card: (c, sock) for c in chosen
-                 for sock, card in ((state.get(c) or {}).get("slots") or {}).items()}
+        where = {
+            card: (c, sock)
+            for c in chosen
+            for sock, card in ((state.get(c) or {}).get("slots") or {}).items()
+        }
         for chr_id in sorted(chosen):
             slots = (state.get(chr_id) or {}).get("slots") or {}
             for sock, card in list(slots.items()):
                 now = ((captured.get(chr_id) or {}).get("slots") or {}).get(sock)
-                if not now or now == card or group_of.get(now) is None \
-                        or group_of.get(now) != group_of.get(card):
+                if (
+                    not now
+                    or now == card
+                    or group_of.get(now) is None
+                    or group_of.get(now) != group_of.get(card)
+                ):
                     continue
-                if now in where:                       # the plan put the account's card elsewhere
+                if now in where:  # the plan put the account's card elsewhere
                     oc, osock = where[now]
                     state[oc]["slots"][osock] = card
                     where[card] = (oc, osock)
@@ -229,7 +252,7 @@ def settle_slots(state: dict, captured: Mapping, chosen: set, group_of: Mapping 
         if entry is None:
             continue
         slots = entry.setdefault("slots", {})
-        owned = {"S-001", *(entry.get("nodes") or ())}     # the root is free on every board
+        owned = {"S-001", *(entry.get("nodes") or ())}  # the root is free on every board
         for socket, card in ((captured.get(chr_id) or {}).get("slots") or {}).items():
             # only a socket the plan still owns can keep a card (a reset S-004 cannot)
             if card and socket not in slots and card not in used and socket in owned:
@@ -300,9 +323,10 @@ def board_doc_for(precompute, board_state: dict, ids: list, basis_name: str, fla
     if ids:
         wanted |= {"chr-" + c.split("-")[1] for c in ids if "-" in c}
     doc["characters"] = [c for c in doc.get("characters", []) if c["chr"] in wanted]
-    overlay = {chr_id: {"nodes": list((st or {}).get("nodes") or []),
-                        "slots": dict((st or {}).get("slots") or {})}
-               for chr_id, st in board_state.items()}
+    overlay = {
+        chr_id: {"nodes": list((st or {}).get("nodes") or []), "slots": dict((st or {}).get("slots") or {})}
+        for chr_id, st in board_state.items()
+    }
     precompute._apply_plan(doc, overlay)
     precompute._annotate_plan_budget(doc, char_level="current")
     if flat_budget is not None:
@@ -315,9 +339,12 @@ def board_doc_for(precompute, board_state: dict, ids: list, basis_name: str, fla
     doc["for_team"] = ids
     doc["plan_included"] = True
     # node values + Connect ranges/boosts (the page prints the game's numbers)
-    board_values.annotate(doc, config.read_json(config.SKILLTREE_PATH) or {},
-                          config.read_json(config.COLLECTION_PATH) or {},
-                          maxed=basis_name == basis.MAXED_ACCOUNT_BASIS)
+    board_values.annotate(
+        doc,
+        config.read_json(config.SKILLTREE_PATH) or {},
+        config.read_json(config.COLLECTION_PATH) or {},
+        maxed=basis_name == basis.MAXED_ACCOUNT_BASIS,
+    )
     doc["engine"] = "given"
     doc["budget"] = "real" if flat_budget is None else flat_budget
     doc["budget_kind"] = "real" if flat_budget is None else "flat"

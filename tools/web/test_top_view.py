@@ -1,5 +1,6 @@
 """Top 100 (`top_view`): the board's last-hour movement and a player's series, from reads built
 in memory. No files: test_no_writes.py walks this file too."""
+
 from __future__ import annotations
 
 import top_view as tv
@@ -33,7 +34,7 @@ def test_board_is_the_last_read_with_its_last_hour():
 def test_pace_needs_an_hour_of_reads():
     assert tv.board(READS[:1])[0]["pace_h"] is None
     a = next(r for r in tv.board(READS) if r["uid"] == "A")
-    assert a["pace_h"] == 350        # (1700 - 1000) over 2 h, from the oldest read in the 3 h window
+    assert a["pace_h"] == 350  # (1700 - 1000) over 2 h, from the oldest read in the 3 h window
 
 
 def test_rank_change_counts_up_as_positive():
@@ -46,17 +47,22 @@ def test_player_series_only_while_in_the_top():
     assert tv.player_series(READS, "Z") == []
 
 
-
 def test_build_top_keeps_each_rankings_boards_apart(monkeypatch):
     # one chapter file holds the Event Pt board and its song's board (Song Score
     # shows the song's top 100); `kind` picks one, the main ranking by default
     from pathlib import Path
-    reads = [{"captured_at": 5, "kind": "points", "rows": [[1, 900, "A", "a"]]},
-             {"captured_at": 6, "kind": "music:m1", "rows": [[1, 3_000_000, "B", "b"]]}]
+
+    reads = [
+        {"captured_at": 5, "kind": "points", "rows": [[1, 900, "A", "a"]]},
+        {"captured_at": 6, "kind": "music:m1", "rows": [[1, 3_000_000, "B", "b"]]},
+    ]
     monkeypatch.setattr(tv, "top_files", lambda store, region: [Path("c1.top.jsonl")])
     monkeypatch.setattr(tv, "read_top", lambda path: reads)
-    monkeypatch.setattr(tv.cutoffs_view, "list_chapters", lambda store, region: [
-        {"chapter_id": "c1", "start_time": 0, "chapter_end_time": 10}])
+    monkeypatch.setattr(
+        tv.cutoffs_view,
+        "list_chapters",
+        lambda store, region: [{"chapter_id": "c1", "start_time": 0, "chapter_end_time": 10}],
+    )
     pts = tv.build_top(Path("."), "us", now=20, chapter_id="c1")
     assert pts["kind"] == "points" and [r["uid"] for r in pts["rows"]] == ["A"]
     assert pts["kinds"] == ["points", "music:m1"]

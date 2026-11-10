@@ -64,6 +64,7 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 from hbuilder.domain.gates import resolve_team_gates
 from hbuilder.domain.scoring import (
@@ -75,8 +76,6 @@ from hbuilder.domain.scoring import (
     score_with_breakdown,
 )
 from hbuilder.domain.scoring_models import ACTIVE_STACKING_MODELS
-
-from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 # the builders' STATS baseline is 300 total per card, so five members are 1500.0.
 BASE_STAT_SUM = 1500.0
@@ -101,9 +100,7 @@ ACTIVE_OCCUPANCY = ACTIVE_UPTIME * 0.46
 
 
 def _cfg(stacking: str = "max"):
-    return dataclasses.replace(
-        make_scoring_config(), active_stacking_model=ACTIVE_STACKING_MODELS[stacking]
-    )
+    return dataclasses.replace(make_scoring_config(), active_stacking_model=ACTIVE_STACKING_MODELS[stacking])
 
 
 def _active(card_id: str, magnitude: float):
@@ -300,16 +297,11 @@ def test_the_factorisation_carries_the_within_b_covariance_and_not_the_between_b
     it would double-count that dead zone, which is modelled explicitly by
     `_finite_window_uptime` rather than assumed away by a duty cycle. Anyone
     adding one has to break the `!=` below."""
-    team = _team(
-        _active("a", 40.0), _active("b", 30.0), _special("s1", 50.0), _special("s2", 40.0)
-    )
+    team = _team(_active("a", 40.0), _active("b", 30.0), _special("s1", 50.0), _special("s2", 40.0))
     total = score_fast(team, _cfg())
 
     expected_b = 0.50 * 0.10 + 0.40 * 0.10
-    expected_active_max = (
-        0.40 * ACTIVE_OCCUPANCY
-        + 0.30 * ACTIVE_OCCUPANCY * (1.0 - ACTIVE_OCCUPANCY)
-    )
+    expected_active_max = 0.40 * ACTIVE_OCCUPANCY + 0.30 * ACTIVE_OCCUPANCY * (1.0 - ACTIVE_OCCUPANCY)
     assert expected_active_max == pytest.approx(0.2429944897959184)
     assert total == BASE_STAT_SUM * (1.0 + (1.0 + expected_b) * expected_active_max)
     assert total == pytest.approx(1897.2959908163266)
@@ -326,15 +318,11 @@ def test_the_factorisation_carries_the_within_b_covariance_and_not_the_between_b
     # And the additive model, which adds the SPECIAL bucket to the ratio
     # instead of multiplying by it — 1993.4917... here, 1500 * 1.34452 at the
     # steady-state uptime.
-    assert total != pytest.approx(
-        BASE_STAT_SUM * (1.0 + expected_active_max + 0.086)
-    )
+    assert total != pytest.approx(BASE_STAT_SUM * (1.0 + expected_active_max + 0.086))
     assert total != pytest.approx(BASE_STAT_SUM * 1.34452)
     # A between-bucket covariance factor of the measured whole-song 1.0747 would
     # land here. It is deliberately NOT applied.
-    assert total != pytest.approx(
-        BASE_STAT_SUM * (1.0 + (1.0 + 1.0747 * expected_b) * expected_active_max)
-    )
+    assert total != pytest.approx(BASE_STAT_SUM * (1.0 + (1.0 + 1.0747 * expected_b) * expected_active_max))
 
 
 # --- Interaction with Score Support, which shares `B` -----------------------
@@ -359,9 +347,7 @@ def test_a_special_and_a_score_support_add_inside_b_because_they_sit_in_two_buck
     steady-state uptime the two would read 1713.9 and 1707.0."""
     support = make_card(
         "sup",
-        passive=make_skill(
-            "PASSIVE", family="score_support", effect_type="score", magnitude=50.0
-        ),
+        passive=make_skill("PASSIVE", family="score_support", effect_type="score", magnitude=50.0),
     )
     team = _team(_active("a", 20.0), _special("s", 50.0), support)
 
@@ -490,9 +476,7 @@ def test_batch_and_single_paths_stay_bit_identical_under_the_collapse():
     deliberately mixes both populations and both buckets."""
     outfit = make_card(
         "outfit_support",
-        costume_skill=make_skill(
-            "COSTUME", family="score_support", effect_type="score", magnitude=60.0
-        ),
+        costume_skill=make_skill("COSTUME", family="score_support", effect_type="score", magnitude=60.0),
     )
     members = (
         _active("a", 40.0),

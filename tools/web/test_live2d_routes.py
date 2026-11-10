@@ -4,6 +4,7 @@ folder). The index must always answer (the page falls back to the card art when 
 nothing is available); the file route must refuse anything outside its own name pattern.
     python -m pytest tools/web/test_live2d_routes.py
 """
+
 from __future__ import annotations
 
 import json
@@ -11,7 +12,6 @@ import urllib.error
 import urllib.request
 
 import pytest
-
 
 
 def _get(url):
@@ -33,11 +33,17 @@ def test_index_always_answers_with_its_shape(web_base):
         assert doc["models"][asset]["model"].startswith("/live2d/models/")
 
 
-@pytest.mark.parametrize("path", [
-    "/live2d/../server.py", "/live2d/models/../../index.json", "/live2d/index.json",
-    "/live2d/models/00022-uniq-0063-00/../../../x.json", "/live2d/motions/evil.js",
-    "/live2d/models/00022-uniq-0063-00/model3.exe",
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/live2d/../server.py",
+        "/live2d/models/../../index.json",
+        "/live2d/index.json",
+        "/live2d/models/00022-uniq-0063-00/../../../x.json",
+        "/live2d/motions/evil.js",
+        "/live2d/models/00022-uniq-0063-00/model3.exe",
+    ],
+)
 def test_paths_outside_the_pattern_are_refused(web_base, path):
     status, _body, _kind = _get(web_base + path)
     assert status in (400, 404)

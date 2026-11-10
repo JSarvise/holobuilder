@@ -38,17 +38,17 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_left
-from typing import Sequence
+from collections.abc import Sequence
 
 from hbuilder.domain.card import Card
 from hbuilder.domain.gates import resolve_card_set_gates, resolve_leader_costume_skills
 from hbuilder.domain.scoring import (
     _board_bonus,
-    active_magnitude_by_card,
     _fold_activation_rate_up,
     _is_score_up_effect,
     _pool_for,
     _resolve_skill,
+    active_magnitude_by_card,
 )
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.song import (
@@ -90,11 +90,20 @@ def _terms(members: tuple[Card, ...], leader: Card, chart: SongChart, cfg: Scori
         index = index_of[resolved.card_id]
         if pool == "support":
             s_state, s_targets = _support_state(resolved, members, cfg, state, active_rank)
-            terms.extend(_combo_split(resolved, cfg, _term_for(
-                resolved, cfg, team_rate_up, s_state, song_seconds, index, s_targets), times))
+            terms.extend(
+                _combo_split(
+                    resolved,
+                    cfg,
+                    _term_for(resolved, cfg, team_rate_up, s_state, song_seconds, index, s_targets),
+                    times,
+                )
+            )
         elif _is_score_up_effect(resolved):
-            terms.extend(_combo_split(resolved, cfg, _term_for(
-                resolved, cfg, team_rate_up, state, song_seconds, index), times))
+            terms.extend(
+                _combo_split(
+                    resolved, cfg, _term_for(resolved, cfg, team_rate_up, state, song_seconds, index), times
+                )
+            )
         else:
             score_rates.append(rate * weight)
     # the SPECIAL activation-rate riders, in the scorer's place (after the members)
@@ -103,7 +112,8 @@ def _terms(members: tuple[Card, ...], leader: Card, chart: SongChart, cfg: Scori
     if cfg.board is not None and chart.singers:
         board_score_rate = cfg.board.song_score_bonus_for(chart.singers, scope=chart.singer_type)
         board_skill_effect_up += cfg.board.conditional_skill_effect_up_for(
-            members, leader.member, chart.singers)
+            members, leader.member, chart.singers
+        )
     for costume in resolve_leader_costume_skills(leader, gates.aggregates, cfg.run_state):
         pool = _pool_for(costume)
         if pool in ("none", "stat"):
@@ -112,8 +122,7 @@ def _terms(members: tuple[Card, ...], leader: Card, chart: SongChart, cfg: Scori
         weight = cfg.family_weights[costume.family]
         if pool == "support":
             s_state, s_targets = _support_state(costume, members, cfg, state, active_rank)
-            terms.append(_term_for(costume, cfg, team_rate_up, s_state, song_seconds,
-                                   None, s_targets))
+            terms.append(_term_for(costume, cfg, team_rate_up, s_state, song_seconds, None, s_targets))
         elif pool == "score":
             if _is_score_up_effect(costume):
                 terms.append(_term_for(costume, cfg, team_rate_up, state, song_seconds, None))
@@ -122,8 +131,15 @@ def _terms(members: tuple[Card, ...], leader: Card, chart: SongChart, cfg: Scori
     return terms, score_rates, board_score_rate, board_skill_effect_up
 
 
-def _summary(dist: dict[int, float], base: int, bins: int, bin_width: int,
-             lowest: int | None = None, highest: int | None = None, keep_law: bool = False) -> dict:
+def _summary(
+    dist: dict[int, float],
+    base: int,
+    bins: int,
+    bin_width: int,
+    lowest: int | None = None,
+    highest: int | None = None,
+    keep_law: bool = False,
+) -> dict:
     items = sorted((v + base, p) for v, p in dist.items())
     if bin_width > 1 and lowest is not None and highest is not None:
         # a binned body can put a grid point up to one bin past an exact extreme:
@@ -135,9 +151,17 @@ def _summary(dist: dict[int, float], base: int, bins: int, bin_width: int,
         items = sorted(clamped.items())
     mean = sum(v * p for v, p in items)
     var = max(0.0, sum((v - mean) ** 2 * p for v, p in items))
-    out: dict = {"min": items[0][0], "max": items[-1][0], "mean": mean, "sd": var ** 0.5,
-                 "p_min": items[0][1], "p_max": items[-1][1], "support": len(items),
-                 "bin_width": bin_width, "exact": bin_width == 1}
+    out: dict = {
+        "min": items[0][0],
+        "max": items[-1][0],
+        "mean": mean,
+        "sd": var**0.5,
+        "p_min": items[0][1],
+        "p_max": items[-1][1],
+        "support": len(items),
+        "bin_width": bin_width,
+        "exact": bin_width == 1,
+    }
     acc = 0.0
     got: dict[float, int] = {}
     for v, p in items:
@@ -165,8 +189,12 @@ def _summary(dist: dict[int, float], base: int, bins: int, bin_width: int,
             continue
         key = lo + ((v - lo) // width) * width
         pmf[key] = pmf.get(key, 0.0) + p
-    out["pmf"] = {"start": lo, "width": width, "below": below,
-                  "mass": [pmf.get(lo + k * width, 0.0) for k in range((hi - lo) // width + 1)]}
+    out["pmf"] = {
+        "start": lo,
+        "width": width,
+        "below": below,
+        "mass": [pmf.get(lo + k * width, 0.0) for k in range((hi - lo) // width + 1)],
+    }
     if keep_law:
         out["law"] = items
     return out
@@ -200,15 +228,28 @@ def best_of_n(law: Sequence[tuple[int, float]], n: int, score: float | None = No
         out[f"p{round(q * 100)}"] = next((v for v, c in cdf_n if c >= q - 1e-12), law[-1][0])
     if score is not None:
         below = sum(p for v, p in law if v < score) / total
-        out.update({"score": score, "run_percentile": below, "best_percentile": below ** n,
-                    "chance_to_reach": 1.0 - below ** n})
+        out.update(
+            {
+                "score": score,
+                "run_percentile": below,
+                "best_percentile": below**n,
+                "chance_to_reach": 1.0 - below**n,
+            }
+        )
     return out
 
 
 def run_score_distribution(
-    members: Sequence[Card], leader: Card, chart: SongChart, cfg: ScoringConfig,
-    member_order: Sequence[str], deck_power: float, *, bins: int = 60,
-    cap: int = 400_000, keep_law: bool = False,
+    members: Sequence[Card],
+    leader: Card,
+    chart: SongChart,
+    cfg: ScoringConfig,
+    member_order: Sequence[str],
+    deck_power: float,
+    *,
+    bins: int = 60,
+    cap: int = 400_000,
+    keep_law: bool = False,
 ) -> dict:
     """The law of the run score of (`leader`, `members` in `member_order`) on
     `chart`, at `deck_power`. Returns `mean`, `sd`, `min`, `max`, `p1..p99`,
@@ -223,8 +264,13 @@ def run_score_distribution(
     times = tuple(note.time for note in chart.notes)
     terms, score_rates, board_score_rate, skill_effect_up = _terms(members, leader, chart, cfg)
     note_weights, perfect_sum = _chart_weights(chart, cfg.platform, cfg.song_auto)
-    constant = (float(deck_power) * SCORE_COEFFICIENT * chart.music_coefficient()
-                / perfect_sum * (1.0 + board_score_rate))
+    constant = (
+        float(deck_power)
+        * SCORE_COEFFICIENT
+        * chart.music_coefficient()
+        / perfect_sum
+        * (1.0 + board_score_rate)
+    )
     slot_of = {cid: slot for slot, cid in enumerate(member_order)}
     index_slot = {i: slot_of[card.id] for i, card in enumerate(members)}
     n = len(times)
@@ -272,7 +318,8 @@ def run_score_distribution(
             live_ratio = [t for b, t in enumerate(source) if mask >> b & 1 and not t.is_boost]
             live_boost = [t for b, t in enumerate(source) if mask >> b & 1 and t.is_boost]
             hit = 1.0 + cfg.stacking_model.combine(
-                [*score_rates, _ratio_at(live_ratio, live_boost, cfg, skill_effect_up)])
+                [*score_rates, _ratio_at(live_ratio, live_boost, cfg, skill_effect_up)]
+            )
             cache[mask] = hit
         return hit
 
@@ -377,9 +424,15 @@ def run_score_distribution(
         final = state if final is None else merged(final, state)
     _w, base, dist, lo, hi = final
     out = _summary(dist, base, bins, bin_width, lo + base, hi + base, keep_law=keep_law)
-    out.update({"expected_total": expected_total, "deck_power": float(deck_power),
-                "member_order": list(member_order), "random_windows": len(first),
-                "notes": n})
+    out.update(
+        {
+            "expected_total": expected_total,
+            "deck_power": float(deck_power),
+            "member_order": list(member_order),
+            "random_windows": len(first),
+            "notes": n,
+        }
+    )
     return out
 
 

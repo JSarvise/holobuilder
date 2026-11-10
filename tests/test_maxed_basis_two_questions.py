@@ -32,7 +32,6 @@ real one, and every maxed run says so rather than inventing a build.
 
 from __future__ import annotations
 
-
 from hbuilder.domain.collection import (
     MEMBER_POWER_UP_CAP_PERMYRIAD,
     MEMORY_BONUS_MAX_POSTERS,
@@ -125,8 +124,9 @@ def test_a_maxed_run_does_not_down_level_any_skill(tmp_path):
     import json
 
     from support.builders import make_card
-    from hbuilder.inputs import apply_collection
+
     from hbuilder.domain.card import skill_slot_from_record
+    from hbuilder.inputs import apply_collection
 
     record = {
         "family": "stat_up",
@@ -171,12 +171,11 @@ def test_a_maxed_run_says_the_board_is_still_the_real_one(tmp_path):
     import json
 
     from support.builders import make_card
+
     from hbuilder.inputs import apply_collection
 
     document = tmp_path / "collection.json"
-    document.write_text(
-        json.dumps({"schema_version": "collection-1", "cards": {}}), encoding="utf-8"
-    )
+    document.write_text(json.dumps({"schema_version": "collection-1", "cards": {}}), encoding="utf-8")
     _cards, basis = apply_collection((make_card("c1"),), str(document), maxed=True)
     text = " ".join(basis.lines()).lower()
     assert "board" in text

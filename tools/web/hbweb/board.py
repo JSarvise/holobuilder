@@ -8,7 +8,8 @@ three endpoints together on every character switch.
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from hbuilder.domain.collection import (
     CollectionError,
@@ -18,7 +19,6 @@ from hbuilder.domain.collection import (
     resolve_card_state,
 )
 from hbuilder.domain.skilltree import ROOT_NODE, TOTAL_BOARD_POINTS, player_level_requirement
-
 from hbweb import config
 
 # `…_level_up` is a hollow FRAME with "Lv" on its base, not a finished icon —
@@ -134,8 +134,9 @@ def board_level_gates() -> list[dict[str, int]]:
     return [{"level": lvl, "nodes": counts[lvl]} for lvl in sorted(counts)]
 
 
-def _characters(tree: Mapping, document: Mapping, costs: Mapping[str, int],
-                unspent: Mapping[str, Any]) -> dict[str, Any]:
+def _characters(
+    tree: Mapping, document: Mapping, costs: Mapping[str, int], unspent: Mapping[str, Any]
+) -> dict[str, Any]:
     """Each member's selection, its `source` and its budget.
 
     `source` is the honest part: `"edited"` means the player typed it and it lives in
@@ -176,7 +177,9 @@ def _characters(tree: Mapping, document: Mapping, costs: Mapping[str, int],
             }
         else:
             characters[chr_id] = {
-                "nodes": [], "slots": {}, "source": "empty",
+                "nodes": [],
+                "slots": {},
+                "source": "empty",
                 "budget": budgets.get(chr_id),
             }
     return characters
@@ -200,11 +203,7 @@ def _node_glyphs(tree: Mapping, costs: Mapping[str, int]) -> tuple[dict, set[str
 
     The four sockets have no glyph and are drawn as sockets. A glyph that cannot be
     resolved is reported by the name WANTED, so the gap is visible."""
-    available = (
-        {path.stem for path in config.ICONS_DIR.glob("*.png")}
-        if config.ICONS_DIR.is_dir()
-        else set()
-    )
+    available = {path.stem for path in config.ICONS_DIR.glob("*.png")} if config.ICONS_DIR.is_dir() else set()
     missing_icons: set[str] = set()
 
     def _icon_of(raw: dict) -> tuple[str, str]:

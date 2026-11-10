@@ -26,6 +26,7 @@ older that read it.
 
 stdlib + pycryptodome (already in the VPS venv). SQLite at $HB_AUTH_DB.
 """
+
 from __future__ import annotations
 
 import base64
@@ -52,7 +53,7 @@ DB = os.environ.get("HB_AUTH_DB", "/var/lib/hb-auth/users.db")
 JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
 ISSUERS = {"https://accounts.google.com", "accounts.google.com"}
 MAX_BODY = 8192
-REGISTER_PER_HOUR = 6          # per client address, kept in memory only
+REGISTER_PER_HOUR = 6  # per client address, kept in memory only
 SEEN_EVERY_S = 300
 USERNAME_RE = re.compile(r"[A-Za-z0-9_.-]{3,20}")
 
@@ -92,9 +93,13 @@ class Keys:
         with self.lock:
             if time.time() >= self.until or kid not in self.keys:
                 doc, age = self.fetch()
-                self.keys = {k["kid"]: RSA.construct((int.from_bytes(b64url(k["n"]), "big"),
-                                                      int.from_bytes(b64url(k["e"]), "big")))
-                             for k in doc.get("keys", []) if k.get("kty") == "RSA"}
+                self.keys = {
+                    k["kid"]: RSA.construct(
+                        (int.from_bytes(b64url(k["n"]), "big"), int.from_bytes(b64url(k["e"]), "big"))
+                    )
+                    for k in doc.get("keys", [])
+                    if k.get("kty") == "RSA"
+                }
                 self.until = time.time() + max(60, age)
             return self.keys.get(kid)
 
@@ -143,8 +148,9 @@ class Store:
         with self.db:
             if "username" not in {r[1] for r in self.db.execute("PRAGMA table_info(users)")}:
                 self.db.execute("ALTER TABLE users ADD COLUMN username TEXT")
-            self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_username "
-                            "ON users (username COLLATE NOCASE)")
+            self.db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users (username COLLATE NOCASE)"
+            )
             self.db.execute("UPDATE users SET name='' WHERE name IS NOT NULL AND name != ''")
 
     def register(self, claims: dict, app: str) -> tuple[str, dict]:
@@ -159,15 +165,23 @@ class Store:
                 cur = self.db.execute(
                     "INSERT INTO users (sub, email, name, status, admin, created, approved, app) "
                     "VALUES (?,?,'',?,?,?,?,?)",
-                    (claims["sub"], email, status, int(admin), now, now if admin else None, app[:20]))
+                    (claims["sub"], email, status, int(admin), now, now if admin else None, app[:20]),
+                )
                 uid, username = cur.lastrowid, None
             else:
                 uid, status = row
                 self.db.execute("UPDATE users SET email=?, app=? WHERE id=?", (email, app[:20], uid))
                 username = self.db.execute("SELECT username FROM users WHERE id=?", (uid,)).fetchone()[0]
-            self.db.execute("INSERT INTO keys (hash, user_id, created) VALUES (?,?,?)", (key_hash(key), uid, now))
-        return key, {"status": status, "username": username or "", "name": username or "",
-                     "email": email, "admin": admin}
+            self.db.execute(
+                "INSERT INTO keys (hash, user_id, created) VALUES (?,?,?)", (key_hash(key), uid, now)
+            )
+        return key, {
+            "status": status,
+            "username": username or "",
+            "name": username or "",
+            "email": email,
+            "admin": admin,
+        }
 
     def set_username(self, user_id: int, username) -> str:
         """'ok' | 'invalid' | 'taken'."""
@@ -189,18 +203,28 @@ class Store:
         with self.lock:
             row = self.db.execute(
                 "SELECT u.id, u.status, u.admin, u.username, u.email, k.last_seen FROM keys k "
-                "JOIN users u ON u.id=k.user_id WHERE k.hash=?", (key_hash(key),)).fetchone()
+                "JOIN users u ON u.id=k.user_id WHERE k.hash=?",
+                (key_hash(key),),
+            ).fetchone()
         if row is None:
             return None
-        return {"id": row[0], "status": row[1], "admin": bool(row[2]), "username": row[3] or "",
-                "email": row[4], "_seen": row[5] or 0}
+        return {
+            "id": row[0],
+            "status": row[1],
+            "admin": bool(row[2]),
+            "username": row[3] or "",
+            "email": row[4],
+            "_seen": row[5] or 0,
+        }
 
     def seen(self, key: str, user_id: int, app: str | None) -> None:
         now = int(time.time())
         with self.lock, self.db:
             self.db.execute("UPDATE keys SET last_seen=? WHERE hash=?", (now, key_hash(key)))
-            self.db.execute("UPDATE users SET last_seen=?, app=COALESCE(?, app) WHERE id=?",
-                            (now, app[:20] if app else None, user_id))
+            self.db.execute(
+                "UPDATE users SET last_seen=?, app=COALESCE(?, app) WHERE id=?",
+                (now, app[:20] if app else None, user_id),
+            )
 
     def users(self) -> list[dict]:
         cols = ["id", "email", "username", "status", "admin", "created", "approved", "last_seen", "app"]
@@ -212,7 +236,9 @@ class Store:
         now = int(time.time())
         with self.lock, self.db:
             if action == "approve":
-                n = self.db.execute("UPDATE users SET status='approved', approved=? WHERE id=?", (now, user_id)).rowcount
+                n = self.db.execute(
+                    "UPDATE users SET status='approved', approved=? WHERE id=?", (now, user_id)
+                ).rowcount
             elif action == "revoke":
                 n = self.db.execute("UPDATE users SET status='revoked' WHERE id=?", (user_id,)).rowcount
             elif action == "delete":
@@ -243,7 +269,7 @@ def make_handler(store: Store, keys: Keys, limiter: Limiter):
         server_version = "hb-auth"
         sys_version = ""
 
-        def log_message(self, *a):          # no access log: no IPs anywhere
+        def log_message(self, *a):  # no access log: no IPs anywhere
             pass
 
         def _json(self, code: int, doc: dict) -> None:
@@ -277,8 +303,10 @@ def make_handler(store: Store, keys: Keys, limiter: Limiter):
                 u = self._who()
                 if u is None:
                     return self._json(401, {"error": "unknown key"})
-                return self._json(200, {**{k: u[k] for k in ("status", "username", "email", "admin")},
-                                        "name": u["username"]})
+                return self._json(
+                    200,
+                    {**{k: u[k] for k in ("status", "username", "email", "admin")}, "name": u["username"]},
+                )
             if path == "/admin/users":
                 u = self._who()
                 if not (u and u["admin"] and u["status"] == "approved"):
@@ -331,12 +359,15 @@ def make_handler(store: Store, keys: Keys, limiter: Limiter):
                     return self._json(400, {"error": "id and action needed"})
                 return self._json(200 if store.act(uid, action) else 404, {"ok": True})
             return self._json(404, {"error": "no such route"})
+
     return H
 
 
 def main() -> int:
     port = int(os.environ.get("HB_AUTH_PORT", "8792"))
-    srv = ThreadingHTTPServer(("127.0.0.1", port), make_handler(Store(DB), Keys(), Limiter(REGISTER_PER_HOUR)))
+    srv = ThreadingHTTPServer(
+        ("127.0.0.1", port), make_handler(Store(DB), Keys(), Limiter(REGISTER_PER_HOUR))
+    )
     print(f"hb-auth on 127.0.0.1:{port}, {len(CLIENT_IDS)} client id(s), {len(ADMIN_EMAILS)} admin(s)")
     srv.serve_forever()
     return 0

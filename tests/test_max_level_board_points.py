@@ -23,20 +23,26 @@ def _row(group: str, level: int, points: int | None) -> dict:
 
 def test_the_points_of_every_level_of_the_group_are_summed(tmp_path):
     path = tmp_path / "main_CharacterLevel.json"
-    path.write_text(json.dumps([
-        _row("level-group-1", 1, None),       # level 1 grants nothing (the field is elided)
-        _row("level-group-1", 2, 5),
-        _row("level-group-1", 3, 7),
-        _row("level-group-2", 2, 100),        # another group's levels are not counted
-    ]), encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            [
+                _row("level-group-1", 1, None),  # level 1 grants nothing (the field is elided)
+                _row("level-group-1", 2, 5),
+                _row("level-group-1", 3, 7),
+                _row("level-group-2", 2, 100),  # another group's levels are not counted
+            ]
+        ),
+        encoding="utf-8",
+    )
     assert max_level_board_points(path) == 12
     assert max_level_board_points(path, group="level-group-2") == 100
 
 
 def test_the_wrapped_export_shape_reads_the_same(tmp_path):
     path = tmp_path / "main_CharacterLevel.json"
-    path.write_text(json.dumps({"rows": [_row("level-group-1", 2, 5), _row("level-group-1", 3, 7)]}),
-                    encoding="utf-8")
+    path.write_text(
+        json.dumps({"rows": [_row("level-group-1", 2, 5), _row("level-group-1", 3, 7)]}), encoding="utf-8"
+    )
     assert max_level_board_points(path) == 12
 
 

@@ -1,5 +1,6 @@
 """account_snapshot.master_get on OUTDATED_APP: one retry with the current client version, no
 guessed versions, and a refusal that says what to do."""
+
 from __future__ import annotations
 
 import sys
@@ -14,11 +15,13 @@ import account_snapshot as A  # noqa: E402
 def _server(accepts: str, seen: list):
     def call(host, path, body, ident=None, master_version=None):
         import os
+
         v = os.environ.get("HOLODREAMS_APP_VERSION") or dict(ident or A.GENERIC_HEADERS)["x-app-version"]
         seen.append(v)
         if v == accepts:
             return {}, {"grpc-status": "0"}, b"ok"
         return {}, {"grpc-status": "3", "grpc-message": "OUTDATED_APP"}, b""
+
     return call
 
 

@@ -32,6 +32,7 @@ Output: tools/recon/proxy/dumps/chibi/ (gitignored)
     python chibi_build.py --all
 Nothing here writes data/ or state/.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -54,7 +55,7 @@ OUT = os.path.join(DUMPS, "chibi")
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-TEX_SIZE = 512          # the runner is drawn ~150 px tall: 512 px textures are plenty
+TEX_SIZE = 512  # the runner is drawn ~150 px tall: 512 px textures are plenty
 WEBP_QUALITY = 85
 # the renderers kept, lightest LOD first (a renderer missing at LOD1 falls back to LOD0)
 PARTS = ("Body", "Eye", "Iris", "Brow", "Hair")
@@ -63,12 +64,14 @@ PARTS = ("Body", "Eye", "Iris", "Brow", "Hair")
 def _unity():
     warnings.filterwarnings("ignore")
     import UnityPy  # noqa: PLC0415
+
     UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
     return UnityPy
 
 
 def load(name: str):
     import octo_crypto  # noqa: PLC0415
+
     raw = open(os.path.join(FETCHED, name + ".bundle"), "rb").read()
     return _unity().load(octo_crypto.decrypt_bundle(raw, name))
 
@@ -77,6 +80,7 @@ def fetch(names: list[str]) -> None:
     missing = [n for n in names if not os.path.exists(os.path.join(FETCHED, n + ".bundle"))]
     if missing:
         import octo_fetch  # noqa: PLC0415
+
         octo_fetch.fetch(missing)
 
 
@@ -86,12 +90,15 @@ HOLODORI = str(paths.HOLODORI)
 
 def catalogue_names() -> set[str]:
     from master_db import decode_record  # noqa: PLC0415
+
     top = decode_record(open(os.path.join(DUMPS, "octocacheevai_prod.dec"), "rb").read())
     return {decode_record(b).get(2, [b""])[0].decode() for b in top.get(2, [])}
 
 
 def _rows(table: str) -> list[dict]:
-    return [r["data"] for r in json.load(open(os.path.join(HOLODORI, f"main_{table}.json"), encoding="utf-8"))]
+    return [
+        r["data"] for r in json.load(open(os.path.join(HOLODORI, f"main_{table}.json"), encoding="utf-8"))
+    ]
 
 
 def _master(table: str, fields: dict[str, int]) -> list[dict] | None:
@@ -123,7 +130,7 @@ def sd_costumes(names: set[str]) -> list[dict]:
     mc = _master("Character", {"id": 1, "nameEng": 4, "sdPersonalityType": 20})
     ms = _master("SdCostume", {"id": 1, "characterId": 2, "hairAssetId": 4, "bodyAssetId": 6})
     if mc is not None and ms is not None:
-        for c in mc:                                 # enum 1..3 -> TYP000..TYP002
+        for c in mc:  # enum 1..3 -> TYP000..TYP002
             v = c.get("sdPersonalityType")
             c["sdPersonalityType"] = f"_TYP{int(v) - 1:03d}" if isinstance(v, int) and v > 0 else ""
         chars, costumes = {c["id"]: c for c in mc}, ms
@@ -139,8 +146,16 @@ def sd_costumes(names: set[str]) -> list[dict]:
         typ = str(c.get("sdPersonalityType", "")).rsplit("_TYP", 1)[-1]
         if body not in names or hair not in names or not typ.isdigit():
             continue
-        out.append({"id": r["id"], "chr": r["characterId"], "name": c.get("nameEng", ""),
-                    "typ": int(typ), "body": body, "hair": hair})
+        out.append(
+            {
+                "id": r["id"],
+                "chr": r["characterId"],
+                "name": c.get("nameEng", ""),
+                "typ": int(typ),
+                "body": body,
+                "hair": hair,
+            }
+        )
     return out
 
 
@@ -154,15 +169,20 @@ def transforms(env) -> dict[int, dict]:
         t = o.read_typetree()
         go = o.assets_file.objects[t["m_GameObject"]["m_PathID"]].read()
         p, q, s = t["m_LocalPosition"], t["m_LocalRotation"], t["m_LocalScale"]
-        out[o.path_id] = {"name": go.m_Name, "parent": t["m_Father"]["m_PathID"],
-                          "p": (p["x"], p["y"], p["z"]), "q": (q["x"], q["y"], q["z"], q["w"]),
-                          "s": (s["x"], s["y"], s["z"])}
+        out[o.path_id] = {
+            "name": go.m_Name,
+            "parent": t["m_Father"]["m_PathID"],
+            "p": (p["x"], p["y"], p["z"]),
+            "q": (q["x"], q["y"], q["z"], q["w"]),
+            "s": (s["x"], s["y"], s["z"]),
+        }
     return out
 
 
 def renderers(env) -> dict[str, dict]:
     """{renderer GameObject name: {mesh, bones (Transform path ids), materials}}."""
     from UnityPy.helpers.MeshHelper import MeshHandler  # noqa: PLC0415
+
     out = {}
     for o in env.objects:
         if o.type.name != "SkinnedMeshRenderer":
@@ -177,11 +197,14 @@ def renderers(env) -> dict[str, dict]:
         for ptr in r.m_Materials:
             try:
                 mats.append(ptr.read())
-            except Exception:      # noqa: BLE001 -- an external shared material (outline pass)
+            except Exception:  # noqa: BLE001 -- an external shared material (outline pass)
                 mats.append(None)
         out[r.m_GameObject.read().m_Name] = {
-            "mesh": mesh, "h": h, "tris": h.get_triangles(),
-            "bones": [b.m_PathID for b in r.m_Bones], "materials": mats,
+            "mesh": mesh,
+            "h": h,
+            "tris": h.get_triangles(),
+            "bones": [b.m_PathID for b in r.m_Bones],
+            "materials": mats,
             "bindposes": list(getattr(mesh, "m_BindPose", None) or []),
         }
     return out
@@ -234,12 +257,23 @@ def unity_matrix(mm) -> list[float]:
 class Glb:
     def __init__(self):
         self.bin = bytearray()
-        self.j = {"asset": {"version": "2.0", "generator": "hololive-builder chibi_build"},
-                  "scene": 0, "scenes": [{"nodes": []}], "nodes": [], "meshes": [], "skins": [],
-                  "materials": [], "textures": [], "images": [], "samplers": [
-                      {"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}],
-                  "accessors": [], "bufferViews": [], "buffers": [],
-                  "extensionsUsed": ["EXT_texture_webp"], "extensionsRequired": ["EXT_texture_webp"]}
+        self.j = {
+            "asset": {"version": "2.0", "generator": "hololive-builder chibi_build"},
+            "scene": 0,
+            "scenes": [{"nodes": []}],
+            "nodes": [],
+            "meshes": [],
+            "skins": [],
+            "materials": [],
+            "textures": [],
+            "images": [],
+            "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}],
+            "accessors": [],
+            "bufferViews": [],
+            "buffers": [],
+            "extensionsUsed": ["EXT_texture_webp"],
+            "extensionsRequired": ["EXT_texture_webp"],
+        }
 
     def view(self, data: bytes, target: int | None = None) -> int:
         while len(self.bin) % 4:
@@ -264,7 +298,9 @@ class Glb:
 
     def image(self, webp: bytes) -> int:
         self.j["images"].append({"bufferView": self.view(webp), "mimeType": "image/webp"})
-        self.j["textures"].append({"sampler": 0, "extensions": {"EXT_texture_webp": {"source": len(self.j["images"]) - 1}}})
+        self.j["textures"].append(
+            {"sampler": 0, "extensions": {"EXT_texture_webp": {"source": len(self.j["images"]) - 1}}}
+        )
         return len(self.j["textures"]) - 1
 
     def write(self, path: str) -> int:
@@ -293,14 +329,32 @@ def webp_of(tex) -> bytes:
 # ------------------------------------------------------------------ the run motion
 RUN_MOTION = "mot_define_general_chr_drs_run00_typ{typ:03d}_lp_bdy00"
 # Mecanim human bone -> the chibi rig's joint (names as on chr 00001's skeleton)
-HUMAN = {"Hips": "jnt_C_hips00_00", "Spine": "jnt_C_spine00_00", "Chest": "jnt_C_spine00_01",
-         "Neck": "jnt_C_neck00_00", "Head": "jnt_C_head00_00"}
+HUMAN = {
+    "Hips": "jnt_C_hips00_00",
+    "Spine": "jnt_C_spine00_00",
+    "Chest": "jnt_C_spine00_01",
+    "Neck": "jnt_C_neck00_00",
+    "Head": "jnt_C_head00_00",
+}
 for _s, _side in (("L", "Left"), ("R", "Right")):
-    HUMAN.update({f"{_side}Shoulder": f"jnt_{_s}_shoulder00_00", f"{_side}UpperArm": f"jnt_{_s}_upperArm00_00",
-                  f"{_side}LowerArm": f"jnt_{_s}_foreArm00_00", f"{_side}Hand": f"jnt_{_s}_hand00_00",
-                  f"{_side}UpperLeg": f"jnt_{_s}_thigh00_00", f"{_side}LowerLeg": f"jnt_{_s}_leg00_00",
-                  f"{_side}Foot": f"jnt_{_s}_foot00_00"})
-    for _f, _jf in (("Thumb", "Thumb"), ("Index", "Index"), ("Middle", "Middle"), ("Ring", "Ring"), ("Little", "Pinky")):
+    HUMAN.update(
+        {
+            f"{_side}Shoulder": f"jnt_{_s}_shoulder00_00",
+            f"{_side}UpperArm": f"jnt_{_s}_upperArm00_00",
+            f"{_side}LowerArm": f"jnt_{_s}_foreArm00_00",
+            f"{_side}Hand": f"jnt_{_s}_hand00_00",
+            f"{_side}UpperLeg": f"jnt_{_s}_thigh00_00",
+            f"{_side}LowerLeg": f"jnt_{_s}_leg00_00",
+            f"{_side}Foot": f"jnt_{_s}_foot00_00",
+        }
+    )
+    for _f, _jf in (
+        ("Thumb", "Thumb"),
+        ("Index", "Index"),
+        ("Middle", "Middle"),
+        ("Ring", "Ring"),
+        ("Little", "Pinky"),
+    ):
         for _k in range(3):
             HUMAN[f"{_side}{_f}{_k + 1}"] = f"jnt_{_s}_finger{_jf}00_{_k:02d}"
 _motions: dict = {}
@@ -330,7 +384,7 @@ def humanoid_frames(motion: str) -> tuple[float, list]:
     n = min(n, dc["m_FrameCount"]) if nd else n
     arr = dc["m_SampleArray"]
     frames = [[0.0] * 137 for _ in range(n)]
-    for f in frames:                                     # MotionQ / RootQ default identity
+    for f in frames:  # MotionQ / RootQ default identity
         f[6] = f[13] = 1.0
     for ci, bi in enumerate(curves):
         b = binds[bi]
@@ -339,15 +393,15 @@ def humanoid_frames(motion: str) -> tuple[float, list]:
         if ci < ns:
             raise ValueError(f"{motion}: humanoid value {b['attribute']} is a streamed curve")
         for fi in range(n):
-            frames[fi][b["attribute"]] = (arr[fi * nd + ci - ns] if ci < ns + nd
-                                          else cc["data"][ci - ns - nd])
+            frames[fi][b["attribute"]] = arr[fi * nd + ci - ns] if ci < ns + nd else cc["data"][ci - ns - nd]
     _motions[motion] = (rate, frames)
     return _motions[motion]
 
 
-def add_run_animation(g: "Glb", T: dict, node_of: dict, root, typ: int) -> int:
+def add_run_animation(g: Glb, T: dict, node_of: dict, root, typ: int) -> int:
     """Bake the run motion of personality `typ` onto this skeleton as a glTF animation."""
     import humanoid  # noqa: PLC0415
+
     rate, frames = humanoid_frames(RUN_MOTION.format(typ=typ))
     names = {k: v["name"] for k, v in T.items() if k in node_of}
     nodes = {names[k]: (T[k]["p"], T[k]["q"]) for k in names}
@@ -362,10 +416,17 @@ def add_run_animation(g: "Glb", T: dict, node_of: dict, root, typ: int) -> int:
     for n, qs in baked["rot"].items():
         out = g.accessor("f", 5126, "VEC4", [mirror_q(q) for q in qs])
         samplers.append({"input": t_acc, "output": out, "interpolation": "LINEAR"})
-        channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of[by_name[n]], "path": "rotation"}})
+        channels.append(
+            {"sampler": len(samplers) - 1, "target": {"node": node_of[by_name[n]], "path": "rotation"}}
+        )
     out = g.accessor("f", 5126, "VEC3", [(-x, y, z) for x, y, z in baked["hips_pos"]])
     samplers.append({"input": t_acc, "output": out, "interpolation": "LINEAR"})
-    channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of[by_name[human["Hips"]]], "path": "translation"}})
+    channels.append(
+        {
+            "sampler": len(samplers) - 1,
+            "target": {"node": node_of[by_name[human["Hips"]]], "path": "translation"},
+        }
+    )
     g.j.setdefault("animations", []).append({"name": "run", "channels": channels, "samplers": samplers})
     return len(frames)
 
@@ -395,8 +456,11 @@ def build_outfit(sd: dict) -> dict:
 
     def add_node(k):
         v = T[k]
-        n = {"name": v["name"], "translation": [-v["p"][0], v["p"][1], v["p"][2]],
-             "rotation": list(mirror_q(v["q"]))}
+        n = {
+            "name": v["name"],
+            "translation": [-v["p"][0], v["p"][1], v["p"][2]],
+            "rotation": list(mirror_q(v["q"])),
+        }
         if any(abs(c - 1) > 1e-6 for c in v["s"]):
             n["scale"] = list(v["s"])
         g.j["nodes"].append(n)
@@ -410,11 +474,16 @@ def build_outfit(sd: dict) -> dict:
     add_node(root)
     g.j["scenes"][0]["nodes"].append(node_of[root])
 
-    rend = {**{("b", k): v for k, v in renderers(body).items()}, **{("h", k): v for k, v in renderers(hair).items()}}
+    rend = {
+        **{("b", k): v for k, v in renderers(body).items()},
+        **{("h", k): v for k, v in renderers(hair).items()},
+    }
     tex_cache: dict = {}
     stats = {}
     for part in PARTS:
-        cands = [k for k in rend if k[1] == f"Geo_{part}_LOD1"] or [k for k in rend if k[1] == f"Geo_{part}_LOD0"]
+        cands = [k for k in rend if k[1] == f"Geo_{part}_LOD1"] or [
+            k for k in rend if k[1] == f"Geo_{part}_LOD0"
+        ]
         if not cands:
             continue
         src, rname = cands[0]
@@ -424,7 +493,7 @@ def build_outfit(sd: dict) -> dict:
         joints = []
         for pid in R["bones"]:
             key = pid if src == "b" else ("h", pid)
-            if key not in node_of:            # a bone outside the kept tree (should not happen)
+            if key not in node_of:  # a bone outside the kept tree (should not happen)
                 key = root
             joints.append(node_of[key])
         binds = []
@@ -432,8 +501,13 @@ def build_outfit(sd: dict) -> dict:
             binds.append(mirror_m(unity_matrix(m)))
         if not binds:
             raise ValueError(f"{rname}: no bind poses")
-        g.j["skins"].append({"joints": joints, "inverseBindMatrices": g.accessor("f", 5126, "MAT4", binds),
-                             "skeleton": node_of[root]})
+        g.j["skins"].append(
+            {
+                "joints": joints,
+                "inverseBindMatrices": g.accessor("f", 5126, "MAT4", binds),
+                "skeleton": node_of[root],
+            }
+        )
         pos = [(-x, y, z) for x, y, z in h.m_Vertices]
         nrm = [(-x, y, z) for x, y, z in (h.m_Normals or [(0, 1, 0)] * len(pos))]
         uv = [(u, 1.0 - v) for u, v in h.m_UV0]
@@ -441,14 +515,16 @@ def build_outfit(sd: dict) -> dict:
         # renderers carry 2 of each: pad both to the 4 glTF wants
         bi = [tuple(int(i) for i in t) + (0,) * (4 - len(t)) for t in h.m_BoneIndices]
         bw = []
-        for w in (h.m_BoneWeights or [(1.0,)] * len(bi)):
+        for w in h.m_BoneWeights or [(1.0,)] * len(bi):
             s = sum(w) or 1.0
             bw.append(tuple(x / s for x in w) + (0.0,) * (4 - len(w)))
-        attrs = {"POSITION": g.accessor("f", 5126, "VEC3", pos, 34962, minmax=True),
-                 "NORMAL": g.accessor("f", 5126, "VEC3", nrm, 34962),
-                 "TEXCOORD_0": g.accessor("f", 5126, "VEC2", uv, 34962),
-                 "JOINTS_0": g.accessor("H", 5123, "VEC4", bi, 34962),
-                 "WEIGHTS_0": g.accessor("f", 5126, "VEC4", bw, 34962)}
+        attrs = {
+            "POSITION": g.accessor("f", 5126, "VEC3", pos, 34962, minmax=True),
+            "NORMAL": g.accessor("f", 5126, "VEC3", nrm, 34962),
+            "TEXCOORD_0": g.accessor("f", 5126, "VEC2", uv, 34962),
+            "JOINTS_0": g.accessor("H", 5123, "VEC4", bi, 34962),
+            "WEIGHTS_0": g.accessor("f", 5126, "VEC4", bw, 34962),
+        }
         prims = []
         for si, tris in enumerate(R["tris"]):
             mat = R["materials"][si] if si < len(R["materials"]) else None
@@ -460,14 +536,28 @@ def build_outfit(sd: dict) -> dict:
             key = (src, tex.m_Name)
             if key not in tex_cache:
                 tex_cache[key] = g.image(webp_of(tex))
-            g.j["materials"].append({"name": mat.m_Name, "pbrMetallicRoughness": {
-                "baseColorTexture": {"index": tex_cache[key]}, "metallicFactor": 0, "roughnessFactor": 1},
-                **({"alphaMode": "MASK", "alphaCutoff": 0.5} if alpha else {}),
-                "doubleSided": part in ("Hair",), "extensions": {}})
+            g.j["materials"].append(
+                {
+                    "name": mat.m_Name,
+                    "pbrMetallicRoughness": {
+                        "baseColorTexture": {"index": tex_cache[key]},
+                        "metallicFactor": 0,
+                        "roughnessFactor": 1,
+                    },
+                    **({"alphaMode": "MASK", "alphaCutoff": 0.5} if alpha else {}),
+                    "doubleSided": part in ("Hair",),
+                    "extensions": {},
+                }
+            )
             g.j["materials"][-1].pop("extensions")
-            idx = [i for a, b, c in tris for i in (a, c, b)]          # winding reversed by the mirror
-            prims.append({"attributes": attrs, "material": len(g.j["materials"]) - 1,
-                          "indices": g.accessor("I", 5125, "SCALAR", idx, 34963)})
+            idx = [i for a, b, c in tris for i in (a, c, b)]  # winding reversed by the mirror
+            prims.append(
+                {
+                    "attributes": attrs,
+                    "material": len(g.j["materials"]) - 1,
+                    "indices": g.accessor("I", 5125, "SCALAR", idx, 34963),
+                }
+            )
         if not prims:
             continue
         g.j["meshes"].append({"name": rname, "primitives": prims})
@@ -486,13 +576,19 @@ def main(argv=None) -> int:
     g.add_argument("--chr", nargs="+", help="character ids, e.g. 00001")
     g.add_argument("--outfit", nargs="+", help="SdCostume ids, e.g. sdcos-00001-cmmn-0000-00")
     g.add_argument("--all", action="store_true")
-    g.add_argument("--new", action="store_true",
-                   help="only the SD outfits with no model yet (what refresh_all runs)")
+    g.add_argument(
+        "--new", action="store_true", help="only the SD outfits with no model yet (what refresh_all runs)"
+    )
     a = ap.parse_args(argv)
     sds = sd_costumes(catalogue_names())
-    todo = [d for d in sds if a.all or (a.outfit and d["id"] in a.outfit)
-            or (a.chr and d["chr"].split("-")[1] in a.chr)
-            or (a.new and not os.path.exists(os.path.join(OUT, "models", d["id"] + ".glb")))]
+    todo = [
+        d
+        for d in sds
+        if a.all
+        or (a.outfit and d["id"] in a.outfit)
+        or (a.chr and d["chr"].split("-")[1] in a.chr)
+        or (a.new and not os.path.exists(os.path.join(OUT, "models", d["id"] + ".glb")))
+    ]
     print(f"{len(sds)} SD outfits in the catalogue, {len(todo)} to build")
     index_path = os.path.join(OUT, "index.json")
     index = json.load(open(index_path, encoding="utf-8")) if os.path.exists(index_path) else {"outfits": {}}
@@ -501,7 +597,7 @@ def main(argv=None) -> int:
             r = build_outfit(d)
             index["outfits"][d["id"]] = {k: r[k] for k in ("chr", "name", "typ", "model", "bytes")}
             print(f"  OK  {d['id']}  {r['bytes'] / 1024:.0f} KB  {r['vertices']}")
-            write_index(index_path, index)          # after each one: a long run can be stopped
+            write_index(index_path, index)  # after each one: a long run can be stopped
         except Exception as e:  # noqa: BLE001 -- one bad outfit never stops the rest
             print(f"  FAIL {d['id']}: {e!r}")
     write_index(index_path, index)

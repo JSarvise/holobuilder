@@ -1,5 +1,6 @@
 """hb-auth: Google ID tokens checked for real (signed here with a test RSA key), the approval
 gate, revocation, and what is (not) stored. No network."""
+
 from __future__ import annotations
 
 import base64
@@ -30,8 +31,16 @@ def jwks():
 
 
 def token(**over) -> str:
-    claims = {"iss": "https://accounts.google.com", "aud": CID, "sub": "111", "email": "Ann@x.com",
-              "email_verified": True, "name": "Ann", "exp": time.time() + 600, **over}
+    claims = {
+        "iss": "https://accounts.google.com",
+        "aud": CID,
+        "sub": "111",
+        "email": "Ann@x.com",
+        "email_verified": True,
+        "name": "Ann",
+        "exp": time.time() + 600,
+        **over,
+    }
     h = b64(json.dumps({"alg": "RS256", "kid": "k1"}).encode())
     p = b64(json.dumps(claims).encode())
     sig = pkcs1_15.new(KEY).sign(SHA256.new(f"{h}.{p}".encode()))
@@ -48,8 +57,12 @@ def config(monkeypatch):
 def test_a_real_google_token_is_accepted_and_forgeries_are_not():
     keys = A.Keys(fetch=jwks)
     assert A.verify_id_token(token(), keys)["sub"] == "111"
-    for bad, why in [(token(aud="someone-else"), "not issued"), (token(exp=time.time() - 3600), "expired"),
-                     (token(email_verified=False), "not verified"), (token(iss="evil.com"), "issuer")]:
+    for bad, why in [
+        (token(aud="someone-else"), "not issued"),
+        (token(exp=time.time() - 3600), "expired"),
+        (token(email_verified=False), "not verified"),
+        (token(iss="evil.com"), "issuer"),
+    ]:
         with pytest.raises(ValueError, match=why):
             A.verify_id_token(bad, keys)
     h, p, s = token().split(".")
@@ -64,7 +77,7 @@ def test_a_new_user_waits_for_approval_and_only_the_key_hash_is_kept():
     assert info["status"] == "pending" and info["email"] == "ann@x.com"
     assert st.lookup(key)["status"] == "pending"
     stored = [r[0] for r in st.db.execute("SELECT hash FROM keys")]
-    assert key not in stored and A.key_hash(key) in stored          # the key itself: nowhere
+    assert key not in stored and A.key_hash(key) in stored  # the key itself: nowhere
     uid = st.users()[0]["id"]
     assert st.act(uid, "approve") and st.lookup(key)["status"] == "approved"
     assert st.act(uid, "revoke") and st.lookup(key)["status"] == "revoked"
@@ -86,27 +99,32 @@ def test_registration_is_rate_limited_per_address():
 def test_users_pick_a_username_and_no_real_name_is_kept():
     st = A.Store(":memory:")
     key, info = st.register(A.verify_id_token(token(), A.Keys(fetch=jwks)), "0.1.3")
-    assert info["username"] == "" and info["name"] == ""                # Google's "Ann": not kept
+    assert info["username"] == "" and info["name"] == ""  # Google's "Ann": not kept
     assert [r[0] for r in st.db.execute("SELECT name FROM users")] == [""]
     uid = st.lookup(key)["id"]
     assert st.set_username(uid, "ab") == "invalid" and st.set_username(uid, "a b c") == "invalid"
     assert st.set_username(uid, "Nene_fan.01") == "ok"
     assert st.lookup(key)["username"] == "Nene_fan.01"
     _, again = st.register(A.verify_id_token(token(), A.Keys(fetch=jwks)), "0.1.4")
-    assert again["username"] == "Nene_fan.01"                         # a re-install keeps it
+    assert again["username"] == "Nene_fan.01"  # a re-install keeps it
     k2, _ = st.register({"sub": "2", "email": "bo@x.com", "name": "Bo Real"}, "0.1.3")
-    assert st.set_username(st.lookup(k2)["id"], "nene_FAN.01") == "taken"   # ignoring case
+    assert st.set_username(st.lookup(k2)["id"], "nene_FAN.01") == "taken"  # ignoring case
     assert {"username"} <= set(st.users()[0]) and "name" not in st.users()[0]
 
 
 def test_names_stored_before_usernames_are_blanked(tmp_path):
     import sqlite3
+
     db = tmp_path / "users.db"
     con = sqlite3.connect(db)
-    con.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, sub TEXT UNIQUE NOT NULL, email TEXT, "
-                "name TEXT, status TEXT NOT NULL, admin INTEGER NOT NULL DEFAULT 0, created INTEGER, "
-                "approved INTEGER, last_seen INTEGER, app TEXT)")
-    con.execute("INSERT INTO users (sub, email, name, status) VALUES ('1', 'a@x.com', 'Real Name', 'approved')")
+    con.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, sub TEXT UNIQUE NOT NULL, email TEXT, "
+        "name TEXT, status TEXT NOT NULL, admin INTEGER NOT NULL DEFAULT 0, created INTEGER, "
+        "approved INTEGER, last_seen INTEGER, app TEXT)"
+    )
+    con.execute(
+        "INSERT INTO users (sub, email, name, status) VALUES ('1', 'a@x.com', 'Real Name', 'approved')"
+    )
     con.commit()
     con.close()
     st = A.Store(str(db))

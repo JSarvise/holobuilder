@@ -15,22 +15,29 @@ import math
 import random
 
 import pytest
-
-from hbuilder.domain.board import (
-    GROUPING_ALL_CAP, SONG_ALL_CAP_PERMIL, STAT_NAMES, BoardBase, BoardDigest, BoardEffect, BoardError,
-    BoardModel, BoardNode, CharacterBoard, _reaches,
-)
 from support.board_reference import resolve
-from hbuilder.domain.board_plan import PlanCache
-from hbuilder.domain.card import Stats
-
 from support.builders import make_card, make_scoring_config
 from test_fast_leaf import BENCH, CONNECT, _both_boards, _team
 
+from hbuilder.domain.board import (
+    GROUPING_ALL_CAP,
+    SONG_ALL_CAP_PERMIL,
+    STAT_NAMES,
+    BoardBase,
+    BoardDigest,
+    BoardEffect,
+    BoardError,
+    BoardModel,
+    BoardNode,
+    CharacterBoard,
+    _reaches,
+)
+from hbuilder.domain.board_plan import PlanCache
+from hbuilder.domain.card import Stats
+
 _HOLOMEM = [f"Chr{n}" for n in range(1, 13)]
 _GROUPS = ["grp-myth", "grp-gen_3", "Myth"]
-_STATS = [Stats(performance=1000 + 137 * n, technique=900 + 71 * n, sense=1100 + 53 * n)
-          for n in range(12)]
+_STATS = [Stats(performance=1000 + 137 * n, technique=900 + 71 * n, sense=1100 + 53 * n) for n in range(12)]
 
 
 # `_FRACTIONAL[0]` makes some flat stat values fractional (77.5): a model
@@ -46,9 +53,19 @@ def fractional(request):
 
 
 def _random_effect(rng: random.Random) -> BoardEffect:
-    kind = rng.choice(["stat", "stat", "rate", "rate", "skill_effect_up",
-                       "song_score_bonus", "activation_rate_up", "cooldown_shorten",
-                       "ignored"])
+    kind = rng.choice(
+        [
+            "stat",
+            "stat",
+            "rate",
+            "rate",
+            "skill_effect_up",
+            "song_score_bonus",
+            "activation_rate_up",
+            "cooldown_shorten",
+            "ignored",
+        ]
+    )
     if kind in ("activation_rate_up", "cooldown_shorten"):
         scope = "member"
     elif kind in ("song_score_bonus", "ignored"):
@@ -59,23 +76,30 @@ def _random_effect(rng: random.Random) -> BoardEffect:
         family=f"fam-{kind}",
         kind=kind,
         stat=rng.choice(["all", *STAT_NAMES]) if kind in ("stat", "rate") else "",
-        value=(rng.randrange(5, 120) + (0.5 if _FRACTIONAL[0] and rng.random() < 0.3 else 0.0)
-               if kind == "stat"
-               else rng.randrange(1, 300) / 1000.0),
+        value=(
+            rng.randrange(5, 120) + (0.5 if _FRACTIONAL[0] and rng.random() < 0.3 else 0.0)
+            if kind == "stat"
+            else rng.randrange(1, 300) / 1000.0
+        ),
         scope=scope,
         grouping=rng.choice(_GROUPS) if scope == "grouping" else None,
-        song_scope=(rng.choice(["all", "solo", "group", None])
-                    if kind == "song_score_bonus" else None),
+        song_scope=(rng.choice(["all", "solo", "group", None]) if kind == "song_score_bonus" else None),
         conditional=kind != "song_score_bonus" and rng.random() < 0.2,
     )
 
 
 def _random_board(rng: random.Random, holomem: str) -> CharacterBoard:
-    return CharacterBoard(holomem=holomem, nodes=tuple(
-        BoardNode(node_id=f"{rng.choice('RGBY')}-{i:03d}",
-                  effects=tuple(_random_effect(rng) for _ in range(rng.choice([1, 1, 2]))),
-                  connect_multiplier=rng.choice([1.0, 1.0, 1.55, 2.4, 1.3]))
-        for i in range(rng.randrange(0, 14))))
+    return CharacterBoard(
+        holomem=holomem,
+        nodes=tuple(
+            BoardNode(
+                node_id=f"{rng.choice('RGBY')}-{i:03d}",
+                effects=tuple(_random_effect(rng) for _ in range(rng.choice([1, 1, 2]))),
+                connect_multiplier=rng.choice([1.0, 1.0, 1.55, 2.4, 1.3]),
+            )
+            for i in range(rng.randrange(0, 14))
+        ),
+    )
 
 
 def _random_model(rng: random.Random) -> BoardModel:
@@ -84,17 +108,24 @@ def _random_model(rng: random.Random) -> BoardModel:
 
 
 def _cards():
-    return [make_card(f"card-{n:05d}-5-uniq-0000-00", member=_HOLOMEM[n],
-                      stats=_STATS[n],
-                      generations=frozenset({["Myth", "3期生", "grp-gen_3", "holoX"][n % 4]}))
-            for n in range(12)]
+    return [
+        make_card(
+            f"card-{n:05d}-5-uniq-0000-00",
+            member=_HOLOMEM[n],
+            stats=_STATS[n],
+            generations=frozenset({["Myth", "3期生", "grp-gen_3", "holoX"][n % 4]}),
+        )
+        for n in range(12)
+    ]
 
 
 def _reference(model: BoardModel) -> dict:
     """The derived fields, by the plain nested walks."""
     leader_scoped = frozenset(
-        holomem for holomem, board in model.characters.items()
-        if any(e.scope == "leader" for node in board.nodes for e in node.effects))
+        holomem
+        for holomem, board in model.characters.items()
+        if any(e.scope == "leader" for node in board.nodes for e in node.effects)
+    )
     song: dict[str, float] = {}
     seu, cond_seu, cond_stat = [], [], []
     by_holomem: dict[str, dict[str, float]] = {}
@@ -158,7 +189,7 @@ def _reference_terms(model: BoardModel, card, leader_holomem):
                 if effect.kind == "stat" and effect.scope == "grouping" and effect.stat == "all":
                     grouping = (grouping or 0.0) + effect.value
                     continue
-                for stat in (STAT_NAMES if effect.stat == "all" else (effect.stat,)):
+                for stat in STAT_NAMES if effect.stat == "all" else (effect.stat,):
                     bucket[stat] = bucket.get(stat, 0.0) + effect.value
     if grouping is not None:
         # the grouping greens a card receives are capped, then reach every stat
@@ -189,13 +220,10 @@ def test_terms_and_power_bonus_equal_the_nested_walk_and_resolve_on_random_board
             got = model._terms(card, leader_holomem)
             assert got == _reference_terms(model, card, leader_holomem)
             # dict ORDER is the order the first addend arrived in — the same walk
-            assert [list(d) for d in got] == \
-                [list(d) for d in _reference_terms(model, card, leader_holomem)]
+            assert [list(d) for d in got] == [list(d) for d in _reference_terms(model, card, leader_holomem)]
         contribution = resolve(model, leader, members)
-        assert model.power_bonus_for(members, leader_holomem) == \
-            contribution.power_bonus(members)
-        assert model.skill_effect_up_for(members, leader_holomem) == \
-            contribution.skill_effect_up
+        assert model.power_bonus_for(members, leader_holomem) == contribution.power_bonus(members)
+        assert model.skill_effect_up_for(members, leader_holomem) == contribution.skill_effect_up
     # the fixture did select the path it names: whole flats always sum per
     # board, and fractional ones push (nearly) every model off that path
     assert exact == {True} if not fractional else False in exact
@@ -221,8 +249,7 @@ def test_digests_shared_across_models_give_the_same_model_as_fresh_ones(fraction
             assert getattr(shared, name) == value, name
         leader_holomem = rng.choice([None, *_HOLOMEM])
         for card in rng.sample(cards, 5):
-            assert shared._terms(card, leader_holomem) == \
-                _reference_terms(fresh, card, leader_holomem)
+            assert shared._terms(card, leader_holomem) == _reference_terms(fresh, card, leader_holomem)
 
 
 def test_a_digest_of_another_board_is_ignored_not_trusted():
@@ -241,8 +268,7 @@ def test_a_digest_of_another_board_is_ignored_not_trusted():
 
 
 def test_an_uptime_effect_off_member_scope_still_refuses_to_build():
-    bad = BoardEffect(family="f", kind="cooldown_shorten", stat="", value=0.1,
-                      scope="account")
+    bad = BoardEffect(family="f", kind="cooldown_shorten", stat="", value=0.1, scope="account")
     board = CharacterBoard(holomem="Chr1", nodes=(BoardNode(node_id="B-001", effects=(bad,)),))
     with pytest.raises(BoardError, match="Chr1 node B-001: cooldown_shorten at scope 'account'"):
         BoardModel(characters={"Chr1": board})
@@ -253,27 +279,25 @@ def test_an_uptime_effect_off_member_scope_still_refuses_to_build():
 
 def test_the_plan_cache_reuses_bench_digests_and_developed_boards_across_teams():
     cache = PlanCache.from_team(_team(1, [2, 3, 4, 5, 6]), make_scoring_config())
-    teams = [_team(1, [2, 3, 4, 5, 6]), _team(1, [2, 3, 4, 5, 7]),
-             _team(1, [2, 3, 4, 5, 6])]
+    teams = [_team(1, [2, 3, 4, 5, 6]), _team(1, [2, 3, 4, 5, 7]), _team(1, [2, 3, 4, 5, 6])]
     models = []
     for team in teams:
         (plain, _pp), (fast, _pf) = _both_boards(
-            team, cache, budget=453, sings=False, connect=CONNECT, bench=BENCH)
+            team, cache, budget=453, sings=False, connect=CONNECT, bench=BENCH
+        )
         assert fast == plain
         for card in team.members:
-            assert fast._terms(card, team.leader.member) == \
-                plain._terms(card, team.leader.member)
-            assert fast._terms(card, team.leader.member) == \
-                _reference_terms(plain, card, team.leader.member)
+            assert fast._terms(card, team.leader.member) == plain._terms(card, team.leader.member)
+            assert fast._terms(card, team.leader.member) == _reference_terms(plain, card, team.leader.member)
         models.append((team, fast))
     (t0, m0), (_t1, m1), (_t2, m2) = models
     in_team = {c.member for c in (t0.leader, *t0.members)}
     bench_only = [name for name in m0.characters if name not in in_team]
     assert bench_only
-    for name in bench_only:                 # the bench: one digest for every team
+    for name in bench_only:  # the bench: one digest for every team
         assert m0._digests[name] is m2._digests[name]
         assert m0._digests[name].board is m0.characters[name]
-    for name in in_team:                    # the same team again: its boards are reused
+    for name in in_team:  # the same team again: its boards are reused
         assert m0.characters[name] is m2.characters[name]
         assert m0._digests[name] is m2._digests[name]
     assert cache._team_boards
@@ -286,10 +310,10 @@ def test_flat_exact_is_refused_for_a_fractional_or_an_enormous_flat_value():
         return CharacterBoard(holomem="Chr1", nodes=(BoardNode(node_id="G-001", effects=(effect,)),))
 
     assert BoardDigest(board(50.0)).flat_exact
-    assert BoardDigest(board(78)).flat_exact            # `scaled` ceils to an int
+    assert BoardDigest(board(78)).flat_exact  # `scaled` ceils to an int
     assert not BoardDigest(board(77.5)).flat_exact
     assert not BoardDigest(board(float(2**40))).flat_exact
-    assert BoardDigest(board(0.01, kind="rate")).flat_exact   # rates are never summed
+    assert BoardDigest(board(0.01, kind="rate")).flat_exact  # rates are never summed
     whole, half = board(50.0), board(77.5)
     assert BoardModel(characters={"a": whole})._flat_exact
     assert not BoardModel(characters={"a": whole, "b": half})._flat_exact
@@ -324,8 +348,9 @@ def test_terms_over_a_bench_base_equal_the_nested_walk(fractional):
                     want = _reference_terms(plain, card, leader_holomem)
                     assert model._terms(card, leader_holomem) == want
                     assert plain._terms(card, leader_holomem) == want
-                assert model.power_bonus_for(members, leader_holomem) == \
-                    plain.power_bonus_for(members, leader_holomem)
+                assert model.power_bonus_for(members, leader_holomem) == plain.power_bonus_for(
+                    members, leader_holomem
+                )
     # whole flats take the base; one fractional flat anywhere switches it off
     assert (False in used) if fractional else used == {True}
 
@@ -351,13 +376,13 @@ def test_the_plan_cache_hands_every_model_the_same_bench_base():
     seen = []
     for team in (_team(1, [2, 3, 4, 5, 6]), _team(7, [2, 3, 8, 9, 10])):
         (plain, _pp), (fast, _pf) = _both_boards(
-            team, cache, budget=453, sings=False, connect=CONNECT, bench=BENCH)
+            team, cache, budget=453, sings=False, connect=CONNECT, bench=BENCH
+        )
         assert fast._base is not None and plain._base is None
         seen.append(fast._base)
         for leader_holomem in (team.leader.member, None):
             for card in team.members:
-                assert fast._terms(card, leader_holomem) == \
-                    _reference_terms(plain, card, leader_holomem)
+                assert fast._terms(card, leader_holomem) == _reference_terms(plain, card, leader_holomem)
     assert seen[0] is seen[1]
 
 
@@ -365,10 +390,11 @@ def _rows(rng: random.Random) -> list:
     """A bench board's rows as `board.json` holds them (the fast-leaf fixture's effects)."""
     from test_fast_leaf import EFFECTS  # noqa: PLC0415
 
-    nodes = sorted(n for n in EFFECTS if n[0] != "Y")     # (its yellow is not a bench row's id)
-    return [{"node": node, "effects": list(EFFECTS[node]),
-             "connect_multiplier": rng.choice([1.0, 1.5, 1.2])}
-            for node in rng.sample(nodes, rng.randrange(1, 5))]
+    nodes = sorted(n for n in EFFECTS if n[0] != "Y")  # (its yellow is not a bench row's id)
+    return [
+        {"node": node, "effects": list(EFFECTS[node]), "connect_multiplier": rng.choice([1.0, 1.5, 1.2])}
+        for node in rng.sample(nodes, rng.randrange(1, 5))
+    ]
 
 
 def test_the_plan_cache_keeps_several_benches_and_shares_the_boards_they_share():
@@ -383,7 +409,7 @@ def test_the_plan_cache_keeps_several_benches_and_shares_the_boards_they_share()
     root = {f"Chr{n}": _rows(rng) for n in range(20, 32)}
     benches = [root]
     for changed in (["Chr21"], ["Chr21", "Chr25"], ["Chr30"], ["Chr40"]):
-        bench = dict(root)                      # as `singer_bench_characters` derives one
+        bench = dict(root)  # as `singer_bench_characters` derives one
         for name in changed:
             bench[name] = _rows(rng)
         benches.append(bench)
@@ -391,8 +417,11 @@ def test_the_plan_cache_keeps_several_benches_and_shares_the_boards_they_share()
     first = [(cache.bench_boards(b), cache.bench_digests(b), cache.bench_base(b)) for b in benches]
     for _ in range(3):
         for k in rng.sample(range(len(benches)), len(benches)):
-            again = (cache.bench_boards(benches[k]), cache.bench_digests(benches[k]),
-                     cache.bench_base(benches[k]))
+            again = (
+                cache.bench_boards(benches[k]),
+                cache.bench_digests(benches[k]),
+                cache.bench_base(benches[k]),
+            )
             assert all(a is b for a, b in zip(again, first[k]))
     for bench, (boards, digests, base) in zip(benches, first):
         whole = board_from_mapping({"characters": {k: list(v) for k, v in bench.items()}})
@@ -421,8 +450,8 @@ def test_benches_beyond_the_bound_are_dropped_oldest_first_and_parse_the_same_ag
     cache = PlanCache.from_team(_team(1, [2, 3, 4, 5, 6]), make_scoring_config())
     seen = [cache.bench_boards(b) for b in benches]
     assert len(cache._benches) == 3
-    assert cache.bench_boards(benches[4]) is seen[4]            # still held
-    again = cache.bench_boards(benches[0])                      # dropped: parsed again
+    assert cache.bench_boards(benches[4]) is seen[4]  # still held
+    again = cache.bench_boards(benches[0])  # dropped: parsed again
     assert again is not seen[0] and again == seen[0]
     # the boards the benches share were never dropped (their rows lists are still parsed)
     assert all(again[name] is seen[4][name] for name in root if name != "Chr20")
@@ -438,9 +467,9 @@ def test_models_over_alternating_benches_equal_the_plain_assembly():
     benches = [dict(BENCH)]
     for n in range(4):
         bench = dict(BENCH)
-        bench[f"Chr{90 + n}"] = _rows(rng)                       # a board appended
+        bench[f"Chr{90 + n}"] = _rows(rng)  # a board appended
         if n % 2:
-            bench["Chr99"] = _rows(rng)                          # and the shared one replaced
+            bench["Chr99"] = _rows(rng)  # and the shared one replaced
         benches.append(bench)
     cache = PlanCache.from_team(_team(1, [2, 3, 4, 5, 6]), make_scoring_config())
     teams = [_team(1, [2, 3, 4, 5, 6]), _team(7, [2, 3, 8, 9, 10]), _team(1, [2, 3, 4, 5, 7])]
@@ -449,15 +478,16 @@ def test_models_over_alternating_benches_equal_the_plain_assembly():
         for k in rng.sample(range(len(benches)), len(benches)):
             team = rng.choice(teams)
             (plain, _pp), (fast, _pf) = _both_boards(
-                team, cache, budget=453, sings=False, connect=CONNECT, bench=benches[k])
+                team, cache, budget=453, sings=False, connect=CONNECT, bench=benches[k]
+            )
             assert fast == plain
             assert fast._base is not None and bases.setdefault(k, fast._base) is fast._base
             for leader_holomem in (team.leader.member, None):
                 for card in team.members:
-                    assert fast._terms(card, leader_holomem) == \
-                        _reference_terms(plain, card, leader_holomem)
-                assert fast.power_bonus_for(team.members, leader_holomem) == \
-                    plain.power_bonus_for(team.members, leader_holomem)
+                    assert fast._terms(card, leader_holomem) == _reference_terms(plain, card, leader_holomem)
+                assert fast.power_bonus_for(team.members, leader_holomem) == plain.power_bonus_for(
+                    team.members, leader_holomem
+                )
     assert len(bases) == len(benches) and len({id(b) for b in bases.values()}) == len(benches)
 
 
@@ -465,17 +495,31 @@ def test_grouping_greens_a_card_receives_are_capped_at_900():
     """Four Gen-3 boards each giving 300 grouping all-stats: a Gen-3 card receives
     900 per stat, not 1,200 (`GROUPING_ALL_CAP`, the type-20 limit row). An
     account-wide green on top is NOT capped with them."""
+
     def grp(value):
-        return BoardEffect(family="all_parameter_up_for_character_grouping", kind="stat",
-                           stat="all", value=value, scope="grouping", grouping="grp-gen_3")
-    green = BoardEffect(family="all_parameter_up", kind="stat", stat="all", value=55.0,
-                        scope="account")
+        return BoardEffect(
+            family="all_parameter_up_for_character_grouping",
+            kind="stat",
+            stat="all",
+            value=value,
+            scope="grouping",
+            grouping="grp-gen_3",
+        )
+
+    green = BoardEffect(family="all_parameter_up", kind="stat", stat="all", value=55.0, scope="account")
     names = _HOLOMEM[:4]
-    model = BoardModel(characters={
-        name: CharacterBoard(holomem=name, nodes=(
-            BoardNode(node_id="G-011", effects=(grp(300.0),), connect_multiplier=1.0),
-            BoardNode(node_id="G-001", effects=(green,), connect_multiplier=1.0)))
-        for name in names})
+    model = BoardModel(
+        characters={
+            name: CharacterBoard(
+                holomem=name,
+                nodes=(
+                    BoardNode(node_id="G-011", effects=(grp(300.0),), connect_multiplier=1.0),
+                    BoardNode(node_id="G-001", effects=(green,), connect_multiplier=1.0),
+                ),
+            )
+            for name in names
+        }
+    )
     gen3 = next(c for c in _cards() if "grp-gen_3" in c.generations)
     other = next(c for c in _cards() if not ({"grp-gen_3", "3期生"} & c.generations))
     flat, _rate = model._terms(gen3, None)

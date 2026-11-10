@@ -9,13 +9,12 @@ from __future__ import annotations
 import json
 
 import pytest
+from support.builders import FIXTURE_CARDS_PATH
 
 from hbuilder.domain.gates import RunState, aggregate, resolve_team_gates
 from hbuilder.domain.loader import load_cards
 from hbuilder.domain.schema import SCHEMA_VERSION, SchemaError
 from hbuilder.domain.team import MEMBER_COUNT, build_team
-
-from support.builders import FIXTURE_CARDS_PATH
 
 CARDS_PATH = FIXTURE_CARDS_PATH
 
@@ -65,9 +64,7 @@ def test_costume_skill_present_as_team_wide_effect_alongside_normal_slots():
 
     # The leader contributes its outfit skill and NOTHING else. Its own
     # normal slots must not appear.
-    normal_leader_entries = [
-        r for r in resolved if r.card_id == LEADER_ID and r.source == "normal"
-    ]
+    normal_leader_entries = [r for r in resolved if r.card_id == LEADER_ID and r.source == "normal"]
     assert normal_leader_entries == [], (
         "the leader's own SPECIAL/ACTIVE/PASSIVE must not be emitted; only "
         "its Outfit Skill is a team-wide effect"
@@ -80,12 +77,8 @@ def test_generation_counts_sum_matches_dual_generation_rule():
 
     # Counted over the MEMBERS, not the whole loaded collection: only they
     # feed the aggregate a gate resolves against.
-    multi_generation_members = sum(
-        1 for card in team.members if len(card.generations) > 1
-    )
-    assert (
-        sum(agg.generation_counts.values()) == MEMBER_COUNT + multi_generation_members
-    )
+    multi_generation_members = sum(1 for card in team.members if len(card.generations) > 1)
+    assert sum(agg.generation_counts.values()) == MEMBER_COUNT + multi_generation_members
 
 
 def test_type_counts_sum_to_the_five_members():

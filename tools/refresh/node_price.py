@@ -57,6 +57,7 @@ POINT_ITEM = "<skill-tree points>"  # not an Item row; a per-character point poo
 # stdlib protobuf walk (no protobuf package dependency)
 # --------------------------------------------------------------------------
 
+
 def _varint(buf: bytes, i: int) -> tuple[int, int]:
     val = shift = 0
     while True:
@@ -78,11 +79,11 @@ def decode_protobuf(buf: bytes) -> dict[int, list[Any]]:
             val, i = _varint(buf, i)
         elif wire == 2:
             ln, i = _varint(buf, i)
-            val, i = buf[i:i + ln], i + ln
+            val, i = buf[i : i + ln], i + ln
         elif wire == 5:
-            val, i = int.from_bytes(buf[i:i + 4], "little"), i + 4
+            val, i = int.from_bytes(buf[i : i + 4], "little"), i + 4
         elif wire == 1:
-            val, i = int.from_bytes(buf[i:i + 8], "little"), i + 8
+            val, i = int.from_bytes(buf[i : i + 8], "little"), i + 8
         else:
             raise ValueError(f"unsupported wire type {wire} at {i}")
         out[field].append(val)
@@ -96,6 +97,7 @@ def txt(v: Any) -> Any:
 # --------------------------------------------------------------------------
 # loading -- straight from the SQLCipher DB, binary fields kept as bytes
 # --------------------------------------------------------------------------
+
 
 def load(table: str) -> list[dict]:
     import master_cache as mc  # noqa: PLC0415
@@ -149,6 +151,7 @@ def char_ids(row: dict) -> list[str]:
 # the price vector
 # --------------------------------------------------------------------------
 
+
 def price(row: dict) -> dict[str, int]:
     """A node's FULL price as {currency_id: quantity}. Points included.
 
@@ -197,6 +200,7 @@ def item_names() -> dict[str, str]:
 # --------------------------------------------------------------------------
 # sections
 # --------------------------------------------------------------------------
+
 
 def section_currencies(nodes: list[dict], names: dict[str, str]) -> None:
     print("=== the currencies a node is actually priced in ===")
@@ -263,15 +267,16 @@ def section_node(nodes: list[dict], gid: str, names: dict[str, str]) -> None:
         eff = lang("LangGeneratedSkillTreeEffect_Eng")
     except Exception:  # noqa: BLE001
         pass
-    typ = {1: "socket", 2: "Leader Skill", 3: "Member Skill",
-           4: "Overall Boost", 5: "content"}
+    typ = {1: "socket", 2: "Leader Skill", 3: "Member Skill", 4: "Overall Boost", 5: "content"}
     for r in nodes:
         if f(r, 1) != gid:
             continue
         e = f(r, 6, "")
         desc = (eff or {}).get(f"la-generated-{e}-description", "") if e else ""
-        print(f"  number={f(r, 2)}  type={f(r, 4)} ({typ.get(f(r, 4), '?')})  "
-              f"grade={f(r, 5)}  chars={char_ids(r) or 'ALL'}")
+        print(
+            f"  number={f(r, 2)}  type={f(r, 4)} ({typ.get(f(r, 4), '?')})  "
+            f"grade={f(r, 5)}  chars={char_ids(r) or 'ALL'}"
+        )
         print(f"  effect  : {e}")
         print(f"  text    : {desc.strip()}")
         print(f"  PRICE   : {fmt(price(r), names)}")

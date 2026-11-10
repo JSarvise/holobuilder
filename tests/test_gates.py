@@ -10,6 +10,7 @@ import inspect
 import itertools
 import typing
 
+from support.team_reference import effective_skill_instances
 
 from hbuilder.domain.card import Card, GateCondition, SkillSlot, Stats
 from hbuilder.domain.gates import (
@@ -23,8 +24,6 @@ from hbuilder.domain.gates import (
 )
 from hbuilder.domain.schema import CARD_TYPES, GENERATIONS
 from hbuilder.domain.team import MEMBER_COUNT, Team
-
-from support.team_reference import effective_skill_instances
 
 _STATS = Stats(performance=100, technique=100, sense=100)
 
@@ -103,9 +102,9 @@ def test_dual_generation_card_fires_two_generation_gates():
     agg = aggregate(cards)
 
     kisei_res = GatePredicate(dimension="generation", value="1期生", threshold=2).resolve(agg, _RUN_STATE)
-    gamers_res = GatePredicate(
-        dimension="generation", value="ゲーマーズ", threshold=2
-    ).resolve(agg, _RUN_STATE)
+    gamers_res = GatePredicate(dimension="generation", value="ゲーマーズ", threshold=2).resolve(
+        agg, _RUN_STATE
+    )
 
     assert kisei_res.fired
     assert kisei_res.actual_count == 2
@@ -166,9 +165,9 @@ def test_threshold_fires_at_exactly_two_and_not_at_one():
     assert not res_at_3.fired
     assert res_at_3.actual_count == 2
 
-    res_happy_threshold_2 = GatePredicate(
-        dimension="type", value="Happy", threshold=2
-    ).resolve(agg, _RUN_STATE)
+    res_happy_threshold_2 = GatePredicate(dimension="type", value="Happy", threshold=2).resolve(
+        agg, _RUN_STATE
+    )
     assert not res_happy_threshold_2.fired
     assert res_happy_threshold_2.actual_count == 1
 
@@ -224,9 +223,7 @@ def test_aggregates_are_invariant_under_member_permutation():
             if GatePredicate(dimension="type", value=value, threshold=2).resolve(agg, _RUN_STATE).fired:
                 fired.add(("type", value))
         for value in GENERATIONS:
-            if GatePredicate(
-                dimension="generation", value=value, threshold=2
-            ).resolve(agg, _RUN_STATE).fired:
+            if GatePredicate(dimension="generation", value=value, threshold=2).resolve(agg, _RUN_STATE).fired:
                 fired.add(("generation", value))
         return frozenset(fired)
 

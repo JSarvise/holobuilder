@@ -1,4 +1,5 @@
 """HTTPS in the app and the installer is verified by Windows (system_trust.py)."""
+
 from __future__ import annotations
 
 import os
@@ -11,19 +12,24 @@ HERE = Path(__file__).resolve().parent
 
 def _run(code: str) -> str:
     env = dict(os.environ, PYTHONPATH=str(HERE))
-    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env,
-                          check=True).stdout.strip()
+    return subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, env=env, check=True
+    ).stdout.strip()
 
 
 def test_use_system_trust_makes_every_ssl_context_a_truststore_context():
-    got = _run("import ssl, system_trust\n"
-               "print(system_trust.use_system_trust(), type(ssl.create_default_context()).__module__)")
+    got = _run(
+        "import ssl, system_trust\n"
+        "print(system_trust.use_system_trust(), type(ssl.create_default_context()).__module__)"
+    )
     assert got == "True truststore._api"
 
 
 def test_an_h2_style_context_still_takes_alpn_after_the_switch():
-    got = _run("import ssl, system_trust\nsystem_trust.use_system_trust()\n"
-               "ctx = ssl.create_default_context(); ctx.set_alpn_protocols(['h2']); print('ok')")
+    got = _run(
+        "import ssl, system_trust\nsystem_trust.use_system_trust()\n"
+        "ctx = ssl.create_default_context(); ctx.set_alpn_protocols(['h2']); print('ok')"
+    )
     assert got == "ok"
 
 

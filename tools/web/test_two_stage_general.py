@@ -1,4 +1,4 @@
-""""In general" — the best team over many songs (`two_stage.chart_sample`,
+""" "In general" — the best team over many songs (`two_stage.chart_sample`,
 `two_stage.search_general`) — and the leaf it stands on: one pool scoring a
 chosen subset of its charts with the board rebuilt per song
 (`RefineContext.board_per_chart`, `RefinePool.batch_score(chart_indices=)`).
@@ -7,6 +7,7 @@ The synthetic tests hold the property that makes the sample safe to use: it
 only decides which candidates exist; every reported score is the full
 objective's. The real-data test holds the leaf to `==` against single-song
 contexts."""
+
 from __future__ import annotations
 
 import random
@@ -29,23 +30,28 @@ from test_two_stage import _leader_score, _leaders, _legal, _pool, _scorer  # no
 
 
 def test_chart_sample_is_proportional_spread_and_deterministic():
-    charts = ([SimpleNamespace(music_id=f"s{i:03d}", singer_type="solo", notes=[0] * (300 + 7 * i))
-               for i in range(158)]
-              + [SimpleNamespace(music_id=f"g{i:03d}", singer_type="group", notes=[0] * (400 + 11 * i))
-                 for i in range(43)]
-              + [SimpleNamespace(music_id=f"n{i:03d}", singer_type=None, notes=[0] * (200 + i))
-                 for i in range(14)])
+    charts = (
+        [
+            SimpleNamespace(music_id=f"s{i:03d}", singer_type="solo", notes=[0] * (300 + 7 * i))
+            for i in range(158)
+        ]
+        + [
+            SimpleNamespace(music_id=f"g{i:03d}", singer_type="group", notes=[0] * (400 + 11 * i))
+            for i in range(43)
+        ]
+        + [SimpleNamespace(music_id=f"n{i:03d}", singer_type=None, notes=[0] * (200 + i)) for i in range(14)]
+    )
     random.Random(3).shuffle(charts)
     sample = two_stage.chart_sample(charts, 16)
     kinds = [c.singer_type for c in sample]
     assert len(sample) == len({c.music_id for c in sample}) == 16
     assert (kinds.count("solo"), kinds.count("group"), kinds.count(None)) == (12, 3, 1)
     solo = sorted(len(c.notes) for c in sample if c.singer_type == "solo")
-    assert solo[0] < 300 + 7 * 20 and solo[-1] > 300 + 7 * 137     # both ends of the range
+    assert solo[0] < 300 + 7 * 20 and solo[-1] > 300 + 7 * 137  # both ends of the range
     again = list(charts)
     random.Random(4).shuffle(again)
     assert [c.music_id for c in two_stage.chart_sample(again, 16)] == [c.music_id for c in sample]
-    assert two_stage.chart_sample(charts[:5], 16) == charts[:5]     # nothing to sample
+    assert two_stage.chart_sample(charts[:5], 16) == charts[:5]  # nothing to sample
 
 
 def test_search_general_reports_only_full_scores_and_scores_the_extra_candidates():
@@ -58,7 +64,7 @@ def test_search_general_reports_only_full_scores_and_scores_the_extra_candidates
     of_other = _leader_score(cards, other)
     base = SimpleNamespace(id="bare", member="Nobody", gate=None, flat=1.0, gated=1.0, sings=1.0)
 
-    def full(leader, s) -> float:                     # two "songs": the mean of both
+    def full(leader, s) -> float:  # two "songs": the mean of both
         return (of(leader, s) + of_other(leader, s)) / 2.0
 
     full_calls = []
@@ -69,16 +75,27 @@ def test_search_general_reports_only_full_scores_and_scores_the_extra_candidates
 
     planted = (leaders[3], legal[-1])
     result = two_stage.search_general(
-        cards, leaders, lambda leader, sets: [of(leader, s) for s in sets],   # the sample: song 1 only
-        score_full, base_leader=base, gate_of=lambda leader: leader.gate, keep=40, extra=[planted],
-        initial=800, step=300, triage_top=100, tier=40, max_searched=4)
+        cards,
+        leaders,
+        lambda leader, sets: [of(leader, s) for s in sets],  # the sample: song 1 only
+        score_full,
+        base_leader=base,
+        gate_of=lambda leader: leader.gate,
+        keep=40,
+        extra=[planted],
+        initial=800,
+        step=300,
+        triage_top=100,
+        tier=40,
+        max_searched=4,
+    )
     rows = result["rows"]
     assert len(rows) == len(leaders)
     assert [r["best"] for r in rows] == sorted((r["best"] for r in rows), reverse=True)
     for row in rows:
-        assert row["best"] == full(row["leader"], row["members"])            # never the sample's number
+        assert row["best"] == full(row["leader"], row["members"])  # never the sample's number
     assert all(value == full(leader, members) for value, leader, members in result["ranking"])
-    assert (full(*planted), planted[0], planted[1]) in result["ranking"]     # `extra` was scored
+    assert (full(*planted), planted[0], planted[1]) in result["ranking"]  # `extra` was scored
     scored = {(leader_id, s) for leader_id, sets in full_calls for s in sets}
     assert len(scored) == result["stats"]["full_evals"] == len(result["ranking"])
     agreement = result["stats"]["sample_agreement"]
@@ -101,9 +118,10 @@ def test_one_pool_scores_a_chosen_song_exactly_as_that_songs_own_context_does():
     try:
         import leaf_inputs
 
-        built = leaf_inputs.build_maxed(argparse.Namespace(song="m0334", budget=453, uptime="finite",
-                                                           platform="mobile"),
-                                        leaf_inputs.PROXIES["nonsinger"])
+        built = leaf_inputs.build_maxed(
+            argparse.Namespace(song="m0334", budget=453, uptime="finite", platform="mobile"),
+            leaf_inputs.PROXIES["nonsinger"],
+        )
         library = leaf_inputs.load_charts(str(leaf_inputs.CHARTS_PATH))
         charts = tuple(c for c in (library.get(m) for m in ("m0334", "m0144", "m0001")) if c)
     except Exception as exc:  # noqa: BLE001 - no dumps on this machine
@@ -121,11 +139,12 @@ def test_one_pool_scores_a_chosen_song_exactly_as_that_songs_own_context_does():
         picked = rng.sample(reps, 5)
         if len({c.member for c in picked}) == 5:
             teams.append(Team(leader=rng.choice([proxy, singer, picked[0]]), members=tuple(picked)))
-    assert any(t.leader is singer for t in teams)     # a leader in a different singer context per song
-    many = pr.RefinePool(dataclasses.replace(built["ctx"], charts=charts, board_per_chart=True),
-                         workers=1)
-    alone = [pr.RefinePool(dataclasses.replace(built["ctx"], charts=(chart,)), workers=1).batch_score(teams)
-             for chart in charts]
+    assert any(t.leader is singer for t in teams)  # a leader in a different singer context per song
+    many = pr.RefinePool(dataclasses.replace(built["ctx"], charts=charts, board_per_chart=True), workers=1)
+    alone = [
+        pr.RefinePool(dataclasses.replace(built["ctx"], charts=(chart,)), workers=1).batch_score(teams)
+        for chart in charts
+    ]
     for k in range(3):
         assert many.batch_score(teams, chart_indices=(k,)) == alone[k]
     means = [(alone[0][t] + alone[1][t] + alone[2][t]) / 3 for t in range(len(teams))]
@@ -149,9 +168,10 @@ def test_per_chart_scores_are_the_charts_own_and_average_to_the_batch_score():
     try:
         import leaf_inputs
 
-        built = leaf_inputs.build_maxed(argparse.Namespace(song="m0334", budget=453, uptime="finite",
-                                                           platform="mobile"),
-                                        leaf_inputs.PROXIES["nonsinger"])
+        built = leaf_inputs.build_maxed(
+            argparse.Namespace(song="m0334", budget=453, uptime="finite", platform="mobile"),
+            leaf_inputs.PROXIES["nonsinger"],
+        )
         library = leaf_inputs.load_charts(str(leaf_inputs.CHARTS_PATH))
         charts = tuple(c for c in (library.get(m) for m in ("m0334", "m0144", "m0001")) if c)
     except Exception as exc:  # noqa: BLE001 - no dumps on this machine
@@ -175,5 +195,5 @@ def test_per_chart_scores_are_the_charts_own_and_average_to_the_batch_score():
     for k in range(3):
         assert [v[k] for v in per] == one.batch_score(teams, chart_indices=(k,))
     assert [sum(v) / 3 for v in per] == one.batch_score(teams)
-    with pr.RefinePool(ctx, workers=2) as two:              # the worker path: the same floats
+    with pr.RefinePool(ctx, workers=2) as two:  # the worker path: the same floats
         assert two.batch_score_per_chart(teams) == per

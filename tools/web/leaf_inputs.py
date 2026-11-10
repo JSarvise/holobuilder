@@ -22,6 +22,7 @@ leaf's per-leader rows into the ranked teams the pages show.
 
 Nothing here writes data/ or state/.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,10 +31,10 @@ import hashlib
 import importlib.util
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
-_SRC = str(Path(__file__).resolve().parents[2] / "src")   # this checkout's hbuilder
+_SRC = str(Path(__file__).resolve().parents[2] / "src")  # this checkout's hbuilder
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 from hbuilder import paths  # noqa: E402
@@ -44,15 +45,19 @@ for _p in (paths.WEB_DIR, paths.REFRESH_DIR, paths.WEB_DIR / "kernel"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from hbuilder.inputs import (  # noqa: E402
-    DEFAULT_BOARD_PATH, DEFAULT_CHARTS_PATH, apply_collection, load_inputs,
-    max_level_board_points)
-from hbuilder.domain.board_plan import node_effect_ids_from_master  # noqa: E402
-from hbuilder.domain.song import load_charts  # noqa: E402
-from hbuilder.solver import members_first as mf  # noqa: E402
-from hbuilder.solver.parallel_refine import RefineContext  # noqa: E402
 import certificate as cert_mod  # noqa: E402
 
+from hbuilder.domain.board_plan import node_effect_ids_from_master  # noqa: E402
+from hbuilder.domain.song import load_charts  # noqa: E402
+from hbuilder.inputs import (  # noqa: E402
+    DEFAULT_BOARD_PATH,
+    DEFAULT_CHARTS_PATH,
+    apply_collection,
+    load_inputs,
+    max_level_board_points,
+)
+from hbuilder.solver import members_first as mf  # noqa: E402
+from hbuilder.solver.parallel_refine import RefineContext  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -75,49 +80,64 @@ REFRESH_DIR = paths.REFRESH_DIR
 VERSION = "two-stage-build-4"
 # The maxed basis' flat board budget is not here: it is read from the master
 # (`maxed_budget`) and added to every key by `keys_for`.
-SETTINGS = {"uptime": "finite", "platform": "mobile", "proxy": "nonsinger",
-            "margin": 0.04, "max_searched": 12, "triage_top": 300, "tier": 100,
-            "general": {"sample": 16, "keep": 100, "triage_top": 150, "tier": 50},
-            "seed": 20261013,
-            # The short list re-scored with the team's activation nodes chosen jointly
-            # (`RefineContext.refine_activation`): every row within `margin` of the best,
-            # at most `cap` of them, then re-sorted. The search itself stays plain
-            # (the refinement costs ~0.1-0.2 s a team against ~0.5 ms).
-            "refine": {"margin": 0.04, "cap": 30},
-            # per song row, the next best member sets under the same leader
-            # (`alternatives[]`, plain leaf, not refined)
-            "alternatives": 4,
-            # the GLOBAL top teams of the song (the 10 best teams may share one
-            # leader): every leader's ranking merged, best `size` kept
-            "ranking": {"size": 50}}
+SETTINGS = {
+    "uptime": "finite",
+    "platform": "mobile",
+    "proxy": "nonsinger",
+    "margin": 0.04,
+    "max_searched": 12,
+    "triage_top": 300,
+    "tier": 100,
+    "general": {"sample": 16, "keep": 100, "triage_top": 150, "tier": 50},
+    "seed": 20261013,
+    # The short list re-scored with the team's activation nodes chosen jointly
+    # (`RefineContext.refine_activation`): every row within `margin` of the best,
+    # at most `cap` of them, then re-sorted. The search itself stays plain
+    # (the refinement costs ~0.1-0.2 s a team against ~0.5 ms).
+    "refine": {"margin": 0.04, "cap": 30},
+    # per song row, the next best member sets under the same leader
+    # (`alternatives[]`, plain leaf, not refined)
+    "alternatives": 4,
+    # the GLOBAL top teams of the song (the 10 best teams may share one
+    # leader): every leader's ranking merged, best `size` kept
+    "ranking": {"size": 50},
+}
 # the bases the leaf is built on (basis -> its short tag). The maxed basis keys
 # carry no basis line.
-BASES = {"maxed": "", "account": "account_", "account-max": "accountmax_",
-         # every owned card at its max level (blooms real): "Upgraded cards, level Max" on
-         # the page; with -max also the boards at max points and unlimited materials
-         # (on demand only)
-         "account-levelmax": "accountlvmax_", "account-levelmax-max": "accountlvmaxmax_"}
+BASES = {
+    "maxed": "",
+    "account": "account_",
+    "account-max": "accountmax_",
+    # every owned card at its max level (blooms real): "Upgraded cards, level Max" on
+    # the page; with -max also the boards at max points and unlimited materials
+    # (on demand only)
+    "account-levelmax": "accountlvmax_",
+    "account-levelmax-max": "accountlvmaxmax_",
+}
 # The other characters' boards on each account basis. On the max-level what-if
 # ("max board points + infinite cubes/hexas") their idle points go to
 # account-wide green without limit: +12..16 % on three measured winners. On the
 # account as it is they stay as captured: spending the idle points within the
 # account's own wallet moves the same winners by only -0.3..+0.35 %.
-BENCH = {"account": "captured", "account-max": "infinite",
-         "account-levelmax": "captured", "account-levelmax-max": "infinite"}
+BENCH = {
+    "account": "captured",
+    "account-max": "infinite",
+    "account-levelmax": "captured",
+    "account-levelmax-max": "infinite",
+}
 # the account bases whose cards are restated at their max level
 LEVEL_MAX = ("account-levelmax", "account-levelmax-max")
 # `{points}`: the max-level board points (`basis_text`)
 BASIS_TEXT = {
     "maxed": "maxed five-star catalogue, every holomem at max level ({points} board points), "
-             "boards rebuilt per song",
-    "account": "your cards at their real level and bloom, your real board points, "
-               "boards rebuilt per song",
+    "boards rebuilt per song",
+    "account": "your cards at their real level and bloom, your real board points, boards rebuilt per song",
     "account-max": "your cards at their real level and bloom, every character at max level "
-                   "({points} board points), unlimited cubes/hexas (the other characters' green too), boards rebuilt per song",
+    "({points} board points), unlimited cubes/hexas (the other characters' green too), boards rebuilt per song",
     "account-levelmax": "your cards at their MAX level (blooms real), your real board points, "
-                        "boards rebuilt per song",
+    "boards rebuilt per song",
     "account-levelmax-max": "your cards at their MAX level (blooms real), every character at max level "
-                            "({points} board points), unlimited cubes/hexas: holodori.best's default assumptions",
+    "({points} board points), unlimited cubes/hexas: holodori.best's default assumptions",
 }
 DEFAULT_DIFFICULTY = "EXPERT"
 
@@ -151,7 +171,8 @@ def _read_json(path: Path):
 
 def _load_precompute():
     spec = importlib.util.spec_from_file_location(
-        "precompute_optimisations", REFRESH_DIR / "precompute_optimisations.py")
+        "precompute_optimisations", REFRESH_DIR / "precompute_optimisations.py"
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -160,8 +181,8 @@ def _load_precompute():
 def load_context(uptime_model: str, flat_budget: int, song: str, difficulty: str = "EXPERT"):
     cards, owned, cfg, _prov = load_inputs(CARDS_PATH, OWNED_PATH)
     cards, basis = apply_collection(
-        cards, None, owned_ids=[c.id for c in owned], maxed=True,
-        assume_level="max", assume_bloom="max")
+        cards, None, owned_ids=[c.id for c in owned], maxed=True, assume_level="max", assume_bloom="max"
+    )
     if basis.bonuses is not None:
         cfg = dataclasses.replace(cfg, account=basis.bonuses)
     cfg = dataclasses.replace(cfg, active_uptime_model=uptime_model)
@@ -181,11 +202,18 @@ def load_context(uptime_model: str, flat_budget: int, song: str, difficulty: str
     if chart is None:
         raise MissingInput(f"no {difficulty} chart for {song}")
     ctx = RefineContext(
-        cards=tuple(cards), cfg=dataclasses.replace(cfg, board=None),
-        charts=(chart,), skilltree=skilltree, node_master=node_master,
-        node_effect_ids=effects, connect_cards=connect_cards,
-        bench_characters=bench, name_by_chr=name_by_chr,
-        flat_budget=flat_budget, granted={})
+        cards=tuple(cards),
+        cfg=dataclasses.replace(cfg, board=None),
+        charts=(chart,),
+        skilltree=skilltree,
+        node_master=node_master,
+        node_effect_ids=effects,
+        connect_cards=connect_cards,
+        bench_characters=bench,
+        name_by_chr=name_by_chr,
+        flat_budget=flat_budget,
+        granted={},
+    )
     return cards, cfg, ctx, chart
 
 
@@ -195,10 +223,19 @@ def load_context(uptime_model: str, flat_budget: int, song: str, difficulty: str
 def _slot_key(slot):
     if slot is None:
         return None
-    return (slot.kind, slot.family, slot.effect_type, repr(slot.duration),
-            repr(slot.interval), repr(slot.probability_tier), repr(slot.magnitude),
-            repr(slot.condition), repr(slot.target), repr(slot.override),
-            repr(slot.rider))
+    return (
+        slot.kind,
+        slot.family,
+        slot.effect_type,
+        repr(slot.duration),
+        repr(slot.interval),
+        repr(slot.probability_tier),
+        repr(slot.magnitude),
+        repr(slot.condition),
+        repr(slot.target),
+        repr(slot.override),
+        repr(slot.rider),
+    )
 
 
 def feature_key(card):
@@ -206,9 +243,13 @@ def feature_key(card):
     normal skill slots (SPECIAL/ACTIVE/PASSIVE with magnitude, interval,
     duration, prob tier, condition, target, override, rider). The costume skill
     is NOT included: a member's costume never fires (team.py docstring)."""
-    return (card.member, card.type, tuple(sorted(card.generations)),
-            (card.stats.performance, card.stats.technique, card.stats.sense),
-            tuple(_slot_key(s) for s in card.skills))
+    return (
+        card.member,
+        card.type,
+        tuple(sorted(card.generations)),
+        (card.stats.performance, card.stats.technique, card.stats.sense),
+        tuple(_slot_key(s) for s in card.skills),
+    )
 
 
 def build_pool(cards, leader_id: str):
@@ -227,10 +268,16 @@ def build_pool(cards, leader_id: str):
     return five, reps, dominated
 
 
-TABLE_SEED = ("card-04001-5-uniq-0042-00",
-              ("card-04001-5-uniq-0042-00", "card-00032-5-uniq-0026-00",
-               "card-04003-5-uniq-0044-00", "card-00007-5-uniq-0008-00",
-               "card-00006-5-uniq-0007-00"))
+TABLE_SEED = (
+    "card-04001-5-uniq-0042-00",
+    (
+        "card-04001-5-uniq-0042-00",
+        "card-00032-5-uniq-0026-00",
+        "card-04003-5-uniq-0044-00",
+        "card-00007-5-uniq-0008-00",
+        "card-00006-5-uniq-0007-00",
+    ),
+)
 
 
 # bare proxies: a non-singer of m0334 (Hakos Baelz RC) and the singer (Calli PDW)
@@ -258,19 +305,31 @@ def build_maxed(args, proxy_card_id: str | None):
     # EXPERT reads charts.json exactly as before (its enumeration keys do not
     # move); another difficulty digests ITS chart in charts_all.json, so an
     # enumeration on it can never pass for the EXPERT one
-    cd = cert_mod.chart_digest(args.song, charts_path=cert_mod.charts_path_for(difficulty),
-                               difficulty=difficulty)
+    cd = cert_mod.chart_digest(
+        args.song, charts_path=cert_mod.charts_path_for(difficulty), difficulty=difficulty
+    )
     if cd is None:
-        raise MissingInput(f"no {difficulty} chart for {args.song} in "
-                           f"{cert_mod.charts_path_for(difficulty).name}")
-    return dict(cards=cards, by_id=by_id, ctx=ctx, chart=chart, reps=reps,
-                pool_ids=[c.id for c in reps], hol=tuple(c.member for c in reps),
-                proxy=proxy, inputs_hash=ih, inputs_hash_files=per, dominated=dominated,
-                chart_digest=cd,
-                enumeration_key=cert_mod.enumeration_key(per, cd, cert_mod.MODEL_VERSION),
-                reference_key=cert_mod.reference_key(per, cert_mod.MODEL_VERSION),
-                pool_features={c.id: feature_digest(c) for c in reps},
-                proxy_feature=feature_digest(proxy) if proxy else None)
+        raise MissingInput(
+            f"no {difficulty} chart for {args.song} in {cert_mod.charts_path_for(difficulty).name}"
+        )
+    return dict(
+        cards=cards,
+        by_id=by_id,
+        ctx=ctx,
+        chart=chart,
+        reps=reps,
+        pool_ids=[c.id for c in reps],
+        hol=tuple(c.member for c in reps),
+        proxy=proxy,
+        inputs_hash=ih,
+        inputs_hash_files=per,
+        dominated=dominated,
+        chart_digest=cd,
+        enumeration_key=cert_mod.enumeration_key(per, cd, cert_mod.MODEL_VERSION),
+        reference_key=cert_mod.reference_key(per, cert_mod.MODEL_VERSION),
+        pool_features={c.id: feature_digest(c) for c in reps},
+        proxy_feature=feature_digest(proxy) if proxy else None,
+    )
 
 
 def feature_digest(card) -> str:
@@ -310,12 +369,17 @@ def account_cards_and_cfg(args):
     # `args.assume_level` (e.g. "max", 60) / `assume_bloom`: the what-if "my cards at
     # that level / bloom" (the other stays real); `keep_higher_*`: holodori's "do not
     # delevel / debloom" -- a card already above the assumption keeps its own
-    cards, basis = apply_collection(cards, str(COLLECTION_PATH), owned_ids=owned_ids, maxed=False,
-                                    assume_level=getattr(args, "assume_level", None),
-                                    assume_bloom=getattr(args, "assume_bloom", None),
-                                    keep_higher_level=bool(getattr(args, "keep_higher_level", False)),
-                                    keep_higher_bloom=bool(getattr(args, "keep_higher_bloom", False)),
-                                    assume_limit_break=getattr(args, "assume_limit_break", None))
+    cards, basis = apply_collection(
+        cards,
+        str(COLLECTION_PATH),
+        owned_ids=owned_ids,
+        maxed=False,
+        assume_level=getattr(args, "assume_level", None),
+        assume_bloom=getattr(args, "assume_bloom", None),
+        keep_higher_level=bool(getattr(args, "keep_higher_level", False)),
+        keep_higher_bloom=bool(getattr(args, "keep_higher_bloom", False)),
+        assume_limit_break=getattr(args, "assume_limit_break", None),
+    )
     if basis.bonuses is not None:
         cfg = dataclasses.replace(cfg, account=basis.bonuses)
     cfg = dataclasses.replace(cfg, active_uptime_model=args.uptime, platform=args.platform, board=None)
@@ -351,14 +415,15 @@ def account_reference_key(args, bench: str = "captured") -> str:
     key = cert_mod.reference_key(per, cert_mod.MODEL_VERSION)
     if bench == "captured":
         return key
-    return hashlib.sha256(f"{key}\n{_bench_key(bench)}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{key}\n{_bench_key(bench)}".encode()).hexdigest()
 
 
 def developed_bench(seed_ids: list[str], *, max_level: bool, resources: str) -> dict:
     """`precompute_optimisations.developed_bench_characters` (moved there so the
     web server shares it)."""
     spec = importlib.util.spec_from_file_location(
-        "precompute_optimisations", REFRESH_DIR / "precompute_optimisations.py")
+        "precompute_optimisations", REFRESH_DIR / "precompute_optimisations.py"
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.developed_bench_characters(seed_ids, max_level=max_level, resources=resources)
@@ -373,13 +438,22 @@ def collapse_pool(cards, feature_key, split_key=None):
         key = feature_key(card)
         groups.setdefault(key if split_key is None else (key, split_key(card)), []).append(card)
     reps = sorted((sorted(g, key=lambda c: c.id)[0] for g in groups.values()), key=lambda c: c.id)
-    dominated = [(d.id, sorted(g, key=lambda c: c.id)[0].id)
-                 for g in groups.values() for d in sorted(g, key=lambda c: c.id)[1:]]
+    dominated = [
+        (d.id, sorted(g, key=lambda c: c.id)[0].id)
+        for g in groups.values()
+        for d in sorted(g, key=lambda c: c.id)[1:]
+    ]
     return reps, dominated
 
 
-def build_account(args, proxy_card_id: str | None = None, flat_budget: int | None = None,
-          bench: str = "captured", split_key=None, board_state=None):
+def build_account(
+    args,
+    proxy_card_id: str | None = None,
+    flat_budget: int | None = None,
+    bench: str = "captured",
+    split_key=None,
+    board_state=None,
+):
     """The account basis as `build_maxed` returns the maxed
     one: `reps` = the owned cards (one per distinct feature set, EVERY rarity),
     `ctx` = the leaf's context with per-character real budgets — or, with
@@ -396,10 +470,9 @@ def build_account(args, proxy_card_id: str | None = None, flat_budget: int | Non
     boards AS THEY ARE instead of planned (`RefineContext.board_state`)."""
     if bench not in BENCH_MODES:
         raise ValueError(f"bench must be one of {BENCH_MODES}, got {bench!r}")
-    from hbuilder.inputs import DEFAULT_BOARD_PATH  # noqa: PLC0415
-    from hbuilder.domain.board_plan import (  # noqa: PLC0415
-        bench_sockets_from_state, node_effect_ids_from_master)
+    from hbuilder.domain.board_plan import bench_sockets_from_state, node_effect_ids_from_master  # noqa: PLC0415
     from hbuilder.domain.song import load_charts  # noqa: PLC0415
+    from hbuilder.inputs import DEFAULT_BOARD_PATH  # noqa: PLC0415
     from hbuilder.solver.parallel_refine import RefineContext  # noqa: PLC0415
 
     cards, owned_ids, cfg = account_cards_and_cfg(args)
@@ -407,18 +480,22 @@ def build_account(args, proxy_card_id: str | None = None, flat_budget: int | Non
     node_master = _read_json(NODE_MASTER_PATH)
     precompute = _load_precompute()
     export = precompute.board_export.build(gain=False, pool=1, scenario="account")
-    granted = {c["chr"]: int((c.get("points") or {}).get("granted") or 0)
-               for c in export.get("characters", [])}
+    granted = {
+        c["chr"]: int((c.get("points") or {}).get("granted") or 0) for c in export.get("characters", [])
+    }
     granted = {k: v for k, v in granted.items() if v}
     # the Connect levels follow an assumed bloom too (bloom 5 = level 2), as the stats do
     connect_cards = precompute.connect_cards_for(
-        "account", assume_bloom=getattr(args, "assume_bloom", None),
-        keep_higher_bloom=bool(getattr(args, "keep_higher_bloom", False)))
+        "account",
+        assume_bloom=getattr(args, "assume_bloom", None),
+        keep_higher_bloom=bool(getattr(args, "keep_higher_bloom", False)),
+    )
     bench_captured = (_read_json(REPO / DEFAULT_BOARD_PATH) or {}).get("characters") or None
     bench_mode = bench
     difficulty = cert_mod.normalize_difficulty(getattr(args, "difficulty", None))
-    library = load_charts(str(cert_mod.charts_path_for(
-        difficulty, charts_path=CHARTS_PATH, charts_all_path=CHARTS_ALL_PATH)))
+    library = load_charts(
+        str(cert_mod.charts_path_for(difficulty, charts_path=CHARTS_PATH, charts_all_path=CHARTS_ALL_PATH))
+    )
     chart = library.get(args.song, difficulty) if library is not None else None
     if chart is None:
         raise MissingInput(f"no {difficulty} chart for {args.song}")
@@ -438,32 +515,57 @@ def build_account(args, proxy_card_id: str | None = None, flat_budget: int | Non
     cards = list(cards)
     if proxy_card_id is None:
         singers = set(chart.singers or ())
-        proxy_card_id = next(c.id for c in sorted(reps, key=lambda c: (-_total(c), c.id))
-                             if "chr-" + c.id.split("-")[1] not in singers)
+        proxy_card_id = next(
+            c.id
+            for c in sorted(reps, key=lambda c: (-_total(c), c.id))
+            if "chr-" + c.id.split("-")[1] not in singers
+        )
     if bench != "captured":
-        bench = developed_bench([c.id for c in seed], max_level=flat_budget is not None,
-                                resources=bench) or bench_captured
+        bench = (
+            developed_bench([c.id for c in seed], max_level=flat_budget is not None, resources=bench)
+            or bench_captured
+        )
     else:
         bench = bench_captured
     proxy = mf.bare_leader(by_id[proxy_card_id])
     cards.append(proxy)
     by_id[proxy.id] = proxy
     ctx = RefineContext(
-        cards=tuple(cards), cfg=dataclasses.replace(cfg, board=None), charts=(chart,),
-        skilltree=skilltree, node_master=node_master,
-        node_effect_ids=node_effect_ids_from_master(node_master), connect_cards=connect_cards,
-        bench_characters=bench, name_by_chr={"chr-" + c.id.split("-")[1]: c.member for c in cards},
-        flat_budget=flat_budget, granted=granted, use_plan_cache=True,
-        plan_cache_seed=(seed[0].id, tuple(c.id for c in seed[1:])), board_state=board_state,
+        cards=tuple(cards),
+        cfg=dataclasses.replace(cfg, board=None),
+        charts=(chart,),
+        skilltree=skilltree,
+        node_master=node_master,
+        node_effect_ids=node_effect_ids_from_master(node_master),
+        connect_cards=connect_cards,
+        bench_characters=bench,
+        name_by_chr={"chr-" + c.id.split("-")[1]: c.member for c in cards},
+        flat_budget=flat_budget,
+        granted=granted,
+        use_plan_cache=True,
+        plan_cache_seed=(seed[0].id, tuple(c.id for c in seed[1:])),
+        board_state=board_state,
         # what the off-team sockets hold: the team may not also socket a card a bench
         # board keeps lifting (`board_plan.held_bench_cards`)
-        bench_sockets=bench_sockets_from_state(_read_json(
-            DUMPS / "board_state.json")))
+        bench_sockets=bench_sockets_from_state(_read_json(DUMPS / "board_state.json")),
+    )
     ih, per = cert_mod.inputs_hash(ctx.cfg, "account", cert_mod.MODEL_VERSION)
-    return dict(cards=cards, by_id=by_id, ctx=ctx, chart=chart, reps=reps,
-                pool_ids=[c.id for c in reps], hol=tuple(c.member for c in reps), proxy=proxy,
-                inputs_hash=ih, inputs_hash_files=per, dominated=dominated, granted=granted,
-                reference_key=account_reference_key(args, bench_mode), bench=bench_mode)
+    return dict(
+        cards=cards,
+        by_id=by_id,
+        ctx=ctx,
+        chart=chart,
+        reps=reps,
+        pool_ids=[c.id for c in reps],
+        hol=tuple(c.member for c in reps),
+        proxy=proxy,
+        inputs_hash=ih,
+        inputs_hash_files=per,
+        dominated=dominated,
+        granted=granted,
+        reference_key=account_reference_key(args, bench_mode),
+        bench=bench_mode,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -483,19 +585,24 @@ def charts_path(difficulty: str = DEFAULT_DIFFICULTY) -> Path:
     return cert_mod.charts_path_for(difficulty)
 
 
-def _namespace(song: str = "m0334", difficulty: str = DEFAULT_DIFFICULTY,
-               basis: str = "") -> argparse.Namespace:
+def _namespace(
+    song: str = "m0334", difficulty: str = DEFAULT_DIFFICULTY, basis: str = ""
+) -> argparse.Namespace:
     # budget None: `build_maxed` reads the max-level board points (the account bases
     # take theirs from `build_account`'s `flat_budget`)
-    ns = argparse.Namespace(song=song, budget=None, uptime=SETTINGS["uptime"],
-                            platform=SETTINGS["platform"], difficulty=_difficulty(difficulty))
+    ns = argparse.Namespace(
+        song=song,
+        budget=None,
+        uptime=SETTINGS["uptime"],
+        platform=SETTINGS["platform"],
+        difficulty=_difficulty(difficulty),
+    )
     if basis in LEVEL_MAX:
         ns.assume_level = "max"
     return ns
 
 
-def today_keys(basis: str = "maxed",
-               difficulty: str = DEFAULT_DIFFICULTY) -> tuple[dict[str, str], str]:
+def today_keys(basis: str = "maxed", difficulty: str = DEFAULT_DIFFICULTY) -> tuple[dict[str, str], str]:
     """`(key per song, general key)` of today's inputs on `basis` at
     `difficulty`, WITHOUT building the leaf — for a reader (the web) telling
     fresh from stale."""
@@ -520,16 +627,17 @@ def chart_digests(charts_path: Path, difficulty: str = DEFAULT_DIFFICULTY) -> di
     raw = json.loads(charts_path.read_text("utf-8"))
     out = {}
     entries = raw["charts"]
-    for entry in (entries.values() if isinstance(entries, dict) else entries):
+    for entry in entries.values() if isinstance(entries, dict) else entries:
         if str(entry.get("difficulty", "")).upper() == wanted:
             out[entry["music_id"]] = hashlib.sha256(
-                json.dumps(entry, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+                json.dumps(entry, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest()
     return out
 
 
-def keys_for(reference_key: str, digests: dict[str, str],
-             basis: str = "maxed",
-             difficulty: str = DEFAULT_DIFFICULTY) -> tuple[dict[str, str], str]:
+def keys_for(
+    reference_key: str, digests: dict[str, str], basis: str = "maxed", difficulty: str = DEFAULT_DIFFICULTY
+) -> tuple[dict[str, str], str]:
     """`(key per song, key of the general answer)` for today's inputs. EXPERT
     adds nothing to the key (EXPERT keys carry no difficulty line); any other difficulty
     adds a `difficulty=` line, so its answers can never pass for EXPERT ones. The
@@ -546,14 +654,14 @@ def keys_for(reference_key: str, digests: dict[str, str],
     name = _difficulty(difficulty)
     if name != DEFAULT_DIFFICULTY:
         base += f"difficulty={name}\n"
-    songs = {song: hashlib.sha256((base + digest).encode("utf-8")).hexdigest()
-             for song, digest in digests.items()}
+    songs = {
+        song: hashlib.sha256((base + digest).encode("utf-8")).hexdigest() for song, digest in digests.items()
+    }
     everything = "\n".join(f"{song}:{digests[song]}" for song in sorted(digests))
     return songs, hashlib.sha256((base + "general\n" + everything).encode("utf-8")).hexdigest()
 
 
-def leaf_inputs(basis: str = "maxed", difficulty: str = DEFAULT_DIFFICULTY,
-                song: str = "m0334") -> dict:
+def leaf_inputs(basis: str = "maxed", difficulty: str = DEFAULT_DIFFICULTY, song: str = "m0334") -> dict:
     """The exact leaf's inputs on `basis` (`reps`, `ctx`, `by_id`, `chart` of
     `song`, `reference_key`, ...) — what the search scores with, and what the
     web's row detail (`tools/web/row_detail.py`) re-develops a row on."""
@@ -561,8 +669,9 @@ def leaf_inputs(basis: str = "maxed", difficulty: str = DEFAULT_DIFFICULTY,
     if basis in ("account", "account-levelmax"):
         return build_account(_namespace(song, difficulty, basis), bench=BENCH[basis])
     if basis in ("account-max", "account-levelmax-max"):
-        return build_account(_namespace(song, difficulty, basis), flat_budget=maxed_budget(),
-                          bench=BENCH[basis])
+        return build_account(
+            _namespace(song, difficulty, basis), flat_budget=maxed_budget(), bench=BENCH[basis]
+        )
     built = build_maxed(_namespace(song, difficulty), PROXIES[SETTINGS["proxy"]])
     return _with_maxed_bench(built) if basis == "maxed" else built
 
@@ -582,13 +691,17 @@ def leaf_inputs(basis: str = "maxed", difficulty: str = DEFAULT_DIFFICULTY,
 # holodori.best uses (v3.1.1), the same as `hbweb.basis.MAXED_ACCOUNT_NOMINAL_TEAM`.
 MAXED_NOMINAL_TEAM = (
     "card-00022-5-uniq-0063-00",
-    ("card-00007-5-uniq-0008-00", "card-00022-5-uniq-0063-00",
-     "card-00021-5-uniq-0017-00", "card-00006-5-uniq-0007-00",
-     "card-06005-5-uniq-0061-00"),
+    (
+        "card-00007-5-uniq-0008-00",
+        "card-00022-5-uniq-0063-00",
+        "card-00021-5-uniq-0017-00",
+        "card-00006-5-uniq-0007-00",
+        "card-06005-5-uniq-0061-00",
+    ),
 )
 
 
-_MAXED_BENCH: dict = {}          # inputs key -> (bench characters, bench as a board state)
+_MAXED_BENCH: dict = {}  # inputs key -> (bench characters, bench as a board state)
 
 
 def _with_maxed_bench(built: dict) -> dict:
@@ -602,8 +715,13 @@ def _with_maxed_bench(built: dict) -> dict:
     hit = _MAXED_BENCH.get(key)
     if hit is None:
         state: dict = {}
-        bench = pc.maxed_account_bench(list(ctx.cards), dataclasses.replace(ctx.cfg, board=None),
-                                       MAXED_NOMINAL_TEAM, points=points, state_out=state)
+        bench = pc.maxed_account_bench(
+            list(ctx.cards),
+            dataclasses.replace(ctx.cfg, board=None),
+            MAXED_NOMINAL_TEAM,
+            points=points,
+            state_out=state,
+        )
         _MAXED_BENCH.clear()
         hit = _MAXED_BENCH[key] = (bench, state, {c.id: c for c in ctx.cards})
     return {**built, "ctx": dataclasses.replace(ctx, bench_characters=hit[0])}
@@ -652,16 +770,21 @@ def maxed_bench_targets(team: Sequence[str] = (), difficulty: str = DEFAULT_DIFF
                 return True
             try:
                 return any(_reaches(effect, holomem, c) for c in cards)
-            except BoardError:                      # a leader-scoped effect: keep it
+            except BoardError:  # a leader-scoped effect: keep it
                 return True
         return chr_id in team_chrs and effect.conditional
 
     out = {}
     for chr_id, entry in state.items():
         holomem = name_of.get(chr_id, "")
-        scoring = {e["node"] for e in bench.get(holomem, ())
-                   if any(counts(parse_effect_id(x, branch=e["node"][0]), holomem, chr_id, e["node"][0])
-                          for x in e["effects"])}
+        scoring = {
+            e["node"]
+            for e in bench.get(holomem, ())
+            if any(
+                counts(parse_effect_id(x, branch=e["node"][0]), holomem, chr_id, e["node"][0])
+                for x in e["effects"]
+            )
+        }
         out[chr_id] = {"nodes": sorted(scoring | set(entry["slots"])), "slots": dict(entry["slots"])}
     return out
 
@@ -686,7 +809,7 @@ def global_ranking(rows: list[dict], pool_ids, reps, name, singing, size: int) -
     merged = []
     for r in rows:
         leader = r["leader"]
-        for value, members in (r.get("ranking") or [(r["best"], r["members"])]):
+        for value, members in r.get("ranking") or [(r["best"], r["members"])]:
             merged.append((float(value), leader.id, tuple(members), r))
     merged.sort(key=lambda m: (-m[0], m[1], m[2]))
     out, seen = [], set()
@@ -695,10 +818,17 @@ def global_ranking(rows: list[dict], pool_ids, reps, name, singing, size: int) -
         if key in seen:
             continue
         seen.add(key)
-        out.append({"leader": r["leader"].id, "leader_name": name(r["leader"]),
-                    "sings": r["leader"] in singing, "status": r["status"], "best": value,
-                    "members": [pool_ids[i] for i in members],
-                    "member_names": [reps[i].member for i in members]})
+        out.append(
+            {
+                "leader": r["leader"].id,
+                "leader_name": name(r["leader"]),
+                "sings": r["leader"] in singing,
+                "status": r["status"],
+                "best": value,
+                "members": [pool_ids[i] for i in members],
+                "member_names": [reps[i].member for i in members],
+            }
+        )
         if len(out) >= size:
             break
     return out
@@ -716,9 +846,14 @@ def alternatives(row: dict, pool_ids, reps, count: int | None = None) -> list[di
     for value, members in row.get("ranking") or ():
         if tuple(members) == own:
             continue
-        out.append({"members": [pool_ids[i] for i in members],
-                    "member_names": [reps[i].member for i in members],
-                    "best": float(value), "refined": False})
+        out.append(
+            {
+                "members": [pool_ids[i] for i in members],
+                "member_names": [reps[i].member for i in members],
+                "best": float(value),
+                "refined": False,
+            }
+        )
         if len(out) >= count:
             break
     return out
@@ -735,6 +870,7 @@ def _slot_orders(rows: list[dict], built: dict, chart, log=None, known: dict | N
     known = {} if known is None else known
     try:
         import row_detail  # noqa: PLC0415
+
         from hbuilder.domain.team import Team  # noqa: PLC0415
     except Exception as exc:  # noqa: BLE001
         if log:
@@ -748,8 +884,9 @@ def _slot_orders(rows: list[dict], built: dict, chart, log=None, known: dict | N
             continue
         try:
             team = Team(leader=by_id[row["leader"]], members=tuple(by_id[m] for m in row["members"]))
-            got = row_detail.leaf_detail(built, team, refine=bool(row.get("refined")),
-                                         panel=False, chart=chart, want_distribution=True)
+            got = row_detail.leaf_detail(
+                built, team, refine=bool(row.get("refined")), panel=False, chart=chart, want_distribution=True
+            )
             fields = {"member_order": got["member_order"], **row_detail.quantile_fields(got)}
             known[(_team_key(row), bool(row.get("refined")))] = fields
             row.update(fields)
@@ -771,15 +908,16 @@ def _refine_rows(rows: list[dict], chart_indices, pool, by_id, known: dict | Non
         return 0
     settings = SETTINGS["refine"]
     top = max(r["best"] for r in rows)
-    chosen = [r for r in sorted(rows, key=lambda r: -r["best"])
-              if r["best"] >= (1.0 - settings["margin"]) * top][:settings["cap"]]
+    chosen = [
+        r for r in sorted(rows, key=lambda r: -r["best"]) if r["best"] >= (1.0 - settings["margin"]) * top
+    ][: settings["cap"]]
     known = {} if known is None else known
     todo = [r for r in chosen if _team_key(r) not in known]
-    teams = [Team(leader=by_id[r["leader"]], members=tuple(by_id[m] for m in r["members"]))
-             for r in todo]
+    teams = [Team(leader=by_id[r["leader"]], members=tuple(by_id[m] for m in r["members"])) for r in todo]
     if teams:
-        for row, value in zip(todo, pool.batch_score(teams, chart_indices=chart_indices,
-                                                      refine_activation=True)):
+        for row, value in zip(
+            todo, pool.batch_score(teams, chart_indices=chart_indices, refine_activation=True)
+        ):
             known[_team_key(row)] = float(value)
     for row in chosen:
         value = known[_team_key(row)]

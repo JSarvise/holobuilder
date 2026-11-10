@@ -21,9 +21,7 @@ _DUMPS = _REPO / "tools" / "recon" / "proxy" / "dumps"
 
 
 def _load_board_export():
-    spec = importlib.util.spec_from_file_location(
-        "board_export", _REFRESH / "board_export.py"
-    )
+    spec = importlib.util.spec_from_file_location("board_export", _REFRESH / "board_export.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules["board_export"] = module
     spec.loader.exec_module(module)
@@ -34,8 +32,9 @@ def _build_or_skip(**kw) -> dict:
     for name in ("skilltree.json", "board_state.json", "account_snapshot_main.json"):
         if not (_DUMPS / name).exists():
             pytest.skip(f"dumps/{name} unavailable (gitignored account data)")
-    return _load_board_export().build(gain=kw.get("gain", False), pool=kw.get("pool", 60),
-                                      board_state_path=kw.get("board_state_path"))
+    return _load_board_export().build(
+        gain=kw.get("gain", False), pool=kw.get("pool", 60), board_state_path=kw.get("board_state_path")
+    )
 
 
 def test_export_shape_and_every_node_has_a_state():
@@ -47,9 +46,7 @@ def test_export_shape_and_every_node_has_a_state():
         assert states <= {"owned", "buyable", "locked", "unreachable"}
         assert "unreachable" not in states, character["chr"]  # the tree is connected
         # sockets are a subset view of the S- nodes
-        assert {s["socket"] for s in character["sockets"]} <= {
-            "S-001", "S-002", "S-003", "S-004"
-        }
+        assert {s["socket"] for s in character["sockets"]} <= {"S-001", "S-002", "S-003", "S-004"}
 
 
 def test_r061_is_locked_behind_r058_at_the_real_cost():

@@ -7,6 +7,7 @@ Synthetic inventory (monkeypatched `config.read_json`), so no real-account data 
 The item_ids and names are the ones in the game's LangItem_Eng master
 (`la-item-<id>-name`).
 """
+
 from __future__ import annotations
 
 from hbweb import config, inventory
@@ -17,18 +18,20 @@ def _by_name(rows):
 
 
 def test_account_currencies_maps_items_and_bundles(monkeypatch):
-    inv = {"items": {
-        "item-card_limit_break-attribute_1-1": 100,   # Cute Beads
-        "item-card_limit_break-attribute_3-1": 40,    # Happy Beads
-        "item-card_limit_break-attribute_2-2": 50,    # Pure Crystals
-        # Bundles are their OWN S/M/L items, shown with their raw held count.
-        "item-selectable_reward_box-item-card_limit_break-attribute_1-10": 5,    # Beads Bundle S
-        "item-selectable_reward_box-item-card_limit_break-attribute_1-100": 2,   # Beads Bundle M
-        "item-selectable_reward_box-item-card_limit_break-attribute_2-10": 3,    # Jar of Crystals S
-        "item-card_limit_break-cmn-sr": 7,            # Hololium
-        "item-card_level_up": 999,                    # Lesson Pt
-        "item-gold": 12345,                           # Hologold
-    }}
+    inv = {
+        "items": {
+            "item-card_limit_break-attribute_1-1": 100,  # Cute Beads
+            "item-card_limit_break-attribute_3-1": 40,  # Happy Beads
+            "item-card_limit_break-attribute_2-2": 50,  # Pure Crystals
+            # Bundles are their OWN S/M/L items, shown with their raw held count.
+            "item-selectable_reward_box-item-card_limit_break-attribute_1-10": 5,  # Beads Bundle S
+            "item-selectable_reward_box-item-card_limit_break-attribute_1-100": 2,  # Beads Bundle M
+            "item-selectable_reward_box-item-card_limit_break-attribute_2-10": 3,  # Jar of Crystals S
+            "item-card_limit_break-cmn-sr": 7,  # Hololium
+            "item-card_level_up": 999,  # Lesson Pt
+            "item-gold": 12345,  # Hologold
+        }
+    }
     monkeypatch.setattr(config, "read_json", lambda _p: inv)
     by = _by_name(inventory.account_currencies())
 
@@ -42,7 +45,7 @@ def test_account_currencies_maps_items_and_bundles(monkeypatch):
     # the real bottle icon and a "grants N" note. Sizes not held are omitted.
     assert by["Beads Bundle S"]["held"] == 5
     assert by["Beads Bundle M"]["held"] == 2
-    assert "Beads Bundle L" not in by                       # none held -> omitted
+    assert "Beads Bundle L" not in by  # none held -> omitted
     assert by["A Jar of Crystals S"]["held"] == 3
     assert by["Beads Bundle S"]["group"] == "bundle"
     assert by["Beads Bundle S"]["note"] == "grants 10 beads"
@@ -50,12 +53,13 @@ def test_account_currencies_maps_items_and_bundles(monkeypatch):
     # grant_each / grant_kind feed the "open every bundle" hypothetical the view shows.
     assert (by["Beads Bundle S"]["grant_each"], by["Beads Bundle S"]["grant_kind"]) == (10, "beads")
     assert (by["Beads Bundle M"]["grant_each"], by["Beads Bundle M"]["grant_kind"]) == (100, "beads")
-    assert (by["A Jar of Crystals S"]["grant_each"], by["A Jar of Crystals S"]["grant_kind"]) == (10, "crystals")
+    assert (by["A Jar of Crystals S"]["grant_each"], by["A Jar of Crystals S"]["grant_kind"]) == (
+        10,
+        "crystals",
+    )
     # Bundle icons are explicit octo asset names (they don't reverse-map from item_id):
-    assert by["Beads Bundle S"]["icon"] == \
-        "img_item_thumb_selectable-limit-break-attribute-box-01-01"
-    assert by["A Jar of Crystals S"]["icon"] == \
-        "img_item_thumb_selectable-limit-break-attribute-box-02-01"
+    assert by["Beads Bundle S"]["icon"] == "img_item_thumb_selectable-limit-break-attribute-box-01-01"
+    assert by["A Jar of Crystals S"]["icon"] == "img_item_thumb_selectable-limit-break-attribute-box-02-01"
 
     assert by["Hololium"]["held"] == 7
     assert by["Lesson Pt"]["held"] == 999
@@ -79,18 +83,28 @@ def test_account_items_names_every_held_item_and_holomem_points(monkeypatch):
     zero-held items dropped, a name the master lacks left as None (never guessed),
     and each holomem's unspent board points with the member name from cards.json."""
     files = {
-        config.INVENTORY_PATH: {"_captured_at": "2026-10-15T13:56:08+0200", "items": {
-            "item-gold": 12345, "item-live_auto_play": 7, "item-gacha_ticket-r5-01": 0,
-            "item-mini-game-chase-coin": 9}},
+        config.INVENTORY_PATH: {
+            "_captured_at": "2026-10-15T13:56:08+0200",
+            "items": {
+                "item-gold": 12345,
+                "item-live_auto_play": 7,
+                "item-gacha_ticket-r5-01": 0,
+                "item-mini-game-chase-coin": 9,
+            },
+        },
         config.LANG_ITEM_PATH: [
             {"id": "la-item-gold-name", "data": {"id": "la-item-gold-name", "text": "Hologold"}},
             {"id": "x", "data": {"id": "la-item-live_auto_play-name", "text": "Auto-play Ticket"}},
             {"id": "y", "data": {"id": "la-item-live_auto_play-description", "text": "Enables Auto-Play."}},
-            {"id": "z", "data": {"id": "la-item-gacha_ticket-r5-01-name", "text": "Ticket"}}],
+            {"id": "z", "data": {"id": "la-item-gacha_ticket-r5-01-name", "text": "Ticket"}},
+        ],
         config.CARDS_PATH: {"cards": [{"id": "card-00001-3-nrml-0000-00", "member": "Tokino Sora"}]},
-        config.SNAPSHOT_PATH: {"board_points": [
-            {"point_id": "skill_tree_point-chr-00001", "quantity": 65},
-            {"point_id": "skill_tree_point-chr-00099", "quantity": 3}]},
+        config.SNAPSHOT_PATH: {
+            "board_points": [
+                {"point_id": "skill_tree_point-chr-00001", "quantity": 65},
+                {"point_id": "skill_tree_point-chr-00099", "quantity": 3},
+            ]
+        },
     }
     monkeypatch.setattr(config, "read_json", lambda p: files.get(p))
     doc = inventory.account_items()
@@ -98,7 +112,7 @@ def test_account_items_names_every_held_item_and_holomem_points(monkeypatch):
     assert set(by) == {"item-gold", "item-live_auto_play", "item-mini-game-chase-coin"}
     assert by["item-gold"]["name"] == "Hologold" and by["item-gold"]["held"] == 12345
     assert by["item-live_auto_play"]["description"] == "Enables Auto-Play."
-    assert by["item-mini-game-chase-coin"]["name"] is None          # not in the master
+    assert by["item-mini-game-chase-coin"]["name"] is None  # not in the master
     assert doc["inventory_captured_at"] == "2026-10-15T13:56:08+0200"
     pts = {p["chr"]: p for p in doc["holomem_points"]}
     assert pts["chr-00001"] == {"chr": "chr-00001", "name": "Tokino Sora", "unspent": 65}
@@ -117,12 +131,16 @@ def test_account_items_live_master_names_what_holodori_lacks(monkeypatch):
     items an older one-off export lacks, and wins where both have a row."""
     files = {
         config.INVENTORY_PATH: {"items": {"item-gold": 1, "item-mini-game-chase-coin": 9}},
-        config.LANG_ITEM_PATH: [
-            {"id": "a", "data": {"id": "la-item-gold-name", "text": "Old Gold"}}],
-        config.LIVE_LANG_ITEM_PATH: {"rows": [
-            {"id": "la-item-gold-name", "data": {"1": "la-item-gold-name", "1000": "Hologold"}},
-            {"id": "la-item-mini-game-chase-coin-name",
-             "data": {"1": "la-item-mini-game-chase-coin-name", "1000": "Harmony Garden Coin"}}]},
+        config.LANG_ITEM_PATH: [{"id": "a", "data": {"id": "la-item-gold-name", "text": "Old Gold"}}],
+        config.LIVE_LANG_ITEM_PATH: {
+            "rows": [
+                {"id": "la-item-gold-name", "data": {"1": "la-item-gold-name", "1000": "Hologold"}},
+                {
+                    "id": "la-item-mini-game-chase-coin-name",
+                    "data": {"1": "la-item-mini-game-chase-coin-name", "1000": "Harmony Garden Coin"},
+                },
+            ]
+        },
     }
     monkeypatch.setattr(config, "read_json", lambda p: files.get(p))
     by = {r["item_id"]: r for r in inventory.account_items()["items"]}

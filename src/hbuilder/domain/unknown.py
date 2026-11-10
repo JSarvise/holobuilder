@@ -28,19 +28,14 @@ class Unknown:
 
     def __bool__(self) -> bool:
         raise TypeError(
-            "UNKNOWN has no truthiness — call is_known(value) before "
-            "branching on it, never `if value:`"
+            "UNKNOWN has no truthiness — call is_known(value) before branching on it, never `if value:`"
         )
 
     def __float__(self) -> float:
-        raise SchemaError(
-            "cannot convert UNKNOWN to float — this value was never populated"
-        )
+        raise SchemaError("cannot convert UNKNOWN to float — this value was never populated")
 
     def __int__(self) -> int:
-        raise SchemaError(
-            "cannot convert UNKNOWN to int — this value was never populated"
-        )
+        raise SchemaError("cannot convert UNKNOWN to int — this value was never populated")
 
     def __reduce__(self) -> str:
         """Survive `pickle` and `copy` as the SAME object.

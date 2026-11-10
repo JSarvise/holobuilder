@@ -30,19 +30,19 @@ Where this adapter follows a RULE rather than a measurement it says so:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Sequence
 
 from hbuilder.domain.card import SlotRider
 from hbuilder.domain.deck_panel import DeckPanel, PanelCard, deck_panel
 from hbuilder.domain.gates import resolve_card_set_gates, resolve_leader_costume_skills
 from hbuilder.domain.scoring import (
     _effective_magnitude,
-    active_magnitude_by_card,
     _fold_activation_rate_up,
     _pool_for,
     _resolve_skill,
+    active_magnitude_by_card,
 )
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.song import _support_state
@@ -116,8 +116,11 @@ def _rider_permil(resolved) -> int:
 
 
 def panel_cards_for_team(
-    team: Team, cfg: ScoringConfig, member_order: Sequence[str] | None = None,
-    *, singers: Sequence[str] = (),
+    team: Team,
+    cfg: ScoringConfig,
+    member_order: Sequence[str] | None = None,
+    *,
+    singers: Sequence[str] = (),
 ) -> TeamPanel:
     """The five `PanelCard`s of `team` on `cfg` (board included), in
     `member_order` (card ids; default: `team.members` order), and the panel.
@@ -144,7 +147,7 @@ def panel_cards_for_team(
         if support_state != "applied":
             return
         value = _permil(_effective_magnitude(resolved))
-        for cid in (recipients if recipients is not None else by_id):
+        for cid in recipients if recipients is not None else by_id:
             if cid in bucket:
                 bucket[cid] += value
 
@@ -159,7 +162,8 @@ def panel_cards_for_team(
                 special[resolved.card_id] = (
                     _permil(_effective_magnitude(resolved)),
                     _seconds(resolved.skill.duration),
-                    _rider_permil(resolved))
+                    _rider_permil(resolved),
+                )
         elif pool == "support":
             _give(passive, resolved, state)
         elif pool == "none" and state == "applied":
@@ -174,8 +178,7 @@ def panel_cards_for_team(
     if board is not None:
         effect_up = board.skill_effect_up_for(members, team.leader.member)
         if singers:
-            effect_up += board.conditional_skill_effect_up_for(
-                members, team.leader.member, singers)
+            effect_up += board.conditional_skill_effect_up_for(members, team.leader.member, singers)
         board_up = round(effect_up * 1000.0)
 
     cards: list[PanelCard] = []
@@ -184,24 +187,25 @@ def panel_cards_for_team(
         act = active.get(cid) or {}
         spec = special.get(cid, (0, 0, 0))
         rate_up, shorten = board.uptime_for(card.member) if board is not None else (0.0, 0.0)
-        cards.append(PanelCard(
-            magnitude_permil=act.get("magnitude_permil", 0),
-            probability_permil=act.get("probability_permil", 0),
-            cooldown_s=act.get("cooldown_s", 0) or 1,
-            duration_s=act.get("duration_s", 0),
-            outfit_effect_up_permil=outfit[cid],
-            passive_effect_up_permil=passive[cid],
-            board_effect_up_permil=board_up,
-            board_probability_up_permil=round(rate_up * 1000.0),
-            board_cooldown_shorten_permil=round(shorten * 1000.0),
-            special_magnitude_permil=spec[0],
-            special_duration_s=spec[1],
-            special_rate_rider_permil=spec[2],
-            combo_base_magnitude_permil=act.get("combo_base_magnitude_permil"),
-        ))
+        cards.append(
+            PanelCard(
+                magnitude_permil=act.get("magnitude_permil", 0),
+                probability_permil=act.get("probability_permil", 0),
+                cooldown_s=act.get("cooldown_s", 0) or 1,
+                duration_s=act.get("duration_s", 0),
+                outfit_effect_up_permil=outfit[cid],
+                passive_effect_up_permil=passive[cid],
+                board_effect_up_permil=board_up,
+                board_probability_up_permil=round(rate_up * 1000.0),
+                board_cooldown_shorten_permil=round(shorten * 1000.0),
+                special_magnitude_permil=spec[0],
+                special_duration_s=spec[1],
+                special_rate_rider_permil=spec[2],
+                combo_base_magnitude_permil=act.get("combo_base_magnitude_permil"),
+            )
+        )
     panel = deck_panel(cards)
-    return TeamPanel(panel=panel, cards=tuple(cards), card_ids=order,
-                     unmodelled=tuple(unmodelled))
+    return TeamPanel(panel=panel, cards=tuple(cards), card_ids=order, unmodelled=tuple(unmodelled))
 
 
 def song_bonus_permil(cfg: ScoringConfig, chart) -> Fraction:
@@ -213,14 +217,21 @@ def song_bonus_permil(cfg: ScoringConfig, chart) -> Fraction:
     if chart is None or cfg.board is None:
         return Fraction(0)
     singers = getattr(chart, "singers", None)
-    rate = (cfg.board.song_score_bonus_for(singers, scope=chart.singer_type) if singers
-            else cfg.board.score_bonus_rate())
+    rate = (
+        cfg.board.song_score_bonus_for(singers, scope=chart.singer_type)
+        if singers
+        else cfg.board.score_bonus_rate()
+    )
     return Fraction(rate * 1000.0).limit_denominator(1000)
 
 
 def team_deck_panel(
-    team: Team, cfg: ScoringConfig, member_order: Sequence[str] | None = None,
-    *, overall_power: float | None = None, chart=None,
+    team: Team,
+    cfg: ScoringConfig,
+    member_order: Sequence[str] | None = None,
+    *,
+    overall_power: float | None = None,
+    chart=None,
 ) -> TeamPanel:
     """`panel_cards_for_team` with the Unit Score filled from `overall_power`
     (the deck screen's Overall Power, an integer on the panel). With `chart`, the
@@ -232,7 +243,7 @@ def team_deck_panel(
     got = panel_cards_for_team(team, cfg, member_order, singers=singers)
     if overall_power is None and chart is None:
         return got
-    panel = deck_panel(got.cards, overall_power=round(overall_power or 0),
-                       song_bonus_permil=song_bonus_permil(cfg, chart))
-    return TeamPanel(panel=panel, cards=got.cards, card_ids=got.card_ids,
-                     unmodelled=got.unmodelled)
+    panel = deck_panel(
+        got.cards, overall_power=round(overall_power or 0), song_bonus_permil=song_bonus_permil(cfg, chart)
+    )
+    return TeamPanel(panel=panel, cards=got.cards, card_ids=got.card_ids, unmodelled=got.unmodelled)

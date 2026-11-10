@@ -19,6 +19,7 @@ The catalogue (`data/cards.json`) is deliberately never opened here — the
 fixture-isolation rule — membership is checked against `build_cards`' own
 `by_id` after the call.
 """
+
 from __future__ import annotations
 
 import json

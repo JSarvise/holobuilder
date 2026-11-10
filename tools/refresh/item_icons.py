@@ -16,6 +16,7 @@ anything `octo_fetch.py` pulled earlier into `dumps/octo_fetched/` is read too.
         -> dumps/item_icons/<asset name>.webp
         -> dumps/item_icons/index.json     {asset name: source}
 """
+
 import hashlib
 import io
 import json
@@ -25,11 +26,12 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-from pathlib import Path
+from pathlib import Path  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import MissingInput  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
 DUMPS = str(paths.DUMPS)
@@ -44,9 +46,9 @@ MAX_BUNDLE = 8 << 20
 
 
 def main() -> None:
-    cache = sys.argv[sys.argv.index("--cache-dir") + 1] \
-        if "--cache-dir" in sys.argv else CACHE_DIR
+    cache = sys.argv[sys.argv.index("--cache-dir") + 1] if "--cache-dir" in sys.argv else CACHE_DIR
     import UnityPy
+
     UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
     import octo_crypto
     from card_images import _catalog_by_md5
@@ -84,8 +86,7 @@ def main() -> None:
                 continue
             raw = open(os.path.join(fetched, fn), "rb").read()
             try:
-                data = raw if raw[:8] == b"UnityFS\x00" \
-                    else octo_crypto.decrypt_bundle(raw, name)
+                data = raw if raw[:8] == b"UnityFS\x00" else octo_crypto.decrypt_bundle(raw, name)
                 env = UnityPy.load(io.BytesIO(data))
             except Exception as exc:
                 print(f"  !! {name}: {exc}")
@@ -109,16 +110,14 @@ def main() -> None:
             if raw[:8] == b"UnityFS\x00":
                 try:
                     env = UnityPy.load(io.BytesIO(raw))
-                    hits = [(k, env) for k in env.container
-                            if k.startswith(PREFIXES)]
+                    hits = [(k, env) for k in env.container if k.startswith(PREFIXES)]
                 except Exception:
                     pass
             else:
                 name = by_md5.get(hashlib.md5(raw).hexdigest())
                 if name:
                     try:
-                        env = UnityPy.load(
-                            io.BytesIO(octo_crypto.decrypt_bundle(raw, name)))
+                        env = UnityPy.load(io.BytesIO(octo_crypto.decrypt_bundle(raw, name)))
                         hits = [(name, env)]
                     except Exception as exc:
                         print(f"  !! {name}: {exc}")
@@ -137,6 +136,7 @@ def main() -> None:
     by_item: dict[str, str] = {}
     try:
         import master_cache as mc
+
         for r in mc.rows("Item"):
             rid = (r.get("data") or {}).get(1, [None])[0]
             suffix = (r.get("data") or {}).get(8, [None])[0]
@@ -146,9 +146,11 @@ def main() -> None:
         print(f"  !! master Item map unavailable: {exc}")
 
     missing = sorted(wanted - set(found))
-    json.dump({"have": sorted(found), "missing": missing, "by_item": by_item},
-              open(os.path.join(OUT, "index.json"), "w", encoding="utf-8"),
-              indent=1)
+    json.dump(
+        {"have": sorted(found), "missing": missing, "by_item": by_item},
+        open(os.path.join(OUT, "index.json"), "w", encoding="utf-8"),
+        indent=1,
+    )
     print(f"{saved} webp -> {OUT}")
     print(f"catalogue {len(wanted)}: {len(found)} found, {len(missing)} not in the game's cache")
     for m in missing:

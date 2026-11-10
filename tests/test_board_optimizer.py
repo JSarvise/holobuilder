@@ -7,8 +7,8 @@ value/cost frontier greedy gets wrong)."""
 
 from __future__ import annotations
 
-from hbuilder.domain.skilltree import SkillTree, TreeNode, ROOT_NODE
 from hbuilder.domain.board_optimizer import optimize_board
+from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, TreeNode
 
 
 def _node(node_id: str, cost: int, *, level: int | None = None) -> TreeNode:

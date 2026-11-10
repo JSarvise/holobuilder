@@ -6,6 +6,7 @@ in-memory dict swapped in for `cutoffs_view.list_chapters` / `read_chapter`, and
 runner is a stub. The disk round trip (append -> read back) is tested on the recon side,
 `tools/refresh/test_event_cutoffs.py`.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,9 +14,8 @@ import threading
 import urllib.error
 import urllib.request
 
-import pytest
-
 import cutoffs_view as cv
+import pytest
 from hbweb import config
 
 H = 3_600_000
@@ -31,7 +31,7 @@ def test_no_reads_no_prediction():
 def test_single_read_is_average_pace_with_no_band():
     p = cv.predict([(START + 10 * H, 100_000)], start=START, end=END, now=START + 10 * H)
     assert p["method"] == "pace"
-    assert p["final"] == 500_000            # 10 k/h kept for the remaining 40 h
+    assert p["final"] == 500_000  # 10 k/h kept for the remaining 40 h
     assert p["band"] == [] and p["confidence"] == "low"
     assert p["points"][0] == [START + 10 * H, 100_000]
     assert p["points"][-1] == [END, 500_000]
@@ -65,8 +65,7 @@ def test_template_scales_from_past_curves():
     # two past chapters: 25 % and 40 % of the final was in at the half-way point
     t1 = ([0.0, 0.5, 1.0], [0.0, 0.25, 1.0])
     t2 = ([0.0, 0.5, 1.0], [0.0, 0.40, 1.0])
-    p = cv.predict([(START + 25 * H, 100_000)], start=START, end=END, now=START + 25 * H,
-                   templates=[t1, t2])
+    p = cv.predict([(START + 25 * H, 100_000)], start=START, end=END, now=START + 25 * H, templates=[t1, t2])
     assert p["method"] == "template"
     assert p["low"] == 250_000 and p["high"] == 400_000
     assert p["final"] == 325_000 and p["points"][-1] == [END, 325_000]
@@ -88,22 +87,43 @@ def test_a_curve_first_read_late_is_no_template():
 def test_load_grades_joins_master_and_lang():
     g = cv.load_grades(
         [{"id": "g-x", "data": {"id": "g-x", "nameLangId": "la-g-x", "color1": "A", "color2": "B"}}],
-        [{"id": "la-g-x", "data": {"id": "la-g-x", "text": "Dream"}}])
+        [{"id": "la-g-x", "data": {"id": "la-g-x", "text": "Dream"}}],
+    )
     assert g == {"g-x": {"name": "Dream", "color1": "A", "color2": "B"}}
 
 
 # ------------------------------------------------------------------ in-memory store
-META = {"chapter_id": "ch-1", "event_id": "ev", "event_name": "Point Rally", "start_time": START,
-        "end_time": END, "chapter_end_time": END, "reveal_time": END + 9 * H,
-        "tiers": {"points": [{"end_rank": 500, "grade_id": "g-dream"},
-                             {"end_rank": 50000, "grade_id": "g-bronze"}],
-                  "total": [], "music": {}}}
+META = {
+    "chapter_id": "ch-1",
+    "event_id": "ev",
+    "event_name": "Point Rally",
+    "start_time": START,
+    "end_time": END,
+    "chapter_end_time": END,
+    "reveal_time": END + 9 * H,
+    "tiers": {
+        "points": [{"end_rank": 500, "grade_id": "g-dream"}, {"end_rank": 50000, "grade_id": "g-bronze"}],
+        "total": [],
+        "music": {},
+    },
+}
 RECS = [
-    {"captured_at": START + 4 * H, "region": "us", "chapter_id": "ch-1", "kind": "points",
-     "borders": [{"rank": 500, "score": 20_000}], "self": None},
-    {"captured_at": START + 10 * H, "region": "us", "chapter_id": "ch-1", "kind": "points",
-     "borders": [{"rank": 500, "score": 100_000}], "self": {"rank": 1385, "score": 4_000,
-                                                            "out_of_range": False}},
+    {
+        "captured_at": START + 4 * H,
+        "region": "us",
+        "chapter_id": "ch-1",
+        "kind": "points",
+        "borders": [{"rank": 500, "score": 20_000}],
+        "self": None,
+    },
+    {
+        "captured_at": START + 10 * H,
+        "region": "us",
+        "chapter_id": "ch-1",
+        "kind": "points",
+        "borders": [{"rank": 500, "score": 100_000}],
+        "self": {"rank": 1385, "score": 4_000, "out_of_range": False},
+    },
 ]
 
 
@@ -123,8 +143,12 @@ def store(monkeypatch):
 
 
 def test_build_view_shape(store):
-    v = cv.build_view(config.CUTOFFS_STORE_DIR, "us", now=START + 11 * H,
-                      grades={"g-dream": {"name": "Dream", "color1": "1", "color2": "2"}})
+    v = cv.build_view(
+        config.CUTOFFS_STORE_DIR,
+        "us",
+        now=START + 11 * H,
+        grades={"g-dream": {"name": "Dream", "color1": "1", "color2": "2"}},
+    )
     assert v["available"] and v["chapter_id"] == "ch-1" and v["kind"] == "points"
     assert v["regions"] == {"us": True, "as": False, "jp": False}
     assert v["snapshots"] == 2 and v["self"]["rank"] == 1385
@@ -150,8 +174,9 @@ def web_base(serve_web):
 
 def _req(url, body=None):
     data = None if body is None else json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, method="GET" if body is None else "POST",
-                                 headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(
+        url, data=data, method="GET" if body is None else "POST", headers={"Content-Type": "application/json"}
+    )
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return r.status, json.loads(r.read())
@@ -184,8 +209,7 @@ def test_poller_never_uses_the_owner_account():
 
 
 def test_poller_parse_output_and_interval_floor():
-    out = ("[jp] FAILED: RuntimeError: x\n"
-           "cutoffs: 2 series point(s) appended, 1 region(s) failed\n")
+    out = "[jp] FAILED: RuntimeError: x\ncutoffs: 2 series point(s) appended, 1 region(s) failed\n"
     assert cp.parse_output(out) == (2, ["jp"])
     assert cp.clamp_interval("5") == 5
     for bad in (0, -3, "x", None):
@@ -201,13 +225,16 @@ def _poller(results, lock=None):
         if isinstance(r, Exception):
             raise r
         return r
-    return cp.CutoffsPoller(runner, lock or threading.Lock(), interval_min=5,
-                            clock=lambda: 100.0)
+
+    return cp.CutoffsPoller(runner, lock or threading.Lock(), interval_min=5, clock=lambda: 100.0)
 
 
 def test_poller_backs_off_on_total_failure_and_resets_on_success():
-    fail = (1, "[us] FAILED: x\n[as] FAILED: x\n[jp] FAILED: x\n"
-               "cutoffs: 0 series point(s) appended, 3 region(s) failed\n")
+    fail = (
+        1,
+        "[us] FAILED: x\n[as] FAILED: x\n[jp] FAILED: x\n"
+        "cutoffs: 0 series point(s) appended, 3 region(s) failed\n",
+    )
     ok = (0, "cutoffs: 3 series point(s) appended, 0 region(s) failed\n")
     p = _poller([fail, fail, RuntimeError("boom"), fail, fail, ok])
     delays = []
@@ -220,8 +247,7 @@ def test_poller_backs_off_on_total_failure_and_resets_on_success():
 
 def test_poller_partial_failure_keeps_the_interval_and_idle_waits_an_hour():
     partial = (0, "[jp] FAILED: x\ncutoffs: 2 series point(s) appended, 1 region(s) failed\n")
-    idle = (0, "[us] no marathon chapter is open\n"
-               "cutoffs: 0 series point(s) appended, 0 region(s) failed\n")
+    idle = (0, "[us] no marathon chapter is open\ncutoffs: 0 series point(s) appended, 0 region(s) failed\n")
     p = _poller([partial, idle])
     p.run_cycle()
     assert p.next_delay_min() == 5 and "jp" in p.last_error
@@ -245,8 +271,9 @@ def test_poller_thread_runs_and_stops_cleanly():
     def runner():
         ran.set()
         return 0, "cutoffs: 1 series point(s) appended, 0 region(s) failed\n"
+
     p = cp.CutoffsPoller(runner, threading.Lock(), interval_min=5)
-    assert p.status()["enabled"] is False          # off by default
+    assert p.status()["enabled"] is False  # off by default
     st = p.configure(enabled=True)
     assert st["enabled"] and st["requests_per_hour"] == 144
     assert ran.wait(5)
@@ -264,12 +291,17 @@ def test_template_path_bends_and_one_chapter_still_has_a_band():
     (a = 1.2) gives a convex path ending on its final, and a band from zero now to at least
     +-BAND_FLOOR at the end (one chapter cannot bound itself)."""
     x = 0.25
-    tpl = ([0.0, x, 1.0], [0.0, x ** 1.2, 1.0])
-    p = cv.predict([(START + int(50 * H * x), 100_000)], start=START, end=END,
-                   now=START + int(50 * H * x), templates=[tpl])
+    tpl = ([0.0, x, 1.0], [0.0, x**1.2, 1.0])
+    p = cv.predict(
+        [(START + int(50 * H * x), 100_000)],
+        start=START,
+        end=END,
+        now=START + int(50 * H * x),
+        templates=[tpl],
+    )
     assert p["method"] == "template"
     final = p["final"]
-    assert final == round(100_000 / x ** 1.2)
+    assert final == round(100_000 / x**1.2)
     ys = [q[1] for q in p["points"]]
     steps = [b - a for a, b in zip(ys, ys[1:])]
     assert all(b > a for a, b in zip(steps, steps[1:])), "convex: each step gains more"
@@ -282,13 +314,27 @@ def test_template_path_bends_and_one_chapter_still_has_a_band():
 def test_a_relay_learns_from_relays_when_it_can(monkeypatch):
     def meta(cid, eid, t0):
         return {"chapter_id": cid, "event_id": eid, "start_time": t0, "chapter_end_time": t0 + 10 * H}
-    metas = [meta("relay-b", "marathon_event-relay-002", 300 * H),
-             meta("normal-a", "marathon_event-normal-001", 200 * H),
-             meta("relay-a", "marathon_event-relay-001", 100 * H)]
-    recs = {m["chapter_id"]: [{"kind": "points", "captured_at": m["start_time"] + 2 * H,
-                               "borders": [{"rank": 500, "score": 10 if "relay" in m["chapter_id"] else 30}]},
-                              {"kind": "points", "captured_at": m["chapter_end_time"],
-                               "borders": [{"rank": 500, "score": 100}]}] for m in metas}
+
+    metas = [
+        meta("relay-b", "marathon_event-relay-002", 300 * H),
+        meta("normal-a", "marathon_event-normal-001", 200 * H),
+        meta("relay-a", "marathon_event-relay-001", 100 * H),
+    ]
+    recs = {
+        m["chapter_id"]: [
+            {
+                "kind": "points",
+                "captured_at": m["start_time"] + 2 * H,
+                "borders": [{"rank": 500, "score": 10 if "relay" in m["chapter_id"] else 30}],
+            },
+            {
+                "kind": "points",
+                "captured_at": m["chapter_end_time"],
+                "borders": [{"rank": 500, "score": 100}],
+            },
+        ]
+        for m in metas
+    }
     monkeypatch.setattr(cv, "list_chapters", lambda store, region: metas)
     monkeypatch.setattr(cv, "read_chapter", lambda store, region, cid: (None, recs[cid]))
     got = cv.templates_for(None, "us", "points", 500, "relay-b")
@@ -297,21 +343,46 @@ def test_a_relay_learns_from_relays_when_it_can(monkeypatch):
 
 
 def test_history_view_reads_the_tier_from_the_rank_then_the_emblem():
-    doc = {"events": {
-        "marathon_event-normal-007": {"title": "Neon", "starts_at": "2026-10-15T03:00:00+00:00", "chapters": {
-            "c7": {"number": 1, "ranking": "points",
-                   "tiers": [{"rank": 1000, "grade_id": "g-diamond"}, {"rank": 5000, "grade_id": "g-platinum"}],
-                   "self": {"rank": 2974, "final": True, "captured_at": 9},
-                   "final_borders": {"borders": [{"rank": 1000, "score": 2_927_346}, {"rank": 5000, "score": 530_352}]},
-                   "event_pt": {"value": 874_103}}}},
-        "marathon_event-normal-001": {"chapters": {"c1": {"emblems": {"points": {"grade": "gold"}}}}},
-        "marathon_event-normal-006": {"starts_at": "2026-10-07T03:00:00+00:00", "chapters": {
-            "c6": {"ranking": "total", "tiers": [{"rank": 500, "grade_id": "g-dream"}],
-                   "self": {"rank": None, "out_of_range": True, "final": True}}}},
-    }}
+    doc = {
+        "events": {
+            "marathon_event-normal-007": {
+                "title": "Neon",
+                "starts_at": "2026-10-15T03:00:00+00:00",
+                "chapters": {
+                    "c7": {
+                        "number": 1,
+                        "ranking": "points",
+                        "tiers": [
+                            {"rank": 1000, "grade_id": "g-diamond"},
+                            {"rank": 5000, "grade_id": "g-platinum"},
+                        ],
+                        "self": {"rank": 2974, "final": True, "captured_at": 9},
+                        "final_borders": {
+                            "borders": [{"rank": 1000, "score": 2_927_346}, {"rank": 5000, "score": 530_352}]
+                        },
+                        "event_pt": {"value": 874_103},
+                    }
+                },
+            },
+            "marathon_event-normal-001": {"chapters": {"c1": {"emblems": {"points": {"grade": "gold"}}}}},
+            "marathon_event-normal-006": {
+                "starts_at": "2026-10-07T03:00:00+00:00",
+                "chapters": {
+                    "c6": {
+                        "ranking": "total",
+                        "tiers": [{"rank": 500, "grade_id": "g-dream"}],
+                        "self": {"rank": None, "out_of_range": True, "final": True},
+                    }
+                },
+            },
+        }
+    }
     got = cv.history_view(doc, {"g-platinum": {"name": "Platinum", "color1": "A1EFDC"}})
-    assert [e["event_id"] for e in got] == ["marathon_event-normal-007", "marathon_event-normal-006",
-                                            "marathon_event-normal-001"]
+    assert [e["event_id"] for e in got] == [
+        "marathon_event-normal-007",
+        "marathon_event-normal-006",
+        "marathon_event-normal-001",
+    ]
     c7 = got[0]["chapters"][0]
     assert c7["rank"] == 2974 and c7["reached"]["grade_name"] == "Platinum" and c7["event_pt"] == 874_103
     assert [b["score"] for b in c7["borders"]] == [2_927_346, 530_352] and c7["borders_final"]
@@ -322,34 +393,64 @@ def test_history_view_reads_the_tier_from_the_rank_then_the_emblem():
 
 def test_a_final_event_pt_is_placed_among_the_final_borders():
     import cutoffs_view as cv
+
     b = [{"rank": 500, "score": 4000}, {"rank": 1000, "score": 2000}, {"rank": 5000, "score": 400}]
     st = cv.standing_from_points(1357, b)
     assert st["best"] == 5000 and st["from_rank"] == 1001 and st["next"] == {"rank": 1000, "need": 643}
-    assert cv.standing_from_points(5000, b)["best"] == 500 and cv.standing_from_points(5000, b)["next"] is None
+    assert (
+        cv.standing_from_points(5000, b)["best"] == 500 and cv.standing_from_points(5000, b)["next"] is None
+    )
     low = cv.standing_from_points(100, b)
     assert low["outside"] and low["best"] is None and low["from_rank"] == 5001
-    assert cv.standing_from_points(2000, b)["best"] == 1000        # equal to a border: reached
+    assert cv.standing_from_points(2000, b)["best"] == 1000  # equal to a border: reached
     assert cv.standing_from_points(None, b) is None
 
 
 def test_history_places_the_owner_by_final_pt_and_by_emblem():
     import cutoffs_view as cv
-    tiers = [{"rank": 500, "grade_id": "g-dream"}, {"rank": 1000, "grade_id": "g-diamond"},
-             {"rank": 5000, "grade_id": "g-platinum"}]
-    fb = {"borders": [{"rank": 500, "score": 4000}, {"rank": 1000, "score": 2000}, {"rank": 5000, "score": 400}]}
-    doc = {"events": {
-        "new": {"chapters": {"c": {"number": 1, "ranking": "points", "tiers": tiers, "end_time": 100,
-                                   "self": {"rank": 800, "final": False, "captured_at": 50},
-                                   "event_pt": {"value": 1357, "captured_at": 200}, "final_borders": fb}}},
-        "old": {"chapters": {"c": {"number": 1, "ranking": "points", "final_borders": fb,
-                                   "emblems": {"points": {"grade": "diamond"}}}}}}}
-    for e in doc["events"].values():          # the emblem names grades by their short id
+
+    tiers = [
+        {"rank": 500, "grade_id": "g-dream"},
+        {"rank": 1000, "grade_id": "g-diamond"},
+        {"rank": 5000, "grade_id": "g-platinum"},
+    ]
+    fb = {
+        "borders": [{"rank": 500, "score": 4000}, {"rank": 1000, "score": 2000}, {"rank": 5000, "score": 400}]
+    }
+    doc = {
+        "events": {
+            "new": {
+                "chapters": {
+                    "c": {
+                        "number": 1,
+                        "ranking": "points",
+                        "tiers": tiers,
+                        "end_time": 100,
+                        "self": {"rank": 800, "final": False, "captured_at": 50},
+                        "event_pt": {"value": 1357, "captured_at": 200},
+                        "final_borders": fb,
+                    }
+                }
+            },
+            "old": {
+                "chapters": {
+                    "c": {
+                        "number": 1,
+                        "ranking": "points",
+                        "final_borders": fb,
+                        "emblems": {"points": {"grade": "diamond"}},
+                    }
+                }
+            },
+        }
+    }
+    for e in doc["events"].values():  # the emblem names grades by their short id
         for c in e["chapters"].values():
             c.get("tiers") and None
     doc["events"]["old"]["chapters"]["c"]["emblems"]["points"]["grade"] = "x"
     view = {e["event_id"]: e for e in cv.history_view(doc)}
     new = view["new"]["chapters"][0]
-    assert new["event_pt_final"] and new["standing"]["best"] == 5000      # not the mid-event #800
+    assert new["event_pt_final"] and new["standing"]["best"] == 5000  # not the mid-event #800
     assert new["reached"]["grade_id"] == "g-platinum"
     # the emblem's grade id must be one the ladder knows to be placed
     doc["events"]["old"]["chapters"]["c"]["emblems"]["points"]["grade"] = "diamond"
@@ -362,10 +463,12 @@ def test_history_places_the_owner_by_final_pt_and_by_emblem():
 
 def test_own_series_ends_at_the_end_with_the_value_read_after_it():
     # a score cannot move after the end: a read after it is the value at the end
-    of_kind = [{"captured_at": 1_000, "self": {"score": 50}},
-               {"captured_at": 1_030, "self": {"score": 50}},     # same refresh, seconds apart
-               {"captured_at": 500_000, "self": {"score": 900}},
-               {"captured_at": 9_000_000, "self": {"score": 1_300}},
-               {"captured_at": 900, "self": {"score": None}}]
+    of_kind = [
+        {"captured_at": 1_000, "self": {"score": 50}},
+        {"captured_at": 1_030, "self": {"score": 50}},  # same refresh, seconds apart
+        {"captured_at": 500_000, "self": {"score": 900}},
+        {"captured_at": 9_000_000, "self": {"score": 1_300}},
+        {"captured_at": 900, "self": {"score": None}},
+    ]
     s = cv.own_series("no-store", "us", None, None, of_kind, "points", start=0, end=1_000_000)
     assert s == [[1_000, 50], [500_000, 900], [1_000_000, 1_300]]

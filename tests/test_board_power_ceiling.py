@@ -35,17 +35,16 @@ from __future__ import annotations
 import math
 
 import pytest
+from support.board_reference import resolve
+from support.builders import make_card
 
-from hbuilder.domain.card import Stats
 from hbuilder.domain.board import (
     BoardEffect,
     BoardModel,
     BoardNode,
     CharacterBoard,
 )
-from support.board_reference import resolve
-
-from support.builders import make_card
+from hbuilder.domain.card import Stats
 
 # `builders.make_card` gives every stat 300, so a rate of 0.01 lands on 3.0
 # exactly. Anything that must land OFF an integer says so with its own stats.
@@ -110,9 +109,7 @@ def test_an_unconnected_node_is_NOT_ceiled():
     model = _model(_stat(50.5), 1.0)
     members = _members()
     assert model.power_bonus_for(members, None) == pytest.approx(50.5 * 15)
-    assert resolve(model, None, members).power_bonus(members) == pytest.approx(
-        50.5 * 15
-    )
+    assert resolve(model, None, members).power_bonus(members) == pytest.approx(50.5 * 15)
 
 
 def test_the_ceiling_is_UP_never_to_nearest():
@@ -157,9 +154,7 @@ def test_the_rate_product_is_ceiled_per_card_and_stat():
     )
     member = make_card("card-0", stats=Stats(performance=305, technique=305, sense=305))
     assert model.power_bonus_for((member,), None) == pytest.approx(7.0 * 3)
-    assert resolve(model, None, (member,)).power_bonus((member,)) == pytest.approx(
-        7.0 * 3
-    )
+    assert resolve(model, None, (member,)).power_bonus((member,)) == pytest.approx(7.0 * 3)
 
 
 # ---------------------------------------------------------------------------
@@ -182,9 +177,7 @@ def test_both_drivers_agree_bit_for_bit(multiplier, value):
         }
     )
     members = _members()
-    assert model.power_bonus_for(members, None) == resolve(
-        model, None, members
-    ).power_bonus(members)
+    assert model.power_bonus_for(members, None) == resolve(model, None, members).power_bonus(members)
 
 
 def test_a_board_with_no_power_effects_is_still_exactly_zero():

@@ -24,11 +24,11 @@ catalogue to ship a counter-example before it is correct.
 
 from __future__ import annotations
 
+from support.builders import make_resolved, make_skill
+
 from hbuilder.domain.card import GateCondition, SlotOverride
 from hbuilder.domain.gates import GateResolution, predicate_from_condition
 from hbuilder.domain.scoring import _effective_magnitude
-
-from support.builders import make_resolved, make_skill
 
 _MET = GateCondition(kind="run_state", target="life", count=600, operator="gte")
 
@@ -42,8 +42,7 @@ def _resolved(base: float, override: float | None, *, fired: bool = True):
         interval=20.0,
         probability_tier="High",
         magnitude=base,
-        override=None if override is None
-        else SlotOverride(magnitude=override, condition=_MET),
+        override=None if override is None else SlotOverride(magnitude=override, condition=_MET),
     )
     gate = None
     if override is not None:

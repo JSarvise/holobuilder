@@ -157,7 +157,7 @@ class SkillSlot:
 SCORED_COSTUME_RIDER_FAMILIES: tuple[str, ...] = ("score_support",)
 
 
-def scored_costume_rider_slot(costume: "SkillSlot") -> "SkillSlot | None":
+def scored_costume_rider_slot(costume: SkillSlot) -> SkillSlot | None:
     """The synthesized COSTUME `SkillSlot` for a costume slot's scored rider,
     or `None` when the costume carries no rider of a
     `SCORED_COSTUME_RIDER_FAMILIES` family (absent, `UNKNOWN`, or another
@@ -347,9 +347,7 @@ def skill_slot_from_record(record: dict | None, kind: str) -> SkillSlot | None:
 
 def card_from_record(record: dict) -> Card:
     """Build a `Card` from an already-validated cards.json record."""
-    skills = tuple(
-        skill_slot_from_record(record["skills"][kind], kind) for kind in SKILL_SLOT_KINDS
-    )
+    skills = tuple(skill_slot_from_record(record["skills"][kind], kind) for kind in SKILL_SLOT_KINDS)
     costume_skill = skill_slot_from_record(record["costume_skill"], COSTUME_SLOT_KIND)
     stats_record = record["stats"]
     stats = Stats(

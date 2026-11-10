@@ -5,35 +5,67 @@ scores: the ACTIVE term's own probability (the team's and the board's Activation
 folded in) and, inside a SPECIAL rider's window, the boosted roll. A drawing with the card's
 tier alone said 55 % where the score used 77-78 %, and 100 % inside a rider's window.
 """
+
 from __future__ import annotations
 
 import dataclasses
 
+from support.builders import make_card, make_scoring_config, make_skill
+
 from hbuilder.domain.card import SlotRider
 from hbuilder.domain.song import ChartNote, SongChart, score_song_detailed, timeline
 from hbuilder.domain.song_distribution import _terms
-from support.builders import make_card, make_scoring_config, make_skill
 
 HALF = {"Low": 0.3, "Medium": 0.5, "High": 0.7}
 
 
 def _chart():
     return SongChart(
-        music_id="m0001", difficulty="easy", difficulty_level=5, live_score_coefficient_permil=4,
+        music_id="m0001",
+        difficulty="easy",
+        difficulty_level=5,
+        live_score_coefficient_permil=4,
         notes=tuple(ChartNote(time=0.25 * k, perfect_permil=1000) for k in range(1, 241)),
         special_cues=(10.0, 20.0, 30.0, 40.0, 50.0),
     )
 
 
 def _team():
-    host = make_card("rider-host", member="Host", special=make_skill(
-        "SPECIAL", family="score_support", effect_type="score", duration=10.0, magnitude=100.0,
-        probability_tier=None,
-        rider=SlotRider(family="activation_rate_up", effect_type="activation_rate", magnitude=50.0,
-                        condition=None, target=None)))
-    scorers = tuple(make_card(f"scorer-{i}", member=f"Scorer{i}", active=make_skill(
-        "ACTIVE", family="conditional_score_up", effect_type="score", duration=6.0, interval=9.0 + i,
-        probability_tier="Medium", magnitude=40.0 + 5 * i)) for i in range(3))
+    host = make_card(
+        "rider-host",
+        member="Host",
+        special=make_skill(
+            "SPECIAL",
+            family="score_support",
+            effect_type="score",
+            duration=10.0,
+            magnitude=100.0,
+            probability_tier=None,
+            rider=SlotRider(
+                family="activation_rate_up",
+                effect_type="activation_rate",
+                magnitude=50.0,
+                condition=None,
+                target=None,
+            ),
+        ),
+    )
+    scorers = tuple(
+        make_card(
+            f"scorer-{i}",
+            member=f"Scorer{i}",
+            active=make_skill(
+                "ACTIVE",
+                family="conditional_score_up",
+                effect_type="score",
+                duration=6.0,
+                interval=9.0 + i,
+                probability_tier="Medium",
+                magnitude=40.0 + 5 * i,
+            ),
+        )
+        for i in range(3)
+    )
     members = (host, *scorers, make_card("plain", member="Plain"))
     return make_card("leader", member="Leader"), members
 

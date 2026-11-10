@@ -8,6 +8,7 @@ Wire facts + safety: see gacha_wire.py. Store rules: see gacha_store.py.
 
 Last stdout line is `SUMMARY {json}` with the line-count deltas RE-READ FROM DISK.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import run_cli  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 import account_snapshot as snap  # noqa: E402
 import gacha_store as gs  # noqa: E402
@@ -34,8 +36,9 @@ HISTORY_CAP = 100
 HISTORY_DAYS = 30
 
 
-def history_gap(server_hist: list[dict], stored: list[dict], last_sync: int | None = None,
-                synced_at: int | None = None) -> bool:
+def history_gap(
+    server_hist: list[dict], stored: list[dict], last_sync: int | None = None, synced_at: int | None = None
+) -> bool:
     """True when pulls may have been lost between syncs: the server's oldest entry is newer
     than everything the store holds AND the window could have dropped something -- it came
     back FULL (the 100 cap), or the last sync (`last_sync`, epoch s) is older than the 30-day
@@ -55,11 +58,21 @@ def history_gap(server_hist: list[dict], stored: list[dict], last_sync: int | No
 def _counters(banners: list[dict], synced_at: int) -> list[dict]:
     rows = []
     for b in banners:
-        rows.append({"gacha_id": b.get("gacha_id"), "synced_at": synced_at,
-                     "gacha_point": b.get("gacha_point"),
-                     "buttons": [{"id": x.get("gacha_button_id"), "drawn_count": x.get("drawn_count"),
-                                  "limit_count": x.get("limit_count")}
-                                 for x in b.get("gacha_buttons", [])]})
+        rows.append(
+            {
+                "gacha_id": b.get("gacha_id"),
+                "synced_at": synced_at,
+                "gacha_point": b.get("gacha_point"),
+                "buttons": [
+                    {
+                        "id": x.get("gacha_button_id"),
+                        "drawn_count": x.get("drawn_count"),
+                        "limit_count": x.get("limit_count"),
+                    }
+                    for x in b.get("gacha_buttons", [])
+                ],
+            }
+        )
     return rows
 
 
@@ -78,37 +91,55 @@ def alias_gacha_ids(path: Path) -> list[str]:
     if not isinstance(doc, dict):
         print("banner_aliases.json could not be read: top level is not an object")
         return []
-    return [v["gacha_id"] for k, v in doc.items()
-            if k != "_doc" and isinstance(v, dict) and v.get("gacha_id")]
+    return [
+        v["gacha_id"] for k, v in doc.items() if k != "_doc" and isinstance(v, dict) and v.get("gacha_id")
+    ]
 
 
-def apply_sync(store_dir: Path, synced_at: int, list_resp: dict, hist_resp: dict,
-               rates: dict[str, dict]) -> dict:
-    files = {k: store_dir / n for k, n in
-             (("pulls", gs.PULLS), ("banners", gs.BANNERS), ("rates", gs.RATES), ("counters", gs.COUNTERS))}
+def apply_sync(
+    store_dir: Path, synced_at: int, list_resp: dict, hist_resp: dict, rates: dict[str, dict]
+) -> dict:
+    files = {
+        k: store_dir / n
+        for k, n in (
+            ("pulls", gs.PULLS),
+            ("banners", gs.BANNERS),
+            ("rates", gs.RATES),
+            ("counters", gs.COUNTERS),
+        )
+    }
     before = {k: gs.count_lines(p) for k, p in files.items()}
     live = gw.live_banners(list_resp)
     gs.append_jsonl(files["banners"], gs.banner_rows(live, gs.read_jsonl(files["banners"]), synced_at))
     stored_pulls = gs.read_jsonl(files["pulls"])
     last_sync = max((r.get("synced_at") or 0 for r in gs.read_jsonl(files["counters"])), default=0) or None
     gap = history_gap(hist_resp.get("histories", []), stored_pulls, last_sync, synced_at)
-    gs.append_jsonl(files["pulls"], gs.new_pulls(hist_resp.get("histories", []),
-                                                 stored_pulls, live, synced_at))
-    gs.append_jsonl(files["rates"], [{"gacha_id": gid, "synced_at": synced_at, **tables}
-                                     for gid, tables in rates.items()])
+    gs.append_jsonl(
+        files["pulls"], gs.new_pulls(hist_resp.get("histories", []), stored_pulls, live, synced_at)
+    )
+    gs.append_jsonl(
+        files["rates"], [{"gacha_id": gid, "synced_at": synced_at, **tables} for gid, tables in rates.items()]
+    )
     gs.append_jsonl(files["counters"], _counters(live, synced_at))
     snap_dir = store_dir / gs.SNAPSHOTS
     snap_dir.mkdir(parents=True, exist_ok=True)
     with open(snap_dir / f"{synced_at}.json", "ab") as fh:  # fresh name per sync; append mode by rule
-        fh.write(json.dumps({"synced_at": synced_at, "list": list_resp, "history": hist_resp},
-                            ensure_ascii=False, sort_keys=True).encode("utf8"))
+        fh.write(
+            json.dumps(
+                {"synced_at": synced_at, "list": list_resp, "history": hist_resp},
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf8")
+        )
     after = {k: gs.count_lines(p) for k, p in files.items()}
     out = {k: after[k] - before[k] for k in files}
     out["possible_gap"] = gap
     if gap:
-        print(f"⚠ POSSIBLE GAP: the server's history (the last {HISTORY_DAYS} days, at most "
-              f"{HISTORY_CAP} pulls) starts after everything stored -- pulls drawn between the "
-              "last sync and that window are not recoverable from the wire.")
+        print(
+            f"⚠ POSSIBLE GAP: the server's history (the last {HISTORY_DAYS} days, at most "
+            f"{HISTORY_CAP} pulls) starts after everything stored -- pulls drawn between the "
+            "last sync and that window are not recoverable from the wire."
+        )
     return out
 
 
@@ -164,6 +195,7 @@ def main() -> None:
     if not args.no_art:
         try:
             import gacha_art  # noqa: PLC0415
+
             art_dir = store / gs.ART
             summary["art"] = gacha_art.ensure_art([b["gacha_id"] for b in live], art_dir)
             # Closed banners: the server refuses their rate tables but the Octo catalogue still

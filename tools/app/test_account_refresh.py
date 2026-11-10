@@ -1,5 +1,6 @@
 """The app's account-only refresh on a PC without the game.
 No network: the gRPC call is a fake."""
+
 from __future__ import annotations
 
 import argparse
@@ -10,11 +11,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tools" / "refresh"))
 import account_snapshot as A  # noqa: E402
-from hbuilder import paths  # noqa: E402
-from hbuilder.errors import MissingInput  # noqa: E402
+import pytest  # noqa: E402
 import refresh_all as R  # noqa: E402
 
-import pytest  # noqa: E402
+from hbuilder import paths  # noqa: E402
+from hbuilder.errors import MissingInput  # noqa: E402
 
 
 def test_account_only_runs_the_account_steps_without_the_event_call():
@@ -23,7 +24,7 @@ def test_account_only_runs_the_account_steps_without_the_event_call():
     cmd, _, _ = R.cmd_account(ns)
     assert "--refresh-events" not in cmd and "--merge-collection" in cmd
     ns.account_only = False
-    assert "--refresh-events" in R.cmd_account(ns)[0]       # the publisher's refresh keeps it
+    assert "--refresh-events" in R.cmd_account(ns)[0]  # the publisher's refresh keeps it
 
 
 def test_the_app_refresh_reads_its_own_event_rank_and_only_its_own_region():
@@ -32,7 +33,7 @@ def test_the_app_refresh_reads_its_own_event_rank_and_only_its_own_region():
     cmd = R.cmd_event_cutoffs(ns)[0]
     assert cmd[-4:] == ["--self", "--songs", "--region", "own"]
     ns.account_only = False
-    assert "--region" not in R.cmd_event_cutoffs(ns)[0]       # the publisher reads every region
+    assert "--region" not in R.cmd_event_cutoffs(ns)[0]  # the publisher reads every region
 
 
 def test_no_game_means_no_install_lookup(monkeypatch):
@@ -60,7 +61,7 @@ def test_outdated_app_retries_once_with_the_current_version(tmp_path, monkeypatc
     retry with the current version (here the generic header's: no install, nothing published),
     never a guessed one."""
     monkeypatch.delenv("HOLODREAMS_APP_VERSION", raising=False)
-    monkeypatch.setattr(A, "_app_version_cache", [None])          # no install, nothing published
+    monkeypatch.setattr(A, "_app_version_cache", [None])  # no install, nothing published
     monkeypatch.setattr(A, "CLIENT_VERSION_FILE", tmp_path / "client_version.json")
     tried = []
 
@@ -71,12 +72,13 @@ def test_outdated_app_retries_once_with_the_current_version(tmp_path, monkeypatc
             return {}, {"grpc-status": "0"}, b""
         msg = "OUTDATED_APP" if v < "1.2.1" else "INVALID_ARGUMENT"
         return {}, {"grpc-status": "3", "grpc-message": msg}, b""
+
     monkeypatch.setattr(A, "call", call)
     monkeypatch.setattr(A, "unframe", lambda data: [])
     ident = [("x-app-version", "1.1.1")]
     try:
         A.fetch_master_version("us.example", ident)
-    except Exception:                                             # noqa: BLE001 -- empty body
+    except Exception:  # noqa: BLE001 -- empty body
         pass
     assert tried == ["1.1.1", "1.2.1"]
     assert json.loads((tmp_path / "client_version.json").read_text())["version"] == "1.2.1"

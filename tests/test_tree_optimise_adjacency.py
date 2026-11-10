@@ -133,8 +133,7 @@ def test_cheapest_path_to_r061_costs_the_real_eight_points():
     witness needs a board that owns R-055."""
     to = _load_tree_optimise()
     document = _skilltree_or_skip()
-    board_path = (Path(__file__).parent / "fixtures"
-                  / "board_state_2026-08-09_pre_respec.json")
+    board_path = Path(__file__).parent / "fixtures" / "board_state_2026-08-09_pre_respec.json"
     board = json.loads(board_path.read_text(encoding="utf-8"))
     if "chr-04003" not in board or not board["chr-04003"].get("nodes"):
         pytest.skip("account has no captured board for chr-04003")

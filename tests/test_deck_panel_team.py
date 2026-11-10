@@ -54,8 +54,7 @@ def test_an_active_is_read_off_the_card_in_permil(cards, cfg):
         active = next((s for s in card.skills if s is not None and s.kind == "ACTIVE"), None)
         if active is None or not isinstance(active.magnitude, (int, float)):
             continue
-        assert panel_card.probability_permil == round(
-            cfg.probability_tiers[active.probability_tier] * 1000)
+        assert panel_card.probability_permil == round(cfg.probability_tiers[active.probability_tier] * 1000)
         assert panel_card.cooldown_s == round(active.interval)
         assert panel_card.duration_s == round(active.duration)
         assert panel_card.magnitude_permil >= round(active.magnitude * 10)

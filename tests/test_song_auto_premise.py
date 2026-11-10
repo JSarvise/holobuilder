@@ -23,13 +23,13 @@ from __future__ import annotations
 
 import dataclasses
 
+from support.builders import make_card, make_scoring_config, make_skill
+from support.song_ranking import rank_on_chart
+
 from hbuilder.domain.card import GateCondition, SlotOverride
 from hbuilder.domain.scoring_config import RunState
 from hbuilder.domain.song import ChartNote, SongChart, score_song_detailed
-from support.song_ranking import rank_on_chart
 from hbuilder.domain.team import Team
-
-from support.builders import make_card, make_scoring_config, make_skill
 
 CERTAIN = {"Low": 1.0, "Medium": 1.0, "High": 1.0}
 
@@ -67,9 +67,7 @@ def _combo_gated_scorer(card_id="combo-card"):
             magnitude=50.0,
             override=SlotOverride(
                 magnitude=100.0,
-                condition=GateCondition(
-                    kind="run_state", target="combo", count=40, operator="gte"
-                ),
+                condition=GateCondition(kind="run_state", target="combo", count=40, operator="gte"),
             ),
         ),
     )
@@ -95,8 +93,12 @@ def test_the_ranking_path_scores_auto_when_asked():
     manual = rank_on_chart([team], chart, _cfg()).teams[0].expected_score
     auto = rank_on_chart([team], chart, _cfg(song_auto=True)).teams[0].expected_score
     reference = score_song_detailed(
-        tuple(team.members), (team.leader,), chart, _cfg(song_auto=True),
-        deck_power=None, auto=True,
+        tuple(team.members),
+        (team.leader,),
+        chart,
+        _cfg(song_auto=True),
+        deck_power=None,
+        auto=True,
     )[0].total_score
     assert auto == reference
     assert auto != manual
@@ -105,9 +107,7 @@ def test_the_ranking_path_scores_auto_when_asked():
 def test_the_default_still_scores_the_manual_column():
     team, chart = _team(), _chart()
     ranked = rank_on_chart([team], chart, _cfg()).teams[0].expected_score
-    reference = score_song_detailed(
-        tuple(team.members), (team.leader,), chart, _cfg()
-    )[0].total_score
+    reference = score_song_detailed(tuple(team.members), (team.leader,), chart, _cfg())[0].total_score
     assert ranked == reference
 
 
@@ -122,9 +122,9 @@ def test_a_combo_gated_override_fires_under_the_manual_premise():
     team, chart = _team(), _chart()
     assert _cfg().run_state.combo >= 40
     with_override = rank_on_chart([team], chart, _cfg()).teams[0].expected_score
-    without = rank_on_chart(
-        [team], chart, _cfg(run_state=RunState(life=1000, combo=0))
-    ).teams[0].expected_score
+    without = (
+        rank_on_chart([team], chart, _cfg(run_state=RunState(life=1000, combo=0))).teams[0].expected_score
+    )
     assert with_override > without
 
 
@@ -136,9 +136,11 @@ def test_the_auto_premise_must_zero_the_combo_or_it_over_values_the_card():
     run that does not exist."""
     team, chart = _team(), _chart()
     half = rank_on_chart([team], chart, _cfg(song_auto=True)).teams[0].expected_score
-    whole = rank_on_chart(
-        [team], chart, _cfg(song_auto=True, run_state=RunState(life=1000, combo=0))
-    ).teams[0].expected_score
+    whole = (
+        rank_on_chart([team], chart, _cfg(song_auto=True, run_state=RunState(life=1000, combo=0)))
+        .teams[0]
+        .expected_score
+    )
     assert whole < half, (
         "zeroing the combo must lower this team's AUTO score — it carries a "
         "combo-gated override the AUTO run cannot satisfy"
@@ -152,18 +154,34 @@ def test_the_manual_combo_is_read_at_each_check():
     (the combo is read at each check, as the community tool holodori.best does, not
     granted from the first check)."""
     times = [2.0 * k for k in range(1, 11)] + [20.0 + 0.25 * k for k in range(1, 161)]
-    chart = SongChart(music_id="m0001", difficulty="easy", difficulty_level=5,
-                      live_score_coefficient_permil=4,
-                      notes=tuple(ChartNote(time=t, perfect_permil=1000) for t in times),
-                      special_cues=(10.0, 20.0, 30.0, 40.0, 50.0))
+    chart = SongChart(
+        music_id="m0001",
+        difficulty="easy",
+        difficulty_level=5,
+        live_score_coefficient_permil=4,
+        notes=tuple(ChartNote(time=t, perfect_permil=1000) for t in times),
+        special_cues=(10.0, 20.0, 30.0, 40.0, 50.0),
+    )
     team = _team()
     manual = rank_on_chart([team], chart, _cfg()).teams[0].expected_score
     never = rank_on_chart([team], chart, _cfg(run_state=RunState(life=1000, combo=0))).teams[0].expected_score
-    always_card = make_card("combo-card", active=make_skill(
-        "ACTIVE", family="conditional_score_up", effect_type="score", duration=10.0,
-        interval=20.0, probability_tier="High", magnitude=100.0))
-    always = rank_on_chart([Team(leader=team.leader, members=(always_card,) + team.members[1:])],
-                           chart, _cfg()).teams[0].expected_score
+    always_card = make_card(
+        "combo-card",
+        active=make_skill(
+            "ACTIVE",
+            family="conditional_score_up",
+            effect_type="score",
+            duration=10.0,
+            interval=20.0,
+            probability_tier="High",
+            magnitude=100.0,
+        ),
+    )
+    always = (
+        rank_on_chart([Team(leader=team.leader, members=(always_card,) + team.members[1:])], chart, _cfg())
+        .teams[0]
+        .expected_score
+    )
     assert never < manual < always
 
 
@@ -177,14 +195,36 @@ def _rider_team(condition):
     `condition` holds, and a member with an uncertain ACTIVE for it to raise."""
     from hbuilder.domain.card import SlotRider
 
-    host = make_card("rider-host", special=make_skill(
-        "SPECIAL", family="score_support", effect_type="score", duration=10.0, magnitude=100.0,
-        probability_tier=None,
-        rider=SlotRider(family="activation_rate_up", effect_type="activation_rate", magnitude=50.0,
-                        condition=condition, target=None)))
-    scorer = make_card("scorer", active=make_skill(
-        "ACTIVE", family="conditional_score_up", effect_type="score", duration=10.0, interval=20.0,
-        probability_tier="Medium", magnitude=50.0))
+    host = make_card(
+        "rider-host",
+        special=make_skill(
+            "SPECIAL",
+            family="score_support",
+            effect_type="score",
+            duration=10.0,
+            magnitude=100.0,
+            probability_tier=None,
+            rider=SlotRider(
+                family="activation_rate_up",
+                effect_type="activation_rate",
+                magnitude=50.0,
+                condition=condition,
+                target=None,
+            ),
+        ),
+    )
+    scorer = make_card(
+        "scorer",
+        active=make_skill(
+            "ACTIVE",
+            family="conditional_score_up",
+            effect_type="score",
+            duration=10.0,
+            interval=20.0,
+            probability_tier="Medium",
+            magnitude=50.0,
+        ),
+    )
     members = (host, scorer) + tuple(make_card(f"card-{i}") for i in range(3))
     return Team(leader=make_card("leader"), members=members)
 
@@ -217,6 +257,8 @@ def test_an_auto_note_carries_no_combo_multiplier():
     auto, _ = _chart_weights(chart, "mobile", True)
     manual, _ = _chart_weights(chart, "mobile", False)
     assert auto == tuple(n.auto_permil / 1000.0 for n in chart.notes)
-    assert manual == tuple((n.perfect_permil_for("mobile") / 1000.0) * (1.0 + chart.combo_coefficient(k + 1))
-                           for k, n in enumerate(chart.notes))
-    assert manual[-1] > manual[0]          # the last note carries the highest combo tier
+    assert manual == tuple(
+        (n.perfect_permil_for("mobile") / 1000.0) * (1.0 + chart.combo_coefficient(k + 1))
+        for k, n in enumerate(chart.notes)
+    )
+    assert manual[-1] > manual[0]  # the last note carries the highest combo tier

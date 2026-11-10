@@ -9,11 +9,13 @@ place and this pins that they stay together.
 
     python -m pytest tools/web/test_auto_premise_route.py
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 from hbweb import basis
+
 from hbuilder.domain.scoring_config import RunState
 
 REPO = Path(__file__).resolve().parents[2]

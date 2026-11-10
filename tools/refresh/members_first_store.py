@@ -17,18 +17,28 @@ file-writing call inside `tools/web/`, test files included — so the writer
 lives on the recon side).
 It never touches `data/` or `state/`.
 """
+
 from __future__ import annotations
 
 import array
 import json
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable, Mapping
 
 
-def write_enumeration(directory: Path, *, song: str, proxy: str, pool: Iterable[str],
-                      scores: Iterable[float], inputs_hash: str,
-                      plan_cache_seed: Mapping | None = None, finished: bool = True,
-                      n_sets: int | None = None, extra: Mapping | None = None) -> Path:
+def write_enumeration(
+    directory: Path,
+    *,
+    song: str,
+    proxy: str,
+    pool: Iterable[str],
+    scores: Iterable[float],
+    inputs_hash: str,
+    plan_cache_seed: Mapping | None = None,
+    finished: bool = True,
+    n_sets: int | None = None,
+    extra: Mapping | None = None,
+) -> Path:
     """Write `members_first_<song>_<proxy>.{meta.json,scores.bin}` under
     `directory` (created if needed). `n_sets` defaults to `len(scores)`;
     pass a larger value with fewer scores to fake a run in progress;
@@ -37,11 +47,14 @@ def write_enumeration(directory: Path, *, song: str, proxy: str, pool: Iterable[
     directory.mkdir(parents=True, exist_ok=True)
     arr = array.array("d", [float(s) for s in scores])
     meta = {
-        "song": song, "proxy": proxy, "pool": list(pool),
+        "song": song,
+        "proxy": proxy,
+        "pool": list(pool),
         "n_sets": len(arr) if n_sets is None else int(n_sets),
         "order": "exact_row.legal_rosters(pool holomems, 5) — lexicographic 5-combinations "
-                 "of pool indices with distinct holomems",
-        "inputs_hash": inputs_hash, "model_version": "objective-v2.2",
+        "of pool indices with distinct holomems",
+        "inputs_hash": inputs_hash,
+        "model_version": "objective-v2.2",
         "plan_cache_seed": dict(plan_cache_seed) if plan_cache_seed else None,
         "started": "2026-08-19T00:00:00",
     }

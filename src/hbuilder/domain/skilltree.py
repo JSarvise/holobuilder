@@ -55,8 +55,8 @@ from __future__ import annotations
 
 import re
 from collections import deque
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping, Sequence
 
 __all__ = [
     "ROOT_NODE",
@@ -137,9 +137,7 @@ class SkillTree:
         """Total point cost. Unknown ids contribute 0 rather than raising —
         a validator names them, and a cost function that raised would stop the
         editor from showing the rest of its report."""
-        return sum(
-            self.nodes[node].cost for node in node_ids if node in self.nodes
-        )
+        return sum(self.nodes[node].cost for node in node_ids if node in self.nodes)
 
     def reachable(self, selected: Iterable[str]) -> frozenset[str]:
         """The selected nodes connected to `ROOT_NODE` *through other selected
@@ -182,6 +180,4 @@ def tree_from_mapping(
         )
         for node_id, raw in nodes_raw.items()
     }
-    return SkillTree(
-        nodes=nodes, positions=positions, adjacency=neighbours(positions)
-    )
+    return SkillTree(nodes=nodes, positions=positions, adjacency=neighbours(positions))

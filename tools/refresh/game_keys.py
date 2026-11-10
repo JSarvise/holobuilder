@@ -20,6 +20,7 @@ response into well-formed protobuf: the same check the client's own traffic woul
 needs no account and sends nothing but that one anonymous request, and it writes
 state/game_keys.json without printing the values.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,7 +36,7 @@ from hbuilder.errors import run_cli  # noqa: E402
 
 STATE_FILE = paths.STATE / "game_keys.json"
 HOSTS = {r: f"{r}.game-hololive-dreams.com" for r in ("us", "jp", "as")}
-MAX_SEED_LEN = 128                     # literals longer than this are text, not a build seed
+MAX_SEED_LEN = 128  # literals longer than this are text, not a build seed
 
 
 class GameKeyMissing(RuntimeError):
@@ -52,6 +53,7 @@ def _from_json() -> dict:
 def _private():
     try:
         import _game_keys  # noqa: PLC0415
+
         return _game_keys
     except ImportError:
         return None
@@ -67,9 +69,11 @@ def grpc_seed(required: bool = True) -> bytes | None:
     if not seed:
         if not required:
             return None
-        raise GameKeyMissing("the game's payload seed is not on this PC: run "
-                             "`python tools/refresh/game_keys.py --find` (refresh.cmd / refresh.sh does it for "
-                             "you), or put it in state/game_keys.json (docs/dev/game-keys.md)")
+        raise GameKeyMissing(
+            "the game's payload seed is not on this PC: run "
+            "`python tools/refresh/game_keys.py --find` (refresh.cmd / refresh.sh does it for "
+            "you), or put it in state/game_keys.json (docs/dev/game-keys.md)"
+        )
     return seed.encode()
 
 
@@ -90,7 +94,7 @@ def source() -> str | None:
     if _private() is not None:
         return "tools/refresh/_game_keys.py"
     for path in (os.environ.get("HB_GAME_KEYS"), STATE_FILE):
-        if path and Path(path).is_file():                  # the file _from_json reads
+        if path and Path(path).is_file():  # the file _from_json reads
             return str(path) if _from_json().get("grpc_seed") else None
     return None
 
@@ -119,15 +123,16 @@ def opens(message: bytes, seed: bytes) -> bool:
     if len(message) < 4:
         return False
     nlen = message[3]
-    nonce, ct = message[4:4 + nlen], message[4 + nlen:]
+    nonce, ct = message[4 : 4 + nlen], message[4 + nlen :]
     if not ct or len(ct) % 16:
         return False
     # the last block's padding first: it does not need the IV, and a wrong key fails it
     # 255 times in 256, so most candidates cost one block
     prev = ct[-32:-16] if len(ct) >= 32 else hashlib.md5(seed + nonce).digest()
-    last = bytes(a ^ b for a, b in zip(AES.new(hashlib.md5(seed).digest(), AES.MODE_ECB)
-                                       .decrypt(ct[-16:]), prev))
-    if not (1 <= last[-1] <= 16 and last[-last[-1]:] == bytes([last[-1]]) * last[-1]):
+    last = bytes(
+        a ^ b for a, b in zip(AES.new(hashlib.md5(seed).digest(), AES.MODE_ECB).decrypt(ct[-16:]), prev)
+    )
+    if not (1 <= last[-1] <= 16 and last[-last[-1] :] == bytes([last[-1]]) * last[-1]):
         return False
     try:
         top = list(A.fields(A.unseal(message, seed)))
@@ -167,10 +172,15 @@ def find(host: str = "us", metadata: str | None = None, *, out: Path = STATE_FIL
         return 1
     hits = search(literals, messages[0])
     if len(hits) != 1:
-        print("no literal opens the server's answer" if not hits else
-              f"{len(hits)} literals open the server's answer: refusing to guess")
-        print("the installed client may be older than the server's: update the game, start it once, "
-              "and run this again")
+        print(
+            "no literal opens the server's answer"
+            if not hits
+            else f"{len(hits)} literals open the server's answer: refusing to guess"
+        )
+        print(
+            "the installed client may be older than the server's: update the game, start it once, "
+            "and run this again"
+        )
         return 1
     try:
         doc = json.loads(out.read_text("utf8"))
@@ -199,10 +209,16 @@ def check(host: str = "us") -> bool | None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="The game client's build constants on this PC.")
-    ap.add_argument("--find", action="store_true",
-                    help="find them in this PC's game install and write state/game_keys.json")
-    ap.add_argument("--check", action="store_true",
-                    help="ask the game's server (one anonymous request) whether this PC's are current")
+    ap.add_argument(
+        "--find",
+        action="store_true",
+        help="find them in this PC's game install and write state/game_keys.json",
+    )
+    ap.add_argument(
+        "--check",
+        action="store_true",
+        help="ask the game's server (one anonymous request) whether this PC's are current",
+    )
     ap.add_argument("--host", default="us", help="us, jp, as, or a host name (default: us)")
     ap.add_argument("--metadata", help="a global-metadata.dat other than the installed one")
     args = ap.parse_args(argv)
@@ -213,9 +229,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"metadata key: {'present' if metadata_key() else 'not stored (re-derived when needed)'}")
     if args.check:
         ok = check(args.host)
-        print({True: "check: it opens the server's Master/Get",
-               False: "check: it does NOT open the server's Master/Get: run with --find",
-               None: "check: could not ask the server (offline, maintenance, or no seed)"}[ok])
+        print(
+            {
+                True: "check: it opens the server's Master/Get",
+                False: "check: it does NOT open the server's Master/Get: run with --find",
+                None: "check: could not ask the server (offline, maintenance, or no seed)",
+            }[ok]
+        )
         return 0 if ok else 1
     return 0 if src else 1
 

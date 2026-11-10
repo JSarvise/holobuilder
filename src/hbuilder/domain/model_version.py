@@ -19,6 +19,7 @@ What each version covers:
                         PC 1000).
   objective-v2.0-draft  fixed board plan, per-member support, singer context.
 """
+
 from __future__ import annotations
 
 MODEL_VERSION = "objective-v2.2"

@@ -17,7 +17,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 import tree_optimise as to
 
 _REFRESH = Path(__file__).resolve().parent
@@ -25,8 +24,7 @@ _DUMPS = _REFRESH.parents[1] / "tools" / "recon" / "proxy" / "dumps"
 
 
 @pytest.mark.skipif(
-    not (_DUMPS / "skilltree.json").exists()
-    or not (_DUMPS / "master_SkillTreeNode.json").exists(),
+    not (_DUMPS / "skilltree.json").exists() or not (_DUMPS / "master_SkillTreeNode.json").exists(),
     reason="dumps/ is gitignored account data",
 )
 def test_cheapest_paths_reaches_nodes_from_an_empty_board():
@@ -47,9 +45,7 @@ def test_cheapest_paths_reaches_nodes_from_an_empty_board():
     assert to.ROOT not in from_empty, "the root socket must not be a purchase"
     for target, path in from_empty.items():
         assert path, f"{target} resolved to an empty path"
-        assert all(node in prices for node in path), (
-            f"{target}: a path node carries no price: {path}"
-        )
+        assert all(node in prices for node in path), f"{target}: a path node carries no price: {path}"
 
     # NEGATIVE CONTROL: root seeding must not quietly make everything reachable
     # from nowhere. A node with no adjacency to the root's component should not

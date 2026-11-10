@@ -4,6 +4,7 @@ already holds (a maxed account resets nothing), so the board panel warns about t
 
     python -m pytest tools/web/test_board_doc_over_points.py
 """
+
 from __future__ import annotations
 
 from hbweb.boardplan import over_points

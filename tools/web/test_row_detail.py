@@ -6,6 +6,7 @@ row's `board_state`, /api/timeline with it, /api/row-detail for a two-stage row
 the Score Bonus split / run law / grade thresholds are served. Real-data cases
 use the maxed basis and SKIP when the gitignored dumps are absent; the pure
 helpers run on synthetic inputs. Writes nothing (test_no_writes.py)."""
+
 from __future__ import annotations
 
 import json
@@ -13,15 +14,16 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import pytest
-
 import event_mode
+import pytest
 import row_detail
 
 SONG = "m0334"
 _MEMBERS = [
-    "card-04001-5-uniq-0042-00", "card-00032-5-uniq-0026-00",
-    "card-04003-5-uniq-0044-00", "card-00007-5-uniq-0008-00",
+    "card-04001-5-uniq-0042-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04003-5-uniq-0044-00",
+    "card-00007-5-uniq-0008-00",
     "card-00006-5-uniq-0007-00",
 ]
 _TEAM = ["card-04001-5-uniq-0042-00", *_MEMBERS]
@@ -29,8 +31,9 @@ _TEAM = ["card-04001-5-uniq-0042-00", *_MEMBERS]
 
 def _req(url: str, obj: dict | None = None) -> tuple[int, dict]:
     data = None if obj is None else json.dumps(obj).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"},
-                                 method="GET" if obj is None else "POST")
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="GET" if obj is None else "POST"
+    )
     try:
         with urllib.request.urlopen(req, timeout=600) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8"))
@@ -42,8 +45,11 @@ def _skip_without_dumps(status: int, doc: dict) -> None:
     # 503: no dumps; a missing chart; `_LoadFailure`: no account files (data/owned.json);
     # the maxed basis without the refresh's master export (its max-level board points)
     error = str(doc.get("error", ""))
-    if (status == 503 or (status == 400 and ("chart" in error or "master export" in error))
-            or "_LoadFailure" in error):
+    if (
+        status == 503
+        or (status == 400 and ("chart" in error or "master export" in error))
+        or "_LoadFailure" in error
+    ):
         pytest.skip(f"dumps absent: {doc.get('error')}")
 
 
@@ -53,23 +59,61 @@ def _put(path: Path, obj) -> None:
 
 def test_ranks_are_read_from_the_master_tables(tmp_path):
     holo = tmp_path
-    _put(holo / "main_LiveDeckEvaluationRank.json", [
-        {"type": 1, "plus": 0, "data": {"type": "LiveDeckRankType_LIVE_DECK_RANK_TYPE_D", "order": 1}},
-        {"type": 5, "plus": 2, "data": {"type": "LiveDeckRankType_LIVE_DECK_RANK_TYPE_S", "plus": 2,
-                                         "threshold": "1500000", "order": 11}},
-    ])
-    _put(holo / "main_LiveScoreEvaluationRank.json", [
-        {"group_id": "live_score_rank-s001", "plus": 0, "data": {
-            "evaluationRankType": "LiveEvaluationRankType_LIVE_EVALUATION_RANK_TYPE_A", "score": "600000"}},
-        {"group_id": "live_score_rank-s001", "plus": 1, "data": {
-            "evaluationRankType": "LiveEvaluationRankType_LIVE_EVALUATION_RANK_TYPE_S", "plus": 1,
-            "score": "1200000"}},
-    ])
-    _put(holo / "main_Music.json", [
-        {"id": "m0001", "data": {"id": "m0001", "singleLiveScoreEvaluationRankGroupId": "live_score_rank-s001"}},
-        {"id": "m0002", "data": {"id": "m0002", "singleLiveScoreEvaluationRankGroupId": "live_score_rank-s001"}},
-        {"id": "m0003", "data": {"id": "m0003", "singleLiveScoreEvaluationRankGroupId": "live_score_rank-s002"}},
-    ])
+    _put(
+        holo / "main_LiveDeckEvaluationRank.json",
+        [
+            {"type": 1, "plus": 0, "data": {"type": "LiveDeckRankType_LIVE_DECK_RANK_TYPE_D", "order": 1}},
+            {
+                "type": 5,
+                "plus": 2,
+                "data": {
+                    "type": "LiveDeckRankType_LIVE_DECK_RANK_TYPE_S",
+                    "plus": 2,
+                    "threshold": "1500000",
+                    "order": 11,
+                },
+            },
+        ],
+    )
+    _put(
+        holo / "main_LiveScoreEvaluationRank.json",
+        [
+            {
+                "group_id": "live_score_rank-s001",
+                "plus": 0,
+                "data": {
+                    "evaluationRankType": "LiveEvaluationRankType_LIVE_EVALUATION_RANK_TYPE_A",
+                    "score": "600000",
+                },
+            },
+            {
+                "group_id": "live_score_rank-s001",
+                "plus": 1,
+                "data": {
+                    "evaluationRankType": "LiveEvaluationRankType_LIVE_EVALUATION_RANK_TYPE_S",
+                    "plus": 1,
+                    "score": "1200000",
+                },
+            },
+        ],
+    )
+    _put(
+        holo / "main_Music.json",
+        [
+            {
+                "id": "m0001",
+                "data": {"id": "m0001", "singleLiveScoreEvaluationRankGroupId": "live_score_rank-s001"},
+            },
+            {
+                "id": "m0002",
+                "data": {"id": "m0002", "singleLiveScoreEvaluationRankGroupId": "live_score_rank-s001"},
+            },
+            {
+                "id": "m0003",
+                "data": {"id": "m0003", "singleLiveScoreEvaluationRankGroupId": "live_score_rank-s002"},
+            },
+        ],
+    )
     got = row_detail.load_ranks(holo)
     assert got["available"]
     assert [g["grade"] for g in got["unit_score"]] == ["D", "S+2"]
@@ -82,11 +126,21 @@ def test_ranks_are_read_from_the_master_tables(tmp_path):
 
 def test_event_row_detail_fills_the_row_and_survives_a_failure():
     row = {"score": 1000}
-    event_mode.add_row_detail(row, {}, "L", ["a"], detail_fn=lambda l, m: {
-        "song_est": 1000.4, "song_max": 1200, "member_order": ["a"], "deck_power": 5.0,
-        "board_state": {"chr-1": {"nodes": [], "slots": {}}},
-        "panel": {"overall_power": 10, "unit_score": 99.5},
-        "score_bonus": {"unit_score": 98, "score_bonus_permil": 7}})
+    event_mode.add_row_detail(
+        row,
+        {},
+        "L",
+        ["a"],
+        detail_fn=lambda l, m: {
+            "song_est": 1000.4,
+            "song_max": 1200,
+            "member_order": ["a"],
+            "deck_power": 5.0,
+            "board_state": {"chr-1": {"nodes": [], "slots": {}}},
+            "panel": {"overall_power": 10, "unit_score": 99.5},
+            "score_bonus": {"unit_score": 98, "score_bonus_permil": 7},
+        },
+    )
     assert row["member_order"] == ["a"] and row["unit_score"] == 98 and row["detail_matches"]
     broken = {"score": 1}
     event_mode.add_row_detail(broken, {}, "L", [], detail_fn=lambda l, m: 1 / 0)
@@ -104,13 +158,13 @@ def test_ranks_route(web_base):
 
 def test_row_detail_route_rejects_a_bad_body(web_base):
     assert _req(web_base + "/api/row-detail", {"song": SONG, "cards": _TEAM[:3]})[0] == 400
-    assert _req(web_base + "/api/row-detail", {"song": SONG, "cards": _TEAM,
-                                               "basis": "nope"})[0] == 400
+    assert _req(web_base + "/api/row-detail", {"song": SONG, "cards": _TEAM, "basis": "nope"})[0] == 400
 
 
 def test_compare_state_mode_needs_the_board_state(web_base):
-    status, doc = _req(web_base + "/api/compare", {
-        "teams": [_TEAM, _TEAM], "basis": "maxed", "board": "state", "song": SONG})
+    status, doc = _req(
+        web_base + "/api/compare", {"teams": [_TEAM, _TEAM], "basis": "maxed", "board": "state", "song": SONG}
+    )
     _skip_without_dumps(status, doc)
     assert status == 400 and "board_state" in doc["error"]
 
@@ -118,18 +172,27 @@ def test_compare_state_mode_needs_the_board_state(web_base):
 def test_a_rows_board_gives_the_same_numbers_on_every_route(web_base):
     """The row (develop), the panel (/api/compare board "state") and the
     timeline (/api/timeline board_state) must be ONE number set."""
-    status, dev = _req(web_base + "/api/compare", {
-        "teams": [_TEAM, _TEAM], "basis": "maxed", "board": "develop", "song": SONG,
-        "budget": 453})
+    status, dev = _req(
+        web_base + "/api/compare",
+        {"teams": [_TEAM, _TEAM], "basis": "maxed", "board": "develop", "song": SONG, "budget": 453},
+    )
     _skip_without_dumps(status, dev)
     assert status == 200, dev
     row = dev["teams"][0]
     state = row["board_state"]
     assert state
-    status, cmp_ = _req(web_base + "/api/compare", {
-        "teams": [{"cards": _TEAM, "board_state": state,
-                   "member_order": row["score"]["member_order"]}] * 2,
-        "basis": "maxed", "board": "state", "song": SONG, "budget": 453, "distribution": True})
+    status, cmp_ = _req(
+        web_base + "/api/compare",
+        {
+            "teams": [{"cards": _TEAM, "board_state": state, "member_order": row["score"]["member_order"]}]
+            * 2,
+            "basis": "maxed",
+            "board": "state",
+            "song": SONG,
+            "budget": 453,
+            "distribution": True,
+        },
+    )
     assert status == 200, cmp_
     got = cmp_["teams"][0]
     assert got["score"]["song_est"] == row["score"]["song_est"]
@@ -144,8 +207,9 @@ def test_a_rows_board_gives_the_same_numbers_on_every_route(web_base):
     assert law["available"] and law["verified"] is True
     assert law["min"] <= law["mean"] <= law["max"]
 
-    status, tl = _req(web_base + "/api/timeline", {
-        "song": SONG, "cards": _TEAM, "basis": "maxed", "board_state": state})
+    status, tl = _req(
+        web_base + "/api/timeline", {"song": SONG, "cards": _TEAM, "basis": "maxed", "board_state": state}
+    )
     assert status == 200 and tl["available"], tl
     assert tl["song_est"] == row["score"]["song_est"]
     assert tl["deck_power"] == row["score"]["deck_power"]
@@ -156,11 +220,13 @@ def test_a_rows_board_gives_the_same_numbers_on_every_route(web_base):
 def test_row_detail_route_on_a_searched_row(web_base):
     """A searched row re-developed on its own leaf: board, slot order, split and law
     from ONE board (the law reproduces the figure exactly)."""
-    status, doc = _req(web_base + "/api/row-detail", {
-        "song": SONG, "basis": "maxed", "cards": _TEAM, "distribution": True, "timeline": True})
+    status, doc = _req(
+        web_base + "/api/row-detail",
+        {"song": SONG, "basis": "maxed", "cards": _TEAM, "distribution": True, "timeline": True},
+    )
     _skip_without_dumps(status, doc)
     assert status == 200, doc
-    assert doc["refined"] is False                  # no `refine`: the plain leaf
+    assert doc["refined"] is False  # no `refine`: the plain leaf
     assert sorted(doc["member_order"]) == sorted(_MEMBERS)
     assert doc["board_state"] and doc["timeline"]["lanes"]
     assert doc["distribution"]["verified"] is True
@@ -176,8 +242,8 @@ def test_row_detail_is_scored_for_the_searchs_play(web_base):
     assert status == 200, manual
     _status, auto = _req(web_base + "/api/row-detail", {**body, "auto": True})
     _status, pc = _req(web_base + "/api/row-detail", {**body, "platform": "pc"})
-    assert 0.70 < auto["song_est"] / manual["song_est"] < 0.85    # GREAT weights, no combo
-    assert pc["song_est"] != manual["song_est"]                   # flicks weigh 1000, not 1050
+    assert 0.70 < auto["song_est"] / manual["song_est"] < 0.85  # GREAT weights, no combo
+    assert pc["song_est"] != manual["song_est"]  # flicks weigh 1000, not 1050
     built = row_detail._leaf_inputs("maxed", SONG, "EXPERT", None, ("pc", True))
     cfg = built["ctx"].cfg
     assert (cfg.platform, cfg.song_auto, cfg.run_state.combo) == ("pc", True, 0)

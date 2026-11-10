@@ -20,13 +20,13 @@ actually read by `domain/scoring.py`.
 
 from __future__ import annotations
 
-from hbuilder.domain.card import GateCondition
+from support.builders import make_card, make_resolved, make_scoring_config, make_skill, make_team
+
 from hbuilder.domain import scoring
+from hbuilder.domain.card import GateCondition
 from hbuilder.domain.scoring import _resolve_skill, score_card_set, score_with_breakdown
 from hbuilder.domain.team import Team
 from hbuilder.domain.unknown import UNKNOWN
-
-from support.builders import make_card, make_resolved, make_scoring_config, make_skill, make_team
 
 # A fully-known ACTIVE slot, so `condition` is the only field under test.
 _DURATION = 8.0
@@ -113,9 +113,7 @@ def test_team_with_unrecorded_condition_never_outscores_the_same_team_once_it_is
     )
 
     unrecorded = score_with_breakdown(_team_whose_one_carrier_has_condition(UNKNOWN), cfg)
-    filled_in = score_with_breakdown(
-        _team_whose_one_carrier_has_condition(_FIRING_CONDITION), cfg
-    )
+    filled_in = score_with_breakdown(_team_whose_one_carrier_has_condition(_FIRING_CONDITION), cfg)
 
     assert unrecorded.total_score < filled_in.total_score, (
         "CR-01, end to end: the same team must score strictly lower while "
@@ -202,9 +200,7 @@ def test_unrecorded_condition_on_a_rate_up_skill_inflates_no_other_skill_on_the_
         "skill — compared with == because D-17 makes this a structural "
         "skip, not a numeric approximation"
     )
-    assert _contribution_for(folded, "scorer_01").rate == (
-        _contribution_for(baseline, "scorer_01").rate
-    ), (
+    assert _contribution_for(folded, "scorer_01").rate == (_contribution_for(baseline, "scorer_01").rate), (
         "the bystander assertion, and the one that actually proves the "
         "defect is gone: an unrecorded rate-up gate must leave EVERY other "
         "ACTIVE skill's rate untouched. Checking only that the rate-up "
@@ -230,9 +226,7 @@ def test_batch_path_and_breakdown_path_agree_bit_for_bit_on_an_unrecorded_condit
 
     for leader_index, leader in enumerate(leaders):
         team = Team(leader=leader, members=members)
-        assert leader_scores[leader_index].total_score == (
-            score_with_breakdown(team, cfg).total_score
-        ), (
+        assert leader_scores[leader_index].total_score == (score_with_breakdown(team, cfg).total_score), (
             "score_card_set is what the solver's hot loop actually calls, "
             "so a CR-01 fix that only held on the score_with_breakdown "
             f"path would leave every ranked run still wrong (leader "

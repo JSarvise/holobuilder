@@ -7,24 +7,37 @@ here too. The store fixture is an in-memory dict injected via monkeypatching
 committed, read-only `data/gacha/art/gacha-pickup-normal-260807/` directory
 (banner.png/logo.png/icon.png) rather than writing a fixture PNG.
 """
+
 from __future__ import annotations
-import json, threading, urllib.request, urllib.error
+
+import json
+import threading
+import urllib.error
+import urllib.request
+
 import pytest
 from hbweb import admin, gacha, scripts
-
 
 STORE = {
     "banners": [
         {
-            "gacha_id": "gacha-a", "name": "A", "type": 1,
-            "start_time": 1, "end_time": 2, "pickup_card_ids": [], "seen_at": 5,
+            "gacha_id": "gacha-a",
+            "name": "A",
+            "type": 1,
+            "start_time": 1,
+            "end_time": 2,
+            "pickup_card_ids": [],
+            "seen_at": 5,
             "raw": {},
         }
     ],
     "pulls": [
         {
-            "draw_time": 1000, "gacha_name": "A", "gacha_id": "gacha-a",
-            "card_id": "card-00001-5-x", "first_seen": 5,
+            "draw_time": 1000,
+            "gacha_name": "A",
+            "gacha_id": "gacha-a",
+            "card_id": "card-00001-5-x",
+            "first_seen": 5,
         }
     ],
 }
@@ -60,7 +73,7 @@ def test_gachaart_serves_png_and_rejects_bad_paths(web_base):
     assert _get(web_base + "/gachaart/gacha-a/other.png")[0] == 400
     assert _get(web_base + "/gachaart/../x/banner.png")[0] == 400
     assert _get(web_base + "/gachaart/GACHA-A/banner.png")[0] == 400
-    assert _get(web_base + "/gachaart/gacha-a/banner.gif")[0] == 400   # not one of ours
+    assert _get(web_base + "/gachaart/gacha-a/banner.gif")[0] == 400  # not one of ours
 
 
 def test_gachaart_extensionless_serves_whichever_file_exists(web_base):
@@ -70,7 +83,7 @@ def test_gachaart_extensionless_serves_whichever_file_exists(web_base):
     assert st == 200 and ct == "image/png" and body.startswith(b"\x89PNG")
     # the same banner asked for BY the extension it does not have on disk
     assert _get(web_base + "/gachaart/gacha-pickup-normal-260807/banner.webp")[0] == 404
-    assert _get(web_base + "/gachaart/gacha-a/banner")[0] == 404       # no art for this one at all
+    assert _get(web_base + "/gachaart/gacha-a/banner")[0] == 404  # no art for this one at all
 
 
 def test_gachaart_scales_to_webp_when_a_width_is_asked_for(web_base):
@@ -100,15 +113,16 @@ def test_gacha_sync_refuses_a_second_run_while_one_holds_the_lock(web_base, monk
     held = threading.Lock()
     assert held.acquire(blocking=False)
     monkeypatch.setattr(gacha, "SYNC_LOCK", held)
-    monkeypatch.setattr(scripts, "run_recon_script",
-                        lambda h, script, tag: pytest.fail("a subprocess was started"))
+    monkeypatch.setattr(
+        scripts, "run_recon_script", lambda h, script, tag: pytest.fail("a subprocess was started")
+    )
     st, body = _post(web_base + "/api/gacha/sync")
     assert st == 409 and json.loads(body) == {"error": "a gacha sync is already running"}
     held.release()
 
 
 def test_parse_sync_summary_takes_last_summary_line():
-    out = "login OK\nSUMMARY {\"pulls\": 1}\nnoise\nSUMMARY {\"pulls\": 2, \"banners\": 0}\n"
+    out = 'login OK\nSUMMARY {"pulls": 1}\nnoise\nSUMMARY {"pulls": 2, "banners": 0}\n'
     assert gacha.parse_sync_summary(out) == {"pulls": 2, "banners": 0}
     assert gacha.parse_sync_summary("nothing") is None
 
@@ -127,12 +141,10 @@ def test_refresh_refuses_a_second_run_while_one_is_running(web_base, monkeypatch
     held = threading.Lock()
     assert held.acquire(blocking=False)
     monkeypatch.setattr(admin, "REFRESH_LOCK", held)
-    monkeypatch.setattr(admin, "refresh",
-                        lambda h: pytest.fail("a refresh was started"))
+    monkeypatch.setattr(admin, "refresh", lambda h: pytest.fail("a refresh was started"))
     st, body = _post(web_base + "/api/refresh")
     assert st == 409 and "already running" in json.loads(body)["error"]
     held.release()
-    monkeypatch.setattr(admin, "refresh",
-                        lambda h: h.reply_json(200, {"returncode": 0}))
+    monkeypatch.setattr(admin, "refresh", lambda h: h.reply_json(200, {"returncode": 0}))
     assert _post(web_base + "/api/refresh")[0] == 200
     assert not held.locked()

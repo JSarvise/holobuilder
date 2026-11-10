@@ -1,9 +1,12 @@
 from __future__ import annotations
+
 import sys
 from pathlib import Path
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import gacha_art as ga  # noqa: E402
+
 from hbuilder.errors import MissingInput  # noqa: E402
 
 
@@ -25,10 +28,14 @@ def test_asset_names_cover_measured_variants():
         "img_banner_full_gacha-pickup-260817-free",
     ]
     # a free-first-10 campaign ships one banner, under its `-free` gacha's name
-    assert "img_banner_full_gacha-pickup-261029-free_lang-eng" in ga.asset_names(
-        "gacha-pickup-normal-261029")["banner"]
-    assert not any(b.endswith("-free-free") or "-free-free_" in b
-                   for b in ga.asset_names("gacha-pickup-normal-261029-free")["banner"])
+    assert (
+        "img_banner_full_gacha-pickup-261029-free_lang-eng"
+        in ga.asset_names("gacha-pickup-normal-261029")["banner"]
+    )
+    assert not any(
+        b.endswith("-free-free") or "-free-free_" in b
+        for b in ga.asset_names("gacha-pickup-normal-261029-free")["banner"]
+    )
     assert s["logo"][0] == "img_gacha_logo_pickup-select-260817_lang-eng"
 
 
@@ -45,9 +52,13 @@ def test_missing_accepts_either_extension(tmp_path):
 def test_ensure_art_uses_first_available_name_and_writes_webps(tmp_path):
     fetched = []
     from PIL import Image
-    def fake_fetch(names): fetched.extend(names)
+
+    def fake_fetch(names):
+        fetched.extend(names)
+
     def fake_extract(bundle_path, name):
         return Image.new("RGB", (4, 2)) if name.endswith("_lang-eng") else None
+
     out = ga.ensure_art(["gacha-pickup-normal-260807"], tmp_path, fetch=fake_fetch, extract=fake_extract)
     assert out == {"gacha-pickup-normal-260807": ["banner", "logo", "icon"]}
     d = tmp_path / "gacha-pickup-normal-260807"
@@ -61,8 +72,10 @@ def test_ensure_art_uses_first_available_name_and_writes_webps(tmp_path):
 def test_ensure_art_downscales_to_the_max_width(tmp_path):
     """1280 px WEBP q85 is ~242 KB against ~1.5 MB for the native PNG."""
     from PIL import Image
+
     def fake_extract(bundle_path, name):
         return Image.new("RGB", (2833, 1417))
+
     ga.ensure_art(["gacha-a"], tmp_path, fetch=lambda n: None, extract=fake_extract)
     with Image.open(tmp_path / "gacha-a" / "banner.webp") as im:
         assert im.width == ga.MAX_W and im.height == round(1417 * ga.MAX_W / 2833)
@@ -70,11 +83,15 @@ def test_ensure_art_downscales_to_the_max_width(tmp_path):
 
 def test_ensure_art_survives_extract_exception(tmp_path):
     from PIL import Image
-    def fake_fetch(names): pass
+
+    def fake_fetch(names):
+        pass
+
     def fake_extract(bundle_path, name):
         if name.endswith("_lang-eng"):
             raise RuntimeError("corrupt bundle")
         return Image.new("RGB", (4, 2))
+
     out = ga.ensure_art(["gacha-pickup-normal-260807"], tmp_path, fetch=fake_fetch, extract=fake_extract)
     assert out == {"gacha-pickup-normal-260807": ["banner", "logo", "icon"]}
     d = tmp_path / "gacha-pickup-normal-260807"
@@ -86,9 +103,13 @@ def test_ensure_art_survives_fetch_exception(tmp_path):
     MissingInput for it. That must skip the DOWNLOAD only: an already-cached bundle still
     extracts, and the art step never takes the sync down with it."""
     from PIL import Image
-    def fake_fetch(names): raise MissingInput("no catalogue")
+
+    def fake_fetch(names):
+        raise MissingInput("no catalogue")
+
     def fake_extract(bundle_path, name):
         return Image.new("RGB", (4, 2)) if name.endswith("_lang-eng") else None
+
     out = ga.ensure_art(["gacha-pickup-normal-260807"], tmp_path, fetch=fake_fetch, extract=fake_extract)
     assert out == {"gacha-pickup-normal-260807": ["banner", "logo", "icon"]}
     d = tmp_path / "gacha-pickup-normal-260807"

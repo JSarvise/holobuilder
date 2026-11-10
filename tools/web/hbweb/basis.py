@@ -12,18 +12,18 @@ import dataclasses
 import importlib.util
 import os
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
+
+import certificate as cert_mod
 
 from hbuilder.domain.board import board_from_mapping
 from hbuilder.domain.scoring_config import DEFAULT_PLATFORM, PLATFORMS
 from hbuilder.domain.skilltree import TOTAL_BOARD_POINTS
 from hbuilder.errors import MissingInput
 from hbuilder.inputs import apply_collection, max_level_board_points
-
-import certificate as cert_mod
-
 from hbweb import config
 
 
@@ -84,8 +84,9 @@ def cards_maxed(basis: str) -> bool:
 def charts_path(difficulty: str = "EXPERT") -> Path:
     """The chart file a run at `difficulty` reads (`certificate.charts_path_for`,
     against `config`'s paths so a test that moves them moves both)."""
-    return cert_mod.charts_path_for(difficulty, charts_path=config.CHARTS_PATH,
-                                    charts_all_path=config.CHARTS_ALL_PATH)
+    return cert_mod.charts_path_for(
+        difficulty, charts_path=config.CHARTS_PATH, charts_all_path=config.CHARTS_ALL_PATH
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -115,10 +116,16 @@ def charts_path(difficulty: str = "EXPERT") -> Path:
 # (leader + member), Matsuri VCS, Flare EGG, Fubuki KR, Hajime BSG.
 MAXED_ACCOUNT_NOMINAL_TEAM = (
     "card-00022-5-uniq-0063-00",
-    ("card-00007-5-uniq-0008-00", "card-00022-5-uniq-0063-00",
-     "card-00021-5-uniq-0017-00", "card-00006-5-uniq-0007-00",
-     "card-06005-5-uniq-0061-00"),
+    (
+        "card-00007-5-uniq-0008-00",
+        "card-00022-5-uniq-0063-00",
+        "card-00021-5-uniq-0017-00",
+        "card-00006-5-uniq-0007-00",
+        "card-06005-5-uniq-0061-00",
+    ),
 )
+
+
 def maxed_account_budget() -> int:
     """The board points of every holomem on a maxed account, bench and team alike: what a
     max-level holomem holds (`max_level_board_points`, the master's `CharacterLevel`).
@@ -130,21 +137,21 @@ def maxed_account_budget() -> int:
 
 
 def maxed_account_label(points: int) -> str:
-    return (f"maxed account · 54 bench boards at max level ({points} Pt) · every poster · "
-            "power-up ceiling")
+    return f"maxed account · 54 bench boards at max level ({points} Pt) · every poster · power-up ceiling"
 
 
 @dataclass(frozen=True)
 class MaxedAccountScenario:
     """Everything the maxed-account basis adds on top of the maxed cards."""
-    bonuses: Any                       # AccountBonuses (posters, power_up: the maxed account's)
-    bench: dict                        # name-keyed `characters` mapping (board.json shape)
-    connect_cards: dict | None         # `connect_cards_for("maxed-account")`
-    board_model: Any                   # BoardModel of the bench (the "current" board)
-    literal: str                       # the scenario literal the collection line hashes
-    bench_sockets: int                 # sockets the exact assignment filled (54 expected)
-    report: tuple[str, ...]            # build_board's report + problems (diagnostics)
-    points: int                        # every holomem's board points (`maxed_account_budget`)
+
+    bonuses: Any  # AccountBonuses (posters, power_up: the maxed account's)
+    bench: dict  # name-keyed `characters` mapping (board.json shape)
+    connect_cards: dict | None  # `connect_cards_for("maxed-account")`
+    board_model: Any  # BoardModel of the bench (the "current" board)
+    literal: str  # the scenario literal the collection line hashes
+    bench_sockets: int  # sockets the exact assignment filled (54 expected)
+    report: tuple[str, ...]  # build_board's report + problems (diagnostics)
+    points: int  # every holomem's board points (`maxed_account_budget`)
 
     def current_by_chr(self, name_by_chr: Mapping[str, str]) -> dict:
         """The `current_by_chr` baseline a developed row's `board_plan_summary`
@@ -156,21 +163,27 @@ class MaxedAccountScenario:
             rows = self.bench.get(name)
             if rows is None:
                 continue
-            out[chr_id] = {"name": name,
-                           "owned": sorted(str(r.get("node")) for r in rows if r.get("node")),
-                           "granted": self.points}
+            out[chr_id] = {
+                "name": name,
+                "owned": sorted(str(r.get("node")) for r in rows if r.get("node")),
+                "granted": self.points,
+            }
         return out
 
     def summary(self) -> dict:
         b = self.bonuses
-        return {"basis": MAXED_ACCOUNT_BASIS, "label": maxed_account_label(self.points),
-                "bench_boards": len(self.bench), "bench_budget": self.points,
-                "bench_sockets": self.bench_sockets,
-                "posters": getattr(b, "posters", None),
-                "power_up_permyriad": getattr(b, "power_up_permyriad", None),
-                "connect_cards": len(self.connect_cards or {}),
-                "nominal_team": [MAXED_ACCOUNT_NOMINAL_TEAM[0], *MAXED_ACCOUNT_NOMINAL_TEAM[1]],
-                "scenario": self.literal}
+        return {
+            "basis": MAXED_ACCOUNT_BASIS,
+            "label": maxed_account_label(self.points),
+            "bench_boards": len(self.bench),
+            "bench_budget": self.points,
+            "bench_sockets": self.bench_sockets,
+            "posters": getattr(b, "posters", None),
+            "power_up_permyriad": getattr(b, "power_up_permyriad", None),
+            "connect_cards": len(self.connect_cards or {}),
+            "nominal_team": [MAXED_ACCOUNT_NOMINAL_TEAM[0], *MAXED_ACCOUNT_NOMINAL_TEAM[1]],
+            "scenario": self.literal,
+        }
 
 
 _MAXED_ACCOUNT_CACHE: dict[str, MaxedAccountScenario] = {}
@@ -197,8 +210,7 @@ def load_precompute():
         return None
 
 
-def maxed_account_scenario(cards, cfg, collection_basis, *,
-                           precompute=None) -> MaxedAccountScenario:
+def maxed_account_scenario(cards, cfg, collection_basis, *, precompute=None) -> MaxedAccountScenario:
     """The cached scenario for `cards` (the maxed catalogue) at `cfg` (its
     account bonuses REPLACED by the maxed-account ones before the bench is
     linearised, so the cache key is the config the bench is a function of).
@@ -209,16 +221,18 @@ def maxed_account_scenario(cards, cfg, collection_basis, *,
             "could not import precompute_optimisations.py (maxed_account_bench) — "
             "the maxed-account basis needs the packages of requirements.txt "
             "(setup.cmd or setup.sh installs them) and the gitignored dumps/ (skilltree.json, "
-            "master_SkillTreeNode.json, holodori/main_Poster.json).")
+            "master_SkillTreeNode.json, holodori/main_Poster.json)."
+        )
     try:
         bonuses = precompute.maxed_account_bonuses(collection_basis)
     except Exception as exc:  # noqa: BLE001 — reported, typed
-        raise MaxedAccountUnavailable(f"maxed_account_bonuses: {type(exc).__name__}: {exc}")
+        raise MaxedAccountUnavailable(f"maxed_account_bonuses: {type(exc).__name__}: {exc}") from exc
     if bonuses is None or precompute.master_poster_count() is None:
         raise MaxedAccountUnavailable(
             "the maxed-account basis needs the master Poster table "
             "(dumps/holodori/main_Poster.json) for its Memory Bonus and the level "
-            "curve for the Power-Up ceiling; one of them is absent.")
+            "curve for the Power-Up ceiling; one of them is absent."
+        )
     cfg_scn = dataclasses.replace(cfg, account=bonuses, board=None)
     # the bench is a function of the config and of the max-level points (a game update
     # may move them)
@@ -240,37 +254,52 @@ def _build_maxed_account_scenario(cards, cfg_scn, bonuses, precompute) -> MaxedA
         raise MaxedAccountUnavailable(
             "the maxed-account bench needs skilltree.json + "
             "master_SkillTreeNode.json under the gitignored dumps/; run "
-            "tools/refresh/build_skilltree.py")
+            "tools/refresh/build_skilltree.py"
+        )
     by_id = {c.id: c for c in cards}
     leader, members = MAXED_ACCOUNT_NOMINAL_TEAM
     missing = [c for c in (leader, *members) if c not in by_id]
     if missing:
         raise MaxedAccountUnavailable(
-            f"the bench's nominal team names card(s) not in the catalogue: {missing}")
+            f"the bench's nominal team names card(s) not in the catalogue: {missing}"
+        )
     points = maxed_account_budget()
     report: list[str] = []
     try:
         connect_cards = precompute.connect_cards_for(precompute.MAXED_ACCOUNT_SCENARIO)
         bench = precompute.maxed_account_bench(
-            cards, cfg_scn, (leader, tuple(members)), skilltree=skilltree,
-            node_master=node_master, connect_cards=connect_cards, points=points, report=report)
+            cards,
+            cfg_scn,
+            (leader, tuple(members)),
+            skilltree=skilltree,
+            node_master=node_master,
+            connect_cards=connect_cards,
+            points=points,
+            report=report,
+        )
         board_model = board_from_mapping(
-            {"characters": {k: list(v) for k, v in bench.items()}},
-            source="<maxed-account bench>")
+            {"characters": {k: list(v) for k, v in bench.items()}}, source="<maxed-account bench>"
+        )
     except Exception as exc:  # noqa: BLE001 — reported, typed
-        raise MaxedAccountUnavailable(
-            f"maxed_account_bench: {type(exc).__name__}: {exc}")
+        raise MaxedAccountUnavailable(f"maxed_account_bench: {type(exc).__name__}: {exc}") from exc
     sockets = sum(1 for line in report if str(line).strip().startswith("S-00"))
-    literal = (f"maxed-account:level=max,bloom=max,posters={bonuses.posters},"
-               f"power_up_permyriad={bonuses.power_up_permyriad},bench=maxlevel{points}+L2sockets")
+    literal = (
+        f"maxed-account:level=max,bloom=max,posters={bonuses.posters},"
+        f"power_up_permyriad={bonuses.power_up_permyriad},bench=maxlevel{points}+L2sockets"
+    )
     return MaxedAccountScenario(
-        bonuses=bonuses, bench=bench, connect_cards=connect_cards,
-        board_model=board_model, literal=literal, bench_sockets=sockets,
-        report=tuple(str(x) for x in report), points=points)
+        bonuses=bonuses,
+        bench=bench,
+        connect_cards=connect_cards,
+        board_model=board_model,
+        literal=literal,
+        bench_sockets=sockets,
+        report=tuple(str(x) for x in report),
+        points=points,
+    )
 
 
-def apply_basis(cards, owned, cfg, basis: str, *, assume_level=None, assume_bloom=None,
-                precompute=None):
+def apply_basis(cards, owned, cfg, basis: str, *, assume_level=None, assume_bloom=None, precompute=None):
     """The ONE place a request's card basis becomes (cards, collection_basis,
     cfg, scenario): `apply_collection` exactly as the CLI applies it, then —
     on the maxed-account basis only — the account bonuses swapped for the
@@ -296,8 +325,7 @@ def apply_basis(cards, owned, cfg, basis: str, *, assume_level=None, assume_bloo
     return cards, collection_basis, cfg, scenario
 
 
-def certificate_meta(cfg, basis_name: str, *,
-                     scenario: MaxedAccountScenario | None = None) -> dict[str, Any]:
+def certificate_meta(cfg, basis_name: str, *, scenario: MaxedAccountScenario | None = None) -> dict[str, Any]:
     """`model_version` + `inputs_hash` for a response. The
     hash is over the SAME resolved config shape the certificates hash — `cfg` with
     `board=None` (the board a run develops is an OUTPUT; the captured board file
@@ -308,10 +336,12 @@ def certificate_meta(cfg, basis_name: str, *,
     generated bench's digest (`cert_mod.scenario_hash`, the probes' recipe)."""
     if basis_name == MAXED_ACCOUNT_BASIS and scenario is not None:
         h, per, err = cert_mod.try_scenario_hash(
-            dataclasses.replace(cfg, board=None), scenario.bench, scenario.literal)
+            dataclasses.replace(cfg, board=None), scenario.bench, scenario.literal
+        )
     else:
         h, per, err = cert_mod.try_inputs_hash(
-            dataclasses.replace(cfg, board=None), "maxed" if basis_name == "maxed" else "account")
+            dataclasses.replace(cfg, board=None), "maxed" if basis_name == "maxed" else "account"
+        )
     meta: dict[str, Any] = {"model_version": cert_mod.MODEL_VERSION, "inputs_hash": h}
     if err:
         meta["inputs_hash_error"] = err
@@ -358,8 +388,11 @@ def parse_difficulty(body: Mapping, song: str = "") -> str:
     the song must have a chart at it."""
     try:
         return cert_mod.resolve_difficulty(
-            body.get("difficulty"), song or None,
-            charts_path=config.CHARTS_PATH, charts_all_path=config.CHARTS_ALL_PATH)
+            body.get("difficulty"),
+            song or None,
+            charts_path=config.CHARTS_PATH,
+            charts_all_path=config.CHARTS_ALL_PATH,
+        )
     except ValueError as exc:
         raise HttpError(400, {"error": str(exc)}) from None
 

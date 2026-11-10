@@ -8,6 +8,7 @@ and Event Pt change over the last hour, a player's own series), but from reads e
 minutes instead of every one, so "gains" are counted per read, not per Live: two Lives between
 two reads count once.
 """
+
 from __future__ import annotations
 
 import json
@@ -80,15 +81,20 @@ def board(reads: list[dict], *, now: int | None = None) -> list[dict]:
         old = h.get(uid) if hour else None
         base = p.get(uid)
         span = t - pace_from["captured_at"]
-        out.append({
-            "rank": rank, "score": score, "uid": uid, "name": name,
-            # null when the hour-ago read did not have them in the top 100 (or there is none)
-            "gain_1h": (score - old[1]) if old else None,
-            "rank_1h": (old[0] - rank) if old else None,
-            "reads_with_gain_1h": gains,
-            "last_gain_at": last_gain,
-            "pace_h": round((score - base[1]) * HOUR_MS / span) if base and span >= HOUR_MS else None,
-        })
+        out.append(
+            {
+                "rank": rank,
+                "score": score,
+                "uid": uid,
+                "name": name,
+                # null when the hour-ago read did not have them in the top 100 (or there is none)
+                "gain_1h": (score - old[1]) if old else None,
+                "rank_1h": (old[0] - rank) if old else None,
+                "reads_with_gain_1h": gains,
+                "last_gain_at": last_gain,
+                "pace_h": round((score - base[1]) * HOUR_MS / span) if base and span >= HOUR_MS else None,
+            }
+        )
     return out
 
 
@@ -107,40 +113,61 @@ def top_files(store: Path, region: str) -> list[Path]:
     return sorted(d.glob("*.top.jsonl")) if d.is_dir() else []
 
 
-def build_top(store: Path, region: str, *, now: int, chapter_id: str | None = None,
-              uid: str | None = None, kind: str | None = None) -> dict:
+def build_top(
+    store: Path,
+    region: str,
+    *,
+    now: int,
+    chapter_id: str | None = None,
+    uid: str | None = None,
+    kind: str | None = None,
+) -> dict:
     """The `/api/event/top` payload. Raises LookupError when nothing is stored. One chapter's
     file holds every ranking's boards (`kind` points / total / music:<id>); `kind` picks one,
     by default the chapter's main ranking (points, else total)."""
-    files = {p.name[:-len(".top.jsonl")]: p for p in top_files(store, region)}
+    files = {p.name[: -len(".top.jsonl")]: p for p in top_files(store, region)}
     if not files:
-        raise LookupError(f"no top-100 reads stored for region {region!r} -- the 24/7 tracker "
-                          "writes them (tools/refresh/event_tracker.py)")
+        raise LookupError(
+            f"no top-100 reads stored for region {region!r} -- the 24/7 tracker "
+            "writes them (tools/refresh/event_tracker.py)"
+        )
     metas = [m for m in cutoffs_view.list_chapters(store, region) if m.get("chapter_id") in files]
     if chapter_id is None:
-        open_now = [m for m in metas if (m.get("start_time") or 0) <= now
-                    <= cutoffs_view.chapter_end(m)]
+        open_now = [m for m in metas if (m.get("start_time") or 0) <= now <= cutoffs_view.chapter_end(m)]
         chapter_id = (open_now or metas or [{"chapter_id": sorted(files)[-1]}])[0]["chapter_id"]
     if chapter_id not in files:
         raise LookupError(f"no top-100 reads for chapter {chapter_id!r}")
     meta = next((m for m in metas if m.get("chapter_id") == chapter_id), {}) or {}
     every = read_top(files[chapter_id])
-    kinds = sorted({r.get("kind") or "points" for r in every},
-                   key=lambda k: (k != "points", k != "total", k))
+    kinds = sorted({r.get("kind") or "points" for r in every}, key=lambda k: (k != "points", k != "total", k))
     if kind is None:
         kind = next((k for k in kinds if not k.startswith("music:")), kinds[0] if kinds else "points")
     reads = [r for r in every if (r.get("kind") or "points") == kind]
     last = reads[-1] if reads else {}
     out = {
-        "region": region, "chapter_id": chapter_id, "event_id": meta.get("event_id"),
-        "event_name": meta.get("event_name"), "chapter_number": meta.get("chapter_number"),
-        "start_time": meta.get("start_time"), "end_time": cutoffs_view.chapter_end(meta) or None,
-        "now": now, "kind": kind, "kinds": kinds, "captured_at": last.get("captured_at"),
-        "final": bool(last.get("final")), "reads": len(reads),
+        "region": region,
+        "chapter_id": chapter_id,
+        "event_id": meta.get("event_id"),
+        "event_name": meta.get("event_name"),
+        "chapter_number": meta.get("chapter_number"),
+        "start_time": meta.get("start_time"),
+        "end_time": cutoffs_view.chapter_end(meta) or None,
+        "now": now,
+        "kind": kind,
+        "kinds": kinds,
+        "captured_at": last.get("captured_at"),
+        "final": bool(last.get("final")),
+        "reads": len(reads),
         "first_read": reads[0]["captured_at"] if reads else None,
-        "chapters": [{"chapter_id": c, "chapter_number": next(
-            (m.get("chapter_number") for m in metas if m.get("chapter_id") == c), None)}
-            for c in sorted(files)],
+        "chapters": [
+            {
+                "chapter_id": c,
+                "chapter_number": next(
+                    (m.get("chapter_number") for m in metas if m.get("chapter_id") == c), None
+                ),
+            }
+            for c in sorted(files)
+        ],
         "rows": board(reads, now=now),
     }
     if uid:

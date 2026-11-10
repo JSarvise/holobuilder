@@ -11,6 +11,7 @@ the way any Windows program would.
 The installer calls `use_system_trust()` at start; in the app's runtime, `sitecustomize.py`
 (written by build_app.py) calls it in every process: the launcher, the server and the refresh.
 """
+
 from __future__ import annotations
 
 

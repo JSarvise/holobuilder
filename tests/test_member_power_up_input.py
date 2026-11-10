@@ -70,15 +70,11 @@ def test_a_power_up_permyriad_past_the_declared_cap_is_refused():
     silently clamped 50000 would score as the maximum the mechanic allows on
     what is plainly a typo."""
     with pytest.raises(CollectionError):
-        account_bonuses_from_mapping(
-            {"player": {"power_up_permyriad": MEMBER_POWER_UP_CAP_PERMYRIAD + 1}}
-        )
+        account_bonuses_from_mapping({"player": {"power_up_permyriad": MEMBER_POWER_UP_CAP_PERMYRIAD + 1}})
 
 
 def test_a_power_up_permyriad_at_the_cap_is_accepted():
-    bonuses = account_bonuses_from_mapping(
-        {"player": {"power_up_permyriad": MEMBER_POWER_UP_CAP_PERMYRIAD}}
-    )
+    bonuses = account_bonuses_from_mapping({"player": {"power_up_permyriad": MEMBER_POWER_UP_CAP_PERMYRIAD}})
     assert bonuses.power_up_permyriad == MEMBER_POWER_UP_CAP_PERMYRIAD
 
 
@@ -86,9 +82,7 @@ def test_the_range_check_does_not_catch_the_real_typo():
     """Recorded deliberately. 951 is a legal value; only the derivation below
     knows it is wrong for THIS account. A test that pretended otherwise would
     be false reassurance."""
-    assert account_bonuses_from_mapping(
-        {"player": {"power_up_permyriad": 951}}
-    ).power_up_permyriad == 951
+    assert account_bonuses_from_mapping({"player": {"power_up_permyriad": 951}}).power_up_permyriad == 951
 
 
 # --------------------------------------------------------------------------
@@ -98,9 +92,7 @@ def test_the_range_check_does_not_catch_the_real_typo():
 
 def test_the_value_is_summed_over_owned_cards_at_their_own_levels():
     states = {"five-a": _state("five-a", 80), "four-a": _state("four-a", 70)}
-    derived = derived_member_power_up_permyriad(
-        _basis(), states, ("five-a", "four-a")
-    )
+    derived = derived_member_power_up_permyriad(_basis(), states, ("five-a", "four-a"))
     assert derived.permyriad == LADDER_5[80] + LADDER_4[70]
     assert derived.counted == 2
     assert derived.skipped == ()
@@ -128,9 +120,7 @@ def test_a_defaulted_level_is_SKIPPED_not_believed():
         "five-a": _state("five-a", 80),
         "five-b": _state("five-b", 80, source="max"),
     }
-    derived = derived_member_power_up_permyriad(
-        _basis(), states, ("five-a", "five-b")
-    )
+    derived = derived_member_power_up_permyriad(_basis(), states, ("five-a", "five-b"))
     assert derived.permyriad == LADDER_5[80]
     assert derived.counted == 1
     assert derived.skipped == ("five-b",)
@@ -139,9 +129,7 @@ def test_a_defaulted_level_is_SKIPPED_not_believed():
 
 def test_a_card_with_no_level_at_all_is_skipped_too():
     states = {"five-a": _state("five-a", 80), "five-b": _state("five-b", None)}
-    derived = derived_member_power_up_permyriad(
-        _basis(), states, ("five-a", "five-b")
-    )
+    derived = derived_member_power_up_permyriad(_basis(), states, ("five-a", "five-b"))
     assert derived.skipped == ("five-b",)
 
 
@@ -153,9 +141,7 @@ def test_the_upper_bound_credits_every_skipped_card_its_best_case():
         "five-a": _state("five-a", 80),
         "five-b": _state("five-b", 80, source="max"),
     }
-    derived = derived_member_power_up_permyriad(
-        _basis(), states, ("five-a", "five-b")
-    )
+    derived = derived_member_power_up_permyriad(_basis(), states, ("five-a", "five-b"))
     assert derived.upper == LADDER_5[80] + LADDER_5[80]
 
 
@@ -221,9 +207,7 @@ def test_a_partial_derivation_still_refutes_a_value_above_its_upper_bound():
         "five-a": _state("five-a", 80),
         "five-b": _state("five-b", 80, source="max"),
     }
-    derived = derived_member_power_up_permyriad(
-        _basis(), states, ("five-a", "five-b")
-    )
+    derived = derived_member_power_up_permyriad(_basis(), states, ("five-a", "five-b"))
     assert not derived.exact
     assert derived.disagrees_with(951)
     # ...and stays silent anywhere inside the bound, where it cannot know

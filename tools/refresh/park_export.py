@@ -26,18 +26,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 HERE = str(paths.REFRESH_DIR)
 sys.path.insert(0, HERE)
 
-import park_map  # noqa: E402  -- owns the transform and the asset plumbing; never re-derive
 import park_free_chat  # noqa: E402  -- the Free Chat catalogue (master)
+import park_map  # noqa: E402  -- owns the transform and the asset plumbing; never re-derive
 
 OUT = os.path.join(park_map.DUMPS, "park_export")
 JSON_PATH = os.path.join(OUT, "park_spots.json")
 
+
 def area_names():
     """area id -> the game's own name (LangArea_Eng, through Area's name id)."""
     from master_cache import rows
+
     lang = {r["id"]: (r["data"].get(1000) or [""])[0] for r in rows("LangArea_Eng")}
     return {r["id"]: lang.get((r["data"].get(4) or [""])[0], "") for r in rows("Area")}
 
@@ -63,7 +66,7 @@ def export():
     built = park_free_chat.built_appearance(master["FacilityAppearance"])
     os.makedirs(OUT, exist_ok=True)
     areas = {}
-    facilities = {}            # area -> park_map.load_facilities(scene)
+    facilities = {}  # area -> park_map.load_facilities(scene)
     for area, cfg in park_map.AREAS.items():
         park_map.ensure([cfg["map"], cfg["scene"]])
         base, cal = park_map.load_map(cfg["map"])
@@ -72,8 +75,7 @@ def export():
         facilities[area] = (facs, base.size, cal)
         # the buildings, drawn the way the game's map draws them: each facility's own map
         # piece (mdl_map_facility_<map image>) at its world position, under every marker
-        pieces = {fid: f"mdl_map_facility_{built[fid]['mapImageAssetId']}"
-                  for fid in facs if fid in built}
+        pieces = {fid: f"mdl_map_facility_{built[fid]['mapImageAssetId']}" for fid in facs if fid in built}
         park_map.ensure(sorted(set(pieces.values())))
         drawn = 0
         for fid, bundle in sorted(pieces.items()):
@@ -98,10 +100,13 @@ def export():
             "height": h,
             # informational -- the pixels above are already projected; rounded only to keep
             # float32 noise (8.399999618...) out of a file humans will read
-            "calibration": {"scale": round(cal[0], 6),
-                            "offset_x": round(cal[1], 6),
-                            "offset_y": round(cal[2], 6),
-                            "kx": round(cal[3], 6), "ky": round(cal[4], 6)},
+            "calibration": {
+                "scale": round(cal[0], 6),
+                "offset_x": round(cal[1], 6),
+                "offset_y": round(cal[2], 6),
+                "kx": round(cal[3], 6),
+                "ky": round(cal[4], 6),
+            },
             "spots": spots,
         }
         print(f"  {area:16s} {image}  {w}x{h}  {len(spots)} spots")
@@ -135,23 +140,24 @@ def export():
         # ParkTargetMapping table is 8297 rows of NPC chats and content targets whose spot
         # names are not in the scene's reward arrays -- exporting them bloats the file 4x
         # and every picked id is by definition drawn from the candidate pool anyway.
-        "mapping_to_spot": {m: {"area": spot[m][0], "spot": spot[m][1]}
-                            for lst in cands.values()
-                            for m, _name in sorted(lst)},
+        "mapping_to_spot": {
+            m: {"area": spot[m][0], "spot": spot[m][1]} for lst in cands.values() for m, _name in sorted(lst)
+        },
         # the candidate pool per area (what COULD spawn), for an optional overlay
         "candidates": {a: sorted(m for m, _ in lst) for a, lst in sorted(cands.items())},
         # the 42 fixed chests (background, not a task)
-        "treasures": {tid: {"area": a, "spot": name}
-                      for a, lst in sorted(treasures.items())
-                      for tid, name in sorted(lst)},
+        "treasures": {
+            tid: {"area": a, "spot": name}
+            for a, lst in sorted(treasures.items())
+            for tid, name in sorted(lst)
+        },
         # the Free Chats: every conversation the player can read, its site and map pixel
         "free_chat": free_chat,
     }
     # bytes, not text: Path.write_text would re-translate newlines on Windows
     with open(JSON_PATH, "wb") as f:
         f.write(json.dumps(doc, ensure_ascii=False, indent=1).encode("utf-8"))
-    print(f"  wrote {os.path.relpath(JSON_PATH, paths.REPO)}"
-          f"  ({os.path.getsize(JSON_PATH)} bytes)")
+    print(f"  wrote {os.path.relpath(JSON_PATH, paths.REPO)}  ({os.path.getsize(JSON_PATH)} bytes)")
 
 
 def free_chat_section(catalogue, facilities):
@@ -182,14 +188,18 @@ def free_chat_section(catalogue, facilities):
         mine = [c for c in chats.values() if c["site"] == fid]
         if not mine:
             continue
-        sites[fid] = {**s, "map": mine[0]["map"],
-                      "x": round(sum(c["x"] for c in mine) / len(mine)),
-                      "y": round(sum(c["y"] for c in mine) / len(mine)),
-                      "photo": None, "icon_image": None}
-    photos = {fid: f"img_park_facility_map_thumb_{s['map_image']}"
-              for fid, s in sites.items() if s.get("map_image")}
-    icons = {fid: f"img_park_facility_icon_normal_{s['icon']}"
-             for fid, s in sites.items() if s.get("icon")}
+        sites[fid] = {
+            **s,
+            "map": mine[0]["map"],
+            "x": round(sum(c["x"] for c in mine) / len(mine)),
+            "y": round(sum(c["y"] for c in mine) / len(mine)),
+            "photo": None,
+            "icon_image": None,
+        }
+    photos = {
+        fid: f"img_park_facility_map_thumb_{s['map_image']}" for fid, s in sites.items() if s.get("map_image")
+    }
+    icons = {fid: f"img_park_facility_icon_normal_{s['icon']}" for fid, s in sites.items() if s.get("icon")}
     park_map.ensure(sorted(set(photos.values()) | set(icons.values())))
     for fid, bundle in photos.items():
         img = _texture(bundle) if _have(bundle) else None
@@ -203,10 +213,17 @@ def free_chat_section(catalogue, facilities):
             name = f"park-icon-{sites[fid]['icon']}.png"
             img.save(os.path.join(OUT, name))
             sites[fid]["icon_image"] = name
-    print(f"  free chat        {len(chats)} chats at {len(sites)} sites"
-          f"{f', {len(unplaced)} unplaced' if unplaced else ''}")
-    return {"chats": chats, "sites": sites, "conditions": catalogue["conditions"],
-            "characters": catalogue["characters"], "unplaced": unplaced}
+    print(
+        f"  free chat        {len(chats)} chats at {len(sites)} sites"
+        f"{f', {len(unplaced)} unplaced' if unplaced else ''}"
+    )
+    return {
+        "chats": chats,
+        "sites": sites,
+        "conditions": catalogue["conditions"],
+        "characters": catalogue["characters"],
+        "unplaced": unplaced,
+    }
 
 
 def check():
@@ -220,6 +237,7 @@ def check():
         print(f"  MISSING {JSON_PATH} -- run park_export.py first")
         return False
     from PIL import Image
+
     data = json.loads(open(JSON_PATH, "rb").read().decode("utf-8"))
     total = good = 0
     ok_all = True
@@ -231,14 +249,12 @@ def check():
             continue
         img = Image.open(img_path).convert("RGBA")
         if img.size != (a["width"], a["height"]):
-            print(f"  *** {area}: JSON says {a['width']}x{a['height']}, "
-                  f"image is {img.size[0]}x{img.size[1]}")
+            print(f"  *** {area}: JSON says {a['width']}x{a['height']}, image is {img.size[0]}x{img.size[1]}")
             ok_all = False
         n_ok = 0
         for name, p in a["spots"].items():
             x, y = p["x"], p["y"]
-            if 0 <= x < img.size[0] and 0 <= y < img.size[1] \
-                    and img.getpixel((x, y))[3] > 16:
+            if 0 <= x < img.size[0] and 0 <= y < img.size[1] and img.getpixel((x, y))[3] > 16:
                 n_ok += 1
         total += len(a["spots"])
         good += n_ok
@@ -250,8 +266,10 @@ def check():
         if off * 100 > len(a["spots"]):
             ok_all = False
         flag = "OK " if not off else "~  " if off * 100 <= len(a["spots"]) else "*** "
-        print(f"  {flag}{area:16s} {n_ok}/{len(a['spots'])} exported spots "
-              f"on non-transparent pixels of {a['image']}")
+        print(
+            f"  {flag}{area:16s} {n_ok}/{len(a['spots'])} exported spots "
+            f"on non-transparent pixels of {a['image']}"
+        )
     print(f"  total {good}/{total} on the drawn map")
 
     # join integrity: everything a consumer will look up must actually resolve.
@@ -276,16 +294,18 @@ def check():
         if t["spot"] not in data["areas"][t["area"]]["spots"]:
             bad += 1
             print(f"  *** treasure {tid}: spot {t['spot']} not in {t['area']}")
-    print(f"  joins {joins - bad}/{joins} resolve to a pixel position"
-          f"  ({interior} interior treasures have no exported map, by design)")
+    print(
+        f"  joins {joins - bad}/{joins} resolve to a pixel position"
+        f"  ({interior} interior treasures have no exported map, by design)"
+    )
     return ok_all and bad == 0
 
 
 def main():
-    ap = argparse.ArgumentParser(
-        description="Export raw park maps + spot pixel positions for the web page.")
-    ap.add_argument("--check", action="store_true",
-                    help="only re-check the artefacts already on disk; export nothing")
+    ap = argparse.ArgumentParser(description="Export raw park maps + spot pixel positions for the web page.")
+    ap.add_argument(
+        "--check", action="store_true", help="only re-check the artefacts already on disk; export nothing"
+    )
     args = ap.parse_args()
     if not args.check:
         export()

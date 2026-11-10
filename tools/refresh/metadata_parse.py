@@ -24,15 +24,37 @@ from hbuilder.errors import MissingInput, run_cli  # noqa: E402
 
 MAGIC = 0xFAB11BAF
 SECTIONS = [
-    "stringLiteral", "stringLiteralData", "string", "events", "properties",
-    "methods", "parameterDefaultValues", "fieldDefaultValues",
-    "fieldAndParamDefaultData", "fieldMarshaledSizes", "parameters", "fields",
-    "genericParameters", "genericParameterConstraints", "genericContainers",
-    "nestedTypes", "interfaces", "vtableMethods", "interfaceOffsets",
-    "typeDefinitions", "images", "assemblies", "fieldRefs",
-    "referencedAssemblies", "attributeData", "attributeDataRange",
-    "unresolvedVCallParamTypes", "unresolvedVCallParamRanges",
-    "windowsRTTypeNames", "windowsRTStrings", "exportedTypeDefinitions",
+    "stringLiteral",
+    "stringLiteralData",
+    "string",
+    "events",
+    "properties",
+    "methods",
+    "parameterDefaultValues",
+    "fieldDefaultValues",
+    "fieldAndParamDefaultData",
+    "fieldMarshaledSizes",
+    "parameters",
+    "fields",
+    "genericParameters",
+    "genericParameterConstraints",
+    "genericContainers",
+    "nestedTypes",
+    "interfaces",
+    "vtableMethods",
+    "interfaceOffsets",
+    "typeDefinitions",
+    "images",
+    "assemblies",
+    "fieldRefs",
+    "referencedAssemblies",
+    "attributeData",
+    "attributeDataRange",
+    "unresolvedVCallParamTypes",
+    "unresolvedVCallParamRanges",
+    "windowsRTTypeNames",
+    "windowsRTStrings",
+    "exportedTypeDefinitions",
 ]
 
 
@@ -68,7 +90,7 @@ class Metadata:
         out = []
         for i, o in enumerate(ents):
             end = ents[i + 1] if i + 1 < count else dsize
-            out.append(self.d[doff + o:doff + end].decode("utf-8", "replace"))
+            out.append(self.d[doff + o : doff + end].decode("utf-8", "replace"))
         return out
 
     def cstr(self, index):

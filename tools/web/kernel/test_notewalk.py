@@ -5,6 +5,7 @@ sets are generated in the shapes the per-song path really produces (two buckets,
 ratio and boost populations, team-wide and count-targeted supports, repeated
 magnitudes so the stable sort matters) and compared with `==`, never `approx`.
 """
+
 from __future__ import annotations
 
 import random
@@ -19,10 +20,10 @@ sys.path.insert(0, str(HERE))
 
 pytestmark = pytest.mark.skipif(shutil.which("gcc") is None, reason="no gcc to build the kernel")
 
-from hbuilder.domain.scoring_config import load_scoring_config  # noqa: E402
-from hbuilder.domain.song import _Term, _ratio_at  # noqa: E402
-
 import notewalk  # noqa: E402
+
+from hbuilder.domain.scoring_config import load_scoring_config  # noqa: E402
+from hbuilder.domain.song import _ratio_at, _Term  # noqa: E402
 
 REPO = HERE.parents[2]
 MEMBERS = ("m0", "m1", "m2", "m3", "m4")
@@ -103,7 +104,7 @@ def test_the_library_name_cannot_shadow_the_module():
     import cbuild
 
     assert cbuild.library(HERE, "notewalk", "win32").name == "notewalk.dll"
-    assert cbuild.library(HERE, "notewalk", "linux").name == "libnotewalk.so"   # not notewalk.so
+    assert cbuild.library(HERE, "notewalk", "linux").name == "libnotewalk.so"  # not notewalk.so
 
 
 def test_a_build_leaves_no_partial_file(tmp_path):
@@ -113,7 +114,7 @@ def test_a_build_leaves_no_partial_file(tmp_path):
     src.write_text("double one(void) { return 1.0; }\n")
     out = cbuild.build(src, cbuild.library(tmp_path, "k"), "test")
     assert out.is_file() and sorted(p.name for p in tmp_path.iterdir()) == sorted(["k.c", out.name])
-    assert cbuild.build(src, out, "test") == out                 # current: not rebuilt
+    assert cbuild.build(src, out, "test") == out  # current: not rebuilt
 
 
 def test_py_sum_matches_cpython_compensated_sum():
@@ -140,6 +141,7 @@ def test_py_sum_matches_cpython_compensated_sum():
 
 def _real_inputs():
     import dataclasses
+
     from hbuilder.domain.board import load_board
     from hbuilder.domain.loader import load_cards
     from hbuilder.domain.song import load_charts
@@ -169,7 +171,7 @@ def test_the_whole_song_score_is_bit_identical_with_the_kernel_injected():
 
     cfg, cards, charts = _real_inputs()
     rng = random.Random(20261013)
-    used = declined = 0
+    used = 0
     seen = {"calls": 0, "declined": 0}
 
     def counting(*args, **kwargs):

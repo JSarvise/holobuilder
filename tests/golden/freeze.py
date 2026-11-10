@@ -17,6 +17,7 @@ Layout of the snapshot (``--out``):
 Usage:
     python tests/golden/freeze.py --source C:/path/to/live/checkout --out C:/path/to/snapshot
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,17 +37,31 @@ DUMPS_REL = Path("tools/recon/proxy/dumps")
 # Folders under dumps/ that hold game assets (pictures, models, raw caches), not inputs the
 # optimizer, the board planner or the event views read. Everything else is copied.
 DUMPS_SKIP_DIRS = {
-    "octo_fetched", "card_assets", "stamps", "skill_icons", "live2d", "card_art", "v7",
-    "chibi", "decomp", "ui_sprites", "next_update_assets", "card_images", "live2d_probe",
-    "research_bundle", "research_bundle_2026-08-23", "gacha_art_trial", "member_icons_probe",
+    "octo_fetched",
+    "card_assets",
+    "stamps",
+    "skill_icons",
+    "live2d",
+    "card_art",
+    "v7",
+    "chibi",
+    "decomp",
+    "ui_sprites",
+    "next_update_assets",
+    "card_images",
+    "live2d_probe",
+    "research_bundle",
+    "research_bundle_2026-08-23",
+    "gacha_art_trial",
+    "member_icons_probe",
     "__no_such_cache__",
 }
 # Top-level dumps files that are captures or backups, never read by the product.
 DUMPS_SKIP_SUFFIXES = (".mitm", ".zip", ".obj", ".html", ".stale")
 DUMPS_SKIP_MARKERS = (".before_prune", "_stale_", ".bak", "before_refresh", ".pre_")
 
-STATE_FILES = ("collection.json",)          # never the credential or the client profile
-DATA_SKIP_DIRS = {"art"}                    # data/gacha/art: banner pictures
+STATE_FILES = ("collection.json",)  # never the credential or the client profile
+DATA_SKIP_DIRS = {"art"}  # data/gacha/art: banner pictures
 
 
 def _sha256(path: Path) -> str:
@@ -109,7 +124,7 @@ def freeze(source: Path, out: Path, master_repo: Path | None) -> dict:
     if cache is not None:
         target = out / "localappdata" / "AppData" / "LocalLow" / "QualiArts, Inc_" / "hololive-Dreams"
         for path in _walk(cache, {"logs", "Vuplex.WebView"}):
-            if path.parent == cache:      # Player.log and friends
+            if path.parent == cache:  # Player.log and friends
                 continue
             plan.append((path, target / path.relative_to(cache)))
 
@@ -130,8 +145,9 @@ def freeze(source: Path, out: Path, master_repo: Path | None) -> dict:
         "master_cache": str(cache) if cache else None,
         "master_repo": str(master_repo) if master_repo else None,
     }
-    (out / "MANIFEST.json").write_text(json.dumps({"meta": meta, "files": manifest}, indent=1,
-                                                  sort_keys=True), encoding="utf-8")
+    (out / "MANIFEST.json").write_text(
+        json.dumps({"meta": meta, "files": manifest}, indent=1, sort_keys=True), encoding="utf-8"
+    )
     return meta
 
 
@@ -150,8 +166,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--source", type=Path, help="the live checkout to copy from")
     ap.add_argument("--out", type=Path, required=True, help="a new, empty snapshot directory")
-    ap.add_argument("--master-repo", type=Path, default=None,
-                    help="the master JSON repo (default: HB_MASTER_REPO or <source>/../hololive-dreams-master)")
+    ap.add_argument(
+        "--master-repo",
+        type=Path,
+        default=None,
+        help="the master JSON repo (default: HB_MASTER_REPO or <source>/../hololive-dreams-master)",
+    )
     ap.add_argument("--verify", action="store_true", help="check an existing snapshot against its manifest")
     args = ap.parse_args(argv)
     if args.verify:
@@ -161,7 +181,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.source is None:
         ap.error("--source is required")
     source = args.source.resolve()
-    master = args.master_repo or Path(os.environ.get("HB_MASTER_REPO") or source.parent / "hololive-dreams-master")
+    master = args.master_repo or Path(
+        os.environ.get("HB_MASTER_REPO") or source.parent / "hololive-dreams-master"
+    )
     meta = freeze(source, args.out.resolve(), master)
     print(json.dumps(meta, indent=1))
     return 0

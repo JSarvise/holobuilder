@@ -22,10 +22,9 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 from hbuilder.domain.scoring import score_card_set, score_fast
-
-from support.builders import make_card, make_scoring_config, make_skill, make_team
 
 BASE_STAT_SUM = 1500.0
 
@@ -173,9 +172,7 @@ def test_a_duration_at_least_its_cooldown_is_live_for_all_but_its_dead_zone():
             magnitude=20.0,
         ),
     )
-    team = make_team(
-        [make_card("outfit"), scorer] + [make_card(f"m{i}") for i in range(2, 6)]
-    )
+    team = make_team([make_card("outfit"), scorer] + [make_card(f"m{i}") for i in range(2, 6)])
     without_node = score_fast(team, _cfg())
     with_node = score_fast(team, _cfg({"Nene": 0.12}))
 

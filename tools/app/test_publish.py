@@ -1,4 +1,5 @@
 """content_spec + publish: what goes to the server, and that a publish only adds. No network."""
+
 from __future__ import annotations
 
 import io
@@ -19,8 +20,7 @@ def test_kind_of_sorts_sync_lazy_and_never_the_account():
     assert cs.kind_of(D + "live2d/models/00031-nene-0001-00/x.moc3") == "lazy"
     assert cs.kind_of(D + "chibi/models/sdcos-00031-nene-0001-00.glb") == "lazy"
     # the account never leaves the PC
-    for rel in ("account_snapshot_main.json", "board_state.json", "card_params.json",
-                "inventory.json"):
+    for rel in ("account_snapshot_main.json", "board_state.json", "card_params.json", "inventory.json"):
         assert cs.kind_of(D + rel) is None, rel
     assert cs.kind_of("state/account_credential.json") is None
     # skill_icons: the node glyphs, not the song jackets pulled next to them
@@ -37,7 +37,7 @@ def make_tree(root: Path) -> None:
         D + "board_state.json": b"mine",
         D + "live2d/index.json": b"{}",
         D + "live2d/models/a/model.moc3": b"moc",
-        D + "live2d/models/a/tex.webp": b"moc",          # same bytes as model.moc3
+        D + "live2d/models/a/tex.webp": b"moc",  # same bytes as model.moc3
         D + "skill_icons/img_music_jacket_m1.png": b"big",
     }.items():
         p = root / rel
@@ -48,10 +48,17 @@ def make_tree(root: Path) -> None:
 def test_manifest_lists_only_the_spec_with_hashes(tmp_path):
     make_tree(tmp_path)
     m = pub.build_manifest(tmp_path, {}, now=0)
-    assert sorted(m["files"]) == [D + "charts.json", D + "live2d/index.json",
-                                  D + "live2d/models/a/model.moc3", D + "live2d/models/a/tex.webp"]
+    assert sorted(m["files"]) == [
+        D + "charts.json",
+        D + "live2d/index.json",
+        D + "live2d/models/a/model.moc3",
+        D + "live2d/models/a/tex.webp",
+    ]
     assert m["files"][D + "charts.json"] == {
-        "sha256": pub.sha256_file(tmp_path / D / "charts.json"), "size": 6, "kind": "sync"}
+        "sha256": pub.sha256_file(tmp_path / D / "charts.json"),
+        "size": 6,
+        "kind": "sync",
+    }
     assert pub.summary(m) == {"sync": {"files": 2, "bytes": 8}, "lazy": {"files": 2, "bytes": 6}}
     assert m["id"] == "19700101T000000Z"
 
@@ -63,7 +70,7 @@ def test_hash_cache_skips_unchanged_files(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(pub, "sha256_file", lambda p: calls.append(p) or "x" * 64)
     pub.build_manifest(tmp_path, cache)
-    assert calls == []                                   # nothing changed: nothing rehashed
+    assert calls == []  # nothing changed: nothing rehashed
     (tmp_path / D / "charts.json").write_bytes(b"charts v2")
     pub.build_manifest(tmp_path, cache)
     assert [p.name for p in calls] == ["charts.json"]
@@ -75,7 +82,7 @@ def test_only_missing_objects_are_sent_once_each(tmp_path):
     charts = m["files"][D + "charts.json"]["sha256"]
     todo = pub.missing_objects(m, remote={charts})
     assert charts not in todo
-    assert len(todo) == 2                                # index.json + one copy of the moc bytes
+    assert len(todo) == 2  # index.json + one copy of the moc bytes
     buf = io.BytesIO()
     pub.write_tar(buf, tmp_path, todo)
     names = tarfile.open(fileobj=io.BytesIO(buf.getvalue())).getnames()

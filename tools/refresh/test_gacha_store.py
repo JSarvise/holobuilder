@@ -4,6 +4,7 @@ In a multi-draw every card shares one draw_time (ms) and two
 copies of the same card come back as two identical lines. So dedupe is per
 (draw_time, gacha_name) by card COUNT, never by unique key.
 """
+
 from __future__ import annotations
 
 import ast
@@ -14,8 +15,17 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import gacha_store as gs  # noqa: E402
 
-LIVE = [{"gacha_id": "gacha-pickup-normal-260807", "name": "Summer Duo", "type": 1,
-         "start_time": 1, "end_time": 2, "pickup_card_ids": ["card-a"], "icon_asset_id": "x"}]
+LIVE = [
+    {
+        "gacha_id": "gacha-pickup-normal-260807",
+        "name": "Summer Duo",
+        "type": 1,
+        "start_time": 1,
+        "end_time": 2,
+        "pickup_card_ids": ["card-a"],
+        "icon_asset_id": "x",
+    }
+]
 
 
 def _hist(dt, name, *cards):
@@ -28,7 +38,7 @@ def test_append_and_read_roundtrip(tmp_path):
     n = gs.append_jsonl(p, [{"a": 1, "z": "★"}, {"a": 2}])
     assert n == 2
     raw = p.read_bytes()
-    assert b"\r\n" not in raw and raw.endswith(b"\n") and "★".encode("utf8") in raw
+    assert b"\r\n" not in raw and raw.endswith(b"\n") and "★".encode() in raw
     assert gs.read_jsonl(p) == [{"a": 1, "z": "★"}, {"a": 2}]
     assert gs.count_lines(p) == 2
 
@@ -59,8 +69,17 @@ def test_new_pulls_unknown_banner_gets_null_id_and_is_never_backfilled():
     rows = gs.new_pulls(hist, [], LIVE, 1)
     assert rows[0]["gacha_id"] is None
     # later sync where the banner IS live: existing row is untouched, nothing new
-    live2 = LIVE + [{"gacha_id": "gacha-pickup-normal-260728", "name": "Sunny Summer Vacay Gacha",
-                     "type": 1, "start_time": 0, "end_time": 1, "pickup_card_ids": [], "icon_asset_id": ""}]
+    live2 = LIVE + [
+        {
+            "gacha_id": "gacha-pickup-normal-260728",
+            "name": "Sunny Summer Vacay Gacha",
+            "type": 1,
+            "start_time": 0,
+            "end_time": 1,
+            "pickup_card_ids": [],
+            "icon_asset_id": "",
+        }
+    ]
     assert gs.new_pulls(hist, rows, live2, 2) == []
 
 

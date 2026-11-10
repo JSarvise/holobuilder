@@ -26,12 +26,11 @@ did not exclude the steady-state value would pass under a silent revert.
 from __future__ import annotations
 
 import pytest
+from support.builders import make_resolved, make_scoring_config, make_skill
 
 from hbuilder.domain.scoring import _finite_window_uptime
 from hbuilder.domain.scoring_config import REFERENCE_RUN_SECONDS
 from hbuilder.domain.song import _active_windows
-
-from support.builders import make_resolved, make_scoring_config, make_skill
 
 T = REFERENCE_RUN_SECONDS
 
@@ -136,8 +135,14 @@ def test_it_is_the_run_average_of_the_windows_song_py_puts_on_a_real_axis():
     in its check index — the defect this file exists to prevent."""
     cfg = make_scoring_config()
     for duration, interval in (
-        (6.0, 15.0), (8.0, 17.0), (10.0, 20.0), (12.0, 25.0),
-        (14.0, 35.0), (20.0, 20.0), (30.0, 20.0), (7.0, 22.0),
+        (6.0, 15.0),
+        (8.0, 17.0),
+        (10.0, 20.0),
+        (12.0, 25.0),
+        (14.0, 35.0),
+        (20.0, 20.0),
+        (30.0, 20.0),
+        (7.0, 22.0),
     ):
         skill = make_skill(
             "ACTIVE",

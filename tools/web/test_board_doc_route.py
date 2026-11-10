@@ -8,6 +8,7 @@ gitignored dumps are absent (the endpoint's own 503).
 
     python -m pytest tools/web/test_board_doc_route.py
 """
+
 from __future__ import annotations
 
 import json
@@ -16,15 +17,19 @@ import urllib.request
 
 import pytest
 
-
-_TEAM = ["card-04001-5-uniq-0042-00", "card-00002-5-uniq-0001-00", "card-00034-5-uniq-0027-00",
-         "card-00028-5-uniq-0023-00", "card-00031-5-uniq-0025-00", "card-00016-5-uniq-0014-00"]
+_TEAM = [
+    "card-04001-5-uniq-0042-00",
+    "card-00002-5-uniq-0001-00",
+    "card-00034-5-uniq-0027-00",
+    "card-00028-5-uniq-0023-00",
+    "card-00031-5-uniq-0025-00",
+    "card-00016-5-uniq-0014-00",
+]
 
 
 def _post(url, obj):
     data = json.dumps(obj).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"},
-                                 method="POST")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=180) as r:
             return r.status, json.loads(r.read())
@@ -35,8 +40,10 @@ def _post(url, obj):
 @pytest.fixture(scope="module")
 def developed(web_base):
     """A real developed board_state for _TEAM on the maxed basis, from a row's detail."""
-    status, body = _post(web_base + "/api/row-detail",
-                         {"basis": "maxed", "cards": _TEAM, "song": "m0342", "difficulty": "EXPERT"})
+    status, body = _post(
+        web_base + "/api/row-detail",
+        {"basis": "maxed", "cards": _TEAM, "song": "m0342", "difficulty": "EXPERT"},
+    )
     if status in (400, 503) or "_LoadFailure" in str(body.get("error", "")):
         pytest.skip(f"skilltree/master/chart dumps absent (gitignored): {body.get('error')}")
     assert status == 200, body
@@ -52,8 +59,10 @@ def test_board_doc_overlays_the_given_board_without_optimising(web_base, develop
     """The doc's `plan.optimised_nodes` per character IS the given node set,
     to_buy/to_sell are the diff against the current board, and sockets carry the
     given placements."""
-    status, doc = _post(web_base + "/api/board-doc", {
-        "board_state": developed["board_state"], "cards": _TEAM, "basis": "maxed", "budget": 453})
+    status, doc = _post(
+        web_base + "/api/board-doc",
+        {"board_state": developed["board_state"], "cards": _TEAM, "basis": "maxed", "budget": 453},
+    )
     assert status == 200, doc
     assert doc["engine"] == "given" and doc["plan_included"] is True
     assert doc["budget"] == 453 and doc["budget_kind"] == "flat"
@@ -66,9 +75,9 @@ def test_board_doc_overlays_the_given_board_without_optimising(web_base, develop
         owned = {n["id"] for n in c["nodes"] if n.get("state") == "owned"}
         assert set(plan["to_buy"]) == set(state["nodes"]) - owned
         assert set(plan["to_sell"]) == owned - set(state["nodes"])
-        assert plan["point_budget"] == 453                 # labelled by the given kind
+        assert plan["point_budget"] == 453  # labelled by the given kind
         assert plan["point_cost"] >= 0
-        assert state["slots"].items() <= plan["slots"].items()   # the given placements kept
+        assert state["slots"].items() <= plan["slots"].items()  # the given placements kept
         for sock in c.get("sockets", []):
             cid = state["slots"].get(sock["socket"])
             if cid:
@@ -77,8 +86,10 @@ def test_board_doc_overlays_the_given_board_without_optimising(web_base, develop
 
 
 def test_board_doc_real_budget_labels_the_granted_points(web_base, developed):
-    status, doc = _post(web_base + "/api/board-doc", {
-        "board_state": developed["board_state"], "cards": _TEAM, "basis": "maxed"})
+    status, doc = _post(
+        web_base + "/api/board-doc",
+        {"board_state": developed["board_state"], "cards": _TEAM, "basis": "maxed"},
+    )
     assert status == 200, doc
     assert doc["budget"] == "real" and doc["budget_kind"] == "real"
     for c in doc["characters"]:
@@ -90,8 +101,10 @@ def test_board_doc_serves_node_values_and_connect_boosts(web_base):
     text carries `value`/`value_text`, a placed Connect lists the nodes it
     covers, and a covered node's `boosted_value` is the game's ceiled product
     (`board_values`). No optimiser, no team needed."""
-    status, doc = _post(web_base + "/api/board-doc", {
-        "board_state": {"chr-03001": {"nodes": [], "slots": {}}}, "cards": [], "basis": "account"})
+    status, doc = _post(
+        web_base + "/api/board-doc",
+        {"board_state": {"chr-03001": {"nodes": [], "slots": {}}}, "cards": [], "basis": "account"},
+    )
     if status == 503:
         pytest.skip("skilltree/master dumps absent (gitignored)")
     assert status == 200, doc

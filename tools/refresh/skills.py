@@ -46,9 +46,9 @@ PROBABILITY_TIER_BY_PERMIL = {370: "Low", 460: "Medium", 550: "High"}
 
 def parse_target(s):
     """'attribute-attribute_2-3'            -> {'kind':'type','target':'attribute_2','max':3}
-       'character_grouping-grp-gen_1-2'     -> {'kind':'generation','target':'grp-gen_1','max':2}
-       'self'                               -> {'kind':'self','target':None,'max':1}
-       'all'                                -> {'kind':'all','target':None,'max':None}"""
+    'character_grouping-grp-gen_1-2'     -> {'kind':'generation','target':'grp-gen_1','max':2}
+    'self'                               -> {'kind':'self','target':None,'max':1}
+    'all'                                -> {'kind':'all','target':None,'max':None}"""
     if not s:
         return None
     if s == "self":
@@ -59,8 +59,7 @@ def parse_target(s):
     if not m:
         return {"kind": "unknown", "target": s, "max": None}
     kind = "type" if m.group("what") == "attribute" else "generation"
-    return {"kind": kind, "target": m.group("who"),
-            "max": int(m.group("max")) if m.group("max") else None}
+    return {"kind": kind, "target": m.group("who"), "max": int(m.group("max")) if m.group("max") else None}
 
 
 def parse_effect(s):
@@ -80,8 +79,7 @@ def parse_effect(s):
         out = {"effect": effect, "magnitude_permil": int(mag), "value": None}
     else:
         effect, value = body.rsplit("-", 1)
-        out = {"effect": effect, "magnitude_permil": None,
-               "value": int(value) if value.isdigit() else value}
+        out = {"effect": effect, "magnitude_permil": None, "value": int(value) if value.isdigit() else value}
     out["target"] = parse_target(m.group("target"))
     out["raw"] = s
     return out
@@ -109,10 +107,14 @@ def parse_gate(s):
         # invert it. combo has
         # no LTE trigger in the master today, but a combo_lte would parse
         # harmlessly the same way.
-        return {"kind": "run_state", "target": rs.group("dim"),
-                "count": int(rs.group("n")), "operator": rs.group("op"), "raw": s}
-    dk = re.match(r"^deck_card_(?P<what>attribute|character_grouping)-(?P<who>.+)-(?P<n>\d+)$",
-                  body)
+        return {
+            "kind": "run_state",
+            "target": rs.group("dim"),
+            "count": int(rs.group("n")),
+            "operator": rs.group("op"),
+            "raw": s,
+        }
+    dk = re.match(r"^deck_card_(?P<what>attribute|character_grouping)-(?P<who>.+)-(?P<n>\d+)$", body)
     if dk:
         kind = "type" if dk.group("what") == "attribute" else "generation"
         return {"kind": kind, "target": dk.group("who"), "count": int(dk.group("n")), "raw": s}
@@ -134,8 +136,7 @@ def resolve_active(f):
     return {
         "kind": "ACTIVE",
         "effect": parse_effect(_s(f, 4)),
-        "conditional": {"gate": parse_gate(_s(f, 5)), "effect": parse_effect(_s(f, 6))}
-        if _s(f, 6) else None,
+        "conditional": {"gate": parse_gate(_s(f, 5)), "effect": parse_effect(_s(f, 6))} if _s(f, 6) else None,
         "duration_ms": _n(f, 10),
         "cooldown_ms": _n(f, 7),
         "activation_permil": permil,
@@ -162,8 +163,7 @@ def resolve_leader(f):
         "kind": "COSTUME",
         "gate": parse_gate(_s(f, 2)),
         "effect": parse_effect(_s(f, 3)),
-        "conditional": {"gate": parse_gate(_s(f, 4)), "effect": parse_effect(_s(f, 5))}
-        if _s(f, 5) else None,
+        "conditional": {"gate": parse_gate(_s(f, 4)), "effect": parse_effect(_s(f, 5))} if _s(f, 5) else None,
     }
 
 
@@ -173,8 +173,7 @@ def resolve_special(f):
     return {
         "kind": "SPECIAL",
         "effect": parse_effect(_s(f, 3)),
-        "conditional": {"gate": parse_gate(_s(f, 4)), "effect": parse_effect(_s(f, 5))}
-        if _s(f, 5) else None,
+        "conditional": {"gate": parse_gate(_s(f, 4)), "effect": parse_effect(_s(f, 5))} if _s(f, 5) else None,
         "duration_ms": _n(f, 6),
         "level": _n(f, 2),
     }

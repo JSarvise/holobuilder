@@ -21,6 +21,7 @@ Transport: the publisher's SSH key (the same one the tracker deploy uses), a tar
 `tar -x` on the VPS -- no rsync on Windows, no server code. Hashes are cached by
 (size, mtime) in dumps/.publish_hashes.json, so a re-publish rehashes only what changed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,7 +45,7 @@ import content_spec  # noqa: E402
 
 REMOTE = "/srv/holobuilder/content"
 HASH_CACHE = paths.DUMPS / ".publish_hashes.json"
-REMOTE_CONF = paths.STATE / "tracker_remote.json"   # {"ssh": "root@<vps>", ...}
+REMOTE_CONF = paths.STATE / "tracker_remote.json"  # {"ssh": "root@<vps>", ...}
 MANIFEST_VERSION = 1
 
 
@@ -117,6 +118,7 @@ def write_tar(stream, repo: Path, todo: dict[str, str], progress=None) -> None:
 
 # ------------------------------------------------------------------ remote side (ssh)
 
+
 def ssh_target() -> str:
     env = os.environ.get("HB_PUBLISH_SSH")
     if env:
@@ -125,17 +127,21 @@ def ssh_target() -> str:
 
 
 def ssh(target: str, command: str, *, data: bytes | None = None) -> bytes:
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", target, command], input=data,
-                       capture_output=True, check=False)
+    r = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", target, command], input=data, capture_output=True, check=False
+    )
     if r.returncode != 0:
-        raise RuntimeError(f"ssh {command!r} failed ({r.returncode}): "
-                           f"{r.stderr.decode(errors='replace').strip()}")
+        raise RuntimeError(
+            f"ssh {command!r} failed ({r.returncode}): {r.stderr.decode(errors='replace').strip()}"
+        )
     return r.stdout
 
 
 def remote_objects(target: str) -> set[str]:
-    out = ssh(target, f"mkdir -p {REMOTE}/objects {REMOTE}/manifests && "
-                      f"find {REMOTE}/objects -type f -printf '%f\\n'")
+    out = ssh(
+        target,
+        f"mkdir -p {REMOTE}/objects {REMOTE}/manifests && find {REMOTE}/objects -type f -printf '%f\\n'",
+    )
     return {line.strip() for line in out.decode().splitlines() if len(line.strip()) == 64}
 
 
@@ -148,12 +154,14 @@ def upload(target: str, repo: Path, todo: dict[str, str]) -> None:
         sent[0] += size
         if i == n or i % 200 == 0:
             rate = sent[0] / max(time.time() - t0, 1e-3) / 1e6
-            print(f"  {i}/{n} files  {sent[0] / 1e6:.0f}/{total / 1e6:.0f} MB  {rate:.1f} MB/s",
-                  flush=True)
+            print(f"  {i}/{n} files  {sent[0] / 1e6:.0f}/{total / 1e6:.0f} MB  {rate:.1f} MB/s", flush=True)
 
-    proc = subprocess.Popen(["ssh", "-o", "BatchMode=yes", target,
-                             f"cd {REMOTE} && tar -xf - && echo extracted"],
-                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(
+        ["ssh", "-o", "BatchMode=yes", target, f"cd {REMOTE} && tar -xf - && echo extracted"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
     try:
         write_tar(proc.stdin, repo, todo, progress)
     finally:
@@ -167,11 +175,15 @@ def swap_manifest(target: str, manifest: dict) -> None:
     body = json.dumps(manifest, separators=(",", ":"), sort_keys=True).encode()
     mid = manifest["id"]
     import signing  # noqa: PLC0415 -- the publisher's private key (state/, never in git)
+
     ssh(target, f"cd {REMOTE} && cat > .manifest.sig.tmp", data=signing.sign(body).encode())
-    ssh(target, f"cd {REMOTE} && cat > manifests/{mid}.json && "
-                f"cp manifests/{mid}.json .manifest.json.tmp && mv .manifest.sig.tmp manifest.sig && "
-                f"mv .manifest.json.tmp manifest.json",
-        data=body)
+    ssh(
+        target,
+        f"cd {REMOTE} && cat > manifests/{mid}.json && "
+        f"cp manifests/{mid}.json .manifest.json.tmp && mv .manifest.sig.tmp manifest.sig && "
+        f"mv .manifest.json.tmp manifest.json",
+        data=body,
+    )
 
 
 def write_client_version() -> None:
@@ -180,10 +192,14 @@ def write_client_version() -> None:
     sys.path.insert(0, str(paths.REFRESH_DIR))
     import account_snapshot  # noqa: PLC0415 -- recon-side, only on the publisher
     import atomic_io  # noqa: PLC0415
+
     v = account_snapshot.app_version()
     if v:
-        atomic_io.write_text(account_snapshot.CLIENT_VERSION_FILE,
-                             json.dumps({"version": v, "source": "publisher's install"}), "utf8")
+        atomic_io.write_text(
+            account_snapshot.CLIENT_VERSION_FILE,
+            json.dumps({"version": v, "source": "publisher's install"}),
+            "utf8",
+        )
         print(f"game client version {v}")
     else:
         print("game client version: install not readable, client_version.json left as it is")
@@ -214,8 +230,10 @@ def main(argv: list[str] | None = None) -> int:
         upload(target, REPO, todo)
         still = missing_objects(manifest, remote_objects(target))
         if still:
-            print(f"ERROR: {len(still)} objects still missing after the upload; manifest NOT "
-                  "switched", file=sys.stderr)
+            print(
+                f"ERROR: {len(still)} objects still missing after the upload; manifest NOT switched",
+                file=sys.stderr,
+            )
             return 1
     swap_manifest(target, manifest)
     print(f"published manifest {manifest['id']} ({len(manifest['files'])} files)")

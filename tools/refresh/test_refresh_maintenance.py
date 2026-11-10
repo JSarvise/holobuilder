@@ -1,4 +1,5 @@
 """refresh_all stops before any step when the game is in maintenance."""
+
 from __future__ import annotations
 
 import sys
@@ -7,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import account_snapshot  # noqa: E402
 import refresh_all  # noqa: E402
+
 from hbuilder.errors import MissingInput  # noqa: E402
 
 
@@ -26,11 +28,14 @@ def test_in_maintenance_reads_the_master_get_refusal(monkeypatch):
 
     def refused(host, ident):
         raise account_snapshot.GameMaintenance("Master/Get rejected: grpc-status 3 IN_MAINTENANCE")
+
     monkeypatch.setattr(account_snapshot, "fetch_master_version", refused)
     assert account_snapshot.in_maintenance() is True
     monkeypatch.setattr(account_snapshot, "fetch_master_version", lambda h, i: "v1")
     assert account_snapshot.in_maintenance() is False
+
     def no_credential(account):
         raise MissingInput("no credential")
+
     monkeypatch.setattr(account_snapshot, "load_credential", no_credential)
     assert account_snapshot.in_maintenance() is None

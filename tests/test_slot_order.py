@@ -36,7 +36,6 @@ import itertools
 import json
 
 import pytest
-
 from support.builders import (
     FIXTURE_CARDS_PATH,
     make_card,
@@ -44,6 +43,7 @@ from support.builders import (
     make_skill,
     make_team,
 )
+
 from hbuilder.domain.card import EffectTarget, Stats, card_from_record
 from hbuilder.domain.scoring import (
     SLOT_ORDER_RESOLVERS,
@@ -55,6 +55,7 @@ from hbuilder.domain.scoring import (
 from hbuilder.domain.scoring_config import SLOT_ORDER_RULES
 from hbuilder.domain.team import Team
 
+
 def read_cards(path) -> tuple:
     """`card_from_record` over a cards.json document, deliberately NOT through
     `domain.loader.load_cards`.
@@ -64,7 +65,7 @@ def read_cards(path) -> tuple:
     Coupling a slot-order assertion to a loader signature would make this file
     fail for a reason that has nothing to do with slot order. The records are
     the shipped, already-validated ones."""
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, encoding="utf-8") as handle:
         document = json.load(handle)
     return tuple(card_from_record(record) for record in document["cards"])
 
@@ -117,16 +118,16 @@ def test_first_count_matchers_in_slot_order_receive_a_count_limited_effect():
     d = make_card("D", type_="Cool")
     e = make_card("E", type_="Cool")
 
-    assert _ordered_target_card_ids(
-        cute(2), "SRC", (c, d, a, e, b), "apply_to_available"
-    ) == frozenset({"C", "A"})
-    assert _ordered_target_card_ids(
-        cute(2), "SRC", (b, e, a, d, c), "apply_to_available"
-    ) == frozenset({"B", "A"})
+    assert _ordered_target_card_ids(cute(2), "SRC", (c, d, a, e, b), "apply_to_available") == frozenset(
+        {"C", "A"}
+    )
+    assert _ordered_target_card_ids(cute(2), "SRC", (b, e, a, d, c), "apply_to_available") == frozenset(
+        {"B", "A"}
+    )
     # A non-matching member never receives it however early it sits.
-    assert _ordered_target_card_ids(
-        cute(2), "SRC", (d, e, a, b, c), "apply_to_available"
-    ) == frozenset({"A", "B"})
+    assert _ordered_target_card_ids(cute(2), "SRC", (d, e, a, b, c), "apply_to_available") == frozenset(
+        {"A", "B"}
+    )
 
 
 def test_target_count_zero_self_and_team_wide_are_order_invariant():
@@ -146,9 +147,9 @@ def test_target_count_zero_self_and_team_wide_are_order_invariant():
             "apply_to_available",
         ) == frozenset({"A", "B"})
         # Structurally team-wide.
-        assert _ordered_target_card_ids(
-            None, "SRC", ordering, "apply_to_available"
-        ) == frozenset({"A", "B", "C"})
+        assert _ordered_target_card_ids(None, "SRC", ordering, "apply_to_available") == frozenset(
+            {"A", "B", "C"}
+        )
         # Self is the source card, never resolved against the deck at all.
         assert _ordered_target_card_ids(
             EffectTarget(kind="self", value=None, count=None),
@@ -170,12 +171,8 @@ def test_under_supply_stays_the_configured_rule_on_the_ordered_path():
     a = make_card("A", type_="Cute")
     b = make_card("B", type_="Cool")
     ordering = (a, b)
-    assert _ordered_target_card_ids(
-        cute(3), "SRC", ordering, "apply_to_available"
-    ) == frozenset({"A"})
-    assert _ordered_target_card_ids(
-        cute(3), "SRC", ordering, "do_not_apply"
-    ) == frozenset()
+    assert _ordered_target_card_ids(cute(3), "SRC", ordering, "apply_to_available") == frozenset({"A"})
+    assert _ordered_target_card_ids(cute(3), "SRC", ordering, "do_not_apply") == frozenset()
 
 
 # ---------------------------------------------------------------------------
@@ -208,12 +205,8 @@ def test_a_cards_contribution_is_not_a_function_of_the_card_and_its_own_slot():
     b_early = (b, d, a, c, e)  # A at slot 3, B at slot 1
     assert b_late[2] is a and b_early[2] is a
 
-    assert _ordered_target_card_ids(
-        cute(1), "SRC", b_late, "apply_to_available"
-    ) == frozenset({"A"})
-    assert _ordered_target_card_ids(
-        cute(1), "SRC", b_early, "apply_to_available"
-    ) == frozenset({"B"})
+    assert _ordered_target_card_ids(cute(1), "SRC", b_late, "apply_to_available") == frozenset({"A"})
+    assert _ordered_target_card_ids(cute(1), "SRC", b_early, "apply_to_available") == frozenset({"B"})
 
 
 def test_two_count_limited_effects_each_rank_on_the_stat_they_raise():
@@ -247,9 +240,7 @@ def test_two_count_limited_effects_each_rank_on_the_stat_they_raise():
     a = make_card("A", type_="Cute", stats=Stats(300, 100, 100))
     b = make_card("B", type_="Cute", stats=Stats(100, 300, 100))
     c = make_card("C", type_="Cute", stats=Stats(100, 100, 100))
-    d = make_card(
-        "D", type_="Cool", passive=stat_passive("performance", cute(1))
-    )
+    d = make_card("D", type_="Cool", passive=stat_passive("performance", cute(1)))
     e = make_card("E", type_="Cool", passive=stat_passive("technique", cute(1)))
     leader = make_card("L", type_="Cool")
     team = make_team([leader, a, b, c, d, e])
@@ -279,9 +270,7 @@ def test_the_attribution_names_the_rule_and_each_effects_recipients():
     default = score_with_breakdown(team, cfg)
     assert default.member_order is None
     assert default.slot_order_rule == "free"
-    assert {
-        row.target_card_ids for row in default.contributions if row.pool == "stat"
-    } == {("A",), ("B",)}
+    assert {row.target_card_ids for row in default.contributions if row.pool == "stat"} == {("A",), ("B",)}
 
 
 # ---------------------------------------------------------------------------
@@ -405,9 +394,7 @@ def test_score_card_set_reproduces_score_fast_bit_identically_when_order_binds()
         make_card(
             "M",
             type_="Cool",
-            costume_skill=make_skill(
-                "COSTUME", family="stat_up", effect_type="all_stats", magnitude=10.0
-            ),
+            costume_skill=make_skill("COSTUME", family="stat_up", effect_type="all_stats", magnitude=10.0),
         ),
         a,
     )
@@ -418,9 +405,7 @@ def test_score_card_set_reproduces_score_fast_bit_identically_when_order_binds()
         scoped = dataclasses.replace(cfg, slot_order_rule=rule)
         batch = score_card_set(members, leaders, scoped)
         for leader, leader_score in zip(leaders, batch):
-            assert leader_score.total_score == score_fast(
-                Team(leader=leader, members=members), scoped
-            )
+            assert leader_score.total_score == score_fast(Team(leader=leader, members=members), scoped)
 
     # The count genuinely binds under the shipped rule, not short-circuiting: each
     # count-1 effect reaches exactly one Cute, the one highest in the stat it
@@ -479,7 +464,9 @@ def _tie_deck():
         "card-aaa", type_="Cute", stats=Stats(performance=300, technique=250, sense=0)
     )
     emitter = make_card(  # carries the buff; too low a performance to be a recipient
-        "card-emit", type_="Cute", stats=Stats(performance=10, technique=10, sense=10),
+        "card-emit",
+        type_="Cute",
+        stats=Stats(performance=10, technique=10, sense=10),
         passive=buff,
     )
     f1 = make_card("card-f1", type_="Happy", stats=Stats(performance=10, technique=10, sense=10))
@@ -533,9 +520,7 @@ def test_ranking_tie_break_slot_order_moves_with_the_deck_arrangement():
     slots swaps which one the buff lands on. With card-aaa placed EARLIER than
     card-zzz, the buff is now named on card-aaa. Same tied deck as `_tie_deck`
     (both performance 300), so the sum stays 1050.0."""
-    buff = make_skill(
-        "PASSIVE", family="stat_up", effect_type="performance", magnitude=20.0, target=cute(1)
-    )
+    buff = make_skill("PASSIVE", family="stat_up", effect_type="performance", magnitude=20.0, target=cute(1))
     zzz = make_card("card-zzz", type_="Cute", stats=Stats(performance=300, technique=50, sense=0))
     aaa = make_card("card-aaa", type_="Cute", stats=Stats(performance=300, technique=250, sense=0))
     emitter = make_card(
@@ -562,9 +547,7 @@ def test_the_recipient_is_the_highest_buffed_stat_not_the_highest_total():
     200). The server pays card-aaa (ranking by the buffed stat is bit-exact on
     every measured row, ranking by total on about three quarters). No tie, so
     slot order and card_id are both irrelevant."""
-    buff = make_skill(
-        "PASSIVE", family="stat_up", effect_type="performance", magnitude=20.0, target=cute(1)
-    )
+    buff = make_skill("PASSIVE", family="stat_up", effect_type="performance", magnitude=20.0, target=cute(1))
     # zzz: total 500 (unique max) but performance 200; aaa: total 350, performance 300.
     top = make_card("card-zzz", type_="Cute", stats=Stats(performance=200, technique=300, sense=0))
     mid = make_card("card-aaa", type_="Cute", stats=Stats(performance=300, technique=50, sense=0))

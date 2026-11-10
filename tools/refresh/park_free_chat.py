@@ -27,14 +27,16 @@ current area. So the refresh merges every response into a log (`dumps/park_free_
 and the page reads the log: a chat is READ once marks were seen, PENDING when it was last seen
 without marks, and UNSEEN when no response has carried it yet.
 """
+
 from __future__ import annotations
 
 import datetime
 import json
 import os
 import re
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 LOG_VERSION = 1
 # The log keeps the last observations (when, which area, how many sites) for the page's
@@ -49,12 +51,14 @@ _INTERIOR = re.compile(r"^area-(a\d+)-(\w+)$")
 
 # --------------------------------------------------------------------------- catalogue
 
+
 def _first_line(lines: list[Mapping]) -> Mapping | None:
     return min(lines, key=lambda d: d.get("number", 0)) if lines else None
 
 
-def interactive_rows(talk_free: Iterable[Mapping], mappings: Mapping[str, Mapping],
-                     talks: Mapping[str, list[Mapping]]) -> list[Mapping]:
+def interactive_rows(
+    talk_free: Iterable[Mapping], mappings: Mapping[str, Mapping], talks: Mapping[str, list[Mapping]]
+) -> list[Mapping]:
     """The ParkTalkFree rows the client lets the player read: the mapping has a talk group and
     the talk's first line is not a balloon."""
     out = []
@@ -95,9 +99,14 @@ def quest_label(quest_id: str) -> str:
     return f"Main quest {int(m.group(1))}-{int(m.group(2))}" if m else quest_id
 
 
-def condition_text(rows: list[Mapping], *, quest_titles: Mapping[str, str],
-                   facility_names: Mapping[str, str],
-                   all_rows: Mapping[str, list[Mapping]], depth: int = 0) -> str:
+def condition_text(
+    rows: list[Mapping],
+    *,
+    quest_titles: Mapping[str, str],
+    facility_names: Mapping[str, str],
+    all_rows: Mapping[str, list[Mapping]],
+    depth: int = 0,
+) -> str:
     """One condition group in words, in the game's terms (quest titles, facility names)."""
     parts = []
     for r in sorted(rows, key=lambda r: r.get("number", 0)):
@@ -113,9 +122,13 @@ def condition_text(rows: list[Mapping], *, quest_titles: Mapping[str, str],
         elif kind == "PARK_TIME_PERIOD":
             parts.append(f"{res.capitalize()} only")
         elif kind == "NEGATIVE_SET" and depth < 3 and res in all_rows:
-            inner = condition_text(all_rows[res], quest_titles=quest_titles,
-                                   facility_names=facility_names, all_rows=all_rows,
-                                   depth=depth + 1)
+            inner = condition_text(
+                all_rows[res],
+                quest_titles=quest_titles,
+                facility_names=facility_names,
+                all_rows=all_rows,
+                depth=depth + 1,
+            )
             parts.append("until " + inner.replace(" cleared", "", 1))
         else:
             parts.append(kind.replace("_", " ").lower() + (f" {res}" if res else ""))
@@ -125,6 +138,7 @@ def condition_text(rows: list[Mapping], *, quest_titles: Mapping[str, str],
 def _render(tables: Iterable[str]) -> dict[str, list[dict]]:
     """Named master rows ({table: [row data]}) from the local master (master_json)."""
     import master_json  # noqa: PLC0415  (needs the master; refresh side only)
+
     renderer = master_json.Renderer(master_json.load_schema())
     return {t: [r["data"] for r in master_json.render(t, renderer)] for t in tables}
 
@@ -140,10 +154,22 @@ def built_appearance(rows: Iterable[Mapping]) -> dict[str, Mapping]:
     return out
 
 
-TABLES = ("ParkTalkFreeGrouping", "ParkTalkFree", "ParkTargetMapping", "ParkTalk",
-          "ParkNpcGroup", "ParkNpc", "SdCostume", "ParkPosition", "Facility",
-          "LangFacility_Eng", "FacilityAppearance", "Condition", "LangParkQuest_Eng",
-          "Character")
+TABLES = (
+    "ParkTalkFreeGrouping",
+    "ParkTalkFree",
+    "ParkTargetMapping",
+    "ParkTalk",
+    "ParkNpcGroup",
+    "ParkNpc",
+    "SdCostume",
+    "ParkPosition",
+    "Facility",
+    "LangFacility_Eng",
+    "FacilityAppearance",
+    "Condition",
+    "LangParkQuest_Eng",
+    "Character",
+)
 
 
 def build_catalogue(m: Mapping[str, list[dict]] | None = None) -> dict[str, Any]:
@@ -167,10 +193,12 @@ def build_catalogue(m: Mapping[str, list[dict]] | None = None) -> dict[str, Any]
     positions = {p["id"]: p for p in m["ParkPosition"]}
     lang_facility = {r["id"]: r.get("text") for r in m["LangFacility_Eng"]}
     facilities = {f["id"]: f for f in m["Facility"]}
-    facility_names = {fid: lang_facility.get(f.get("nameLangId")) or fid
-                      for fid, f in facilities.items()}
-    quest_titles = {r["id"][3:-6]: r.get("text") for r in m["LangParkQuest_Eng"]
-                    if r["id"].startswith("la-") and r["id"].endswith("-title")}
+    facility_names = {fid: lang_facility.get(f.get("nameLangId")) or fid for fid, f in facilities.items()}
+    quest_titles = {
+        r["id"][3:-6]: r.get("text")
+        for r in m["LangParkQuest_Eng"]
+        if r["id"].startswith("la-") and r["id"].endswith("-title")
+    }
     cond_rows: dict[str, list[dict]] = {}
     for c in m["Condition"]:
         cond_rows.setdefault(c["groupId"], []).append(c)
@@ -191,9 +219,15 @@ def build_catalogue(m: Mapping[str, list[dict]] | None = None) -> dict[str, Any]
         conds = [c for c in (grouping.get("conditionGroupId"), f.get("conditionGroupId")) if c]
         for c in conds:
             if c not in conditions:
-                conditions[c] = condition_text(cond_rows.get(c, []), quest_titles=quest_titles,
-                                               facility_names=facility_names,
-                                               all_rows=cond_rows) or c
+                conditions[c] = (
+                    condition_text(
+                        cond_rows.get(c, []),
+                        quest_titles=quest_titles,
+                        facility_names=facility_names,
+                        all_rows=cond_rows,
+                    )
+                    or c
+                )
         chats[f["id"]] = {
             "site": fid,
             "area": pos.get("areaId"),
@@ -211,8 +245,13 @@ def build_catalogue(m: Mapping[str, list[dict]] | None = None) -> dict[str, Any]
                 "map_image": app.get("mapImageAssetId"),
                 "icon": (app.get("iconAssetIds") or [None])[0],
             }
-    names = {c["id"]: {"name": c.get("nameEng") or c["id"], "short": c.get("shortNameEng") or c.get("nameEng") or c["id"]}
-             for c in m["Character"]}
+    names = {
+        c["id"]: {
+            "name": c.get("nameEng") or c["id"],
+            "short": c.get("shortNameEng") or c.get("nameEng") or c["id"],
+        }
+        for c in m["Character"]
+    }
     used = {c for ch in chats.values() for c in ch["cast"]}
     return {
         "chats": dict(sorted(chats.items())),
@@ -224,6 +263,7 @@ def build_catalogue(m: Mapping[str, list[dict]] | None = None) -> dict[str, Any]
 
 
 # --------------------------------------------------------------------------- the account
+
 
 def parse_userdata(fields_iter: Iterable[tuple[int, int, Any]], fields_fn) -> dict[str, Any]:
     """{"picks": [{area, grouping}], "details": [{grouping, talk_free, read}]} from UserData."""
@@ -249,16 +289,17 @@ def parse_userdata(fields_iter: Iterable[tuple[int, int, Any]], fields_fn) -> di
 
 
 # Field numbers in rpc.api.common.UserData (the client's own .proto).
-F_PICK = 103534744      # user_park_talk_free_pick_result_list
-F_DETAIL = 498625501    # user_park_talk_free_pick_result_detail_list
+F_PICK = 103534744  # user_park_talk_free_pick_result_list
+F_DETAIL = 498625501  # user_park_talk_free_pick_result_detail_list
 
 
 def _text(b):
     return b.decode("utf-8", "replace") if isinstance(b, (bytes, bytearray)) else b
 
 
-def merge_log(log: Mapping | None, free_chat: Mapping, at: str,
-              keep: set[str] | None = None) -> dict[str, Any]:
+def merge_log(
+    log: Mapping | None, free_chat: Mapping, at: str, keep: set[str] | None = None
+) -> dict[str, Any]:
     """The log with one more User/Get folded in. Never forgets: read marks only grow, a chat
     once read stays read. `keep` (the catalogue's chat ids) drops the background rows; without
     it every row that carries marks or is new is kept.
@@ -268,8 +309,11 @@ def merge_log(log: Mapping | None, free_chat: Mapping, at: str,
     out = {"version": LOG_VERSION, "chats": {}, "observations": []}
     if log:
         # rows kept before a catalogue existed: background rows (never read) go once it does
-        out["chats"] = {k: dict(v) for k, v in (log.get("chats") or {}).items()
-                        if keep is None or k in keep or v.get("read")}
+        out["chats"] = {
+            k: dict(v)
+            for k, v in (log.get("chats") or {}).items()
+            if keep is None or k in keep or v.get("read")
+        }
         out["observations"] = list(log.get("observations") or [])
     chats = out["chats"]
     kept = 0
@@ -286,8 +330,9 @@ def merge_log(log: Mapping | None, free_chat: Mapping, at: str,
         if _ts(at) > _ts(c.get("seen")):
             c["seen"] = at
     areas = sorted({p.get("area") for p in free_chat.get("picks") or [] if p.get("area")})
-    out["observations"].append({"at": at, "areas": areas,
-                                "sites": len(free_chat.get("picks") or []), "chats": kept})
+    out["observations"].append(
+        {"at": at, "areas": areas, "sites": len(free_chat.get("picks") or []), "chats": kept}
+    )
     out["observations"] = sorted(out["observations"], key=lambda o: _ts(o["at"]))[-MAX_OBSERVATIONS:]
     out["chats"] = dict(sorted(chats.items()))
     return out

@@ -1,5 +1,6 @@
 """SHA256SUMS + SHA256SUMS.sig for the installer release: a
 download checks out only when the list is signed by the release key AND the file matches it."""
+
 from __future__ import annotations
 
 import sys

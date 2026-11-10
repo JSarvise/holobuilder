@@ -10,6 +10,7 @@ own asset cache (catalogue, icons, UI sprites) follow the installed client, not 
     python tests/golden/refresh_offline.py run  --frozen DIR --out DIR/refresh_x.json
     python tests/golden/refresh_offline.py diff A.json B.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,18 +26,47 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sandbox  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
-STEPS = ("event_bonus", "cards", "level_curve", "caps", "import", "add_cards", "event_history",
-         "songs", "chart_lib", "node_master", "skilltree", "board", "board_export")
+STEPS = (
+    "event_bonus",
+    "cards",
+    "level_curve",
+    "caps",
+    "import",
+    "add_cards",
+    "event_history",
+    "songs",
+    "chart_lib",
+    "node_master",
+    "skilltree",
+    "board",
+    "board_export",
+)
 HASHED = ("data", "state", "tools/recon/proxy/dumps")
 # What those steps write. They are deleted first, so each one has to be rebuilt (a step that
 # stopped writing would otherwise leave the frozen copy in place and still match). Additive
 # files (event_history.json) and the append-only catalogue stay: their steps read them.
-DERIVED = tuple("tools/recon/proxy/dumps/" + n for n in (
-    "marathon_bonus.json", "cards_enriched.json", "card_level_curve.json", "card_caps.json",
-    "cards_review.json", "cards_import_draft.json", "skill_ladder.json", "songs.json",
-    "lattice_charts.json", "music_coef.json", "charts.json", "charts_all.json",
-    "master_SkillTreeNode.json", "master_SkillTreeEffect.json", "skilltree.json", "board.json",
-    "board_export.json"))
+DERIVED = tuple(
+    "tools/recon/proxy/dumps/" + n
+    for n in (
+        "marathon_bonus.json",
+        "cards_enriched.json",
+        "card_level_curve.json",
+        "card_caps.json",
+        "cards_review.json",
+        "cards_import_draft.json",
+        "skill_ladder.json",
+        "songs.json",
+        "lattice_charts.json",
+        "music_coef.json",
+        "charts.json",
+        "charts_all.json",
+        "master_SkillTreeNode.json",
+        "master_SkillTreeEffect.json",
+        "skilltree.json",
+        "board.json",
+        "board_export.json",
+    )
+)
 
 
 def _sha(path: Path) -> str:
@@ -66,9 +96,21 @@ def run(code: Path, frozen: Path, out: Path) -> dict:
         env = sandbox.env(box, frozen, audit_log=audit, workers=1)
         t0 = time.perf_counter()
         proc = subprocess.run(
-            [sandbox.python_exe(), "-u", str(box / "tools/refresh/refresh_all.py"), "--offline",
-             "--only", ",".join(STEPS)],
-            cwd=box, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            [
+                sandbox.python_exe(),
+                "-u",
+                str(box / "tools/refresh/refresh_all.py"),
+                "--offline",
+                "--only",
+                ",".join(STEPS),
+            ],
+            cwd=box,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         seconds = round(time.perf_counter() - t0, 1)
         out.with_suffix(".log").write_text(proc.stdout + "\n--- stderr ---\n" + proc.stderr, encoding="utf-8")
         after = hashes(box)
@@ -76,8 +118,14 @@ def run(code: Path, frozen: Path, out: Path) -> dict:
         sandbox.remove(box)
     changed = sorted(k for k in after if before.get(k) != after[k])
     not_rebuilt = sorted(rel for rel in DERIVED if rel not in after)
-    doc = {"returncode": proc.returncode, "seconds": seconds, "steps": list(STEPS),
-           "changed": changed, "not_rebuilt": not_rebuilt, "hashes": after}
+    doc = {
+        "returncode": proc.returncode,
+        "seconds": seconds,
+        "steps": list(STEPS),
+        "changed": changed,
+        "not_rebuilt": not_rebuilt,
+        "hashes": after,
+    }
     out.write_text(json.dumps(doc, indent=1, sort_keys=True), encoding="utf-8")
     return doc
 
@@ -113,10 +161,12 @@ def main(argv: list[str] | None = None) -> int:
         print("identical" if not bad else "\n".join(bad))
         return 1 if bad else 0
     doc = run(args.code, args.frozen, args.out)
-    print(f"refresh --offline: rc={doc['returncode']} in {doc['seconds']}s, "
-          f"{len(DERIVED) - len(doc['not_rebuilt'])}/{len(DERIVED)} outputs rebuilt, "
-          f"{len(doc['changed'])} differ from the frozen copy"
-          + (f"; NOT REBUILT: {doc['not_rebuilt']}" if doc["not_rebuilt"] else ""))
+    print(
+        f"refresh --offline: rc={doc['returncode']} in {doc['seconds']}s, "
+        f"{len(DERIVED) - len(doc['not_rebuilt'])}/{len(DERIVED)} outputs rebuilt, "
+        f"{len(doc['changed'])} differ from the frozen copy"
+        + (f"; NOT REBUILT: {doc['not_rebuilt']}" if doc["not_rebuilt"] else "")
+    )
     if args.against:
         bad = diff(json.loads(args.against.read_text("utf-8")), doc)
         print("REFRESH GOLDEN: identical" if not bad else "REFRESH GOLDEN: DIFFERS\n" + "\n".join(bad))

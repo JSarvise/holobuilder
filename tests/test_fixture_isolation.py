@@ -51,8 +51,9 @@ def _iter_test_files() -> list[Path]:
     # tests/golden/ snapshots the real data/ on purpose (freeze.py): it is the one place
     # that must read it
     golden = TESTS_ROOT / "golden"
-    return sorted(p for p in TESTS_ROOT.rglob("*.py")
-                  if p.resolve() != _SELF_PATH and golden not in p.parents)
+    return sorted(
+        p for p in TESTS_ROOT.rglob("*.py") if p.resolve() != _SELF_PATH and golden not in p.parents
+    )
 
 
 def _parse(path: Path) -> ast.Module:

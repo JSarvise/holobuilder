@@ -18,6 +18,7 @@ Config: state/server_api.json {"url", "token"} (gitignored, written by the app's
 The token never reaches the browser: the page asks the local server, the local server asks
 the VPS.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -27,21 +28,21 @@ import os
 import threading
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable
 
 from hbuilder import paths
 
 REPO = paths.REPO
 CONF = paths.STATE / "server_api.json"
 STORE = paths.DUMPS / ".content"
-PUBLISHER_MARK = f"{paths.DUMPS_REL}/.publish_hashes.json"   # publish.py's hash cache
-DEFAULT_CAP = 0                     # unlimited
+PUBLISHER_MARK = f"{paths.DUMPS_REL}/.publish_hashes.json"  # publish.py's hash cache
+DEFAULT_CAP = 0  # unlimited
 TIMEOUT_S = 30
 SYNC_THREADS = 8
 
-Fetch = Callable[[str], bytes]   # route under /content/ -> body
+Fetch = Callable[[str], bytes]  # route under /content/ -> body
 
 
 def _atomic_write(path: Path, body: bytes) -> None:
@@ -135,26 +136,36 @@ def http_fetch(conf: dict) -> Fetch:
                 local.conn = None
                 if attempt == 2:
                     raise
-                continue                           # a dropped keep-alive: reconnect once
+                continue  # a dropped keep-alive: reconnect once
             if r.status in (401, 403):
-                why = {401: "this PC's access key is not known to the server",
-                       403: "access is waiting for an admin's approval, or was withdrawn"}[r.status]
+                why = {
+                    401: "this PC's access key is not known to the server",
+                    403: "access is waiting for an admin's approval, or was withdrawn",
+                }[r.status]
                 raise OSError(f"holobuilder server: {why}")
             if r.status != 200:
                 raise OSError(f"GET {route}: HTTP {r.status}")
             return body
         raise AssertionError("unreachable")
+
     return get
 
 
 class ContentStore:
-    def __init__(self, repo: Path = REPO, *, fetch: Fetch | None = None,
-                 store: Path | None = None, cap: int | None = None, verify: bool = True) -> None:
+    def __init__(
+        self,
+        repo: Path = REPO,
+        *,
+        fetch: Fetch | None = None,
+        store: Path | None = None,
+        cap: int | None = None,
+        verify: bool = True,
+    ) -> None:
         self.verify = verify
         self.repo = repo
         self.store = store or (repo / STORE.relative_to(REPO))
         if cap is None and os.environ.get("HB_CONTENT_CACHE_MB", "").strip().isdigit():
-            cap = int(os.environ["HB_CONTENT_CACHE_MB"]) * 1024 * 1024    # the app's Settings
+            cap = int(os.environ["HB_CONTENT_CACHE_MB"]) * 1024 * 1024  # the app's Settings
         self.cap = DEFAULT_CAP if cap is None else cap
         if fetch is None and CONF.is_file() and repo == REPO:
             fetch = http_fetch(json.loads(CONF.read_text("utf8")))
@@ -188,13 +199,13 @@ class ContentStore:
         if (self.repo / PUBLISHER_MARK).is_file():
             # this checkout is where the content comes FROM: syncing would only overwrite
             # files that changed since the last publish with their older published copy
-            raise RuntimeError("this PC publishes the content (tools/app/publish.py); "
-                               "it never syncs it back")
+            raise RuntimeError("this PC publishes the content (tools/app/publish.py); it never syncs it back")
         raw = self.fetch("manifest.json")
         if self.verify:
             # the server is public and not trusted: only the publisher's signature makes the
             # manifest (and through its sha256s, every object) acceptable (signing.py)
             import signing  # noqa: PLC0415
+
             signing.verify(raw, self.fetch("manifest.sig").decode())
         manifest = json.loads(raw)
         # never back: a manifest older than the one this PC holds (its id is the publish time,
@@ -216,14 +227,14 @@ class ContentStore:
         def one(rel: str, f: dict) -> str:
             _atomic_write(self.repo / rel, self._object(f["sha256"]))
             return rel
+
         with ThreadPoolExecutor(SYNC_THREADS) as pool:
             futures = {pool.submit(one, rel, f): f for rel, f in todo}
             for i, fut in enumerate(as_completed(futures)):
-                rel = fut.result()                 # a failed file fails the whole sync
+                rel = fut.result()  # a failed file fails the whole sync
                 done += futures[fut]["size"]
                 if progress:
-                    progress({"file": rel, "i": i + 1, "n": len(todo), "bytes": done,
-                              "total": total})
+                    progress({"file": rel, "i": i + 1, "n": len(todo), "bytes": done, "total": total})
         _atomic_write(self.manifest_path, json.dumps(manifest).encode())
         self._manifest = manifest
         return {"manifest": manifest.get("id"), "files": len(todo), "bytes": total}
@@ -240,20 +251,20 @@ class ContentStore:
         sha = f["sha256"]
         cached = self.store / "objects" / sha[:2] / sha
         if cached.is_file():
-            os.utime(cached)                       # most recently used
+            os.utime(cached)  # most recently used
             return cached
         with self._lock:
             ev = self._inflight.get(sha)
             mine = ev is None
             if mine:
                 ev = self._inflight[sha] = threading.Event()
-        if not mine:                               # another request is fetching it
+        if not mine:  # another request is fetching it
             ev.wait(TIMEOUT_S)
             return cached if cached.is_file() else self.lazy_uncached(sha)
         try:
             body = self._object(sha)
             _atomic_write(cached, body)
-            if self.cap > 0:                       # 0 = unlimited: everything seen stays
+            if self.cap > 0:  # 0 = unlimited: everything seen stays
                 self._evict(keep=cached)
             return cached
         except Exception:
@@ -263,18 +274,23 @@ class ContentStore:
                 self._inflight.pop(sha, None)
             ev.set()
 
-    def prefetch(self, prefixes: tuple[str, ...], *, threads: int = 4,
-                 stop: threading.Event | None = None) -> dict:
+    def prefetch(
+        self, prefixes: tuple[str, ...], *, threads: int = 4, stop: threading.Event | None = None
+    ) -> dict:
         """Bring every 'lazy' object under `prefixes` into the cache, in the background, so a
         page never waits for it: the card art Collection shows, so every card's art is there
         when the page opens. Skips what is local or cached; only with an
         unlimited cache, since a capped one would evict what it just fetched."""
         if self.fetch is None or self.cap > 0:
             return {"fetched": 0, "skipped": "no server" if self.fetch is None else "capped cache"}
-        todo = [rel for rel, f in sorted((self.manifest().get("files") or {}).items())
-                if f["kind"] == "lazy" and rel.startswith(prefixes)
-                and not (self.repo / rel).is_file()
-                and not (self.store / "objects" / f["sha256"][:2] / f["sha256"]).is_file()]
+        todo = [
+            rel
+            for rel, f in sorted((self.manifest().get("files") or {}).items())
+            if f["kind"] == "lazy"
+            and rel.startswith(prefixes)
+            and not (self.repo / rel).is_file()
+            and not (self.store / "objects" / f["sha256"][:2] / f["sha256"]).is_file()
+        ]
         done = 0
 
         def one(rel: str) -> None:
@@ -283,6 +299,7 @@ class ContentStore:
                 return
             if isinstance(self.lazy(rel), Path):
                 done += 1
+
         with ThreadPoolExecutor(threads) as pool:
             list(pool.map(one, todo))
         return {"fetched": done, "of": len(todo)}

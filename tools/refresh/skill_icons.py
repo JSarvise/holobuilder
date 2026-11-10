@@ -23,15 +23,21 @@ via octo_crypto (a name-derived XOR, no key).
         -> dumps/skill_icons/<asset name>.png
         -> dumps/skill_icons/index.json     {effectType or skill id: asset name}
 """
-import io, json, os, sys, warnings
+
+import io
+import json
+import os
+import sys
+import warnings
 
 warnings.filterwarnings("ignore")
 
-from pathlib import Path
+from pathlib import Path  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import MissingInput  # noqa: E402
+
 HERE = str(paths.REFRESH_DIR)
 sys.path.insert(0, HERE)
 
@@ -41,8 +47,11 @@ OUT = os.path.join(DUMPS, "skill_icons")
 # octo_catalog.py writes, the shipped one is the older name. Prefer
 # whichever is on disk.
 CATALOG = next(
-    (p for p in (os.path.join(DUMPS, "octocacheevai.dec"),
-                 os.path.join(DUMPS, "octocacheevai_prod.dec")) if os.path.exists(p)),
+    (
+        p
+        for p in (os.path.join(DUMPS, "octocacheevai.dec"), os.path.join(DUMPS, "octocacheevai_prod.dec"))
+        if os.path.exists(p)
+    ),
     os.path.join(DUMPS, "octocacheevai.dec"),
 )
 # This module only runs as a script: a missing install ends it with the message.
@@ -63,6 +72,7 @@ def wanted_names():
     """Every icon name the skill tree can ask for, from the master table."""
     sys.path.insert(0, HERE)
     import master_cache as mc
+
     names, index = set(), {}
     for r in mc.rows("SkillTreeEffect"):
         d = r["data"]
@@ -75,6 +85,7 @@ def wanted_names():
         core = eid.split("skill_tree_effect-", 1)[-1]
         core = core.rsplit("-", 1)[0] if "-" in core else core
         import re
+
         core = re.sub(r"-\d+-.*$", "", eid.replace("skill_tree_effect-", ""))
         suffix = d.get(13, [None])[0] or ""
         n = "img_skill_icon_tree_" + core.lower().replace("_", "") + str(suffix)
@@ -98,12 +109,14 @@ def catalog_md5(names):
     """
     sys.path.insert(0, HERE)
     from card_images import _catalog_by_md5
+
     return {m: n for m, n in _catalog_by_md5().items() if n in names}
 
 
 def main():
     cache = sys.argv[sys.argv.index("--cache-dir") + 1] if "--cache-dir" in sys.argv else CACHE_DIR
     import UnityPy
+
     UnityPy.config.FALLBACK_UNITY_VERSION = "6000.3.15f1"
     import octo_crypto
 
@@ -114,6 +127,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
 
     import hashlib
+
     by_md5 = catalog_md5(names)
     print(f"{len(by_md5)} of them found in the catalogue by md5")
 
@@ -135,7 +149,7 @@ def main():
     # (the green branch is gated behind player level 30, so its icons are absent from the
     # cache until then). Same handling as a cached file -- named, so obfuscation is no issue.
     fetched = os.path.join(DUMPS, "octo_fetched")
-    for root, _, files in ([(fetched, [], os.listdir(fetched))] if os.path.isdir(fetched) else []):
+    for root, _, files in [(fetched, [], os.listdir(fetched))] if os.path.isdir(fetched) else []:
         for fn in files:
             if not fn.endswith(".bundle"):
                 continue
@@ -193,8 +207,11 @@ def main():
 
     have = sorted(n for n in names if n in found)
     missing = sorted(names - set(found))
-    json.dump({"index": index, "have": have, "missing": missing},
-              open(os.path.join(OUT, "index.json"), "w", encoding="utf-8"), indent=1)
+    json.dump(
+        {"index": index, "have": have, "missing": missing},
+        open(os.path.join(OUT, "index.json"), "w", encoding="utf-8"),
+        indent=1,
+    )
     print(f"{saved} PNG -> {OUT}")
     print(f"wanted {len(names)}: {len(have)} in the cache, {len(missing)} not cached")
     extra = sorted(set(found) - names)

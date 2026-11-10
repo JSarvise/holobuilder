@@ -5,6 +5,7 @@ and SKIPS (the endpoint's own 503) when the gitignored skilltree/master dumps
 are absent -- the same first-class-absence contract the rerank route test has.
 Writes nothing (tools/web/test_no_writes.py walks this file too).
 """
+
 from __future__ import annotations
 
 import json
@@ -13,21 +14,20 @@ import urllib.request
 
 import pytest
 
-
 _MEMBERS = [
-    "card-04001-5-uniq-0042-00", "card-00032-5-uniq-0026-00",
-    "card-04003-5-uniq-0044-00", "card-00007-5-uniq-0008-00",
+    "card-04001-5-uniq-0042-00",
+    "card-00032-5-uniq-0026-00",
+    "card-04003-5-uniq-0044-00",
+    "card-00007-5-uniq-0008-00",
     "card-00006-5-uniq-0007-00",
 ]
-_TEAM_A = ["card-04001-5-uniq-0042-00", *_MEMBERS]   # Calliope PDW leads (also member 1)
-_TEAM_B = ["card-04001-5-uniq-0071-00", *_MEMBERS]   # the other Calliope leads
+_TEAM_A = ["card-04001-5-uniq-0042-00", *_MEMBERS]  # Calliope PDW leads (also member 1)
+_TEAM_B = ["card-04001-5-uniq-0071-00", *_MEMBERS]  # the other Calliope leads
 
 
 def _post(url: str, obj: dict) -> tuple[int, dict]:
     data = json.dumps(obj).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
-    )
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8"))
@@ -36,8 +36,7 @@ def _post(url: str, obj: dict) -> tuple[int, dict]:
 
 
 def _compare(web_base, teams, **kw) -> tuple[int, dict]:
-    body = {"teams": teams, "basis": "maxed", "board": "off",
-            "platform": "mobile", "uptime_model": "finite"}
+    body = {"teams": teams, "basis": "maxed", "board": "off", "platform": "mobile", "uptime_model": "finite"}
     body.update(kw)
     return _post(web_base + "/api/compare", body)
 
@@ -62,8 +61,12 @@ def test_400_on_missing_card(web_base):
 
 def test_400_on_duplicate_holomem(web_base):
     # two Calliope cards as members: the same holomem twice is what Team refuses
-    dup = ["card-00007-5-uniq-0008-00", "card-04001-5-uniq-0042-00",
-           "card-04001-5-uniq-0071-00", *_MEMBERS[1:4]]
+    dup = [
+        "card-00007-5-uniq-0008-00",
+        "card-04001-5-uniq-0042-00",
+        "card-04001-5-uniq-0071-00",
+        *_MEMBERS[1:4],
+    ]
     status, doc = _compare(web_base, [_TEAM_A, dup])
     assert status == 400 and "invalid roster" in doc["error"]
 
@@ -89,8 +92,7 @@ def test_identical_teams_have_zero_difference(web_base):
 def test_whatif_level_changes_the_score(web_base):
     base_status, base = _compare(web_base, [_TEAM_A, _TEAM_B], basis="account")
     assert base_status == 200, base
-    lvl_status, low = _compare(web_base, [_TEAM_A, _TEAM_B], basis="account",
-                               assume_level=20, assume_bloom=0)
+    lvl_status, low = _compare(web_base, [_TEAM_A, _TEAM_B], basis="account", assume_level=20, assume_bloom=0)
     assert lvl_status == 200, low
     assert low["assumptions"]["assume_level"] == 20
     assert low["teams"][0]["score"]["headline"] < base["teams"][0]["score"]["headline"]
@@ -98,8 +100,7 @@ def test_whatif_level_changes_the_score(web_base):
 
 
 def test_per_card_override_changes_only_that_card(web_base):
-    over = {"cards": _TEAM_A, "overrides": [None, None, {"level": 20, "bloom": 0},
-                                              None, None, None]}
+    over = {"cards": _TEAM_A, "overrides": [None, None, {"level": 20, "bloom": 0}, None, None, None]}
     status, doc = _compare(web_base, [_TEAM_A, over])
     assert status == 200, doc
     a, b = doc["teams"]
@@ -127,8 +128,7 @@ def test_per_card_override_changes_only_that_card(web_base):
 def test_board_off_vs_develop_differ(web_base):
     off_status, off = _compare(web_base, [_TEAM_A, _TEAM_B], song="m0334")
     assert off_status == 200, off
-    dev_status, dev = _compare(web_base, [_TEAM_A, _TEAM_B], song="m0334",
-                               board="develop", budget=453)
+    dev_status, dev = _compare(web_base, [_TEAM_A, _TEAM_B], song="m0334", board="develop", budget=453)
     _skip_if_dumps_missing(dev_status, dev)
     assert dev_status == 200, dev
     assert dev["mode"] == off["mode"] == "song"

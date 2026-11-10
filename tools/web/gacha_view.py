@@ -32,6 +32,7 @@ Also:
 * **`curve`** (observed vs expected ★5, draw group by draw group, with the binomial variance)
   and **`gaps`** (pulls between consecutive ★5 groups) for the page's charts.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -43,14 +44,14 @@ from pathlib import Path
 _FILES = ("pulls", "banners", "rates", "counters")
 _RAR_RE = re.compile(r"^card-\d+-(\d)-")
 ALIASES_FILE = "banner_aliases.json"
-_TUTORIAL_WINDOW_MS = 600_000          # the account's first batch arrives within 10 min
+_TUTORIAL_WINDOW_MS = 600_000  # the account's first batch arrives within 10 min
 _EXCLUDED_KINDS = ("ticket", "tutorial")
 
 
 def _read_jsonl(path: Path) -> list[dict]:
     if not path.is_file():
         return []
-    with open(path, "r", encoding="utf8") as fh:
+    with open(path, encoding="utf8") as fh:
         return [json.loads(line) for line in fh if line.strip()]
 
 
@@ -172,8 +173,11 @@ def _rate_facts(rate_row: dict | None, kind: str) -> dict | None:
     """What a banner's saved table states, in percent; None without a table."""
     if not rate_row:
         return None
-    tag = "card_select" if isinstance(rate_row.get("card_select"), dict) and \
-        (rate_row["card_select"].get("normal")) else "normal"
+    tag = (
+        "card_select"
+        if isinstance(rate_row.get("card_select"), dict) and (rate_row["card_select"].get("normal"))
+        else "normal"
+    )
     tables = rate_row.get(tag) or {}
     normal, fixed = tables.get("normal") or [], tables.get("fixed") or []
     if not normal:
@@ -182,19 +186,26 @@ def _rate_facts(rate_row: dict | None, kind: str) -> dict | None:
     five = by_r.get(5) or {}
     cards = five.get("cards") or []
     base = min((c["ppm"] for c in cards), default=0)
-    featured = sorted(({"card_id": c["card_id"], "pct": c["ppm"] / 1e5} for c in cards if c["ppm"] > base),
-                      key=lambda c: -c["pct"])
+    featured = sorted(
+        ({"card_id": c["card_id"], "pct": c["ppm"] / 1e5} for c in cards if c["ppm"] > base),
+        key=lambda c: -c["pct"],
+    )
     slot = {t["rarity"]: t["ppm"] / 1e5 for t in fixed if "rarity" in t}
     picked = None
     if tag == "card_select":
         # a chosen member carries the 1 % on top of the others (see the module notes)
         picked = any(abs(c["pct"] - 1.0) < 1e-9 for c in featured)
-    return {"table": tag,
-            "rates": {f"{r}★": by_r[r]["ppm"] / 1e5 for r in sorted(by_r, reverse=True)},
-            "slot10": {f"{r}★": v for r, v in sorted(slot.items(), reverse=True)},
-            "featured": featured, "featured_total": sum(c["pct"] for c in featured),
-            "other_5_each": base / 1e5, "other_5_count": len(cards) - len(featured),
-            "picked": picked, "kind": kind}
+    return {
+        "table": tag,
+        "rates": {f"{r}★": by_r[r]["ppm"] / 1e5 for r in sorted(by_r, reverse=True)},
+        "slot10": {f"{r}★": v for r, v in sorted(slot.items(), reverse=True)},
+        "featured": featured,
+        "featured_total": sum(c["pct"] for c in featured),
+        "other_5_each": base / 1e5,
+        "other_5_count": len(cards) - len(featured),
+        "picked": picked,
+        "kind": kind,
+    }
 
 
 def _curve(groups: list[tuple[int, list[dict], dict, dict]], cards_by_id: dict) -> list[list]:
@@ -231,13 +242,23 @@ def _gaps(pulls: list[dict], cards_by_id: dict) -> dict:
 
 def _cards_block(pulls: list[dict], cards_by_id: dict, pickups: set[str], by_card_rate: dict) -> list[dict]:
     cnt = Counter(p["card_id"] for p in pulls)
-    rows = [{"card_id": cid, "count": n, "rarity": rarity_of(cid, cards_by_id),
-             "is_pickup": cid in pickups, "rate_ppm": by_card_rate.get(cid)} for cid, n in cnt.items()]
-    rows.sort(key=lambda r: (-int(r["rarity"][0]) if r["rarity"][0].isdigit() else 0, -r["count"], r["card_id"]))
+    rows = [
+        {
+            "card_id": cid,
+            "count": n,
+            "rarity": rarity_of(cid, cards_by_id),
+            "is_pickup": cid in pickups,
+            "rate_ppm": by_card_rate.get(cid),
+        }
+        for cid, n in cnt.items()
+    ]
+    rows.sort(
+        key=lambda r: (-int(r["rarity"][0]) if r["rarity"][0].isdigit() else 0, -r["count"], r["card_id"])
+    )
     return rows
 
 
-_ART_EXTS = ("png", "webp")   # png = the masters already committed, webp = everything new
+_ART_EXTS = ("png", "webp")  # png = the masters already committed, webp = everything new
 
 
 def _art_ext(art_dir: Path, gid: str) -> dict[str, str | None]:
@@ -262,11 +283,18 @@ def _tutorial_block(snapshot: dict | None, pulls: list[dict], cards_by_id: dict)
     stamps = [c["acquired"] for c in owned if isinstance(c.get("acquired"), (int, float))]
     earliest = min(stamps) if stamps else None
     pulled = {p["card_id"] for p in pulls}
-    rows = [{"card_id": c["card_id"], "rarity": rarity_of(c["card_id"], cards_by_id),
-             "acquired": c.get("acquired"),
-             "is_tutorial": None if (earliest is None or not isinstance(c.get("acquired"), (int, float)))
-             else c["acquired"] - earliest <= _TUTORIAL_WINDOW_MS}
-            for c in owned if c["card_id"] not in pulled]
+    rows = [
+        {
+            "card_id": c["card_id"],
+            "rarity": rarity_of(c["card_id"], cards_by_id),
+            "acquired": c.get("acquired"),
+            "is_tutorial": None
+            if (earliest is None or not isinstance(c.get("acquired"), (int, float)))
+            else c["acquired"] - earliest <= _TUTORIAL_WINDOW_MS,
+        }
+        for c in owned
+        if c["card_id"] not in pulled
+    ]
     rows.sort(key=lambda r: (r["acquired"] or 0, r["card_id"]))
     return {"owned_not_tracked": rows}
 
@@ -281,8 +309,12 @@ def build_view(store: dict, cards_by_id: dict, art_dir: Path, snapshot: dict | N
         first_seen.setdefault(b["gacha_id"], b["seen_at"])
     latest_rate = _latest_by_id(rates)
     latest_counter = _latest_by_id(counters)
-    last_sync = max([r.get("synced_at", 0) for r in rates + counters] + [b.get("seen_at", 0) for b in banners]
-                    + [p.get("first_seen", 0) for p in pulls] + [0])
+    last_sync = max(
+        [r.get("synced_at", 0) for r in rates + counters]
+        + [b.get("seen_at", 0) for b in banners]
+        + [p.get("first_seen", 0) for p in pulls]
+        + [0]
+    )
     last_counter_sync = max([c.get("synced_at", 0) for c in counters] + [0])
 
     # A pull the server left unattributed is attributed to the hand-maintained alias id,
@@ -294,9 +326,13 @@ def build_view(store: dict, cards_by_id: dict, art_dir: Path, snapshot: dict | N
         gid = p.get("gacha_id")
         if gid is None:
             # a banner closed by the next sync: its name and window, when exactly one fits
-            fit = [g for g, b in latest_banner.items()
-                   if b.get("name") == p.get("gacha_name") and b.get("start_time")
-                   and b["start_time"] <= p["draw_time"] <= (b.get("end_time") or float("inf"))]
+            fit = [
+                g
+                for g, b in latest_banner.items()
+                if b.get("name") == p.get("gacha_name")
+                and b.get("start_time")
+                and b["start_time"] <= p["draw_time"] <= (b.get("end_time") or float("inf"))
+            ]
             if len(fit) == 1:
                 gid = fit[0]
                 by_time += 1
@@ -310,7 +346,7 @@ def build_view(store: dict, cards_by_id: dict, art_dir: Path, snapshot: dict | N
     for gid in list(latest_banner) + [g for g in alias_pulls if g not in latest_banner]:
         b = latest_banner.get(gid)
         alias_name, alias = alias_by_id.get(gid, (None, None))
-        if b is None:                                  # alias-only: the store never saw it live
+        if b is None:  # alias-only: the store never saw it live
             b = {"name": alias_name, "pickup_card_ids": []}
         elif aliases.get(b.get("name"), {}).get("gacha_id") == gid:
             # By NAME only when the alias points at THIS id: two banners can share a name
@@ -324,35 +360,50 @@ def build_view(store: dict, cards_by_id: dict, art_dir: Path, snapshot: dict | N
         kind = _kind_of(gid, alias)
         c = latest_counter.get(gid) or {}
         art_ext = _art_ext(art_dir, gid)
-        out_banners.append({
-            "gacha_id": gid, "name": b.get("name"), "type": b.get("type"),
-            "start_time": b.get("start_time"), "end_time": b.get("end_time"),
-            # The permanent pool (`gacha-common-normal-001`) is
-            # sent with NO start_time and NO end_time, and `is_end_time_hidden: 1` instead
-            # -- that flag is the game's own way of saying "this one does not close". The
-            # tab needs it to tell a permanent banner from a closed one whose dates were
-            # simply never captured; both arrive here as a pair of nulls otherwise.
-            "is_end_time_hidden": bool((b.get("raw") or {}).get("is_end_time_hidden")),
-            "pickup_card_ids": list(b.get("pickup_card_ids") or []),
-            "art": {k: v is not None for k, v in art_ext.items()},
-            "art_ext": art_ext,
-            "pulls": len(bp),
-            "by_rarity": dict(Counter(rarity_of(p["card_id"], cards_by_id) for p in bp)),
-            "expected_by_rarity": exp,
-            "pulls_since_last_5": _since_last_five(bp, cards_by_id),
-            "cards": _cards_block(bp, cards_by_id, set(b.get("pickup_card_ids") or []), by_card),
-            "has_rates": bool(by_rar), "first_seen": first_seen.get(gid),
-            "rate_facts": _rate_facts(rate_row, kind),
-            # the 1-pull button's price as the game sent it (Blue/Red Diamonds)
-            "cost_per_pull": next((c.get("quantity") for x in ((b.get("raw") or {}).get("gacha_buttons") or [])
-                                   if x.get("total_reward_pick_count") == 1
-                                   for c in (x.get("consumptions") or [])[:1]), None),
-            "is_live_last_sync": c.get("synced_at") == last_counter_sync and bool(c),
-            "kind": kind, "excluded_from_rates": kind in _EXCLUDED_KINDS,
-            "is_alias": gid in alias_pulls and gid not in latest_banner,
-            "counters": {"gacha_point": ((c.get("gacha_point") or {}).get("quantity")),
-                         "drawn_count_total": sum((x.get("drawn_count") or 0) for x in c.get("buttons", []))},
-        })
+        out_banners.append(
+            {
+                "gacha_id": gid,
+                "name": b.get("name"),
+                "type": b.get("type"),
+                "start_time": b.get("start_time"),
+                "end_time": b.get("end_time"),
+                # The permanent pool (`gacha-common-normal-001`) is
+                # sent with NO start_time and NO end_time, and `is_end_time_hidden: 1` instead
+                # -- that flag is the game's own way of saying "this one does not close". The
+                # tab needs it to tell a permanent banner from a closed one whose dates were
+                # simply never captured; both arrive here as a pair of nulls otherwise.
+                "is_end_time_hidden": bool((b.get("raw") or {}).get("is_end_time_hidden")),
+                "pickup_card_ids": list(b.get("pickup_card_ids") or []),
+                "art": {k: v is not None for k, v in art_ext.items()},
+                "art_ext": art_ext,
+                "pulls": len(bp),
+                "by_rarity": dict(Counter(rarity_of(p["card_id"], cards_by_id) for p in bp)),
+                "expected_by_rarity": exp,
+                "pulls_since_last_5": _since_last_five(bp, cards_by_id),
+                "cards": _cards_block(bp, cards_by_id, set(b.get("pickup_card_ids") or []), by_card),
+                "has_rates": bool(by_rar),
+                "first_seen": first_seen.get(gid),
+                "rate_facts": _rate_facts(rate_row, kind),
+                # the 1-pull button's price as the game sent it (Blue/Red Diamonds)
+                "cost_per_pull": next(
+                    (
+                        c.get("quantity")
+                        for x in ((b.get("raw") or {}).get("gacha_buttons") or [])
+                        if x.get("total_reward_pick_count") == 1
+                        for c in (x.get("consumptions") or [])[:1]
+                    ),
+                    None,
+                ),
+                "is_live_last_sync": c.get("synced_at") == last_counter_sync and bool(c),
+                "kind": kind,
+                "excluded_from_rates": kind in _EXCLUDED_KINDS,
+                "is_alias": gid in alias_pulls and gid not in latest_banner,
+                "counters": {
+                    "gacha_point": ((c.get("gacha_point") or {}).get("quantity")),
+                    "drawn_count_total": sum((x.get("drawn_count") or 0) for x in c.get("buttons", [])),
+                },
+            }
+        )
     out_banners.sort(key=lambda b: -(b["start_time"] or 0))
 
     # The observed-vs-expected comparison: only banners whose rate table was actually saved,
@@ -363,20 +414,24 @@ def build_view(store: dict, cards_by_id: dict, art_dir: Path, snapshot: dict | N
     for b in covered:
         expected_total.update(b["expected_by_rarity"])
         observed.update(b["by_rarity"])
-    excluded = [{"gacha_name": b["name"], "kind": b["kind"], "pulls": b["pulls"]}
-                for b in out_banners if b["excluded_from_rates"]]
+    excluded = [
+        {"gacha_name": b["name"], "kind": b["kind"], "pulls": b["pulls"]}
+        for b in out_banners
+        if b["excluded_from_rates"]
+    ]
     # Everything else: banners with no saved rate table (a closed banner the server
     # will not serve rates for) plus pulls still not attributed to any banner. Reported so
     # covered + excluded + uncovered == totals.pulls and no pull can go missing unnoticed.
-    uncovered = sum(b["pulls"] for b in out_banners
-                    if not b["excluded_from_rates"] and not b["has_rates"])
+    uncovered = sum(b["pulls"] for b in out_banners if not b["excluded_from_rates"] and not b["has_rates"])
     uncovered += len(by_banner.get(None, []))
-    comparison = {"covered_pulls": sum(b["pulls"] for b in covered),
-                  "observed_by_rarity": dict(observed),
-                  "expected_by_rarity": dict(expected_total),
-                  "excluded_pulls": sum(x["pulls"] for x in excluded),
-                  "uncovered_pulls": uncovered,
-                  "excluded": excluded}
+    comparison = {
+        "covered_pulls": sum(b["pulls"] for b in covered),
+        "observed_by_rarity": dict(observed),
+        "expected_by_rarity": dict(expected_total),
+        "excluded_pulls": sum(x["pulls"] for x in excluded),
+        "uncovered_pulls": uncovered,
+        "excluded": excluded,
+    }
 
     # the compared pulls, draw group by draw group in time order, each with its banner's rates
     rated = {b["gacha_id"]: _rate_index(latest_rate.get(b["gacha_id"]))[0] for b in covered}
@@ -385,36 +440,44 @@ def build_view(store: dict, cards_by_id: dict, art_dir: Path, snapshot: dict | N
     for b in covered:
         for p in by_banner.get(b["gacha_id"], []):
             grouped[(p["draw_time"], b["gacha_id"])].append(p)
-    curve = _curve([(dt, ps, rated[g], fixed_of[g]) for (dt, g), ps in sorted(grouped.items())],
-                   cards_by_id)
+    curve = _curve([(dt, ps, rated[g], fixed_of[g]) for (dt, g), ps in sorted(grouped.items())], cards_by_id)
 
     unidentified = []
     by_name: dict[str, list[dict]] = defaultdict(list)
     for p in by_banner.get(None, []):
         by_name[p["gacha_name"]].append(p)
     for name, ps in by_name.items():
-        unidentified.append({"gacha_name": name, "pulls": len(ps),
-                             "by_rarity": dict(Counter(rarity_of(p["card_id"], cards_by_id) for p in ps)),
-                             "cards": _cards_block(ps, cards_by_id, set(), {})})
+        unidentified.append(
+            {
+                "gacha_name": name,
+                "pulls": len(ps),
+                "by_rarity": dict(Counter(rarity_of(p["card_id"], cards_by_id) for p in ps)),
+                "cards": _cards_block(ps, cards_by_id, set(), {}),
+            }
+        )
     unidentified.sort(key=lambda u: -u["pulls"])
 
     days: dict[str, dict] = {}
     for p in pulls:
-        day = _dt.datetime.fromtimestamp(p["draw_time"] / 1000, _dt.timezone.utc).strftime("%Y-%m-%d")
+        day = _dt.datetime.fromtimestamp(p["draw_time"] / 1000, _dt.UTC).strftime("%Y-%m-%d")
         d = days.setdefault(day, {"day": day, "pulls": 0, "five_star": 0})
         d["pulls"] += 1
         if rarity_of(p["card_id"], cards_by_id).startswith("5"):
             d["five_star"] += 1
 
-    return {"last_sync": last_sync,
-            # Absent when the file parsed (or was absent, which is not an error): the tab
-            # only shows the note when there IS something the user has to go fix.
-            "aliases_error": store.get("aliases_error"),
-            "totals": {"pulls": len(pulls), "by_rarity": dict(total_rar)},
-            "expected_by_rarity": comparison["expected_by_rarity"],   # kept for older readers of the view
-            "comparison": comparison,
-            "tutorial": _tutorial_block(snapshot, pulls, cards_by_id),
-            "banners": out_banners, "unidentified": unidentified,
-            "attributed_by_time": by_time,
-            "curve": curve, "gaps": _gaps(pulls, cards_by_id),
-            "timeline": [days[k] for k in sorted(days)]}
+    return {
+        "last_sync": last_sync,
+        # Absent when the file parsed (or was absent, which is not an error): the tab
+        # only shows the note when there IS something the user has to go fix.
+        "aliases_error": store.get("aliases_error"),
+        "totals": {"pulls": len(pulls), "by_rarity": dict(total_rar)},
+        "expected_by_rarity": comparison["expected_by_rarity"],  # kept for older readers of the view
+        "comparison": comparison,
+        "tutorial": _tutorial_block(snapshot, pulls, cards_by_id),
+        "banners": out_banners,
+        "unidentified": unidentified,
+        "attributed_by_time": by_time,
+        "curve": curve,
+        "gaps": _gaps(pulls, cards_by_id),
+        "timeline": [days[k] for k in sorted(days)],
+    }

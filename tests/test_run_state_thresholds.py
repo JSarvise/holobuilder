@@ -17,12 +17,11 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+from support.builders import make_card
 
 from hbuilder.domain.gates import GatePredicate, RunState
 from hbuilder.domain.schema import RUN_STATE_DIMENSIONS, validate_skill_slot
 from hbuilder.domain.scoring_config import load_scoring_config
-
-from support.builders import make_card
 
 
 def _aggregates_for(cards):
@@ -37,10 +36,10 @@ def _aggregates_for(cards):
 @pytest.mark.parametrize(
     "life,threshold,should_fire",
     [
-        (1000, 600, True),    # perfect play clears the lenient gate
-        (1000, 1000, True),   # ...and the strict one, at the boundary
-        (999, 1000, False),   # one short of the strict gate
-        (600, 600, True),     # boundary is inclusive (>=)
+        (1000, 600, True),  # perfect play clears the lenient gate
+        (1000, 1000, True),  # ...and the strict one, at the boundary
+        (999, 1000, False),  # one short of the strict gate
+        (600, 600, True),  # boundary is inclusive (>=)
         (599, 600, False),
     ],
 )
@@ -121,8 +120,7 @@ def test_schema_still_rejects_a_non_positive_threshold():
     }
     errors = validate_skill_slot(record, "PASSIVE", "test_card")
     assert any(e.startswith("condition.count") for e in errors), (
-        "removing the `count != 1` pin must not also remove the generic "
-        "`count >= 1` floor"
+        "removing the `count != 1` pin must not also remove the generic `count >= 1` floor"
     )
 
 

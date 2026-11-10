@@ -28,9 +28,10 @@ import dataclasses
 import json
 
 import pytest
+from support import board_reference
+from support.builders import make_card, make_scoring_config, make_team
 
 from hbuilder.domain import board
-from support import board_reference
 from hbuilder.domain.board import (
     BoardError,
     BoardModel,
@@ -40,8 +41,6 @@ from hbuilder.domain.board import (
 )
 from hbuilder.domain.card import Stats
 from hbuilder.domain.scoring import score_card_set, score_fast
-
-from support.builders import make_card, make_scoring_config, make_team
 
 # --------------------------------------------------------------------------
 # Ina's 27 unlocked red nodes, verbatim.
@@ -61,7 +60,11 @@ BLOOM5_CONNECT_MULTIPLIER: dict[float, float] = {2.4: 2.9, 1.55: 2.05, 1.0: 1.0}
 # --------------------------------------------------------------------------
 INA_RED_NODES: tuple[tuple[str, str, float], ...] = (
     ("R-001", "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader", 2.4),
-    ("R-002", "skill_tree_effect-live_active_skill_effect_up_permil_up-100-skill_tree_effect_target-all-skill_tree_effect_passive_trigger-music_skill_tree_character-set_live_leader", 2.4),
+    (
+        "R-002",
+        "skill_tree_effect-live_active_skill_effect_up_permil_up-100-skill_tree_effect_target-all-skill_tree_effect_passive_trigger-music_skill_tree_character-set_live_leader",
+        2.4,
+    ),
     ("R-003", "skill_tree_effect-sense_up-100-skill_tree_effect_target-all-set_live_leader", 2.4),
     ("R-004", "skill_tree_effect-performance_up-100-skill_tree_effect_target-all-set_live_leader", 2.4),
     ("R-005", "skill_tree_effect-technique_up-100-skill_tree_effect_target-all-set_live_leader", 2.4),
@@ -74,19 +77,55 @@ INA_RED_NODES: tuple[tuple[str, str, float], ...] = (
     ("R-020", "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader", 1.55),
     ("R-021", "skill_tree_effect-technique_up-100-skill_tree_effect_target-all-set_live_leader", 1.55),
     ("R-022", "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader", 1.55),
-    ("R-032", "skill_tree_effect-live_active_skill_effect_up_permil_up-20-skill_tree_effect_target-all-set_live_leader", 1.55),
+    (
+        "R-032",
+        "skill_tree_effect-live_active_skill_effect_up_permil_up-20-skill_tree_effect_target-all-set_live_leader",
+        1.55,
+    ),
     ("R-033", "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-all-set_live_leader", 1.0),
-    ("R-034", "skill_tree_effect-live_active_skill_effect_up_permil_up-40-skill_tree_effect_target-all-set_live_leader", 1.0),
+    (
+        "R-034",
+        "skill_tree_effect-live_active_skill_effect_up_permil_up-40-skill_tree_effect_target-all-set_live_leader",
+        1.0,
+    ),
     ("R-035", "skill_tree_effect-all_parameter_up-70-skill_tree_effect_target-all-set_live_leader", 1.0),
     ("R-036", "skill_tree_effect-sense_up-150-skill_tree_effect_target-all-set_live_leader", 1.0),
-    ("R-049", "skill_tree_effect-live_active_skill_effect_up_permil_up-40-skill_tree_effect_target-all-set_live_leader", 1.55),
-    ("R-050", "skill_tree_effect-all_parameter_up_permil_up-10-skill_tree_effect_target-all-set_live_leader", 1.0),
-    ("R-051", "skill_tree_effect-live_active_skill_effect_up_permil_up-40-skill_tree_effect_target-all-set_live_leader", 1.0),
-    ("R-052", "skill_tree_effect-technique_up_permil_up-30-skill_tree_effect_target-all-set_live_leader", 1.0),
-    ("R-054", "skill_tree_effect-all_parameter_up_permil_up-10-skill_tree_effect_target-all-set_live_leader", 1.0),
-    ("R-055", "skill_tree_effect-all_parameter_up_permil_up-30-skill_tree_effect_target-all-set_live_leader", 1.0),
+    (
+        "R-049",
+        "skill_tree_effect-live_active_skill_effect_up_permil_up-40-skill_tree_effect_target-all-set_live_leader",
+        1.55,
+    ),
+    (
+        "R-050",
+        "skill_tree_effect-all_parameter_up_permil_up-10-skill_tree_effect_target-all-set_live_leader",
+        1.0,
+    ),
+    (
+        "R-051",
+        "skill_tree_effect-live_active_skill_effect_up_permil_up-40-skill_tree_effect_target-all-set_live_leader",
+        1.0,
+    ),
+    (
+        "R-052",
+        "skill_tree_effect-technique_up_permil_up-30-skill_tree_effect_target-all-set_live_leader",
+        1.0,
+    ),
+    (
+        "R-054",
+        "skill_tree_effect-all_parameter_up_permil_up-10-skill_tree_effect_target-all-set_live_leader",
+        1.0,
+    ),
+    (
+        "R-055",
+        "skill_tree_effect-all_parameter_up_permil_up-30-skill_tree_effect_target-all-set_live_leader",
+        1.0,
+    ),
     ("R-056", "skill_tree_effect-sense_up_permil_up-30-skill_tree_effect_target-all-set_live_leader", 1.0),
-    ("R-060", "skill_tree_effect-all_parameter_up_permil_up-10-skill_tree_effect_target-all-set_live_leader", 1.0),
+    (
+        "R-060",
+        "skill_tree_effect-all_parameter_up_permil_up-10-skill_tree_effect_target-all-set_live_leader",
+        1.0,
+    ),
 )
 
 # The A-vs-C configuration's own numbers.
@@ -188,90 +227,90 @@ def _members_with_performance_share(total: int, p_share: float):
 def test_ina_red_nodes_land_on_the_measured_power_delta():
     """+28.73 pp of Overall Power, by hand.
 
-    FLAT points, each node's value times its Connect multiplier:
+        FLAT points, each node's value times its Connect multiplier:
 
-      all_parameter_up : 50*2.4 + 50 + 50*1.55*5 + 50 + 70 = 677.5   -> +677.5 to EACH stat
-      sense_up         : 100*2.4 + 100*1.55 + 150          = 545.0
-      performance_up   : 100*2.4 + 100*1.55                = 395.0
-      technique_up     : 100*2.4 + 100*1.55                = 395.0
+          all_parameter_up : 50*2.4 + 50 + 50*1.55*5 + 50 + 70 = 677.5   -> +677.5 to EACH stat
+          sense_up         : 100*2.4 + 100*1.55 + 150          = 545.0
+          performance_up   : 100*2.4 + 100*1.55                = 395.0
+          technique_up     : 100*2.4 + 100*1.55                = 395.0
 
-      per member: P 1072.5   T 1072.5   S 1222.5   = 3367.5
-      x 5 members (the leader contributes no stats)       = 16,837.5
+          per member: P 1072.5   T 1072.5   S 1222.5   = 3367.5
+          x 5 members (the leader contributes no stats)       = 16,837.5
 
-    RATES (per-mille / 1000), all unboosted:
+        RATES (per-mille / 1000), all unboosted:
 
-      all  6 %  ->  P +0.06  T +0.06  S +0.06
-      tech 3 %  ->  T +0.03
-      sense 3 % ->  S +0.03
-      so P 0.06, T 0.09, S 0.09 of that stat's own base.
+          all  6 %  ->  P +0.06  T +0.06  S +0.06
+          tech 3 %  ->  T +0.03
+          sense 3 % ->  S +0.03
+          so P 0.06, T 0.09, S 0.09 of that stat's own base.
 
-    On 81,009 split evenly (27,003 per stat):
+        On 81,009 split evenly (27,003 per stat):
 
-      0.06*27,003 + 0.09*27,003 + 0.09*27,003 = 1,620.18 + 2,430.27 + 2,430.27
-                                              = 6,483.0
+          0.06*27,003 + 0.09*27,003 + 0.09*27,003 = 1,620.18 + 2,430.27 + 2,430.27
+                                                  = 6,483.0
 
-    Total 16,837.5 + 6,483.0 = **23,318.22** against the game's 23,272 —
-    **+0.370 %**, i.e. +28.82 pp against +28.73 pp.
+        Total 16,837.5 + 6,483.0 = **23,318.22** against the game's 23,272 —
+        **+0.370 %**, i.e. +28.82 pp against +28.73 pp.
 
-⚠ THIS TEST CANNOT ARBITRATE THE `Ceiling`. Read this before touching either
-number.
+    ⚠ THIS TEST CANNOT ARBITRATE THE `Ceiling`. Read this before touching either
+    number.
 
-`BoardEffect.scaled` applies the game's per-node `Ceiling`
-(`GetEffectValueWithConnectEffectsInternal` @`0x6811970`), which takes the total
-23,318.22 -> 23,358.0, i.e. +0.199 % -> +0.370 % against the 23,272 above. That
-looks like a step backwards. It is not evidence either way, for one reason:
+    `BoardEffect.scaled` applies the game's per-node `Ceiling`
+    (`GetEffectValueWithConnectEffectsInternal` @`0x6811970`), which takes the total
+    23,318.22 -> 23,358.0, i.e. +0.199 % -> +0.370 % against the 23,272 above. That
+    looks like a step backwards. It is not evidence either way, for one reason:
 
-    **THE INPUT IS SYNTHETIC.** `_members_summing_to` splits 81,009 EVENLY
-    (27,003 per stat). The real deck's split is NOT RECORDED anywhere.
+        **THE INPUT IS SYNTHETIC.** `_members_summing_to` splits 81,009 EVENLY
+        (27,003 per stat). The real deck's split is NOT RECORDED anywhere.
 
-And the prediction is highly sensitive to that unrecorded input, LINEARLY -- not
-through the `Ceiling`. The red nodes pay 6 % on Performance but 9 % on Technique
-and Sense, so the prediction falls by 0.03 for every point of Performance moved
-out of an even split:
+    And the prediction is highly sensitive to that unrecorded input, LINEARLY -- not
+    through the `Ceiling`. The red nodes pay 6 % on Performance but 9 % on Technique
+    and Sense, so the prediction falls by 0.03 for every point of Performance moved
+    out of an even split:
 
-    predicted  =  16,875  +  0.09*MP  -  0.03*P_total  +  ceil_residue
+        predicted  =  16,875  +  0.09*MP  -  0.03*P_total  +  ceil_residue
 
-The `Ceiling`'s own contribution is +37.5 flat (split-INDEPENDENT, it is per node)
-plus a rate-half residue of 2.3 .. 10.6 -- structurally bounded by 15,
-one per (card, stat) cell. The split term moves the answer by ~120 across its
-plausible range. It swamps the thing this test could be read as measuring.
+    The `Ceiling`'s own contribution is +37.5 flat (split-INDEPENDENT, it is per node)
+    plus a rate-half residue of 2.3 .. 10.6 -- structurally bounded by 15,
+    one per (card, stat) cell. The split term moves the answer by ~120 across its
+    plausible range. It swamps the thing this test could be read as measuring.
 
-This model, varying only the split:
+    This model, varying only the split:
 
-    P-share  33.33 % (even, what this test uses)   23,358   +86 vs 23,272
-    P-share  33.72 % (account-wide, 97 cards)      23,355   +83
-    P-share  34.75 % (the wire deck below)         23,327   +55
-    P-share  37.75 % (another owned five-card set) 23,253   -19
+        P-share  33.33 % (even, what this test uses)   23,358   +86 vs 23,272
+        P-share  33.72 % (account-wide, 97 cards)      23,355   +83
+        P-share  34.75 % (the wire deck below)         23,327   +55
+        P-share  37.75 % (another owned five-card set) 23,253   -19
 
-The account's own observed P-shares BRACKET 23,272. So the target is inside the
-model's reachable band and refutes nothing.
+    The account's own observed P-shares BRACKET 23,272. So the target is inside the
+    model's reachable band and refutes nothing.
 
-A re-derived 23,272 would not refute the `Ceiling` either, unless the same
-capture also carried that deck's per-card, per-stat block: it is the SPLIT that
-is missing, not the target. 23,272 is `37,472 - 14,200`, two screen-read
-INTEGERS, and 37,472 is confirmed EXACTLY on the wire -- so the panel prints
-this integer exactly and 23,272 is exact. The 86 points are real; they are an
-artefact of the input, not slop.
+    A re-derived 23,272 would not refute the `Ceiling` either, unless the same
+    capture also carried that deck's per-card, per-stat block: it is the SPLIT that
+    is missing, not the target. 23,272 is `37,472 - 14,200`, two screen-read
+    INTEGERS, and 37,472 is confirmed EXACTLY on the wire -- so the panel prints
+    this integer exactly and 23,272 is exact. The 86 points are real; they are an
+    artefact of the input, not slop.
 
-WHERE THE `Ceiling` IS ACTUALLY CHECKED -- wire-exact, all 15 cells, and it is
-`test_board_wire.py`'s job, not this one: `deck_oracle.json` idx 5 vs idx 30 hold
-the SAME five cards at the SAME Member Parameter 104,449, differing only in the
-leader, and the model reproduces BOTH board lines EXACTLY (44,682 with Ina
-leading, 17,687 without). That is this test's experiment, run against integers
-instead of against a synthesised split.
+    WHERE THE `Ceiling` IS ACTUALLY CHECKED -- wire-exact, all 15 cells, and it is
+    `test_board_wire.py`'s job, not this one: `deck_oracle.json` idx 5 vs idx 30 hold
+    the SAME five cards at the SAME Member Parameter 104,449, differing only in the
+    leader, and the model reproduces BOTH board lines EXACTLY (44,682 with Ina
+    leading, 17,687 without). That is this test's experiment, run against integers
+    instead of against a synthesised split.
 
-⚠ idx 30 is a `SaveDeck` row and carries `leader: None`, which is the documented
-trap -- `SaveDeck` OMITS the leader, so the label does not mean "no leader" and 3
-of the 32 rows are affected. The pair is still valid, but NOT because of the
-label: Ina (`chr-04003`) is the only character in the account with any red node
-unlocked, so a row reading 17,687 rather than 44,682 cannot have had her leading.
-The NUMBER disambiguates the missing label. Do not reuse a `leader: None` row
-without an argument of that shape.
+    ⚠ idx 30 is a `SaveDeck` row and carries `leader: None`, which is the documented
+    trap -- `SaveDeck` OMITS the leader, so the label does not mean "no leader" and 3
+    of the 32 rows are affected. The pair is still valid, but NOT because of the
+    label: Ina (`chr-04003`) is the only character in the account with any red node
+    unlocked, so a row reading 17,687 rather than 44,682 cannot have had her leading.
+    The NUMBER disambiguates the missing label. Do not reuse a `leader: None` row
+    without an argument of that shape.
 
 
-    The "nearly double" red-branch figure some reports show was never in the
-    data: the report that produced `All 53.0 %` had added 470 FLAT stat points
-    to 60 per-mille and divided the sum by 10.
+        The "nearly double" red-branch figure some reports show was never in the
+        data: the report that produced `All 53.0 %` had added 470 FLAT stat points
+        to 60 per-mille and divided the sum by 10.
     """
     model = _ina_board()
     members = _members_summing_to(MEMBER_PARAMETER)
@@ -281,9 +320,7 @@ without an argument of that shape.
     predicted = contribution.power_bonus(members)
 
     # The two halves, pinned separately so a regression says which one moved.
-    flat_total = sum(
-        value for card in members for value in contribution.flat_by_card[card.id].values()
-    )
+    flat_total = sum(value for card in members for value in contribution.flat_by_card[card.id].values())
     assert flat_total == pytest.approx(16875.0, abs=1e-6)
     assert predicted - flat_total == pytest.approx(6483.0, abs=0.01)
 
@@ -419,10 +456,7 @@ def test_singer_conditional_stat_power_fires_only_when_the_holomem_sings():
     the leader (the leader-scoped effect reaches no card then)."""
     node = BoardNode("R-044", (parse_effect_id(CONDITIONAL_STAT, branch="R"),))
     model = BoardModel(characters={"Ina": CharacterBoard("Ina", (node,))})
-    members = tuple(
-        dataclasses.replace(make_card(f"m{i}"), stats=Stats(1000, 1000, 1000))
-        for i in range(5)
-    )
+    members = tuple(dataclasses.replace(make_card(f"m{i}"), stats=Stats(1000, 1000, 1000)) for i in range(5))
 
     # song-agnostic power excludes it (conditional), so song-agnostic callers are unmoved
     assert model.power_bonus_for(members, "Ina") == 0.0
@@ -501,8 +535,7 @@ def test_the_53_percent_figure_is_flat_points_divided_by_ten():
     multi-row groups are all Y (a `-solo` vs `-solo-fuwamoko` song variant),
     and the remaining 3 are the 54-row `character_grouping` groups."""
     flat = {"all": 0.0, "sense": 0.0, "technique": 0.0, "performance": 0.0}
-    permil = {"all": 0.0, "sense": 0.0, "technique": 0.0, "performance": 0.0,
-              "act_power": 0.0}
+    permil = {"all": 0.0, "sense": 0.0, "technique": 0.0, "performance": 0.0, "act_power": 0.0}
     for node_id, effect_id, _multiplier in INA_RED_NODES:
         effect = parse_effect_id(effect_id, branch=node_id[:1])
         if effect.kind == "stat":
@@ -595,9 +628,7 @@ def test_c09_green_all_always_nodes_are_a_constant_that_cancels_in_a_ranking():
     leader = make_card("leader", member="Leader")
 
     team_a = _members_summing_to(81009)
-    team_b = tuple(
-        dataclasses.replace(card, stats=Stats(1000, 1000, 1000)) for card in team_a
-    )
+    team_b = tuple(dataclasses.replace(card, stats=Stats(1000, 1000, 1000)) for card in team_a)
 
     a = board_reference.resolve(model, leader, team_a).power_bonus(team_a)
     b = board_reference.resolve(model, leader, team_b).power_bonus(team_b)
@@ -641,10 +672,9 @@ def test_c09_green_character_grouping_nodes_are_a_per_team_discriminator():
     assert board_reference.resolve(model, leader, five_myth).power_bonus(five_myth) == 2250.0
 
     # The claim in one assertion: it is not a constant.
-    assert (
-        board_reference.resolve(model, leader, three_myth).power_bonus(three_myth)
-        != board_reference.resolve(model, leader, zero_myth).power_bonus(zero_myth)
-    )
+    assert board_reference.resolve(model, leader, three_myth).power_bonus(
+        three_myth
+    ) != board_reference.resolve(model, leader, zero_myth).power_bonus(zero_myth)
 
 
 def test_c09_grouping_matches_the_catalogue_display_name_not_only_the_token():
@@ -697,10 +727,7 @@ def test_blue_nodes_reach_only_their_own_holomems_card():
     """`-skill_tree_effect_target-skill_tree_character-always`: that
     character's own card, and only while she is one of the five members.
     `all_parameter_up-50` on one member is `50 * 3 = 150`."""
-    effect_id = (
-        "skill_tree_effect-all_parameter_up-50"
-        "-skill_tree_effect_target-skill_tree_character-always"
-    )
+    effect_id = "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
     node = BoardNode("B-001", (parse_effect_id(effect_id, branch="B"),))
     model = BoardModel(characters={"Nene": CharacterBoard("Nene", (node,))})
     leader = make_card("leader", member="Leader")
@@ -713,9 +740,7 @@ def test_blue_nodes_reach_only_their_own_holomems_card():
         for i in range(5)
     )
     without_nene = tuple(
-        dataclasses.replace(
-            make_card(f"m{i}", member=f"Holomem{i}"), stats=Stats(1000, 1000, 1000)
-        )
+        dataclasses.replace(make_card(f"m{i}", member=f"Holomem{i}"), stats=Stats(1000, 1000, 1000))
         for i in range(5)
     )
 
@@ -727,16 +752,11 @@ def test_a_leaders_blue_nodes_do_not_count_while_she_is_not_a_member():
     """Not known from the game, so the conservative default is implemented: blue is defined as
     "while she is in the unit", and the leader slot is not a member slot, so
     a leader who is not also among the five contributes no blue."""
-    effect_id = (
-        "skill_tree_effect-all_parameter_up-50"
-        "-skill_tree_effect_target-skill_tree_character-always"
-    )
+    effect_id = "skill_tree_effect-all_parameter_up-50-skill_tree_effect_target-skill_tree_character-always"
     node = BoardNode("B-001", (parse_effect_id(effect_id, branch="B"),))
     model = BoardModel(characters={"Nene": CharacterBoard("Nene", (node,))})
     members = tuple(
-        dataclasses.replace(
-            make_card(f"m{i}", member=f"Holomem{i}"), stats=Stats(1000, 1000, 1000)
-        )
+        dataclasses.replace(make_card(f"m{i}", member=f"Holomem{i}"), stats=Stats(1000, 1000, 1000))
         for i in range(5)
     )
     leader = make_card("leader_nene", member="Nene")
@@ -760,9 +780,7 @@ def test_connect_multiplies_the_number_whatever_its_unit():
     )
     model = BoardModel(characters={"Calli": CharacterBoard("Calli", nodes)})
     leader = make_card("leader_calli", member="Calli")
-    members = (
-        dataclasses.replace(make_card("m0", member="M0"), stats=Stats(1000, 1000, 1000)),
-    )
+    members = (dataclasses.replace(make_card("m0", member="M0"), stats=Stats(1000, 1000, 1000)),)
 
     contribution = board_reference.resolve(model, leader, members)
     flat = contribution.flat_by_card["m0"]
@@ -809,9 +827,7 @@ def test_bloom_5_connect_overshoots_the_acceptance_number():
             )
             for node_id, effect_id, multiplier in INA_RED_NODES
         )
-        model = BoardModel(
-            characters={"Ina": CharacterBoard(holomem="Ina", nodes=nodes)}
-        )
+        model = BoardModel(characters={"Ina": CharacterBoard(holomem="Ina", nodes=nodes)})
         return board_reference.resolve(model, leader, members).power_bonus(members)
 
     base = power_at(lambda m: m)
@@ -919,11 +935,14 @@ def test_songchart_admits_a_two_singer_duo_solo_but_not_three():
 
     def _chart(singers):
         return SongChart(
-            music_id="m0191", difficulty="expert", difficulty_level=1,
+            music_id="m0191",
+            difficulty="expert",
+            difficulty_level=1,
             live_score_coefficient_permil=1000,
             notes=(ChartNote(time=0.0, perfect_permil=1000),),
             special_cues=(0.0, 0.0, 0.0, 0.0, 0.0),
-            singers=tuple(singers), singer_type="solo",
+            singers=tuple(singers),
+            singer_type="solo",
         )
 
     duo = _chart(("chr-04016", "chr-04017"))
@@ -947,13 +966,12 @@ def test_reward_families_are_parsed_and_deliberately_worth_zero():
 
 
 def test_an_unknown_effect_family_raises_rather_than_scoring_zero():
-    """"Verify artefacts, not counters": a board term that is silently zero is
+    """ "Verify artefacts, not counters": a board term that is silently zero is
     indistinguishable from a board term that is correctly zero, which is the
     exact shape of an unmodelled board."""
     with pytest.raises(BoardError, match="unrouted board effect family"):
         parse_effect_id(
-            "skill_tree_effect-a_family_nobody_routed-50"
-            "-skill_tree_effect_target-all-always",
+            "skill_tree_effect-a_family_nobody_routed-50-skill_tree_effect_target-all-always",
             branch="G",
         )
     with pytest.raises(BoardError, match="unparseable"):
@@ -1001,9 +1019,7 @@ def test_activation_and_cooldown_riders_are_kept_per_member():
 
 def _team_with_ina_leading():
     members = tuple(
-        dataclasses.replace(
-            make_card(f"m{i}", member=f"Holomem{i}"), stats=Stats(100, 100, 100)
-        )
+        dataclasses.replace(make_card(f"m{i}", member=f"Holomem{i}"), stats=Stats(100, 100, 100))
         for i in range(5)
     )
     return make_team([make_card("leader_ina", member="Ina"), *members])
@@ -1055,9 +1071,7 @@ def test_a_red_branch_makes_the_board_leader_dependent_in_both_drivers():
     cfg = dataclasses.replace(make_scoring_config(), board=model)
 
     members = tuple(
-        dataclasses.replace(
-            make_card(f"m{i}", member=f"Holomem{i}"), stats=Stats(100, 100, 100)
-        )
+        dataclasses.replace(make_card(f"m{i}", member=f"Holomem{i}"), stats=Stats(100, 100, 100))
         for i in range(5)
     )
     ina = make_card("leader_ina", member="Ina")
@@ -1069,9 +1083,7 @@ def test_a_red_branch_makes_the_board_leader_dependent_in_both_drivers():
     assert calli_total == 1500.0
     assert ina_total - calli_total == 750.0
 
-    batch = {result.leader_id: result.total_score for result in score_card_set(
-        members, (ina, calli), cfg
-    )}
+    batch = {result.leader_id: result.total_score for result in score_card_set(members, (ina, calli), cfg)}
     assert batch["leader_ina"] == ina_total
     assert batch["leader_calli"] == calli_total
 
@@ -1169,16 +1181,13 @@ def test_a_singer_conditional_rate_shares_one_ceiling_with_the_unconditional_rat
     unconditional and +10 % conditional: ceil(250.75) - ceil(150.45) = 100,
     where ceiling the conditional alone would give ceil(100.3) = 101."""
     unconditional = (
-        "skill_tree_effect-technique_up_permil_up-150"
-        "-skill_tree_effect_target-all-set_live_leader"
+        "skill_tree_effect-technique_up_permil_up-150-skill_tree_effect_target-all-set_live_leader"
     )
-    node = BoardNode("R-044", (parse_effect_id(CONDITIONAL_STAT, branch="R"),
-                               parse_effect_id(unconditional, branch="R")))
+    node = BoardNode(
+        "R-044", (parse_effect_id(CONDITIONAL_STAT, branch="R"), parse_effect_id(unconditional, branch="R"))
+    )
     model = BoardModel(characters={"Ina": CharacterBoard("Ina", (node,))})
-    members = tuple(
-        dataclasses.replace(make_card(f"m{i}"), stats=Stats(1000, 1003, 1000))
-        for i in range(5)
-    )
+    members = tuple(dataclasses.replace(make_card(f"m{i}"), stats=Stats(1000, 1003, 1000)) for i in range(5))
     assert model.power_bonus_for(members, "Ina") == 5 * 151.0
     assert model.conditional_stat_power_for(members, "Ina", ("Ina",)) == 5 * 100.0
 
@@ -1192,13 +1201,14 @@ def test_a_singer_conditional_rate_raises_the_member_power_up():
 
     node = BoardNode("R-044", (parse_effect_id(CONDITIONAL_STAT, branch="R"),))
     model = BoardModel(characters={"Ina": CharacterBoard("Ina", (node,))})
-    members = tuple(
-        dataclasses.replace(make_card(f"m{i}"), stats=Stats(1000, 1000, 1000))
-        for i in range(5)
-    )
+    members = tuple(dataclasses.replace(make_card(f"m{i}"), stats=Stats(1000, 1000, 1000)) for i in range(5))
     cfg = dataclasses.replace(make_scoring_config(), board=model)
-    power = OverallPower(100000.0, power_up_bases=(10000.0,) * 5,
-                         member_ids=tuple(m.id for m in members), power_up_permyriad=333)
+    power = OverallPower(
+        100000.0,
+        power_up_bases=(10000.0,) * 5,
+        member_ids=tuple(m.id for m in members),
+        power_up_permyriad=333,
+    )
     assert cast_power_up(power, members, "Ina", cfg, ("Ina",)) == 5 * 4
     assert cast_power_up(power, members, "Ina", cfg, ()) == 0
     # a fixed raw power declares no bases, so it earns no Power-Up

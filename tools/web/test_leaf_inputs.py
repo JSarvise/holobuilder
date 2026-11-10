@@ -13,6 +13,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import leaf_inputs as build  # noqa: E402
+
 from hbuilder.errors import MissingInput  # noqa: E402
 
 
@@ -51,13 +52,16 @@ def test_the_version_and_settings_are_part_of_every_key(monkeypatch):
 
 
 def test_chart_digests_read_both_file_shapes_and_only_expert(tmp_path):
-    entries = [{"music_id": "m0001", "difficulty": "EXPERT", "notes": [1, 2]},
-               {"music_id": "m0001", "difficulty": "HARD", "notes": [1]},
-               {"music_id": "m0002", "difficulty": "EXPERT", "notes": [3]}]
+    entries = [
+        {"music_id": "m0001", "difficulty": "EXPERT", "notes": [1, 2]},
+        {"music_id": "m0001", "difficulty": "HARD", "notes": [1]},
+        {"music_id": "m0002", "difficulty": "EXPERT", "notes": [3]},
+    ]
     as_list, as_dict = tmp_path / "list.json", tmp_path / "dict.json"
     as_list.write_text(json.dumps({"charts": entries}), encoding="utf-8")
-    as_dict.write_text(json.dumps({"charts": {f"{e['music_id']}|{e['difficulty']}": e
-                                              for e in entries}}), encoding="utf-8")
+    as_dict.write_text(
+        json.dumps({"charts": {f"{e['music_id']}|{e['difficulty']}": e for e in entries}}), encoding="utf-8"
+    )
     digests = build.chart_digests(as_list)
     assert set(digests) == {"m0001", "m0002"} and digests == build.chart_digests(as_dict)
     entries[0]["notes"] = [1, 2, 3]
@@ -76,8 +80,10 @@ def test_the_account_basis_has_its_own_keys_and_leaves_the_maxed_ones_alone():
 
 # -- difficulty (the rest lives in tools/web/test_difficulty.py) --
 def test_chart_digests_pick_the_requested_difficulty(tmp_path):
-    entries = {"m0001/EXPERT": {"music_id": "m0001", "difficulty": "EXPERT", "notes": [1, 2]},
-               "m0001/HARD": {"music_id": "m0001", "difficulty": "HARD", "notes": [1]}}
+    entries = {
+        "m0001/EXPERT": {"music_id": "m0001", "difficulty": "EXPERT", "notes": [1, 2]},
+        "m0001/HARD": {"music_id": "m0001", "difficulty": "HARD", "notes": [1]},
+    }
     path = tmp_path / "charts.json"
     path.write_text(json.dumps({"charts": entries}), encoding="utf-8")
     expert, hard = build.chart_digests(path), build.chart_digests(path, "HARD")
@@ -133,15 +139,18 @@ def test_the_maxed_bench_as_a_board_state_is_a_max_level_board_with_its_connect_
     except (OSError, MissingInput, KeyError) as exc:
         pytest.skip(f"the real inputs are not available here: {exc!r}")
     costs = node_costs_from_master(node_master)
-    trees = {m["chr"]: set(skilltree["models"][m["model"]])
-             for m in skilltree["members"] if m.get("model") in skilltree["models"]}
+    trees = {
+        m["chr"]: set(skilltree["models"][m["model"]])
+        for m in skilltree["members"]
+        if m.get("model") in skilltree["models"]
+    }
     assert set(state) == set(trees)
     for chr_id, entry in state.items():
         nodes = set(entry["nodes"])
         assert _bench_reach(chr_id) <= nodes <= trees[chr_id], chr_id
         assert sum(costs.get(n, 0) for n in nodes) <= build.maxed_budget(), chr_id
         assert set(entry["slots"]) <= {n for n in nodes if n.startswith("S-")}
-    assert sum(len(e["slots"]) for e in state.values()) >= len(state)     # sockets filled
+    assert sum(len(e["slots"]) for e in state.values()) >= len(state)  # sockets filled
 
 
 def test_the_max_level_points_are_part_of_every_key(monkeypatch):
@@ -164,8 +173,14 @@ def test_the_maxed_bench_targets_are_only_what_scores():
     from hbuilder.domain.board import parse_effect_id
 
     # Noel / Soleil Kiss + Fubuki, Matsuri, Flare, Noel, Anya: no Advent member
-    team = ["card-00022-5-uniq-0063-00", "card-00007-5-uniq-0008-00", "card-00022-5-uniq-0063-00",
-            "card-00021-5-uniq-0017-00", "card-00006-5-uniq-0007-00", "card-03005-5-uniq-0084-00"]
+    team = [
+        "card-00022-5-uniq-0063-00",
+        "card-00007-5-uniq-0008-00",
+        "card-00022-5-uniq-0063-00",
+        "card-00021-5-uniq-0017-00",
+        "card-00006-5-uniq-0007-00",
+        "card-03005-5-uniq-0084-00",
+    ]
     try:
         targets = build.maxed_bench_targets(team)
     except (OSError, MissingInput, KeyError) as exc:
@@ -183,7 +198,13 @@ def test_the_maxed_bench_targets_are_only_what_scores():
             parsed = [parse_effect_id(x, branch=node[0]) for x in effects[node]]
             assert any(p.kind != "ignored" for p in parsed), (chr_id, node)
             # a bench red or blue reaches no team; a team red only when its singer sings
-            assert node[0] in "GY" or (chr_id in team_chrs and any(p.conditional for p in parsed)), (chr_id, node)
+            assert node[0] in "GY" or (chr_id in team_chrs and any(p.conditional for p in parsed)), (
+                chr_id,
+                node,
+            )
             # no green for a group the team lacks ("to Advent" without an Advent member)
-            assert not any(p.scope == "grouping" and "advent" in str(p.grouping) for p in parsed), (chr_id, node)
+            assert not any(p.scope == "grouping" and "advent" in str(p.grouping) for p in parsed), (
+                chr_id,
+                node,
+            )
     assert all(entry["nodes"] for entry in targets.values())

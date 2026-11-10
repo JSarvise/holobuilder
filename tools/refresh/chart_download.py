@@ -35,11 +35,17 @@
 #   python chart_download.py --seed          copy what the game already cached (no network)
 #   python chart_download.py                 fetch the rest, ~12 min at 1 req/s
 #   python chart_download.py --status        what is on disk, no network
-import hashlib, os, sys, time, urllib.error, urllib.request
+import hashlib
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
+
 sys.path.insert(0, str(paths.REFRESH_DIR))
 from master_db import decode_record  # noqa: E402
 from octo_crypto import decrypt_resource, encrypt_resource  # noqa: E402
@@ -48,12 +54,12 @@ CATALOG = os.path.join(paths.DUMPS, "octocacheevai_prod.dec")
 OUT = os.path.join(paths.DUMPS, "charts_cdn")
 # the install wherever Steam put it (or HOLODREAMS_DIR); else the usual folder, if any
 GAME_CACHE = os.path.join(paths.game_root_or_default(), "octo", "v1")
-PREFIX = "chart_m"           # not configurable, deliberately
+PREFIX = "chart_m"  # not configurable, deliberately
 # A decrypted chart starts with one of these. SUS format v2 (e.g. m0366) puts
 # `#VISION_SUS_FORMAT_VERSION 2` before `#CREATE_APP_VERSION`; its body is the same SUS --
 # sus_parse reproduces all eight of m0366's header note counts unchanged.
 PLAINTEXT_MAGIC = (b"#CREATE_APP_", b"#VISION_SUS_FORMAT_VERSION")
-INTERVAL = 1.0               # seconds between request starts
+INTERVAL = 1.0  # seconds between request starts
 TIMEOUT = 30
 
 
@@ -111,8 +117,9 @@ def catalog():
         name = rec.get(2, [b""])[0].decode()
         if not name.startswith(PREFIX):
             continue
-        assets.append(Asset(name, rec.get(5, [b""])[0].decode(),
-                            rec.get(7, [b""])[0].decode(), rec.get(3, [0])[0]))
+        assets.append(
+            Asset(name, rec.get(5, [b""])[0].decode(), rec.get(7, [b""])[0].decode(), rec.get(3, [0])[0])
+        )
     assets.sort(key=lambda a: a.name)
     return assets, template
 
@@ -169,8 +176,10 @@ def download(assets, template, limit=None):
     if limit is not None:
         todo = todo[:limit]
     done = len(assets) - len([a for a in assets if not a.on_disk()])
-    print(f"{done}/{len(assets)} already on disk; fetching {len(todo)} at {INTERVAL:g} req/s "
-          f"(~{len(todo) * INTERVAL / 60:.0f} min)")
+    print(
+        f"{done}/{len(assets)} already on disk; fetching {len(todo)} at {INTERVAL:g} req/s "
+        f"(~{len(todo) * INTERVAL / 60:.0f} min)"
+    )
     if not todo:
         return 0, []
 
@@ -194,8 +203,10 @@ def download(assets, template, limit=None):
         got += 1
         if i % 25 == 0 or i == len(todo):
             rate = (time.monotonic() - started) / i
-            print(f"  [{i}/{len(todo)}] {asset.name}  ok={got} fail={len(failures)}  "
-                  f"eta {(len(todo) - i) * rate / 60:.1f} min")
+            print(
+                f"  [{i}/{len(todo)}] {asset.name}  ok={got} fail={len(failures)}  "
+                f"eta {(len(todo) - i) * rate / 60:.1f} min"
+            )
     return got, failures
 
 
@@ -229,8 +240,10 @@ def main():
         got, failures = download(assets, template, limit=1)
         if failures:
             sys.exit("preflight FAILED -- do not run the full pull; the catalog may be stale")
-        print("preflight OK: md5 verified and the file starts with a SUS header "
-              f"({' or '.join(m.decode() for m in PLAINTEXT_MAGIC)})")
+        print(
+            "preflight OK: md5 verified and the file starts with a SUS header "
+            f"({' or '.join(m.decode() for m in PLAINTEXT_MAGIC)})"
+        )
         return
 
     seeded = seed_from_game_cache(assets)
