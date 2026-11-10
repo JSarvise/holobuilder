@@ -39,11 +39,11 @@ def build(force: bool = False) -> Path:
     return cbuild.build(SOURCE, LIBRARY, "cooldown-screen", force or stale)
 
 
-_lib = None
+_lib: ctypes.CDLL | None = None
 _lock = threading.Lock()
 
 
-def load():
+def load() -> ctypes.CDLL:
     """The loaded library, built on first use. Raises if it cannot be built."""
     global _lib
     with _lock:

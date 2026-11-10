@@ -15,12 +15,19 @@ import subprocess
 import sys
 import threading
 import time
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
 
 import cutoffs_poller
 
 from hbuilder.inputs import _LoadFailure, load_inputs
 from hbweb import basis, config, jobs, songs
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from hbuilder.domain.card import Card
+    from hbweb.router import Handler
 
 
 def tracker_configured() -> bool:
@@ -100,7 +107,7 @@ def event_unavailable(exc: Exception) -> dict:
     }
 
 
-def chr_names(cards) -> dict[str, str]:
+def chr_names(cards: Iterable[Card]) -> dict[str, str]:
     """chr-id -> holomem name of the catalogue's cards."""
     names: dict[str, str] = {}
     for card in cards:
@@ -110,13 +117,13 @@ def chr_names(cards) -> dict[str, str]:
     return names
 
 
-def serve_event(h) -> None:
+def serve_event(h: Handler) -> None:
     """`GET /api/event[?event=<key>]` — the newest open event's bonus rows and
     the account's bonus cards (`event_mode.event_payload`). Pure read; 503
     when the refresh has not written marathon_bonus.json or nothing is open."""
     import event_mode  # noqa: PLC0415
 
-    query = parse_qs(urlparse(h.path).query)
+    query: dict[str, list[Any]] = parse_qs(urlparse(h.path).query)
     key = (query.get("event") or [None])[0] or None
     try:
         raw, event, keys = event_mode.load_event_bundle(config.EVENT_BONUS_PATH, key)
@@ -154,12 +161,12 @@ def serve_event(h) -> None:
     )
 
 
-def serve_event_songs(h) -> None:
+def serve_event_songs(h: Handler) -> None:
     """`GET /api/event/songs[?boosts=3&difficulty=EXPERT]` — every song ranked
     by the song-length multiplier L (an ESTIMATE, team-independent)."""
     import event_mode  # noqa: PLC0415
 
-    query = parse_qs(urlparse(h.path).query)
+    query: dict[str, list[Any]] = parse_qs(urlparse(h.path).query)
     try:
         boosts = int((query.get("boosts") or [event_mode.DEFAULT_BOOSTS])[0])
     except ValueError:
@@ -194,7 +201,7 @@ def serve_event_songs(h) -> None:
     )
 
 
-def event_points(h) -> None:
+def event_points(h: Handler) -> None:
     """`POST /api/event/points` -- one team's Event Pt per Live, solo or with the room's
     MULTI SCORE typed in (`event_mode.event_points_for`). Instant: no search."""
     import event_mode  # noqa: PLC0415
@@ -208,7 +215,7 @@ def event_points(h) -> None:
         h.reply_json(400, {"error": str(exc)})
 
 
-def start_event_run(h) -> None:
+def start_event_run(h: Handler) -> None:
     """`POST /api/event/run {objective, song, difficulty?, boosts?, holopass?,
     workers?, top?, event?}` — 202 `{job_id, plan, opts}`; events on
     `/events/<id>`; cancel with `POST /cancel/<id>`."""
@@ -238,7 +245,7 @@ def start_event_run(h) -> None:
     h.reply_json(202, {"job_id": job.job_id, "plan": [dict(s) for s in jobs.EVENT_STAGES], "opts": opts})
 
 
-def _region_of(h, query) -> str | None:
+def _region_of(h: Handler, query) -> str | None:
     """The `region` query parameter (`us` by default), or None having answered 400."""
     import cutoffs_view  # noqa: PLC0415
 
@@ -257,14 +264,14 @@ def _grades():
     )
 
 
-def serve_event_cutoffs(h) -> None:
+def serve_event_cutoffs(h: Handler) -> None:
     """`GET /api/event/cutoffs?region=us[&chapter=<id>][&kind=points]` — the stored
     border series per reward tier plus a prediction of each tier's final. Pure read of
     dumps/cutoffs/ (`cutoffs_view.build_view`). 400 on a bad region, 503
     `{available:false,error}` when nothing has been synced for that region yet."""
     import cutoffs_view  # noqa: PLC0415
 
-    query = parse_qs(urlparse(h.path).query)
+    query: dict[str, list[Any]] = parse_qs(urlparse(h.path).query)
     region = _region_of(h, query)
     if region is None:
         return
@@ -287,7 +294,7 @@ def serve_event_cutoffs(h) -> None:
     h.reply_json(200, view)
 
 
-def serve_event_tracker(h) -> None:
+def serve_event_tracker(h: Handler) -> None:
     """`GET /api/event/tracker` -- is the 24/7 tracker still reading? `{configured, open, stale:
     [{region, minutes, last_read_at, error}], stale_after_min}` (`tracker_health.health`): a
     region with no border read for 30 min while an event is open. Pure read."""
@@ -305,7 +312,7 @@ def serve_event_tracker(h) -> None:
     )
 
 
-def serve_event_top(h) -> None:
+def serve_event_top(h: Handler) -> None:
     """`GET /api/event/top?region=us[&chapter=<id>][&kind=<k>][&uid=<public id>]` -- the latest top-100
     board of a chapter with each player's last-hour movement, and with `uid` that player's
     series (`top_view.build_top` over dumps/cutoffs/<region>/<chapter>.top.jsonl, which the
@@ -313,7 +320,7 @@ def serve_event_top(h) -> None:
     tracker has not stored a board for it."""
     import top_view  # noqa: PLC0415
 
-    query = parse_qs(urlparse(h.path).query)
+    query: dict[str, list[Any]] = parse_qs(urlparse(h.path).query)
     region = _region_of(h, query)
     if region is None:
         return
@@ -346,7 +353,7 @@ def serve_event_top(h) -> None:
     h.reply_json(200, view)
 
 
-def serve_event_history(h) -> None:
+def serve_event_history(h: Handler) -> None:
     """`GET /api/event/history` -- every marathon event on record, newest first, with the
     account's result per chapter and the final borders (`cutoffs_view.history_view` over
     `event_history.build()`, the refresh step's own build, made in memory). Pure read;

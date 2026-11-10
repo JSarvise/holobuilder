@@ -13,10 +13,15 @@ import enum
 import hashlib
 import json
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from hbuilder import paths
 from hbuilder.domain.model_version import MODEL_VERSION  # noqa: F401  (re-export)
+
+if TYPE_CHECKING:
+    from hbuilder.domain.scoring_config import ScoringConfig
 
 REPO = paths.REPO
 
@@ -59,12 +64,12 @@ def _jsonable(o):
     return out
 
 
-def cfg_json(cfg) -> str:
+def cfg_json(cfg: ScoringConfig) -> str:
     return json.dumps(_jsonable(cfg), sort_keys=True, separators=(",", ":"))
 
 
 def inputs_hash(
-    cfg,
+    cfg: ScoringConfig,
     basis: str,
     model_version: str = MODEL_VERSION,
     *,
@@ -133,7 +138,12 @@ def git_state(repo: Path = REPO) -> dict:
 
 
 def scenario_hash(
-    cfg, bench: dict, scenario_literal: str, model_version: str = MODEL_VERSION, *, repo: Path = REPO
+    cfg: ScoringConfig,
+    bench: dict,
+    scenario_literal: str,
+    model_version: str = MODEL_VERSION,
+    *,
+    repo: Path = REPO,
 ) -> tuple[str, dict]:
     """The `inputs_hash` of a GENERATED scenario — the maxed-account basis,
     whose bench (every holomem at max level, her points on what of her board
@@ -151,7 +161,12 @@ def scenario_hash(
 
 
 def try_scenario_hash(
-    cfg, bench: dict, scenario_literal: str, model_version: str = MODEL_VERSION, *, repo: Path = REPO
+    cfg: ScoringConfig,
+    bench: dict,
+    scenario_literal: str,
+    model_version: str = MODEL_VERSION,
+    *,
+    repo: Path = REPO,
 ) -> tuple[str | None, dict | None, str | None]:
     """(hash, per_file, error) — `scenario_hash` with the same tolerance
     `try_inputs_hash` has: a missing dump is reported, never a 500."""
@@ -180,7 +195,7 @@ __all__ = [
 # hash over the files that happened to exist.
 # ---------------------------------------------------------------------------
 def try_inputs_hash(
-    cfg, basis: str, model_version: str = MODEL_VERSION, *, repo: Path = REPO
+    cfg: ScoringConfig, basis: str, model_version: str = MODEL_VERSION, *, repo: Path = REPO
 ) -> tuple[str | None, dict | None, str | None]:
     """(hash, per_file, error). `error` names the missing/unreadable file."""
     try:
@@ -365,7 +380,9 @@ def resolve_difficulty(
 REFERENCE_KEY_LINES = ("cards", "collection", "board", "skilltree", "master_stn", "cfg")
 
 
-def chart_entry(song: str, *, charts_path: Path | None = None, difficulty: str = CHART_DIFFICULTY):
+def chart_entry(
+    song: str, *, charts_path: Path | None = None, difficulty: str = CHART_DIFFICULTY
+) -> dict[str, Any] | None:
     """`song`'s chart entry in charts.json (the `charts` mapping keyed
     `<music_id>/<difficulty>`; a list of entries with `music_id` /
     `difficulty` fields is accepted too). None when the song has no chart;
@@ -413,7 +430,7 @@ def _key_lines(per_file, model_version: str) -> list[str]:
     return lines
 
 
-def reference_key(per_file, model_version: str = MODEL_VERSION) -> str:
+def reference_key(per_file: Mapping[str, str], model_version: str = MODEL_VERSION) -> str:
     """The NON-chart part of an enumeration's key: sha256 over
     `cards=… collection=… board=… skilltree=… master_stn=… cfg=…
     model_version=…` (one line each, that order). Equal between a cached
@@ -423,7 +440,9 @@ def reference_key(per_file, model_version: str = MODEL_VERSION) -> str:
     return hashlib.sha256("\n".join(_key_lines(per_file, model_version)).encode()).hexdigest()
 
 
-def enumeration_key(per_file, chart_digest: str, model_version: str = MODEL_VERSION) -> str:
+def enumeration_key(
+    per_file: Mapping[str, str], chart_digest: str, model_version: str = MODEL_VERSION
+) -> str:
     """The enumeration's OWN validity key: the `reference_key` lines plus
     `chart=<chart_digest>` (inserted before `model_version`). Equal between
     a cached enumeration of song S and a run on S  <=>  the enumeration's
@@ -439,7 +458,11 @@ def enumeration_key(per_file, chart_digest: str, model_version: str = MODEL_VERS
 
 
 def try_enumeration_keys(
-    per_file, song: str, model_version: str = MODEL_VERSION, *, charts_path: Path | None = None
+    per_file: Mapping[str, str] | None,
+    song: str,
+    model_version: str = MODEL_VERSION,
+    *,
+    charts_path: Path | None = None,
 ) -> tuple[str | None, str | None, str | None, str | None]:
     """`(enumeration_key, reference_key, chart_digest, error)` for a run on
     `song` from its `inputs_hash` per-file digests — tolerant: no per-file

@@ -328,7 +328,7 @@ def skill_ladder_from_mapping(
                 if record is not None
             }
             if slots:
-                by_kind[kind] = slots
+                by_kind[kind] = slots  # type: ignore[assignment]
         ladder[card_id] = by_kind
     return ladder
 
@@ -359,7 +359,7 @@ def restate_card_skills(
         level = skill_level_at_bloom(kind, bloom)
         if level == CARDS_JSON_SKILL_LEVEL:
             continue
-        replacement = (ladder.get(kind) or {}).get(level)
+        replacement = (ladder.get(kind) or {}).get(level)  # type: ignore[arg-type]
         if replacement is None:
             # Reported, never guessed.
             notes.append(f"{kind}: no level-{level} row exported, left at level {CARDS_JSON_SKILL_LEVEL}")
@@ -534,7 +534,7 @@ def effective_stats(
         # double happens after the arithmetic, never during it. The inner
         # ceiling is the level-scaled parameter becoming an integer before the
         # bloom effect multiplies it — see the two-ceiling note above.
-        math.ceil(_f32(_f32(math.ceil(_f32(_f32(int(r)) * per_mille))) * mult))
+        math.ceil(_f32(_f32(math.ceil(_f32(_f32(int(r)) * per_mille))) * mult))  # type: ignore[arg-type]
         for r in ratio_permil
     )
     return (values[0], values[1], values[2])
@@ -557,7 +557,7 @@ def _normalise(entry: object) -> dict:
 
 def _coerce_int(value: object, label: str, card_id: str, warn: list[str]) -> int | None:
     try:
-        return int(value)  # type: ignore[arg-type]
+        return int(value)  # type: ignore[call-overload]
     except (TypeError, ValueError):
         warn.append(f"{card_id}: {label} is not a number ({value!r}), ignored")
         return None
@@ -1284,7 +1284,7 @@ def caps_by_rarity_from_mapping(raw: Mapping) -> dict[str, CardLevelCaps]:
         potential = (raw.get("potential_by_rarity") or {}).get(rarity) or {}
         out[rarity] = CardLevelCaps(
             level_by_limit_break=tuple(int(v) for v in caps),
-            max_bloom=potential.get("max"),
+            max_bloom=potential.get("max"),  # type: ignore[arg-type]
             bloom_mult_permil=tuple(int(v) for v in (potential.get("mult_permil") or ())),
         )
     return out

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbuilder.domain.collection import (
     CollectionError,
@@ -20,6 +20,9 @@ from hbuilder.domain.collection import (
 )
 from hbuilder.domain.skilltree import ROOT_NODE, TOTAL_BOARD_POINTS, player_level_requirement
 from hbweb import config
+
+if TYPE_CHECKING:
+    from hbweb.router import Handler
 
 # `…_level_up` is a hollow FRAME with "Lv" on its base, not a finished icon —
 # the granted skill's own glyph belongs inside it, and left empty the node
@@ -247,7 +250,7 @@ def _node_glyphs(tree: Mapping, costs: Mapping[str, int]) -> tuple[dict, set[str
     return nodes, missing_icons, len(available)
 
 
-def serve_board(h) -> None:
+def serve_board(h: Handler) -> None:
     """`GET /api/board`: everything the board editor needs, in one request. Absent files
     and a bad hand-edited `player` block are first-class `available: false` states with
     the reason, never a dropped connection."""

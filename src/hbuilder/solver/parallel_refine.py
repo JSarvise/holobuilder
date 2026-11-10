@@ -27,7 +27,9 @@ import os
 import pickle
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from multiprocessing.reduction import ForkingPickler
+from typing import TYPE_CHECKING, Any
 
 from hbuilder.domain.board_optimizer import BoardPlan
 from hbuilder.domain.board_plan import (
@@ -66,6 +68,12 @@ from hbuilder.domain.song import (
 from hbuilder.domain.song_rank import score_team_ceiling
 from hbuilder.domain.team import Team
 from hbuilder.solver.parallel import default_workers, one_blas_thread
+
+if TYPE_CHECKING:
+    from multiprocessing.pool import Pool
+
+    from hbuilder.domain.board import BoardModel
+    from hbuilder.domain.skilltree import SkillTree
 
 # the workers this module starts inherit it (`parallel.one_blas_thread`)
 one_blas_thread()
@@ -177,7 +185,7 @@ class PlanStore:
 
         return os.path.join(self.folder, hashlib.sha1(repr(key).encode("utf-8")).hexdigest() + ".pkl")
 
-    def get(self, key: tuple):
+    def get(self, key: tuple) -> BoardPlan | None:
         try:
             with open(self._path(key), "rb") as fh:
                 stored_key, plan = pickle.load(fh)
@@ -185,7 +193,7 @@ class PlanStore:
             return None
         return plan if stored_key == key else None
 
-    def put(self, key: tuple, plan) -> None:
+    def put(self, key: tuple, plan: BoardPlan) -> None:
         tmp = None
         try:
             # a private temporary file in the store's folder, moved into place whole
@@ -244,8 +252,8 @@ def _init_worker(ctx: RefineContext | str, stop=None) -> None:
     if isinstance(ctx, str):
         with open(ctx, "rb") as fh:
             ctx = pickle.load(fh)
-    _CTX = ctx
-    _BY_ID = {c.id: c for c in ctx.cards}
+    _CTX = ctx  # type: ignore[assignment]
+    _BY_ID = {c.id: c for c in ctx.cards}  # type: ignore[union-attr]
     _TREES = {}
     _PLAN_CACHE = None
     _STOP = stop
@@ -279,7 +287,7 @@ def _activate(token: tuple) -> None:
     _TOKEN, _SLOT = token, token[1]
 
 
-def forget_context(ctx, plan_cache) -> None:
+def forget_context(ctx: RefineContext, plan_cache: PlanCache | None) -> None:
     """A context this process no longer keeps: the singer-bench memos' entries that hold it
     or its plan cache go with it (each entry keeps its context alive, and the memos are
     only emptied by newer entries)."""
@@ -289,7 +297,7 @@ def forget_context(ctx, plan_cache) -> None:
         forget_plan_cache(plan_cache)
 
 
-def run_in(token: tuple, fn, item):
+def run_in(token: tuple, fn: Callable[[Any], Any], item: Any) -> Any:
     """`fn(item)` in a `SharedPool` worker, on `token`'s context."""
     _activate(token)
     return fn(item)
@@ -387,13 +395,13 @@ def _with_singer_bench(ctx, by_id, tree_for, budget_for, plan_cache, sings):
 def evaluate(
     ctx: RefineContext,
     by_id: Mapping[str, Card],
-    tree_for,
-    budget_for,
-    team_ids: tuple[str, tuple[str, ...]],
+    tree_for: Callable[[Card], SkillTree | None],
+    budget_for: Callable[[Card], int],
+    team_ids: tuple,
     *,
     plan_cache: PlanCache | None = None,
     per_chart: bool = False,
-):
+) -> Any:
     """ONE exact evaluation — develop the team, score it on the context's
     charts, return the mean. Shared by the worker task and the in-process
     fallback so both compute the identical float.
@@ -523,7 +531,7 @@ def evaluate(
         s = score_song_detailed(team.members, (team.leader,), chart, cfg, deck_power=power)
         return score_team_ceiling(team, chart, cfg, s[0].member_order) if s else 0.0
 
-    def develop(sings: bool, charts_for=()):
+    def develop(sings: bool | AbstractSet[str], charts_for=()):
         ctx_d = _with_singer_bench(ctx, by_id, tree_for, budget_for, plan_cache, sings)
         return _develop(ctx_d, sings, charts_for)
 
@@ -613,7 +621,7 @@ def evaluate(
     if ctx.board_per_chart and charts:
         # One board per singer context, each chart scored on its own: the same
         # floats, added in chart order, as one single-chart evaluation per chart.
-        configs: dict[frozenset, object] = {}
+        configs: dict[tuple[frozenset, str], ScoringConfig] = {}
         total = 0.0
         scores: list[float] = []
         # keyed by WHICH of the team's holomems sing: the leader's reds and every
@@ -735,19 +743,19 @@ def board_from_state(
     team: Team,
     board_state: Mapping,
     *,
-    cfg,
+    cfg: ScoringConfig,
     skilltree: Mapping,
     node_effect_ids: Mapping,
-    tree_for,
-    connect_cards=None,
-    bench_characters=None,
-    name_by_chr=None,
-    sings: bool = False,
+    tree_for: Callable[[Card], SkillTree | None],
+    connect_cards: Mapping[str, tuple[Sequence[Sequence[int]], int]] | None = None,
+    bench_characters: Mapping[str, Sequence[Mapping]] | None = None,
+    name_by_chr: Mapping[str, str] | None = None,
+    sings: bool | AbstractSet[str] = False,
     plan_out: list | None = None,
     use_slots: bool = False,
     socket_bench: bool = False,
-    bench_sockets=None,
-):
+    bench_sockets: Mapping[str, Mapping[str, str | None]] | None = None,
+) -> tuple[BoardModel, list[SocketPlacement]]:
     """`(BoardModel, placements)` for `team` with each character's nodes taken
     from `board_state` (`{chr: {"nodes": [...], "slots": {...}}}`), assembled
     by `board_model_from_plan` exactly as the develop assembles a plan: the
@@ -812,13 +820,13 @@ def board_from_state(
 def develop_team(
     ctx: RefineContext,
     team: Team,
-    tree_for,
-    budget_for,
-    chart,
+    tree_for: Callable[[Card], SkillTree | None],
+    budget_for: Callable[[Card], int],
+    chart: SongChart | None,
     *,
     plan_cache: PlanCache | None = None,
     refine: bool | int | None = None,
-):
+) -> BoardOptimisedTeam:
     """The `BoardOptimisedTeam` (board, plan, sockets) behind ONE leaf
     evaluation of `team` on `chart` — what `evaluate` develops, kept whole so a
     DETAIL view can show the board, the slot order and the panel of the very
@@ -864,7 +872,7 @@ def develop_team(
             board=board,
             sockets=tuple(placements),
         )
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         tree_for=tree_for,
         budget_for=budget_for,
         node_effect_ids=ctx.node_effect_ids,
@@ -905,7 +913,7 @@ def develop_team(
         )
         combo = chooser.choose(chart)[2]
         if combo is not None:
-            placements: list[SocketPlacement] = []
+            placements: list[SocketPlacement] = []  # type: ignore[no-redef]
             chosen = plan_with_counts(
                 plan, chooser.axes, combo, {c.id: c for c in (team.leader, *team.members)}, tree_for
             )
@@ -923,7 +931,7 @@ def develop_team(
             )
         refine = False
     if refine and chart is not None:
-        powers: dict[int, tuple] = {}  # as `evaluate`'s: per board, copies share theirs
+        powers: dict[int, tuple] = {}  # type: ignore[no-redef]  # as `evaluate`'s: per board, copies share theirs
 
         def power_of(cfg_r):
             if not cfg_r.song_absolute_deck_power:
@@ -974,7 +982,9 @@ def _cooldown_counts(team: Team, board) -> tuple[dict, dict]:
     return unit, have
 
 
-def lens_value(team: Team, chart, cfg, power) -> tuple[float, float]:
+def lens_value(
+    team: Team, chart: SongChart, cfg: ScoringConfig, power: OverallPower | None
+) -> tuple[float, float]:
     """`(plain, lens)`: the exact score of the developed board (`cfg.board`), and the best
     of it and its every single-member frequency count drop (each member's every lower count,
     estimated by `song.screen_song_cooldown_variants`), from one set-up of the team on the
@@ -996,7 +1006,9 @@ def lens_value(team: Team, chart, cfg, power) -> tuple[float, float]:
     return plain, max([plain, *values])
 
 
-def count_screen_value(team: Team, chart, cfg, plain: float, power) -> float:
+def count_screen_value(
+    team: Team, chart: SongChart, cfg: ScoringConfig, plain: float, power: OverallPower | None
+) -> float:
     """A cheap estimate of the team's score with its members' frequency node counts chosen:
     from the developed board (`cfg.board`), up to COUNT_SCREEN_ROUNDS rounds of the best
     single-member count drop, each round every member's every lower count scored at once
@@ -1186,14 +1198,14 @@ class ChartCounts:
     def __init__(
         self,
         team: Team,
-        cfg,
-        plan,
-        assemble,
+        cfg: ScoringConfig,
+        plan: TeamBoardPlan,
+        assemble: Callable[[TeamBoardPlan], BoardModel | None],
         *,
-        tree_for,
-        budget_for,
-        skilltree,
-        power_of,
+        tree_for: Callable[[Card], SkillTree | None],
+        budget_for: Callable[[Card], int],
+        skilltree: Mapping | None,
+        power_of: Callable[[ScoringConfig], OverallPower | None],
         axes_memo: dict | None = None,
         team_setup: dict | None = None,
     ) -> None:
@@ -1219,7 +1231,7 @@ class ChartCounts:
         )
         self._holomems = [members[card_id].member for card_id, _states, _here in self.axes]
         # each member's cooldown shortening as its board has it, and per frequency node
-        self._own = [board.uptime_for(h)[1] for h in self._holomems]
+        self._own = [board.uptime_for(h)[1] for h in self._holomems]  # type: ignore[union-attr]
         self._unit = [own / here for own, (_cid, _states, here) in zip(self._own, self.axes)]
         self.start = tuple(
             next(k for k, (count, _sel) in enumerate(states) if count == here)
@@ -1236,7 +1248,7 @@ class ChartCounts:
             )
         }
 
-    def config_at(self, combo):
+    def config_at(self, combo: tuple[int, ...]) -> ScoringConfig | None:
         """The config whose board is the plan with the members at `combo`, assembled; None
         when it cannot be."""
         if combo not in self._boards:
@@ -1255,7 +1267,7 @@ class ChartCounts:
         )
         return s[0].total_score if s else 0.0
 
-    def choose(self, chart) -> tuple[float, float, tuple | None]:
+    def choose(self, chart: SongChart) -> tuple[float, float, tuple | None]:
         """`(plain score, score served, the counts it is served at)` on `chart`; the counts
         are None when the plain board is kept."""
         team, cfg = self.team, self.cfg
@@ -1355,14 +1367,14 @@ class SharedPool:
         import threading  # noqa: PLC0415
 
         self.workers = default_workers() if workers is None else max(1, workers)
-        self._pool = None
+        self._pool: Pool | None = None
         self._stop = None
         self._lock = threading.Lock()
         self._generation = 0
         self._free = list(range(self.SLOTS))
         self.failed: str | None = None
 
-    def pool(self):
+    def pool(self) -> Pool | None:
         """The worker processes, started on first use; None when they cannot start."""
         with self._lock:
             if self._pool is None and self.failed is None and self.workers > 1:
@@ -1434,7 +1446,7 @@ class RefinePool:
             workers = shared.workers
         self.workers = default_workers() if workers is None else max(1, workers)
         self.on_fallback = on_fallback
-        self._pool = None
+        self._pool: Pool | None = None
         self._by_id = {c.id: c for c in ctx.cards}
         self._trees: dict = {}
         self._plan_cache: PlanCache | None = None
@@ -1447,7 +1459,7 @@ class RefinePool:
     def new_generation(self) -> int:
         """A number for the next batch of stoppable tasks (`stop_through`)."""
         if self._token is not None:
-            return self.shared.new_generation()
+            return self.shared.new_generation()  # type: ignore[union-attr]
         self._generation += 1
         return self._generation
 
@@ -1455,20 +1467,27 @@ class RefinePool:
         """Tell every worker to stop the tasks of `generation` and earlier: a task polls
         `stopped(its generation)` (no file, no message: one shared integer)."""
         if self._token is not None:
-            self.shared.stop_through(self._token[1], generation)
+            self.shared.stop_through(self._token[1], generation)  # type: ignore[union-attr]
             return
         if self._stop is not None and self._stop.value < generation:
             self._stop.value = generation
 
-    def submit(self, fn, item, *, callback, error_callback) -> None:
+    def submit(
+        self,
+        fn: Callable[[Any], Any],
+        item: Any,
+        *,
+        callback: Callable[[Any], object] | None,
+        error_callback: Callable[[BaseException], object] | None,
+    ) -> None:
         """`fn(item)` on a worker, asynchronously (`materials_plan.dispatch`): on this
         pool's context, which a shared worker activates first."""
         if self._token is not None:
-            self._pool.apply_async(
+            self._pool.apply_async(  # type: ignore[union-attr]
                 run_in, (self._token, fn, item), callback=callback, error_callback=error_callback
             )
         else:
-            self._pool.apply_async(fn, (item,), callback=callback, error_callback=error_callback)
+            self._pool.apply_async(fn, (item,), callback=callback, error_callback=error_callback)  # type: ignore[union-attr]
 
     def _items(self, items: list, task, ctx_task) -> tuple:
         """`(task, task items)` for `imap_unordered`: on a shared pool each item names
@@ -1553,7 +1572,7 @@ class RefinePool:
         forget_context(self.ctx, self._plan_cache)
         if self._token is not None:
             # the workers are the shared pool's: only this context's mark and file go
-            self.shared.release(self._token[1])
+            self.shared.release(self._token[1])  # type: ignore[union-attr]
             self._token = None
             self._pool = None
         if self.shared is not None:
@@ -1595,7 +1614,9 @@ class RefinePool:
         `refine_activation` overrides the context's flag (a `refine_level`) for this batch."""
         if refine_activation is not None:
             chosen = None if chart_indices is None else tuple(chart_indices)
-            items = [(t.leader.id, tuple(m.id for m in t.members), chosen, refine_activation) for t in teams]
+            items: list[tuple] = [
+                (t.leader.id, tuple(m.id for m in t.members), chosen, refine_activation) for t in teams
+            ]
         elif chart_indices is None:
             items = [(t.leader.id, tuple(m.id for m in t.members)) for t in teams]
         else:
@@ -1638,7 +1659,7 @@ class RefinePool:
             ]
         )
 
-    def _run(self, items: list) -> list[float]:
+    def _run(self, items: list) -> list[Any]:
         """`evaluate` on each item (`_task`'s shape), in the workers; in order."""
         if not items:
             return []

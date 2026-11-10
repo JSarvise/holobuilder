@@ -9,11 +9,17 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hbweb import config
 
+if TYPE_CHECKING:
+    from hbweb.router import Handler
 
-def run_recon_script(h, script: Path, tag: str, args: list[str] | None = None) -> tuple[int, str] | None:
+
+def run_recon_script(
+    h: Handler, script: Path, tag: str, args: list[str] | None = None
+) -> tuple[int, str] | None:
     """Run a recon-side script as a subprocess, echoing each line of its output to this
     server's console AS IT ARRIVES (the operator watches the console; a captured pipe
     would leave it blank for minutes) and collecting it for the reply.

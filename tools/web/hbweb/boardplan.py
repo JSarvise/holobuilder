@@ -11,10 +11,16 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 import board_values
 
 from hbweb import basis, config
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
+    from hbweb.router import Handler
 
 
 def _maxed_complete_state(precompute, team: dict, ids: list) -> dict:
@@ -58,7 +64,7 @@ def over_points(doc: Mapping, budget: int) -> list[dict]:
     ]
 
 
-def serve_board_doc(h) -> None:
+def serve_board_doc(h: Handler) -> None:
     """`POST /api/board-doc {board_state, cards, basis, budget}` — the
     board-export/v0 doc for the six characters of a team with a GIVEN
     developed board overlaid (`_apply_plan`: to_buy / to_sell /
@@ -111,7 +117,7 @@ def serve_board_doc(h) -> None:
             )
         doc = board_doc_for(precompute, state, ids, basis_name, flat_budget)
         if complete:
-            doc["over_points"] = over_points(doc, flat_budget)
+            doc["over_points"] = over_points(doc, flat_budget)  # type: ignore[arg-type]
     except Exception as exc:  # noqa: BLE001 — report as JSON, never HTML 500
         h.reply_error(exc)
         return
@@ -141,7 +147,7 @@ def _plan_account_state(body: Mapping, whole: Mapping, captured: Mapping) -> tup
     return state, chosen
 
 
-def serve_board_plan_account(h) -> None:
+def serve_board_plan_account(h: Handler) -> None:
     """`POST /api/board-plan-account {cards: [leader, m1..m5], song?, song_pool?, assumptions,
     board_state?}` — the WHOLE account's planned Holomem Boards for a team, as
     holodori.best shows them: every holomem's target board, not only the six.
@@ -263,7 +269,7 @@ def settle_slots(state: dict, captured: Mapping, chosen: set, group_of: Mapping 
 _CONNECT_GROUPS: list = [None, 0.0]
 
 
-def connect_groups(precompute) -> dict:
+def connect_groups(precompute: ModuleType | None) -> dict:
     """card id -> (shape, permil) of the account's Connect cards (`connect_cards_for`), the
     key two cards are interchangeable by; re-read at most once a minute."""
     if _CONNECT_GROUPS[0] is None or time.monotonic() - _CONNECT_GROUPS[1] > 60:
@@ -313,7 +319,9 @@ def _place_sockets(doc: dict, overlay: Mapping, names: Mapping) -> None:
                 sock["recommended_card_member"] = info.get("member") or ""
 
 
-def board_doc_for(precompute, board_state: dict, ids: list, basis_name: str, flat_budget) -> dict:
+def board_doc_for(
+    precompute: ModuleType, board_state: dict, ids: list, basis_name: str, flat_budget: int | None
+) -> dict:
     """The board-export/v0 doc of the characters in `board_state` (+ `ids`' own) with that
     state overlaid as the plan (`_apply_plan`: to_buy / to_sell / optimised_nodes), its
     sockets the GIVEN placements, node values annotated. No optimisation call."""

@@ -15,6 +15,7 @@ import datetime as _dt
 import json
 import types
 from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
 import compare_view
@@ -36,13 +37,16 @@ from hbuilder.inputs import (
 )
 from hbweb import admin, basis, config, jobs, songs
 
+if TYPE_CHECKING:
+    from hbweb.router import Handler
 
-def serve_ranks(h) -> None:
+
+def serve_ranks(h: Handler) -> None:
     """`GET /api/ranks`: the community rank tables (`row_detail.load_ranks`)."""
     h.reply_json(200, row_detail.load_ranks(paths.HOLODORI))
 
 
-def start_search(h) -> None:
+def start_search(h: Handler) -> None:
     """`POST /api/search {song (empty = in general), basis?: one of
     leaf_inputs.BASES,
     difficulty?, leader_member?, leader_card?, no_leader_overlap?, require?,
@@ -219,7 +223,7 @@ def row_figures(req: Mapping, body: Mapping, *, keep_law: bool = False) -> dict:
     return out
 
 
-def _row_reply(h, make) -> None:
+def _row_reply(h: Handler, make) -> None:
     """Reply `make()` as JSON; the row routes' errors as a 400 with the message (a missing
     chart or account dump, a bad team, a key not in the basis' pool), never an HTML 500."""
     try:
@@ -242,7 +246,7 @@ def _row_reply(h, make) -> None:
     h.reply_json(200, out)
 
 
-def row_detail_route(h) -> None:
+def row_detail_route(h: Handler) -> None:
     """`POST /api/row-detail` — ONE number set for a two-stage / event row,
     re-developed on the leaf that ranked it (`row_detail.two_stage_detail`):
     song figures, slot order, deck power, board state, Overall Power lines,
@@ -265,7 +269,7 @@ def row_detail_route(h) -> None:
     _row_reply(h, lambda: row_figures(row_request(body), body))
 
 
-def export_team_route(h) -> None:
+def export_team_route(h: Handler) -> None:
     """`POST /api/export-team` — the row as a `.hbteam` document (`hbteam.document`): the
     request, the detail the server computes for it now (with the run law's summary), the
     numbers the page showed (`shown`), the search that ranked it (`search`) and the account
@@ -355,7 +359,7 @@ def _timeline_board(
     return (optimised_model if optimised_model is not None else captured), optimised_model
 
 
-def serve_timeline(h) -> None:
+def serve_timeline(h: Handler) -> None:
     """`POST /api/timeline`: when each of a team's five members is actually live, on one
     axis -- `song.timeline()`'s five lanes, the chart's own SPECIAL cues and every
     ACTIVE's cooldown lattice.
@@ -408,7 +412,7 @@ def serve_timeline(h) -> None:
         cards, cfg, ma_scenario = _timeline_inputs(body, basis_name)
         team, cfg = _timeline_team(cards, wanted, cfg)
         chart = charts_from_mapping(
-            {"schema_version": raw.get("schema_version"), "charts": {f"{music_id}/{difficulty}": chart_doc}},
+            {"schema_version": raw.get("schema_version"), "charts": {f"{music_id}/{difficulty}": chart_doc}},  # type: ignore[union-attr]
             source=str(charts_file.name),
         ).get(music_id, difficulty)
 
@@ -418,11 +422,16 @@ def serve_timeline(h) -> None:
         )
         cfg_board = dataclasses.replace(cfg, board=board_model)
 
-        fig = row_detail.figures(team, chart, cfg_board)
-        drawing = timeline(team.members, chart, cfg_board, tuple(fig["member_order"]))
+        fig = row_detail.figures(team, chart, cfg_board)  # type: ignore[arg-type]
+        drawing = timeline(team.members, chart, cfg_board, tuple(fig["member_order"]))  # type: ignore[arg-type]
         law = (
             row_detail.distribution(
-                team, chart, cfg_board, fig["member_order"], fig["deck_power"], row_score=fig["song_est"]
+                team,
+                chart,  # type: ignore[arg-type]
+                cfg_board,
+                fig["member_order"],
+                fig["deck_power"],
+                row_score=fig["song_est"],
             )
             if body.get("distribution") is True
             else None
@@ -516,7 +525,7 @@ def _timeline_payload(
     return out
 
 
-def compare(h) -> None:
+def compare(h: Handler) -> None:
     """`POST /api/compare` — two hand-picked teams scored side by side under
     one set of assumptions. All logic lives in `compare_view.build_compare`;
     this only parses the JSON and maps its typed errors to status codes."""
@@ -529,14 +538,16 @@ def compare(h) -> None:
         h.reply_error(exc)
 
 
-def _meta_assumed(h) -> dict | None:
+def _meta_assumed(h: Handler) -> dict | None:
     """`/api/meta`'s `assumed`: the account bonuses under the query's card levers
     (`ondemand.account_bonuses`), or with `?basis=maxed` the Maxed account's
     (`ondemand.maxed_bonuses`); None when the query sets neither."""
     import ondemand  # noqa: PLC0415
 
     query = parse_qs(h.path.split("?", 1)[1]) if "?" in h.path else {}
-    raw = {k: query[k][0] for k in ("level", "bloom", "sp_training", "keep_higher") if k in query}
+    raw: dict[str, Any] = {
+        k: query[k][0] for k in ("level", "bloom", "sp_training", "keep_higher") if k in query
+    }
     if (query.get("basis") or [""])[0] == "maxed":
         b = ondemand.maxed_bonuses()
     elif raw:
@@ -549,7 +560,7 @@ def _meta_assumed(h) -> dict | None:
     return {"power_up_permyriad": b.power_up_permyriad, "memory_permil": b.memory_permil}
 
 
-def serve_meta(h) -> None:
+def serve_meta(h: Handler) -> None:
     """`GET /api/meta`: the one-line facts the page shows before any run: how many cards
     the account owns of the catalogue, how many boards the capture carries, and
     the two account-level bonuses every score silently includes (memory /
@@ -607,10 +618,10 @@ def serve_meta(h) -> None:
                 "max_level_board_points": max_points,
                 "boards_total": len(bs),
                 "memory_posters": getattr(bonuses, "posters", None) if bonuses else None,
-                "memory_bonus_permil": (bonuses.memory_permil if bonuses is not None else None),
+                "memory_bonus_permil": (bonuses.memory_permil if bonuses is not None else None),  # type: ignore[attr-defined]
                 "power_up_permyriad": (
-                    bonuses.power_up_permyriad
-                    if bonuses is not None and bonuses.power_up_permyriad is not None
+                    bonuses.power_up_permyriad  # type: ignore[attr-defined]
+                    if bonuses is not None and bonuses.power_up_permyriad is not None  # type: ignore[attr-defined]
                     # `player.power_up_permyriad: "auto"` — the derived value the
                     # scoring itself uses, never a hand-typed stale one.
                     else getattr(collection_basis.derived_power_up, "permyriad", None)
@@ -625,5 +636,5 @@ def serve_meta(h) -> None:
         # (otherwise the page shows "_LoadFailure: 3" for "owned: id '...' is not present
         # in the loaded cards")
         if isinstance(exc, _LoadFailure) and exc.__cause__ is not None:
-            exc = exc.__cause__
+            exc = exc.__cause__  # type: ignore[assignment]
         h.reply_json(200, {"error": f"{type(exc).__name__}: {exc}"})

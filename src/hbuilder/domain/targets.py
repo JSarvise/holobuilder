@@ -102,12 +102,12 @@ def resolve_target_card_ids(
         for card in qualifying
     ]
 
-    if len(candidates) < target.count:
+    if len(candidates) < target.count:  # type: ignore[operator]
         if under_supply == "do_not_apply":
             return frozenset()
         # "apply_to_available": the effect applies to every qualifying
         # card, since fewer qualify than the target's own count.
         return frozenset(card_id for card_id, _stat_value in candidates)
 
-    selected = model.select(candidates, target.count)
+    selected = model.select(candidates, target.count)  # type: ignore[arg-type]
     return frozenset(selected)

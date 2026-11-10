@@ -422,7 +422,7 @@ def run_score_distribution(
     final = None
     for state in states.values():
         final = state if final is None else merged(final, state)
-    _w, base, dist, lo, hi = final
+    _w, base, dist, lo, hi = final  # type: ignore[misc]
     out = _summary(dist, base, bins, bin_width, lo + base, hi + base, keep_law=keep_law)
     out.update(
         {

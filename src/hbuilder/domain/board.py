@@ -526,7 +526,7 @@ class BoardDigest:
         cached = self._stat_ops.get(key)
         if cached is not None:
             self._stat_ops_by_card[fast_key] = (card, holomem, cached)
-            return cached
+            return cached  # type: ignore[return-value]
         flat: list[tuple[str, float]] = []
         rate: list[tuple[str, float]] = []
         for effect in self.stat_effects:
@@ -556,7 +556,7 @@ class BoardDigest:
             summed[stat] = summed.get(stat, 0.0) + value
             counts[stat] = counts.get(stat, 0) + 1
         result = (tuple(flat), tuple(rate), tuple(summed.items()), tuple(counts.items()))
-        self._stat_ops[key] = result
+        self._stat_ops[key] = result  # type: ignore[assignment]
         self._stat_ops_by_card[fast_key] = (card, holomem, result)
         return result
 
@@ -942,8 +942,8 @@ class BoardModel:
             self._terms_cache[key] = result
             return result
         flat_index = 2 if self._flat_exact else 0
-        flat: dict[str, float] = {}
-        rate: dict[str, float] = {}
+        flat: dict[str, float] = {}  # type: ignore[no-redef]
+        rate: dict[str, float] = {}  # type: ignore[no-redef]
         for holomem, digest in self._digests.items():
             if not digest.stat_effects:
                 continue
@@ -974,12 +974,12 @@ class BoardModel:
         pays its leader-scope effects."""
         base = self._base
         digests = self._digests
-        base_digests = base.digests
-        total, count, base_rates = base.terms(card, card_key)
+        base_digests = base.digests  # type: ignore[union-attr]
+        total, count, base_rates = base.terms(card, card_key)  # type: ignore[union-attr]
         special = self._base_special
         corrected = list(special.items())
-        if leader_holomem is not None and leader_holomem not in special and leader_holomem in base.index:
-            corrected.append((leader_holomem, base.index[leader_holomem]))
+        if leader_holomem is not None and leader_holomem not in special and leader_holomem in base.index:  # type: ignore[union-attr]
+            corrected.append((leader_holomem, base.index[leader_holomem]))  # type: ignore[union-attr]
         flat_total = dict(total)
         flat_count = dict(count)
         rates: list[tuple[int, tuple]] = []
@@ -1006,7 +1006,7 @@ class BoardModel:
         # count, not the total, says so (a total can be a legitimate 0.0).
         flat = {stat: value for stat, value in flat_total.items() if flat_count[stat]}
         rates.extend((pos, ops) for pos, holomem, ops in base_rates if holomem not in replaced)
-        rates.sort(key=_FIRST)  # board order; positions are unique
+        rates.sort(key=_FIRST)  # type: ignore[arg-type]  # board order; positions are unique
         rate: dict[str, float] = {}
         for _pos, ops in rates:
             for stat, value in ops:
@@ -1430,7 +1430,7 @@ def _reaches(effect: BoardEffect, holomem: str, card: Card) -> bool:
         # token (board tests) or the catalogue's DISPLAY name (`Myth`) — accept both.
         return (
             effect.grouping in card.generations
-            or _GENERATION_BY_GROUPING.get(effect.grouping) in card.generations
+            or _GENERATION_BY_GROUPING.get(effect.grouping) in card.generations  # type: ignore[operator, arg-type]
         )
     if effect.scope == "account":
         return True

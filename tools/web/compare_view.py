@@ -61,7 +61,7 @@ import dataclasses
 import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import certificate as cert_mod
 import row_detail
@@ -103,6 +103,12 @@ from hbuilder.inputs import (
     load_board_basis,
     load_inputs,
 )
+
+if TYPE_CHECKING:
+    from hbuilder.domain.card import Card
+    from hbuilder.domain.collection import CardState
+    from hbuilder.domain.scoring_config import ScoringConfig
+    from hbuilder.domain.song import SongChart
 
 TEAM_LABELS = ("A", "B")
 BOARD_MODES = ("captured", "develop", "off", "state")
@@ -176,7 +182,7 @@ def parse_teams(body: Mapping) -> list[dict]:
             if isinstance(entry.get("board_state"), Mapping):
                 board_state = entry.get("board_state")
             if isinstance(entry.get("member_order"), list):
-                member_order = [str(c) for c in entry.get("member_order")]
+                member_order = [str(c) for c in entry.get("member_order")]  # type: ignore[union-attr]
         else:
             ids_raw, ov_raw = entry, None
         ids = [str(c).strip() for c in (ids_raw or []) if c] if isinstance(ids_raw, list) else []
@@ -233,7 +239,7 @@ def parse_assumptions(body: Mapping) -> dict:
     try:
         difficulty = basis_mod.parse_difficulty(body, song)
     except basis_mod.HttpError as exc:
-        raise CompareError(exc.code, exc.obj.get("error") if isinstance(exc.obj, dict) else str(exc)) from exc
+        raise CompareError(exc.code, exc.obj.get("error") if isinstance(exc.obj, dict) else str(exc)) from exc  # type: ignore[arg-type]
     return {
         "basis": basis_name,
         "assume_level": basis_mod.parse_assume(body, "assume_level", *LEVEL_RANGE),
@@ -305,7 +311,7 @@ class OverrideContext:
             )
             self.default = _whatif_entry(doc.get("card_default", "max"), assume_level, assume_bloom)
 
-    def override(self, raw_card, level: int | None, bloom: int | None):
+    def override(self, raw_card: Card, level: int | None, bloom: int | None) -> tuple[Card, CardState]:
         """`(card, state)`: `raw_card` (the catalogue's maxed card, BEFORE the
         collection was applied — `restate_card_skills` swaps slots from that
         level, so it must start from the catalogue's) restated at the given
@@ -334,7 +340,9 @@ class OverrideContext:
 # ---------------------------------------------------------------------------
 # panel lines
 # ---------------------------------------------------------------------------
-def panel_lines(team: Team, cfg_board, cfg_off, chart=None) -> dict:
+def panel_lines(
+    team: Team, cfg_board: ScoringConfig, cfg_off: ScoringConfig, chart: SongChart | None = None
+) -> dict:
     """The model's deck-screen lines for one team, in the deck screen's shape. `cfg_board`
     carries the board the team is scored on; `cfg_off` is board=None (same
     otherwise). Member Parameter = `base_stat_sum`; Outfit and Passive = the
@@ -384,7 +392,7 @@ def panel_lines(team: Team, cfg_board, cfg_off, chart=None) -> dict:
         cast = cfg_board.board.conditional_stat_power_for(tuple(team.members), team.leader.member, singers)
         board_power += cast
         if power_up is not None:
-            power_up += song_power - overall_power - cast
+            power_up += song_power - overall_power - cast  # type: ignore[assignment]
         overall_power = song_power
     return {
         "unit_score": ds.unit_score,
@@ -506,7 +514,7 @@ def _gate_diff(gates_a: list, gates_b: list) -> list[dict]:
     rows = []
     for key in sorted(set(a_by) | set(b_by), key=str):
         ga, gb = a_by.get(key), b_by.get(key)
-        g = ga or gb
+        g: dict[str, Any] = ga or gb  # type: ignore[assignment]
         rows.append(
             {
                 "card_id": g["card_id"],
@@ -528,7 +536,7 @@ def _skill_diff(rows_a: list, rows_b: list) -> list[dict]:
     out = []
     for k in sorted(set(a_by) | set(b_by), key=str):
         ra, rb = a_by.get(k), b_by.get(k)
-        r = ra or rb
+        r: dict[str, Any] = ra or rb  # type: ignore[assignment]
         out.append(
             {
                 "card_id": r["card_id"],
@@ -586,7 +594,7 @@ def _board_plan_summary(
     `points_used` = the plan's own spend, `points_max` = the budget the plan
     was costed against, named by kind — never "453 / 97". Materials from the
     node price table for the buys; absent when the master is unreadable."""
-    per_character = []
+    per_character: list[dict[str, Any]] = []
     materials: dict[str, int] = {}
     develop_only = budget_kind != "real"
     for card in (bt.team.leader, *bt.team.members):
@@ -752,7 +760,7 @@ class _Developer:
     def __init__(
         self, cfg, cards, basis_name: str, budget: int | None, chart, ma_scenario=None, assume_bloom=None
     ) -> None:
-        self.skilltree = config.read_json(config.SKILLTREE_PATH)
+        self.skilltree: Mapping[str, Any] = config.read_json(config.SKILLTREE_PATH)  # type: ignore[assignment]
         self.node_master = config.read_json(config.NODE_MASTER_PATH)
         if not self.skilltree or not self.node_master:
             raise CompareError(
@@ -1177,7 +1185,7 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
         try:
             if mode == "song":
                 # the row's figures, through the ranker's own entry point
-                fig = row_detail.figures(team, chart, cfg_team, cfg_off=cfg_off)
+                fig = row_detail.figures(team, chart, cfg_team, cfg_off=cfg_off)  # type: ignore[arg-type]
                 est = fig["song_est"]
                 score.update(
                     {
@@ -1217,7 +1225,12 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
         )
         law = (
             row_detail.distribution(
-                team, chart, cfg_team, score["member_order"], score["deck_power"], row_score=score["song_est"]
+                team,
+                chart,  # type: ignore[arg-type]
+                cfg_team,
+                score["member_order"],
+                score["deck_power"],
+                row_score=score["song_est"],
             )
             if mode == "song" and A.get("distribution")
             else None
@@ -1246,7 +1259,7 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
             metric = "song_est" if mode == "song" else "unit_score"
             off = round(score["song_off"]) if mode == "song" else round(us_off)
             dev = round(headline) if mode == "song" else round(panel["unit_score"])
-            row["board_plan_summary"] = developer.summary(
+            row["board_plan_summary"] = developer.summary(  # type: ignore[union-attr]
                 bt, board_state, board_off=off, developed=dev, metric=metric
             )
             row["board_off_us"] = round(bt.board_off_us)
@@ -1257,10 +1270,10 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
         if dev_bt is not None:
             # the what-if: the same team on its OWN greedy re-develop
             cfg_dev = dataclasses.replace(cfg, board=dev_bt.board)
-            dev_state = developer.board_state_of(dev_bt)
+            dev_state = developer.board_state_of(dev_bt)  # type: ignore[union-attr]
             try:
                 if mode == "song":
-                    dev_value = score_team_on_chart(team, chart, cfg_dev).total_score
+                    dev_value = score_team_on_chart(team, chart, cfg_dev).total_score  # type: ignore[arg-type]
                     score["song_est_develop"] = dev_value
                     dev_metric, off_dev = "song_est", round(score["song_off"])
                 else:
@@ -1282,7 +1295,7 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
             row["points_develop"] = sum(p.spent for p in dev_bt.plan.per_character.values())
             row["board_state_develop"] = dev_state
             row["board_plan_summary_develop"] = {
-                **developer.summary(
+                **developer.summary(  # type: ignore[union-attr]
                     dev_bt,
                     dev_state,
                     board_off=off_dev,

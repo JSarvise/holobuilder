@@ -12,7 +12,7 @@ Nothing here is imported by the solver's hot loop; it is a separate objective ov
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from hbuilder.domain.card import Card
@@ -201,7 +201,7 @@ def event_points(
     so the caller supplies it. `multi_score`: the room's MULTI SCORE for a multi Live
     (`event_points_base`). Exact on observed solo and multi Live/Finish results."""
     if base is None:
-        base = event_points_base(int(score), int(bonus_permil), multi_score, divisor)
+        base = event_points_base(int(score), int(bonus_permil), multi_score, divisor)  # type: ignore[arg-type]
     provide = live_stamina_score(boosts)
     return _ceil_div(base * provide * int(length_permil) * (2 if holopass else 1), 1000)
 
@@ -261,7 +261,9 @@ def _event_key(group_id: str) -> str:
     return group_id[at:] if at >= 0 else group_id
 
 
-def pick_chapter(keys, windows=None, now_ms: int | None = None) -> str:
+def pick_chapter(
+    keys: Iterable[str], windows: Mapping[str, Sequence[int]] | None = None, now_ms: int | None = None
+) -> str:
     """The default chapter among the open `keys`: the one whose `(start_ms, end_ms)` window
     holds `now_ms`, else the latest that has started, else the last key. A Spotlight (relay)
     event lists ALL its chapters at once (e.g. four chapters, one holomem each, two days

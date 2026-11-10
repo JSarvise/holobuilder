@@ -23,7 +23,13 @@ import ctypes
 import re
 import sys
 import threading
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hbuilder.domain.board_plan import ConnectTriple
+    from hbuilder.domain.card import Card
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "connect.c"
@@ -104,10 +110,10 @@ def build(force: bool = False) -> Path:
     return cbuild.build(SOURCE, LIBRARY, "connect", force)
 
 
-_lib = None
+_lib: ctypes.CDLL | None = None
 
 
-def load():
+def load() -> ctypes.CDLL:
     """The loaded library, built on first use. Raises if it cannot be built.
 
     `PyDLL`, not `CDLL`: the kernel keeps its work arrays in static storage, so
@@ -306,7 +312,16 @@ def _card(card):
 # --- the adapter `board_plan.CONNECT_KERNEL` is set to -------------------------
 
 
-def assign(inputs, members, *, overall_power, bonus_permil, k_constant, active_pool_rate, song_scope=""):
+def assign(
+    inputs: Sequence[Any],
+    members: Sequence[Card],
+    *,
+    overall_power: float,
+    bonus_permil: float,
+    k_constant: float,
+    active_pool_rate: float,
+    song_scope: str = "",
+) -> list[ConnectTriple] | None:
     """The chosen Connect placements for one team, as the `ConnectTriple`s
     `board_plan._connect_assignment_exact` would have matched — `(gain, chr_id,
     socket, permil, covered, card_ids)` — or `None` to make the caller run its
@@ -492,23 +507,23 @@ LAST_INFO = [0, 0, 0]
 
 
 def assemble(
-    inputs,
-    members,
+    inputs: Sequence[Any],
+    members: Sequence[Card],
     *,
-    overall_power,
-    bonus_permil,
-    k_constant,
-    active_pool_rate,
-    song_scope="",
-    yellows,
-    bench,
-    cap,
-    rounds,
-    incumbent=None,
-    tie_factor=1.0,
-    tie_first=False,
-    checks=True,
-):
+    overall_power: float,
+    bonus_permil: float,
+    k_constant: float,
+    active_pool_rate: float,
+    song_scope: str = "",
+    yellows: Sequence[Any],
+    bench: Sequence[tuple[str, float]],
+    cap: float,
+    rounds: int,
+    incumbent: Mapping[tuple[str, str], str] | None = None,
+    tie_factor: float = 1.0,
+    tie_first: bool = False,
+    checks: bool = True,
+) -> list[ConnectTriple] | None:
     """The chosen Connect placements of one team under the song bonus's cap, as the
     `ConnectTriple`s `board_plan.board_model_from_plan` would have matched -- `(gain, chr_id,
     socket, permil, covered, card_ids)` -- or `None` to make the caller run its own Python.
@@ -603,7 +618,7 @@ def assemble(
     return triples
 
 
-def py_sum(values) -> float:
+def py_sum(values: Sequence[float]) -> float:
     """The kernel's `sum()` over floats (`hd_py_sum`), for its own test."""
     array = (ctypes.c_double * max(1, len(values)))(*values)
     return load().hd_py_sum(array, len(values))

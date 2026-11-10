@@ -14,9 +14,13 @@ from __future__ import annotations
 import json
 import os
 import threading
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
 from hbweb import config, gacha, scripts
+
+if TYPE_CHECKING:
+    from hbweb.router import Handler
 
 # One account refresh at a time. A page reloaded mid-refresh with the button pressed again
 # would start a SECOND refresh_all.py beside the first: two logins, two writers on the same
@@ -25,7 +29,7 @@ from hbweb import config, gacha, scripts
 REFRESH_LOCK = threading.Lock()
 
 
-def refresh_route(h) -> None:
+def refresh_route(h: Handler) -> None:
     """`POST /api/refresh`, guarded: a second refresh is a 409, and any failure is JSON.
     An exception escaping a handler makes `http.server` emit an HTML error page, which the
     page reports as a JSON parse error naming a column number."""
@@ -61,7 +65,7 @@ def refresh_route(h) -> None:
         REFRESH_LOCK.release()
 
 
-def refresh(h) -> None:
+def refresh(h: Handler) -> None:
     """Pull the account down from the game and rebuild every derived file, then sync the
     gacha pulls (`gacha.sync_after_refresh`). The output is returned whatever the exit
     code: a partial refresh that names what moved is more useful than a bare failure."""
@@ -95,7 +99,7 @@ def refresh(h) -> None:
     )
 
 
-def park_scan_route(h) -> None:
+def park_scan_route(h: Handler) -> None:
     """`POST /api/park/scan`, the Park page's "Scan all areas": `park_scan.py` in its own
     process, which owns every guard (game closed, quest gate, master check, a repeat login only,
     once per game day, always back to the starting area). Off unless `HB_PARK_SCAN=1`. It logs
@@ -130,7 +134,7 @@ def park_scan_route(h) -> None:
         REFRESH_LOCK.release()
 
 
-def admin_proxy(h, method: str, route: str) -> None:
+def admin_proxy(h: Handler, method: str, route: str) -> None:
     """The Users page (the admin console):
     api.holobuilder.dev/auth/<route> with THIS PC's key, which the server only honours for
     an admin. Reads state/server_api.json; writes nothing here (approvals live on the VPS)."""
@@ -156,17 +160,17 @@ def admin_proxy(h, method: str, route: str) -> None:
         h.reply_json(502, {"error": f"server unreachable: {exc}"})
 
 
-def serve_me(h) -> None:
+def serve_me(h: Handler) -> None:
     """`GET /api/admin/me`: this PC's standing on the holobuilder server."""
     admin_proxy(h, "GET", "me")
 
 
-def serve_users(h) -> None:
+def serve_users(h: Handler) -> None:
     """`GET /api/admin/users`: every user the holobuilder server knows (admins only)."""
     admin_proxy(h, "GET", "admin/users")
 
 
-def admin_user(h) -> None:
+def admin_user(h: Handler) -> None:
     """`POST /api/admin/user?id=<n>&action=approve|revoke|delete`."""
     q = parse_qs(urlparse(h.path).query)
     uid, action = (q.get("id") or [""])[0], (q.get("action") or [""])[0]

@@ -48,6 +48,7 @@ from bisect import bisect_left
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hbuilder.domain import targets
 from hbuilder.domain.card import Card, SlotRider
@@ -102,6 +103,9 @@ from hbuilder.domain.scoring_config import (
     ScoringConfig,
 )
 from hbuilder.domain.unknown import is_known
+
+if TYPE_CHECKING:
+    from hbuilder.domain.board import BoardModel
 
 __all__ = [
     "ChartNote",
@@ -487,8 +491,8 @@ def _active_windows(
     # (the general scorer already adds it; the two must not disagree on the interval).
     board_cooldown = cfg.board.uptime_for(resolved.member)[1] if cfg.board is not None else 0.0
     reduction = cfg.active_cooldown_reduction.get(resolved.member, 0.0) + board_cooldown
-    interval = float(resolved.skill.interval) / (1.0 + reduction)
-    duration = float(resolved.skill.duration)
+    interval = float(resolved.skill.interval) / (1.0 + reduction)  # type: ignore[arg-type]
+    duration = float(resolved.skill.duration)  # type: ignore[arg-type]
     return _lattice_windows(interval, duration, song_seconds)
 
 
@@ -620,7 +624,7 @@ def _term_for(
             is_boost,
             None,
             member_index,
-            float(resolved.skill.duration),
+            float(resolved.skill.duration),  # type: ignore[arg-type]
             resolved.card_id,
             targets,
         )
@@ -649,13 +653,13 @@ def _combo_split(
         or resolved.skill.kind != "ACTIVE"
         or not term.windows
         or getattr(condition, "kind", None) != "run_state"
-        or condition.target != "combo"
-        or not is_known(override.magnitude)
+        or condition.target != "combo"  # type: ignore[union-attr]
+        or not is_known(override.magnitude)  # type: ignore[attr-defined]
     ):
         return [term]
     base, high = (
-        float(resolved.skill.magnitude),
-        max(float(override.magnitude), float(resolved.skill.magnitude)),
+        float(resolved.skill.magnitude),  # type: ignore[arg-type]
+        max(float(override.magnitude), float(resolved.skill.magnitude)),  # type: ignore[attr-defined, arg-type]
     )
     applied = high if (resolved.override_gate is not None and resolved.override_gate.fired) else base
     if applied <= 0.0 or high == base:
@@ -663,7 +667,7 @@ def _combo_split(
 
     def reached(start: float) -> bool:
         combo = bisect_left(times, start)
-        return combo <= condition.count if condition.operator == "lte" else combo >= condition.count
+        return combo <= condition.count if condition.operator == "lte" else combo >= condition.count  # type: ignore[union-attr]
 
     hit = tuple(w for w in term.windows if reached(w[0]))
     miss = tuple(w for w in term.windows if not reached(w[0]))
@@ -681,7 +685,7 @@ def _rider_gate_at(resolved: ResolvedSkill, combo: int, cfg: ScoringConfig) -> b
     other gate as resolved for the run (`gates`, the static run state). AUTO, or a
     premise of no combo at all, keeps the static gate for a combo gate too: the combo
     never accumulates there, as `_combo_split` reads it for an ACTIVE override."""
-    condition = resolved.skill.rider.condition
+    condition = resolved.skill.rider.condition  # type: ignore[attr-defined]
     if (
         getattr(condition, "kind", None) == "run_state"
         and condition.target == "combo"
@@ -898,7 +902,7 @@ def overall_power_for(members: tuple[Card, ...], leader: Card, cfg: ScoringConfi
     )
 
 
-def overall_power_board_key(members: tuple[Card, ...], leader: Card, board) -> tuple:
+def overall_power_board_key(members: tuple[Card, ...], leader: Card, board: BoardModel) -> tuple:
     """Everything of `board` that `overall_power_for(members, leader, cfg)` reads through
     `cfg.board`: two boards with the same key give the team the same `OverallPower`.
 
@@ -1114,7 +1118,7 @@ def timeline(
     # each check's chance as the scorer rolls it: the ACTIVE term's own probability (the
     # team's and the board's Activation Rate UP folded in) and, inside a SPECIAL rider's
     # window, the boosted roll -- the same hosts, gates and spans `_rider_terms` scores
-    normal = [r for cid in member_order for r in gates.normal_by_card_id.get(cid, ())]  # type: ignore[union-attr]
+    normal = [r for cid in member_order for r in gates.normal_by_card_id.get(cid, ())]
     team_rate_up = _fold_activation_rate_up(tuple(normal), cfg)
     slot_of = {cid: slot for slot, cid in enumerate(member_order)}
     riders = _rider_hosts(normal, slot_of, cfg, chart, times)
@@ -1148,7 +1152,7 @@ def timeline(
         cue = chart.special_cues[slot] if slot < len(chart.special_cues) else None
         active: list[dict] = []
         special: list[dict] = []
-        for resolved in gates.normal_by_card_id.get(card_id, ()):  # type: ignore[union-attr]
+        for resolved in gates.normal_by_card_id.get(card_id, ()):
             kind = resolved.skill.kind
             if kind == "ACTIVE":
                 chance_at = chances(resolved, card_id)
@@ -1259,8 +1263,8 @@ def _note_walk_kernel() -> Callable | None:
 
             file_name, _, attribute = spec.rpartition(":")
             module_spec = importlib.util.spec_from_file_location("_hbuilder_note_walk_kernel", file_name)
-            module = importlib.util.module_from_spec(module_spec)
-            module_spec.loader.exec_module(module)
+            module = importlib.util.module_from_spec(module_spec)  # type: ignore[arg-type]
+            module_spec.loader.exec_module(module)  # type: ignore[union-attr]
             kernel = getattr(module, attribute)
         except Exception as exc:  # noqa: BLE001 - any failure means "use Python"
             print(
@@ -1302,8 +1306,8 @@ def _cooldown_screen_kernel() -> Callable | None:
             module_spec = importlib.util.spec_from_file_location(
                 "_hbuilder_cooldown_screen_kernel", file_name
             )
-            module = importlib.util.module_from_spec(module_spec)
-            module_spec.loader.exec_module(module)
+            module = importlib.util.module_from_spec(module_spec)  # type: ignore[arg-type]
+            module_spec.loader.exec_module(module)  # type: ignore[union-attr]
             kernel = getattr(module, attribute)
         except Exception as exc:  # noqa: BLE001 - any failure means "score exactly"
             print(
@@ -1356,7 +1360,7 @@ def _chart_weights(chart: SongChart, platform: str, auto: bool) -> tuple[tuple[f
     return hit[1], hit[2]
 
 
-def _activation_probability(resolved, cfg: ScoringConfig) -> float:
+def _activation_probability(resolved, cfg: ScoringConfig) -> float | None:
     """The ACTIVE's per-check proc chance, or `None` when it cannot be stated.
 
     ⚠ The BASE tier only. `scoring._score_active` also folds in `team_rate_up`
@@ -1636,7 +1640,7 @@ def _score_song(
     order_totals: dict | None = None,
     note_rows: dict | None = None,
     cooldown_variants: tuple[Mapping[str, float], ...] | None = None,
-    cooldown_screen: bool = False,
+    cooldown_screen: bool | str = False,
     team_setup: dict | None = None,
 ):
     """`score_song_detailed`'s body; with `cooldown_variants`, one result tuple per variant
@@ -1689,7 +1693,7 @@ def _score_song(
                 continue
             # a variant's ACTIVE term is a function of its member's uptime alone: built
             # once per (skill, uptime), whichever variant asks first
-            key = (k, cfg_terms.board.uptime_for(resolved.member)) if reuse is not None else None
+            key = (k, cfg_terms.board.uptime_for(resolved.member)) if reuse is not None else None  # type: ignore[union-attr]
             hit = variant_terms.get(key) if key is not None else None
             if hit is None:
                 hit = _combo_split(
@@ -2104,8 +2108,8 @@ def _score_song(
             # cost, and enumeration reproduces the walk's strict-`>`
             # first-permutation tie-break for free where a solver would have to
             # re-derive it.
-            best_total: float | None = None
-            best_permutation: tuple[int, ...] | None = None
+            best_total: float | None = None  # type: ignore[no-redef]
+            best_permutation: tuple[int, ...] | None = None  # type: ignore[no-redef]
             for permutation in itertools.permutations(range(SPECIAL_CUE_COUNT)):
                 total = fixed_total
                 for slot, owner in enumerate(permutation):
@@ -2255,7 +2259,7 @@ def _score_song(
         # every variant exactly (also the screen's answer when the kernel cannot give one)
         out = []
         for cooldowns in cooldown_variants:
-            cfg_v = dataclasses.replace(cfg, board=cfg.board.with_cooldowns(cooldowns))
+            cfg_v = dataclasses.replace(cfg, board=cfg.board.with_cooldowns(cooldowns))  # type: ignore[union-attr]
             if active_elsewhere or costume_active:
                 out.append(_score_song(members, leaders, chart, cfg_v, deck_power=deck_power, auto=auto))
                 continue
@@ -2366,15 +2370,15 @@ def _cooldown_screen_spec(
             cfg.song_auto
             or cfg.run_state.combo <= 0
             or getattr(condition, "kind", None) != "run_state"
-            or condition.target != "combo"
+            or condition.target != "combo"  # type: ignore[union-attr]
             or not is_known(override.magnitude)
         ):
             base = float(resolved.skill.magnitude)
             high = max(float(override.magnitude), base)
             applied = high if (resolved.override_gate is not None and resolved.override_gate.fired) else base
             if applied > 0.0 and high != base:
-                combo = 2 if condition.operator == "lte" else 1
-                count = int(condition.count)
+                combo = 2 if condition.operator == "lte" else 1  # type: ignore[union-attr]
+                count = int(condition.count)  # type: ignore[union-attr]
                 hit = term.magnitude * high / applied
                 miss = term.magnitude * base / applied
         first = len(rider_q)

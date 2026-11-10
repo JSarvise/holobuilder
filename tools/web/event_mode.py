@@ -38,7 +38,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 _SRC = str(Path(__file__).resolve().parents[2] / "src")  # this checkout's hbuilder
 if _SRC not in sys.path:
@@ -49,6 +49,15 @@ if str(paths.REFRESH_DIR) not in sys.path:
     sys.path.insert(0, str(paths.REFRESH_DIR))
 
 from hbuilder.domain import marathon as mar  # noqa: E402
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from ondemand import Assumptions
+
+    from hbuilder.domain.card import Card
+    from hbuilder.domain.song import SongChart
+    from hbuilder.solver.parallel_refine import RefineContext
 
 EVENT_OBJECTIVES = ("event_points", "event_song")
 # the pins the Score search takes too (`ondemand.parse_filters`)
@@ -112,7 +121,7 @@ HIGHLIGHT_NOTES = (
 )
 
 
-def is_highlight(song) -> bool:
+def is_highlight(song: object) -> bool:
     return str(song or "").strip().lower() == HIGHLIGHT
 
 
@@ -142,7 +151,9 @@ def highlight_pool(
     return sorted(set(pool)), sorted(set(skipped))
 
 
-def highlight_context(ctx, library, pool_ids: Sequence[str]):
+def highlight_context(
+    ctx: RefineContext, library: Iterable[SongChart], pool_ids: Sequence[str]
+) -> tuple[RefineContext, tuple[SongChart, ...], list[str]]:
     """`(ctx, pool charts, lost ids)`: the leaf context scoring every chart of the pool and
     only those, a board per chart (a batch with no `chart_indices` is then the MEAN over
     them, `RefinePool.batch_score`). `lost`: pool songs `library` has no chart for."""
@@ -262,7 +273,7 @@ def _chr_of(card_id: str) -> str:
     return f"chr-{parts[1]}" if len(parts) > 1 else str(card_id)
 
 
-def card_label(card) -> str:
+def card_label(card: Card) -> str:
     return f"{card.member} / {card.costume_name} ({card.rarity})"
 
 
@@ -272,7 +283,14 @@ def _rarity_int(rarity) -> int | None:
 
 
 def card_object(
-    card_id: str, card, *, state: Mapping | None, owned: bool, live_permil: int, song_permil: int, **extra
+    card_id: str,
+    card: Card | None,
+    *,
+    state: Mapping | None,
+    owned: bool,
+    live_permil: int,
+    song_permil: int,
+    **extra: Any,
 ) -> dict:
     """THE card shape every route here returns (the page draws a card face from it)."""
     state = state or {}
@@ -405,7 +423,7 @@ def event_payload(
             attributes.append({"attribute": row.attribute, "permil": row.permil})
     music_rows = []
     for row in music:
-        entry = {
+        entry: dict[str, Any] = {
             "music_id": row.music_id,
             "title": titles.get(row.music_id or "", row.music_id),
             "permil": row.permil,
@@ -489,8 +507,8 @@ def songs_payload(
     if event is not None:
         for row in event.rows_for(mar.MUSIC_CHANNEL):
             if row.music_id:
-                event_songs.setdefault(row.music_id, []).append(row.card_id or row.character_id)
-    songs = []
+                event_songs.setdefault(row.music_id, []).append(row.card_id or row.character_id)  # type: ignore[arg-type]
+    songs: list[dict[str, Any]] = []
     for data in music_rows:
         music_id = str(data.get("id") or "")
         if not music_id:
@@ -584,9 +602,9 @@ def search_event(
     score: Callable,
     bonus: Sequence[tuple[int, int]],
     objective: str,
-    base_leader,
+    base_leader: object,
     always: Sequence = (),
-    gate_of=None,
+    gate_of: Callable[[Any], tuple | None] | None = None,
     top: int = DEFAULT_TOP,
     certify_limit: int = CERTIFY_LIMIT,
     seed: int = SEED,
@@ -679,7 +697,7 @@ def search_event(
                     raw_cache.setdefault((leader.id, tuple(members)), float(value))
             return values_by_group
 
-        recording.many = recording_many
+        recording.many = recording_many  # type: ignore[attr-defined]
 
     # A: by score (S_max for the bound, and the naive re-sort as candidates). Only
     # when certifying: S_max is what the bound needs, and B already ranks by the
@@ -947,7 +965,7 @@ DETAIL_ROWS = 3
 def add_row_detail(
     row: dict,
     built: Mapping,
-    leader,
+    leader: Card,
     members: Sequence,
     *,
     detail_fn: Callable | None = None,
@@ -1177,7 +1195,9 @@ def _replan_rows(
     return out, failed
 
 
-def materials_plan_for(row, reps, song, assumptions):
+def materials_plan_for(
+    row: Mapping[str, Any], reps: Sequence[Card], song: str | None, assumptions: Assumptions
+) -> tuple[dict, dict] | None:
     """`(team board state, bench)` of a re-planned row (for its detail), or None."""
     import materials_plan  # noqa: PLC0415
 
@@ -1230,7 +1250,7 @@ def run_account_search(
             raise KeyError(f"Highlight: no song of the event holomems has a chart at {difficulty} on disk")
     # the song the leaf is built on (Highlight: the pool's first, its charts swapped in below)
     build_song = pool_ids[0] if highlight else song
-    blooms = {k: (v or {}).get("bloom") for k, v in collection.items()}
+    blooms: dict[str, Any] = {k: (v or {}).get("bloom") for k, v in collection.items()}
     cache: dict[str, tuple[int, int]] = {}
 
     def bonus_of(card) -> tuple[int, int]:
@@ -1299,7 +1319,7 @@ def run_account_search(
         # every chart of the pool in the leaf's context, a board per chart: a batch with
         # no chart_indices scores the MEAN over them (`RefinePool.batch_score`), as the
         # Score search's In general does (`ondemand.Engine`)
-        library = load_charts(str(leaf_inputs.charts_path(difficulty))).at(difficulty)
+        library = load_charts(str(leaf_inputs.charts_path(difficulty))).at(difficulty)  # type: ignore[union-attr]
         ctx, pool_charts, lost = highlight_context(built["ctx"], library, pool_ids)
         pool_skipped = sorted(set(pool_skipped) | set(lost))
         if not pool_charts:
@@ -1451,7 +1471,7 @@ def run_account_search(
             check()
             return out
 
-        score.many = score_many
+        score.many = score_many  # type: ignore[attr-defined]
 
         score(proxy, two_stage.random_legal_sets(hol, 64, random.Random(0)))
         # Highlight: the exact plan within materials is per song (one board for one chart),
@@ -1506,7 +1526,7 @@ def run_account_search(
                 + [r for r in found["rows"][head:] if id(r["leader"]) in sing][:SINGER_ROWS]
             )
             on_stage("rescore", "done", {})
-        planned: dict[int, dict] = {}
+        planned: dict[int, tuple[dict, dict]] = {}
         replan_failed: list[str] = []
         if replan:
             # a board constraint the quick plan lacks (own materials, reset cap,
@@ -1533,7 +1553,7 @@ def run_account_search(
             )
             found["bound"] = None
             for r in found["rows"][:DETAIL_ROWS]:
-                whole = materials_plan_for(r, reps, song, assumptions)
+                whole = materials_plan_for(r, reps, song, assumptions)  # type: ignore[arg-type]
                 if whole is not None:
                     planned[id(r)] = whole
             on_stage("replan", "done", {"failed": len(replan_failed)})
@@ -1782,7 +1802,13 @@ def event_chapters(
     return out
 
 
-def bundle_from_raw(raw: Mapping, event_key: str | None = None, *, windows=None, now_ms: int | None = None):
+def bundle_from_raw(
+    raw: Mapping,
+    event_key: str | None = None,
+    *,
+    windows: Mapping[str, tuple[int, int]] | None = None,
+    now_ms: int | None = None,
+) -> tuple[Mapping, mar.MarathonEvent, list[str]]:
     """`(raw, MarathonEvent, open keys)` from marathon_bonus.json's parsed content:
     the chapter `event_key` names, or `marathon.pick_chapter`'s choice among the open
     ones. Raises `SchemaError` when nothing is open."""
@@ -1815,7 +1841,9 @@ def bundle_from_raw(raw: Mapping, event_key: str | None = None, *, windows=None,
     return raw, event, keys
 
 
-def load_event_bundle(path: Path, event_key: str | None = None):
+def load_event_bundle(
+    path: Path, event_key: str | None = None
+) -> tuple[Mapping, mar.MarathonEvent, list[str]]:
     """`(raw json, MarathonEvent, open keys)` or raises FileNotFoundError / SchemaError.
     Without `event_key`, the chapter open NOW (`event_meta.json` beside it gives the windows)."""
     import time as _time  # noqa: PLC0415

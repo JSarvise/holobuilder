@@ -14,6 +14,7 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hbuilder import paths
 from hbuilder.domain.board import BoardModel, load_board
@@ -42,6 +43,11 @@ from hbuilder.domain.scoring_config import (
     load_scoring_config,
 )
 from hbuilder.domain.team import TeamError
+
+if TYPE_CHECKING:
+    from types import SimpleNamespace
+
+    from hbuilder.domain.collection import DerivedMemberPowerUp
 
 # What a failed `load_inputs` carries (`_LoadFailure`): which input was bad.
 EXIT_INPUT_DATA = 3  # cards.json / owned.json missing, unreadable, malformed.
@@ -296,7 +302,7 @@ class CollectionBasis:
         # also read by tools/web and by anything piping stderr, and a report
         # that raises UnicodeEncodeError on a Windows console is a report that
         # does not arrive.
-        derived = self.derived_power_up
+        derived: DerivedMemberPowerUp | None = self.derived_power_up  # type: ignore[assignment]
         if derived is None:
             return []
         typed = getattr(self.bonuses, "power_up_permyriad", None)
@@ -608,7 +614,7 @@ def load_inputs(
     return cards, owned, cfg, provenance
 
 
-def default_paths():
+def default_paths() -> SimpleNamespace:
     """The default input paths, relative to the repo root: `cards`, `owned`, `collection`,
     `board`, `charts`, `skilltree`, `master_nodes`."""
     from types import SimpleNamespace  # noqa: PLC0415

@@ -34,6 +34,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 DEFAULT_INTERVAL_MIN = 5
 MIN_INTERVAL_MIN = 1
@@ -65,7 +66,7 @@ def parse_output(stdout: str) -> tuple[int | None, list[str]]:
     return appended, failed
 
 
-def clamp_interval(minutes) -> int:
+def clamp_interval(minutes: Any) -> int:
     try:
         m = int(minutes)
     except (TypeError, ValueError):
@@ -160,7 +161,7 @@ class CutoffsPoller:
             self._wake.wait(delay_s)
             self._wake.clear()
 
-    def configure(self, *, enabled: bool | None = None, interval_min=None) -> dict:
+    def configure(self, *, enabled: bool | None = None, interval_min: Any = None) -> dict:
         if interval_min is not None:
             self.interval_min = clamp_interval(interval_min)
         if enabled is True:

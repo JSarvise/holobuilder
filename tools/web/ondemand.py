@@ -24,7 +24,8 @@ import dataclasses
 import sys
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from hbuilder import paths
 
@@ -40,6 +41,11 @@ from hbuilder.domain.song import load_charts  # noqa: E402
 from hbuilder.solver import members_first  # noqa: E402
 from hbuilder.solver.parallel import default_workers  # noqa: E402
 from hbuilder.solver.parallel_refine import COUNTS, COUNTS_BOTH, RefinePool, SharedPool  # noqa: E402
+
+if TYPE_CHECKING:
+    from hbuilder.domain.card import Card
+    from hbuilder.domain.collection import AccountBonuses
+    from hbuilder.solver.parallel_refine import RefineContext
 
 # the served ranking with the activation refinement is the best REFINE_HEAD teams of the
 # search, every one refined, in refined order (~0.04 s a team): refining only a few teams
@@ -165,7 +171,9 @@ def is_five_star(card_id: str) -> bool:
     return len(parts) > 2 and parts[2] == "5"
 
 
-def replan_pick(ranked: list, sings, n: int = REPLAN_CANDIDATES, extra: int = SINGER_CANDIDATES) -> list[int]:
+def replan_pick(
+    ranked: list, sings: Callable[[Any], bool], n: int = REPLAN_CANDIDATES, extra: int = SINGER_CANDIDATES
+) -> list[int]:
     """Positions in `ranked` (best first) that get the exact board plan: the first `n`, then
     the best `extra` more whose leader sings the song (`sings(item)`), in ranking order."""
     head = list(range(min(n, len(ranked))))
@@ -173,7 +181,7 @@ def replan_pick(ranked: list, sings, n: int = REPLAN_CANDIDATES, extra: int = SI
     return head + more
 
 
-def outfit_tilt(pool) -> Callable[[object], tuple[float, ...] | None]:
+def outfit_tilt(pool: Sequence[Card]) -> Callable[[object], tuple[float, ...] | None]:
     """`tilt_of(leader)` for `joint_search.search` over `pool`: an outfit that raises one stat
     (`stat_up` of performance, technique or sense) adds OUTFIT_TILT x (the card's share of
     that stat - 1/3) to each card; any other outfit, None. One tuple per stat, shared by every
@@ -194,7 +202,7 @@ def outfit_tilt(pool) -> Callable[[object], tuple[float, ...] | None]:
     return tilt_of
 
 
-def candidates(reps, filters: Filters) -> tuple[list, list]:
+def candidates(reps: Iterable[Card], filters: Filters) -> tuple[list, list]:
     """(member pool, leader candidates) of a search: banned cards out of both; with the 5-star
     switch the MEMBERS are 5-star only while any rarity may lead (an outfit leader is not
     part of the card-pool filter)."""
@@ -505,16 +513,16 @@ def _card_levers(ns, a: Assumptions):
     return ns
 
 
-def account_bonuses(a: Assumptions):
+def account_bonuses(a: Assumptions) -> AccountBonuses | None:
     """The account's Memory / Member Power-Up bonuses under `a`'s card levers: the
     `cfg.account` the leaf of `build_inputs` scores with, without building the leaf.
     Raising every card's level raises the Member Power-Up, so the account's own
     figure is not the one an "Upgraded cards" search uses."""
     _cards, _owned, cfg = leaf_inputs.account_cards_and_cfg(_card_levers(leaf_inputs._namespace(), a))
-    return cfg.account
+    return cfg.account  # type: ignore[return-value]
 
 
-def maxed_bonuses():
+def maxed_bonuses() -> AccountBonuses | None:
     """The Memory / Member Power-Up bonuses of the Maxed account basis: every card in the
     game owned at max level (the roster's power-up ceiling) and every poster the game has,
     as its leaf scores (`apply_collection(maxed=True)`)."""
@@ -522,10 +530,16 @@ def maxed_bonuses():
 
     cards, owned, _cfg, _prov = load_inputs(leaf_inputs.CARDS_PATH, leaf_inputs.OWNED_PATH)
     _cards, basis = apply_collection(cards, None, owned_ids=[c.id for c in owned], maxed=True)
-    return basis.bonuses
+    return basis.bonuses  # type: ignore[return-value]
 
 
-def build_inputs(a: Assumptions, difficulty: str, song: str = "m0334", *, split_key=None) -> dict:
+def build_inputs(
+    a: Assumptions,
+    difficulty: str,
+    song: str = "m0334",
+    *,
+    split_key: Callable[[Card], Hashable] | None = None,
+) -> dict:
     """The leaf inputs of the user's account under `a` (the shape of
     `leaf_inputs.leaf_inputs`) -- shared by the engine, the event search and
     the row detail so a row is re-developed on the very leaf that ranked it.
@@ -597,7 +611,7 @@ class Engine:
         play: tuple[str, bool] = ("mobile", False),
     ) -> None:
         self.basis = basis
-        self.play = tuple(play)
+        self.play = tuple(play)  # type: ignore[assignment]
         self.assumptions = assumptions
         self.difficulty = leaf_inputs._difficulty(difficulty)
         # holodori.best's "any song" level range: every chart of ANY difficulty whose level
@@ -615,13 +629,15 @@ class Engine:
             lo, hi = self.levels
             library = load_charts(str(leaf_inputs.charts_path("HARD")))  # charts_all.json
             self.charts = tuple(
-                c for _k, c in sorted(library.charts.items()) if lo <= c.difficulty_level <= hi
+                c
+                for _k, c in sorted(library.charts.items())  # type: ignore[union-attr]
+                if lo <= c.difficulty_level <= hi
             )
             if not self.charts:
                 raise KeyError(f"no chart has a level in {lo}..{hi}")
             self.index = {}
         else:
-            self.charts = load_charts(str(path)).at(self.difficulty)
+            self.charts = load_charts(str(path)).at(self.difficulty)  # type: ignore[union-attr]
             self.index = {chart.music_id: k for k, chart in enumerate(self.charts)}
         digests = leaf_inputs.chart_digests(path, self.difficulty)
         if assumptions is not None:
@@ -794,13 +810,21 @@ class Engine:
         funnel = list(ranking[:COUNTS_FUNNEL])
         if lens:
             teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in funnel]
-            both = self.pool.batch_score(teams, chart_indices=chart_indices, refine_activation="screen_both")
+            both: list[tuple[float, float]] = self.pool.batch_score(  # type: ignore[assignment]
+                teams,
+                chart_indices=chart_indices,
+                refine_activation="screen_both",  # type: ignore[arg-type]
+            )
             order = sorted(range(len(funnel)), key=lambda k: (-max(float(both[k][1]), float(both[k][0])), k))
             return [(float(both[k][0]), funnel[k][1], funnel[k][2]) for k in order[:REFINE_HEAD]]
         if len(funnel) <= REFINE_HEAD:
             return funnel
         teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in funnel]
-        screened = self.pool.batch_score(teams, chart_indices=chart_indices, refine_activation="screen")
+        screened = self.pool.batch_score(
+            teams,
+            chart_indices=chart_indices,
+            refine_activation="screen",  # type: ignore[arg-type]
+        )
         order = sorted(range(len(funnel)), key=lambda k: (-max(float(screened[k]), float(funnel[k][0])), k))
         return [funnel[k] for k in order[:REFINE_HEAD]]
 
@@ -941,7 +965,7 @@ class Engine:
         engine's only in what `Assumptions.engine_key` leaves out."""
         a = self.assumptions if assumptions is None else assumptions
         if (a is None) != (self.assumptions is None) or (
-            a is not None and a.engine_key() != self.assumptions.engine_key()
+            a is not None and a.engine_key() != self.assumptions.engine_key()  # type: ignore[union-attr]
         ):
             raise ValueError("these assumptions are scored on another engine")
         replan = a is not None and a.replan
@@ -1040,6 +1064,7 @@ class Engine:
                 # proposed: separate seeds can settle on different sets even where the
                 # sample ranks them the same way as every chart does, so it is the reach
                 merged = {(li, s): v for v, li, s in ranking}
+                extra: Any
                 for extra in range(1, starts):
                     on_round.next_start()
                     more = joint_search.search(
@@ -1066,7 +1091,7 @@ class Engine:
                 # the climb on the wide sample, from the search's best teams; its
                 # best go to the full re-score first, then the search's own order
                 wide = tuple(self._wide)
-                climbed = {"ranking": [], "stats": {"evals": 0}}
+                climbed: dict = {"ranking": [], "stats": {"evals": 0}}
                 if len(wide) > len(chart_indices):
 
                     def score_wide(pairs):
@@ -1146,7 +1171,7 @@ class Engine:
                     refined = self.pool.batch_score(
                         [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in chosen],
                         chart_indices=None,
-                        refine_activation=COUNTS,
+                        refine_activation=COUNTS,  # type: ignore[arg-type]
                     )
                     levels = [COUNTS] * len(chosen)
             else:
@@ -1252,6 +1277,7 @@ class Engine:
             )
         t_ceiling = time.perf_counter() - t_ceiling
         # each leader's best team, with its next sets as alternatives
+        by_leader: dict[str, list[dict]]
         rows, by_leader = [], {}
         for t in served:
             by_leader.setdefault(t["leader"], []).append(t)
@@ -1471,7 +1497,7 @@ def parse_play(body: Mapping) -> tuple[str, bool]:
     return (platform if platform in PLATFORMS else "mobile", body.get("auto") is True)
 
 
-def with_play(ctx, play: tuple[str, bool]):
+def with_play(ctx: RefineContext, play: tuple[str, bool]) -> RefineContext:
     """`ctx` (a `RefineContext`) scored for `play`. AUTO sets BOTH halves, as
     `hbweb.basis.auto_premise` does for the other routes: the AUTO judgement column (a
     note scores like a GREAT, ~80 % of manual) AND `run_state.combo = 0`,

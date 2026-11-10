@@ -58,7 +58,7 @@ from __future__ import annotations
 import array
 import dataclasses
 import itertools
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
 from hbuilder.domain.card import Card
 from hbuilder.domain.song import SPECIAL_CUE_COUNT
@@ -86,7 +86,7 @@ MEMBER_COUNT = 5
 Gate = tuple[str, str | None, int]
 
 
-def legal_rosters(holomems: Sequence[str], k: int = SPECIAL_CUE_COUNT):
+def legal_rosters(holomems: Sequence[str], k: int = SPECIAL_CUE_COUNT) -> Iterator[tuple[int, ...]]:
     """Lexicographic `k`-combinations of pool indices with distinct holomems —
     the exhaustive route's own order."""
     n = len(holomems)
@@ -207,8 +207,8 @@ def tabulate(reps: Sequence[Card]) -> Tables:
             gm |= card_gmask[k]
             hm |= 1 << card_h[k]
         tcount.append(tc)
-        gmask.append(gm)  # type: ignore[union-attr]
-        hmask.append(hm)  # type: ignore[union-attr]
+        gmask.append(gm)  # type: ignore[attr-defined]
+        hmask.append(hm)  # type: ignore[attr-defined]
         n += 1
     return Tables(
         n=n,

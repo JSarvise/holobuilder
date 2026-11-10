@@ -36,7 +36,7 @@ import sys
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 _SRC = str(Path(__file__).resolve().parents[2] / "src")  # this checkout's hbuilder
 if _SRC not in sys.path:
@@ -54,6 +54,13 @@ from hbuilder.domain.song_distribution import run_score_distribution  # noqa: E4
 from hbuilder.domain.song_rank import score_team_ceiling, score_team_notes, score_team_on_chart  # noqa: E402
 from hbuilder.domain.team import Team  # noqa: E402
 
+if TYPE_CHECKING:
+    from ondemand import Assumptions
+
+    from hbuilder.domain.board_plan import BoardOptimisedTeam
+    from hbuilder.domain.scoring_config import ScoringConfig
+    from hbuilder.domain.song import SongChart
+
 SCORE_BONUS_LINES = (
     ("active", "Active Skill"),
     ("outfit", "Outfit Skill"),
@@ -70,7 +77,9 @@ def _chr(card) -> str:
 # ---------------------------------------------------------------------------
 # the song figures
 # ---------------------------------------------------------------------------
-def figures(team: Team, chart, cfg_board, *, cfg_off=None) -> dict:
+def figures(
+    team: Team, chart: SongChart, cfg_board: ScoringConfig, *, cfg_off: ScoringConfig | None = None
+) -> dict:
     """`song_est`, `song_max` (every ACTIVE fires), `song_off` (board off, when
     `cfg_off` is given), `member_order`, `deck_power` — all through the
     ranker's own `score_team_on_chart`."""
@@ -107,7 +116,7 @@ NOTE_COLUMNS = (
 )
 
 
-def note_breakdown(team: Team, chart, cfg_board) -> dict:
+def note_breakdown(team: Team, chart: SongChart, cfg_board: ScoringConfig) -> dict:
     """The row's score note by note at its best slot order (`song_rank.score_team_notes`):
     `columns` (`NOTE_COLUMNS`) and one row per note. `base_value` is the note with no
     skill, `skill_rate` the expected multiplier at that instant, `expected_value` =
@@ -157,11 +166,11 @@ def note_breakdown(team: Team, chart, cfg_board) -> dict:
 # ---------------------------------------------------------------------------
 def score_bonus_lines(
     team: Team,
-    cfg_board,
+    cfg_board: ScoringConfig,
     member_order: Sequence[str] | None = None,
     *,
     overall_power: float | None = None,
-    chart=None,
+    chart: SongChart | None = None,
 ) -> dict:
     """The deck screen's five Score Bonus lines for `team` on `cfg_board`, in
     `member_order`. Integers in permil, as the game shows them (x 0.1 %). With
@@ -183,7 +192,7 @@ def score_bonus_lines(
     }
 
 
-def song_board_bonus(team: Team, cfg_board, chart) -> dict | None:
+def song_board_bonus(team: Team, cfg_board: ScoringConfig, chart: SongChart | None) -> dict | None:
     """What the boards add on THIS song only (how much extra yellow or red bonus the song
     gets): the YELLOW song score bonus -- each singer's board,
     Connect multipliers included, then the 100-permil cap; on a whole-roster song with no
@@ -236,7 +245,11 @@ def song_board_bonus(team: Team, cfg_board, chart) -> dict | None:
 
 
 def unit_score_block(
-    team: Team, cfg_board, cfg_off, member_order: Sequence[str] | None = None, chart=None
+    team: Team,
+    cfg_board: ScoringConfig,
+    cfg_off: ScoringConfig,
+    member_order: Sequence[str] | None = None,
+    chart: SongChart | None = None,
 ) -> dict:
     """`{"panel": Overall Power lines (compare_view.panel_lines), "score_bonus":
     the five-line split}` on the row's board and slot order."""
@@ -255,8 +268,8 @@ def unit_score_block(
 # ---------------------------------------------------------------------------
 def distribution(
     team: Team,
-    chart,
-    cfg_board,
+    chart: SongChart,
+    cfg_board: ScoringConfig,
     member_order: Sequence[str],
     deck_power: float,
     row_score: float | None = None,
@@ -302,9 +315,9 @@ def quantile_fields(got: dict) -> dict:
 
 def detail(
     team: Team,
-    chart,
-    cfg_board,
-    cfg_off,
+    chart: SongChart | None,
+    cfg_board: ScoringConfig,
+    cfg_off: ScoringConfig,
     *,
     want_distribution: bool = False,
     want_timeline: bool = False,
@@ -324,10 +337,16 @@ def detail(
         order = fig["member_order"]
     out.update(unit_score_block(team, cfg_board, cfg_off, order, chart=chart))
     if chart is not None and want_timeline:
-        out["timeline"] = song_timeline(tuple(team.members), chart, cfg_board, tuple(order))
+        out["timeline"] = song_timeline(tuple(team.members), chart, cfg_board, tuple(order))  # type: ignore[arg-type]
     if chart is not None and want_distribution:
         out["distribution"] = distribution(
-            team, chart, cfg_board, order, out["deck_power"], row_score=out["song_est"], keep_law=keep_law
+            team,
+            chart,
+            cfg_board,
+            order,  # type: ignore[arg-type]
+            out["deck_power"],
+            row_score=out["song_est"],
+            keep_law=keep_law,
         )
     return out
 
@@ -353,7 +372,7 @@ def _bench_slots(ctx, team, sockets) -> dict | None:
     return out
 
 
-def board_state_of(bt) -> dict:
+def board_state_of(bt: BoardOptimisedTeam) -> dict:
     """`{chr: {nodes, slots}}` of a developed team — the server's own
     `_board_state_of` shape (the plan's nodes, the REAL Connect placements)."""
     slots_by_chr: dict[str, dict[str, str]] = {}
@@ -386,7 +405,7 @@ def _leaf_inputs(
         return built
     import ondemand  # noqa: PLC0415
 
-    return dict(built, ctx=ondemand.with_play(built["ctx"], tuple(play)))
+    return dict(built, ctx=ondemand.with_play(built["ctx"], tuple(play)))  # type: ignore[arg-type]
 
 
 def _leaf_inputs_cached(basis: str, song: str, difficulty: str, assumptions=None) -> dict:
@@ -418,7 +437,7 @@ def leaf_detail(
     want_timeline: bool = False,
     member_order: Sequence[str] | None = None,
     panel: bool = True,
-    chart=None,
+    chart: SongChart | None = None,
     as_is: bool = False,
     keep_law: bool = False,
     want_notes: bool = False,
@@ -545,7 +564,7 @@ def plan_cost(
     `affordable`. A wallet / point figure nobody measured stays `None`, never
     0. Nodes without a price are counted in `unpriced`."""
     names = names or {}
-    per_character = []
+    per_character: list[dict[str, Any]] = []
     need: dict[str, int] = {}
     refund: dict[str, int] = {}
     resets = 0
@@ -756,7 +775,7 @@ def two_stage_detail(
     want_timeline: bool = False,
     member_order: Sequence[str] | None = None,
     as_is: bool = True,
-    assumptions=None,
+    assumptions: Assumptions | None = None,
     want_reset_price: bool = False,
     play: tuple[str, bool] | None = None,
     keep_law: bool = False,
@@ -802,7 +821,7 @@ def two_stage_detail(
         whole_plan = planned[2]
         optimal = materials_plan.plan_optimal(leader_id, list(member_ids), song, opts)
     else:
-        whole_plan = optimal = None
+        whole_plan = optimal = None  # type: ignore[assignment]
     by_id = built["by_id"]
     missing = [c for c in (leader_id, *member_ids) if c not in by_id]
     if missing:
@@ -829,7 +848,7 @@ def two_stage_detail(
                 _leaf_inputs(basis, song, difficulty, assumptions, play),
                 team,
                 song,
-                assumptions,
+                assumptions,  # type: ignore[arg-type]
                 refine=refine,
                 current=(out["plan_cost"]["resets"], out["song_est"]),
             )
@@ -855,10 +874,10 @@ def _common_order(team: Team, charts: Sequence, cfg_board) -> tuple[tuple[str, .
     for order, total in sums.items():
         if best is None or total > sums[best]:
             best = order
-    return best, sums[best] / len(charts), [(m, tot[best], max(tot.values())) for m, tot in per]
+    return best, sums[best] / len(charts), [(m, tot[best], max(tot.values())) for m, tot in per]  # type: ignore[return-value,index]
 
 
-def pool_yellow(team: Team, charts: Sequence, cfg_board) -> list[dict]:
+def pool_yellow(team: Team, charts: Sequence[SongChart], cfg_board: ScoringConfig) -> list[dict]:
     """The pool's songs as the plan solver values their yellows (`board_plan_solver.
     _pool_yellow_terms`): `[{"singers", "singer_type", "slope"}]`, one per distinct
     (cast, singer type), `slope` the team's score per permil of that song's bonus on
@@ -887,7 +906,7 @@ def pool_detail(
     leader_id: str,
     member_ids: Sequence[str],
     *,
-    assumptions=None,
+    assumptions: Assumptions | None = None,
     refine: bool = True,
     play: tuple[str, bool] | None = None,
 ) -> dict:
@@ -925,7 +944,7 @@ def pool_detail(
     if not songs:
         raise ValueError("no pool songs")
     built = _leaf_inputs(basis, songs[0], difficulty, assumptions, play)
-    library = load_charts(str(leaf_inputs.charts_path(difficulty))).at(difficulty)
+    library = load_charts(str(leaf_inputs.charts_path(difficulty))).at(difficulty)  # type: ignore[union-attr]
     by_music = {c.music_id: c for c in library}
     charts = [by_music[m] for m in songs if m in by_music]
     if not charts:
@@ -1034,7 +1053,7 @@ def pool_detail(
         order, mean, per = _common_order(team, charts, cfg_board)
         if best is None or mean > best[1]:
             best = (label, mean, order, per, song, ctx, bt, cfg_board)
-    label, mean, order, per, song, ctx, bt, cfg_board = best
+    label, mean, order, per, song, ctx, bt, cfg_board = best  # type: ignore[misc]
     cfg_off = dataclasses.replace(ctx.cfg, board=None)
     out: dict[str, Any] = {
         "pool": True,
@@ -1077,7 +1096,13 @@ RESET_PRICE_POINTS = (
 
 
 def reset_price(
-    built: Mapping, team: Team, song: str, assumptions, *, refine: bool, current: tuple[int, float]
+    built: Mapping,
+    team: Team,
+    song: str,
+    assumptions: Assumptions,
+    *,
+    refine: bool | int,
+    current: tuple[int, float],
 ) -> dict:
     """What the row's resets BUY: the same team re-planned within the wallet with
     fewer resets (none; only those earning 0.2 % / 0.05 % of the score each), every
@@ -1088,7 +1113,7 @@ def reset_price(
     import materials_plan  # noqa: PLC0415
 
     leader_id, member_ids = team.leader.id, [m.id for m in team.members]
-    points = [
+    points: list[dict[str, Any]] = [
         {
             "label": "This plan",
             "resets": int(current[0]),
@@ -1169,7 +1194,7 @@ def load_ranks(holo: Path) -> dict:
     def grade(letter: str, plus: int) -> str:
         return letter if not plus else (f"{letter}+" if plus == 1 else f"{letter}+{plus}")
 
-    unit = []
+    unit: list[dict[str, Any]] = []
     for r in deck:
         d = r.get("data") or {}
         letter = str(d.get("type") or "").rsplit("_", 1)[-1]
@@ -1199,7 +1224,7 @@ def load_ranks(holo: Path) -> dict:
         )
     for rows in groups.values():
         rows.sort(key=lambda g: g["threshold"])
-    single = Counter()
+    single: Counter[str] = Counter()
     exceptions: dict[str, str] = {}
     for m in music or []:
         g = (m.get("data") or {}).get("singleLiveScoreEvaluationRankGroupId") or m.get(

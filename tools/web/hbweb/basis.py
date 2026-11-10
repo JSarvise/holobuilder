@@ -12,10 +12,10 @@ import dataclasses
 import importlib.util
 import os
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import certificate as cert_mod
 
@@ -25,6 +25,13 @@ from hbuilder.domain.skilltree import TOTAL_BOARD_POINTS
 from hbuilder.errors import MissingInput
 from hbuilder.inputs import apply_collection, max_level_board_points
 from hbweb import config
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
+    from hbuilder.domain.card import Card
+    from hbuilder.domain.scoring_config import ScoringConfig
+    from hbuilder.inputs import CollectionBasis
 
 
 def web_workers() -> int | None:
@@ -60,7 +67,7 @@ def parse_basis(raw: object) -> str:
     return basis if basis in BASES else "account"
 
 
-def parse_budget(raw: object) -> int | None:
+def parse_budget(raw: Any) -> int | None:
     """A request's flat board budget: None for absent / "" / "real" (each holomem's own
     points) or a value that is not a number, "max" for what a max-level holomem holds
     (`maxed_account_budget`), an int clamped to 0..the whole tree's cost."""
@@ -195,7 +202,7 @@ class MaxedAccountUnavailable(RuntimeError):
     not import): a first-class, typed absence the routes turn into a 503."""
 
 
-def load_precompute():
+def load_precompute() -> ModuleType | None:
     """`precompute_optimisations.py` under `tools/refresh/`, imported by path. Its
     module-level code is import-safe (it only imports `board_export`/`socket_optimise`/
     `tree_optimise` and defines functions). Returns None if unloadable."""
@@ -203,14 +210,20 @@ def load_precompute():
         spec = importlib.util.spec_from_file_location(
             "precompute_optimisations", config.REFRESH_DIR / "precompute_optimisations.py"
         )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
         return module
     except Exception:  # noqa: BLE001 — any failure means "no on-demand plan"
         return None
 
 
-def maxed_account_scenario(cards, cfg, collection_basis, *, precompute=None) -> MaxedAccountScenario:
+def maxed_account_scenario(
+    cards: tuple[Card, ...],
+    cfg: ScoringConfig,
+    collection_basis: CollectionBasis,
+    *,
+    precompute: ModuleType | None = None,
+) -> MaxedAccountScenario:
     """The cached scenario for `cards` (the maxed catalogue) at `cfg` (its
     account bonuses REPLACED by the maxed-account ones before the bench is
     linearised, so the cache key is the config the bench is a function of).
@@ -299,7 +312,16 @@ def _build_maxed_account_scenario(cards, cfg_scn, bonuses, precompute) -> MaxedA
     )
 
 
-def apply_basis(cards, owned, cfg, basis: str, *, assume_level=None, assume_bloom=None, precompute=None):
+def apply_basis(
+    cards: tuple[Card, ...],
+    owned: Iterable[Card],
+    cfg: ScoringConfig,
+    basis: str,
+    *,
+    assume_level: object = None,
+    assume_bloom: object = None,
+    precompute: ModuleType | None = None,
+) -> tuple[tuple[Card, ...], CollectionBasis, ScoringConfig, MaxedAccountScenario | None]:
     """The ONE place a request's card basis becomes (cards, collection_basis,
     cfg, scenario): `apply_collection` exactly as the CLI applies it, then —
     on the maxed-account basis only — the account bonuses swapped for the
@@ -325,7 +347,9 @@ def apply_basis(cards, owned, cfg, basis: str, *, assume_level=None, assume_bloo
     return cards, collection_basis, cfg, scenario
 
 
-def certificate_meta(cfg, basis_name: str, *, scenario: MaxedAccountScenario | None = None) -> dict[str, Any]:
+def certificate_meta(
+    cfg: ScoringConfig, basis_name: str, *, scenario: MaxedAccountScenario | None = None
+) -> dict[str, Any]:
     """`model_version` + `inputs_hash` for a response. The
     hash is over the SAME resolved config shape the certificates hash — `cfg` with
     `board=None` (the board a run develops is an OUTPUT; the captured board file
@@ -429,7 +453,7 @@ def parse_assume(body: Mapping, key: str, lo: int, hi: int) -> object:
 DECK_POWER_BASES = {"server": True, "modelled": False}
 
 
-def auto_premise(cfg, body: Mapping) -> dict:
+def auto_premise(cfg: ScoringConfig, body: Mapping) -> dict:
     """`{}` or the BOTH-HALVES AUTO premise, as kwargs for `dataclasses.replace`.
 
     `"auto": true` in the request body ranks for an AUTO run. It sets the AUTO

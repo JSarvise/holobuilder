@@ -34,6 +34,16 @@ ignore = [
     "UP031",   # %-formatting kept where it mirrors the game's own format strings
 ]
 
+[tool.mypy]
+# a light check: the solver package and the web server, with what they import followed silently
+python_version = "3.12"
+files = ["src/hbuilder", "tools/web"]
+mypy_path = ["src", "tools/web", "tools/refresh"]
+explicit_package_bases = true
+follow_imports = "silent"
+ignore_missing_imports = true
+exclude = ['(^|/)test_[^/]*\.py$', '(^|/)conftest\.py$']
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

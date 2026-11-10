@@ -16,7 +16,12 @@ from __future__ import annotations
 import ctypes
 import sys
 import threading
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hbuilder.domain.scoring_config import ScoringConfig
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "notewalk.c"
@@ -47,10 +52,10 @@ def build(force: bool = False) -> Path:
     return cbuild.build(SOURCE, LIBRARY, "note-walk", force)
 
 
-_lib = None
+_lib: ctypes.CDLL | None = None
 
 
-def load():
+def load() -> ctypes.CDLL:
     """The loaded library, built on first use. Raises if it cannot be built."""
     global _lib
     if _lib is None:
@@ -91,7 +96,7 @@ def load():
     return _lib
 
 
-def pack_terms(terms, member_ids):
+def pack_terms(terms: Sequence[Any], member_ids: Sequence[str]) -> ctypes.Array[Term] | None:
     """`song._Term` objects -> a C array. `member_ids` are the five member card
     ids in slot order; a term's owner and a boost's recipients become indices
     into it. Returns `None` when a team cannot be expressed (too many terms)."""
@@ -177,18 +182,18 @@ def _ranges(ranges):
 
 
 def walk(
-    note_weights,
-    liveness,
-    constant,
-    terms,
-    score_rates,
-    skill_effect_up,
-    special_terms,
-    cover_range,
-    member_ids,
-    cfg,
-    general=False,
-):
+    note_weights: Sequence[float],
+    liveness: tuple[int, Sequence[tuple[int, Sequence[tuple[int, int]]]]],
+    constant: float,
+    terms: Sequence[Any],
+    score_rates: Sequence[float],
+    skill_effect_up: float,
+    special_terms: Sequence[int],
+    cover_range: Mapping[int, Sequence[tuple[int, int]]],
+    member_ids: Sequence[str],
+    cfg: ScoringConfig,
+    general: bool = False,
+) -> tuple[float, tuple[int, ...]] | None:
     """The separable fast path of `score_song_detailed`: `(total, permutation)`,
     or `None` to make the caller run its own Python (a configuration or a team
     this kernel does not express). Never an approximation. `general`: the

@@ -40,6 +40,7 @@ import json
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
+from typing import Any
 
 _FILES = ("pulls", "banners", "rates", "counters")
 _RAR_RE = re.compile(r"^card-\d+-(\d)-")
@@ -83,7 +84,7 @@ def _read_aliases(path: Path) -> tuple[dict, str | None]:
 
 
 def load_store(store_dir: Path) -> dict:
-    store = {k: _read_jsonl(store_dir / f"{k}.jsonl") for k in _FILES}
+    store: dict[str, Any] = {k: _read_jsonl(store_dir / f"{k}.jsonl") for k in _FILES}
     store["aliases"], store["aliases_error"] = _read_aliases(store_dir / ALIASES_FILE)
     return store
 
@@ -135,9 +136,9 @@ def _expected(pulls: list[dict], by_rar: dict[str, float], fixed_rar: dict[str, 
     for n in groups.values():
         n_fixed = (n // 10) if fixed_rar else 0
         for k, v in by_rar.items():
-            exp[k] += (n - n_fixed) * v
+            exp[k] += (n - n_fixed) * v  # type: ignore[assignment]
         for k, v in fixed_rar.items():
-            exp[k] += n_fixed * v
+            exp[k] += n_fixed * v  # type: ignore[assignment]
     return dict(exp)
 
 
@@ -304,7 +305,7 @@ def build_view(store: dict, cards_by_id: dict, art_dir: Path, snapshot: dict | N
     aliases = {k: v for k, v in (store.get("aliases") or {}).items() if k != "_doc"}
     alias_by_id = {v["gacha_id"]: (k, v) for k, v in aliases.items() if v.get("gacha_id")}
     latest_banner = _latest_by_id(banners)
-    first_seen = {}
+    first_seen: dict[str, Any] = {}
     for b in banners:
         first_seen.setdefault(b["gacha_id"], b["seen_at"])
     latest_rate = _latest_by_id(rates)
@@ -342,7 +343,7 @@ def build_view(store: dict, cards_by_id: dict, art_dir: Path, snapshot: dict | N
         by_banner[gid].append(p)
 
     total_rar = Counter(rarity_of(p["card_id"], cards_by_id) for p in pulls)
-    out_banners = []
+    out_banners: list[dict[str, Any]] = []
     for gid in list(latest_banner) + [g for g in alias_pulls if g not in latest_banner]:
         b = latest_banner.get(gid)
         alias_name, alias = alias_by_id.get(gid, (None, None))
@@ -442,7 +443,7 @@ def build_view(store: dict, cards_by_id: dict, art_dir: Path, snapshot: dict | N
             grouped[(p["draw_time"], b["gacha_id"])].append(p)
     curve = _curve([(dt, ps, rated[g], fixed_of[g]) for (dt, g), ps in sorted(grouped.items())], cards_by_id)
 
-    unidentified = []
+    unidentified: list[dict[str, Any]] = []
     by_name: dict[str, list[dict]] = defaultdict(list)
     for p in by_banner.get(None, []):
         by_name[p["gacha_name"]].append(p)

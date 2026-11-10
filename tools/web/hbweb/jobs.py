@@ -13,9 +13,12 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbweb import basis, config, songs
+
+if TYPE_CHECKING:
+    from hbweb.router import Handler
 
 
 @dataclass
@@ -55,7 +58,7 @@ def launch(runner: Callable[[Job, Mapping], None], opts: Mapping, name: str) -> 
     return job
 
 
-def run_search_job(job: Job, opts: Mapping, *, engine_for=None) -> None:
+def run_search_job(job: Job, opts: Mapping, *, engine_for: Callable[[str, str], Any] | None = None) -> None:
     """The job behind `POST /api/search` (the optimiser on demand):
     `ondemand.engine(basis, difficulty)` -- started once, kept alive
     -- then one joint search of the song. Events: `plan` -> `progress` (per
@@ -153,7 +156,7 @@ def _event_song_info(opts: Mapping) -> dict:
     return song_info
 
 
-def run_event_job(job: Job, opts: Mapping, *, runner=None) -> None:
+def run_event_job(job: Job, opts: Mapping, *, runner: Callable[..., Any] | None = None) -> None:
     """The job behind `POST /api/event/run`. Events: `plan` -> `stage` / `progress`
     (per stage) -> `result{payload}` -> `end`; or `cancelled` / `error` then `end`.
     `runner` replaces `event_mode.run_account_search` (tests)."""
@@ -190,7 +193,7 @@ def run_event_job(job: Job, opts: Mapping, *, runner=None) -> None:
         emit({"type": "end"})
 
 
-def cancel(h, job_id: str) -> None:
+def cancel(h: Handler, job_id: str) -> None:
     """`POST /cancel/<id>`: ask a running job to stop."""
     with JOBS_LOCK:
         job = JOBS.get(job_id)
@@ -201,7 +204,7 @@ def cancel(h, job_id: str) -> None:
     h.reply_json(200, {"job_id": job_id, "cancelling": True})
 
 
-def serve_events(h, job_id: str) -> None:
+def serve_events(h: Handler, job_id: str) -> None:
     """`GET /events/<id>`: the job's events as a Server-Sent Events stream, until `end`."""
     with JOBS_LOCK:
         job = JOBS.get(job_id)

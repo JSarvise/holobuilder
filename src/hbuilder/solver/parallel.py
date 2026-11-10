@@ -50,7 +50,7 @@ def physical_ram_gb() -> float | None:
             if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
                 return None
             return status.total_phys / 2**30
-        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30  # type: ignore[attr-defined]
     except (AttributeError, OSError, ValueError):
         return None
 

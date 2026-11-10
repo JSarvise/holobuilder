@@ -442,7 +442,7 @@ def validate_skill_slot(record: object, card_id: str, slot_kind: str) -> list[st
             f"{principal_family!r} is not one of {list(SKILL_FAMILIES)}"
         )
 
-    required_slot_kind = FAMILY_REQUIRES_SLOT_KIND.get(principal_family)
+    required_slot_kind = FAMILY_REQUIRES_SLOT_KIND.get(principal_family)  # type: ignore[arg-type]
     if required_slot_kind is not None and slot_kind != required_slot_kind:
         errors.append(
             f"family: card '{card_id}' {slot_kind} slot family "

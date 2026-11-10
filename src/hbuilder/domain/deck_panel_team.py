@@ -45,7 +45,7 @@ from hbuilder.domain.scoring import (
     active_magnitude_by_card,
 )
 from hbuilder.domain.scoring_config import ScoringConfig
-from hbuilder.domain.song import _support_state
+from hbuilder.domain.song import SongChart, _support_state
 from hbuilder.domain.team import Team
 
 __all__ = ["TeamPanel", "panel_cards_for_team", "team_deck_panel"]
@@ -208,7 +208,7 @@ def panel_cards_for_team(
     return TeamPanel(panel=panel, cards=tuple(cards), card_ids=order, unmodelled=tuple(unmodelled))
 
 
-def song_bonus_permil(cfg: ScoringConfig, chart) -> Fraction:
+def song_bonus_permil(cfg: ScoringConfig, chart: SongChart | None) -> Fraction:
     """`eff3`: the song's per-song board bonus in permil -- the same figure the song
     scorer uses: `BoardModel.song_score_bonus_for` over the song's own cast and
     scope (capped), or, on a whole-roster song with no credited cast, the pooled
@@ -231,7 +231,7 @@ def team_deck_panel(
     member_order: Sequence[str] | None = None,
     *,
     overall_power: float | None = None,
-    chart=None,
+    chart: SongChart | None = None,
 ) -> TeamPanel:
     """`panel_cards_for_team` with the Unit Score filled from `overall_power`
     (the deck screen's Overall Power, an integer on the panel). With `chart`, the

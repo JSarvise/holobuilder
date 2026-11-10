@@ -226,13 +226,13 @@ def _resolve_one_skill(
     condition = skill.condition
     gate = None
     if is_known(condition) and condition is not None:
-        predicate = predicate_from_condition(condition)
+        predicate = predicate_from_condition(condition)  # type: ignore[arg-type]
         gate = predicate.resolve(agg, run_state)
 
     override = skill.override
     override_gate = None
     if is_known(override) and override is not None:
-        override_predicate = predicate_from_condition(override.condition)
+        override_predicate = predicate_from_condition(override.condition)  # type: ignore[attr-defined]
         override_gate = override_predicate.resolve(agg, run_state)
 
     # Resolve the rider's OWN condition, exactly as the override's is
@@ -246,7 +246,7 @@ def _resolve_one_skill(
     if isinstance(rider, SlotRider):
         rider_condition = rider.condition
         if is_known(rider_condition) and rider_condition is not None:
-            rider_gate = predicate_from_condition(rider_condition).resolve(agg, run_state)
+            rider_gate = predicate_from_condition(rider_condition).resolve(agg, run_state)  # type: ignore[arg-type]
 
     return ResolvedSkill(
         card_id=card_id,
@@ -384,7 +384,7 @@ def resolve_leader_costume_skills(
     principal = resolve_leader_costume(leader, aggregates, run_state)
     if principal is None:
         return ()
-    rider_slot = scored_costume_rider_slot(leader.costume_skill)
+    rider_slot = scored_costume_rider_slot(leader.costume_skill)  # type: ignore[arg-type]
     if rider_slot is None:
         return (principal,)
     rider = _resolve_one_skill(
@@ -438,7 +438,7 @@ def _gate_probes(card: Card) -> tuple[tuple[str, str], ...]:
 
     def probe(condition: object) -> None:
         if is_known(condition) and condition is not None:
-            predicate = predicate_from_condition(condition)
+            predicate = predicate_from_condition(condition)  # type: ignore[arg-type]
             if predicate.dimension in ("type", "generation"):
                 probes.append((predicate.dimension, predicate.value))
 

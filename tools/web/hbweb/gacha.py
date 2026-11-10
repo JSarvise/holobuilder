@@ -12,10 +12,14 @@ import json
 import re
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import gacha_view
 
 from hbweb import config, scripts, static
+
+if TYPE_CHECKING:
+    from hbweb.router import Handler
 
 _GACHA_ID_RE = re.compile(r"^gacha-[0-9a-z_-]+$")
 # `<kind>` (extension-less, what the page asks for), `<kind>.png` (the committed masters)
@@ -53,7 +57,7 @@ def parse_wrote(stdout: str) -> str | None:
     return last
 
 
-def serve_gacha(h) -> None:
+def serve_gacha(h: Handler) -> None:
     """`GET /api/gacha`: the tracker's view of the store (`gacha_view.build_view`)."""
     cards_doc = config.read_json(config.CARDS_PATH) or {}
     cards_by_id = {c["id"]: c for c in (cards_doc.get("cards") or []) if isinstance(c, dict) and "id" in c}
@@ -82,7 +86,7 @@ def serve_gacha(h) -> None:
     h.reply_json(200, view)
 
 
-def _art_file(h, gacha_id: str, kind: str, wanted: list[str]) -> Path | None:
+def _art_file(h: Handler, gacha_id: str, kind: str, wanted: list[str]) -> Path | None:
     """The banner file on disk, else the server's copy as a cached Path. With the app's
     cache off the server's bytes are sent here and the answer is None (nothing left to do)."""
     art_dir = config.GACHA_ART_DIR
@@ -103,7 +107,7 @@ def _art_file(h, gacha_id: str, kind: str, wanted: list[str]) -> Path | None:
     return path
 
 
-def serve_gachaart(h, rest: str) -> None:
+def serve_gachaart(h: Handler, rest: str) -> None:
     """`GET /gachaart/<gacha_id>/<kind>[.png|.webp][?w=N]`: a banner's art, downscaled on
     request. `banner`, `banner.png` and `banner.webp` are all accepted; the extension-less
     form is what the page and the export ask for: it works whether a banner was saved as
@@ -141,7 +145,7 @@ def serve_gachaart(h, rest: str) -> None:
     h.reply(200, body, ctype, cache="max-age=3600")
 
 
-def gacha_sync(h) -> None:
+def gacha_sync(h: Handler) -> None:
     """`POST /api/gacha/sync`: the page's sync button. Spends the account credential (a login).
 
     One at a time (`SYNC_LOCK`): this is a threading server, and a double click
@@ -161,7 +165,7 @@ def gacha_sync(h) -> None:
         SYNC_LOCK.release()
 
 
-def sync_after_refresh(h, refresh_code: int) -> dict | None:
+def sync_after_refresh(h: Handler, refresh_code: int) -> dict | None:
     """The gacha block of `POST /api/refresh`: a refresh also syncs the pulls, because
     Gacha/ListHistory serves at most the newest 100 entries and every refresh without a
     sync is a chance for pulls to age out of that window unrecorded. Same lock as the
@@ -183,7 +187,7 @@ def sync_after_refresh(h, refresh_code: int) -> dict | None:
     return {"returncode": gcode, "summary": parse_sync_summary(gout)}
 
 
-def gacha_export(h) -> None:
+def gacha_export(h: Handler) -> None:
     """`POST /api/gacha/export`: one self-contained HTML file under dumps/. No login: it
     reads the store."""
     ran = scripts.run_recon_script(h, config.GACHA_EXPORT_SCRIPT, "gacha-export")

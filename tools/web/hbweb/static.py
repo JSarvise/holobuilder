@@ -18,6 +18,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
 from hbuilder import paths
@@ -25,6 +26,9 @@ from hbweb import config
 
 sys.path.insert(0, str(paths.APP_DIR))
 import content_store as _content_store  # noqa: E402
+
+if TYPE_CHECKING:
+    from hbweb.router import Handler
 
 CONTENT = _content_store.ContentStore()
 LIVE2D_CORE_URL = "https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"
@@ -105,7 +109,7 @@ def asset_bytes(base: Path, path: Path) -> bytes | None:
 _ART_SCALE_CACHE: dict = {}
 
 
-def scaled_art(path, width: int) -> bytes | None:
+def scaled_art(path: Path, width: int) -> bytes | None:
     """The bytes of `path`, downscaled to `width` px wide (aspect kept) and cached.
     `width <= 0`, an unreadable master, or a master already narrower returns the
     master untouched — a resize is never an upscale and never a failure path."""
@@ -128,7 +132,7 @@ def scaled_art(path, width: int) -> bytes | None:
             with Image.open(io.BytesIO(raw)) as im:
                 if im.width > width:
                     height = max(1, round(im.height * width / im.width))
-                    im = im.convert("RGBA").resize((width, height), Image.LANCZOS)
+                    im = im.convert("RGBA").resize((width, height), Image.LANCZOS)  # type: ignore[assignment,attr-defined]
                     buf = io.BytesIO()
                     im.save(buf, format="WEBP", quality=90, method=4)
                     body = buf.getvalue()
@@ -172,7 +176,7 @@ def live2d_core() -> bool:
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
-def serve_static(h, name: str) -> None:
+def serve_static(h: Handler, name: str) -> None:
     """A file of `static/`, re-checked for containment."""
     path = (config.STATIC_DIR / name).resolve()
     if not str(path).startswith(str(config.STATIC_DIR.resolve())) or not path.is_file():
@@ -201,7 +205,7 @@ def is_page(path: str) -> bool:
     return bool(PAGE_RE.fullmatch(path)) and (config.STATIC_DIR / f"{path[1:]}.html").is_file()
 
 
-def redirect_home(h) -> None:
+def redirect_home(h: Handler) -> None:
     """`GET /` -> the Optimizer."""
     h.send_response(302)
     h.send_header("Location", "/optimizer")
@@ -213,7 +217,7 @@ def redirect_home(h) -> None:
 # ---------------------------------------------------------------------------
 # Figures: the leaders' Live2D outfits and the 3D chibis
 # ---------------------------------------------------------------------------
-def serve_live2d_index(h) -> None:
+def serve_live2d_index(h: Handler) -> None:
     """`GET /api/live2d/index` -> `{available, core, by_card: {card id: asset},
     models: {asset: {model, motion, expression}}}`: which leader cards have a
     converted Live2D figure, so the page never asks for one that is not there."""
@@ -235,7 +239,7 @@ def serve_live2d_index(h) -> None:
     )
 
 
-def serve_live2d_core(h) -> None:
+def serve_live2d_core(h: Handler) -> None:
     """`GET /live2d/core.js`: the Cubism Core runtime, fetched once per PC."""
     live2d_core()
     _send_asset(
@@ -247,7 +251,7 @@ def serve_live2d_core(h) -> None:
     )
 
 
-def serve_live2d_file(h, rel: str) -> None:
+def serve_live2d_file(h: Handler, rel: str) -> None:
     """`GET /live2d/<rel>`: a converted Live2D file under `LIVE2D_DIR`."""
     if not _LIVE2D_PATH_RE.match(rel):
         h.reply(400, b"bad live2d path", _TEXT)
@@ -261,7 +265,7 @@ def serve_live2d_file(h, rel: str) -> None:
     )
 
 
-def serve_chibi_index(h) -> None:
+def serve_chibi_index(h: Handler) -> None:
     """`GET /api/chibi/index` -> `{available, outfits: {SdCostume id: {chr, name, typ,
     model}}}`: the converted 3D chibis, so the page only ever asks for one that exists."""
     chibi_dir = config.CHIBI_DIR
@@ -274,7 +278,7 @@ def serve_chibi_index(h) -> None:
     h.reply_json(200, {"available": bool(outfits), "outfits": outfits})
 
 
-def serve_chibi_file(h, rel: str) -> None:
+def serve_chibi_file(h: Handler, rel: str) -> None:
     """`GET /chibi/<rel>`: a converted chibi `.glb` under `CHIBI_DIR`."""
     if not _CHIBI_PATH_RE.match(rel):
         h.reply(400, b"bad chibi path", _TEXT)
@@ -282,7 +286,7 @@ def serve_chibi_file(h, rel: str) -> None:
     _send_asset(h, config.CHIBI_DIR, config.CHIBI_DIR / rel, "model/gltf-binary", b"no such chibi file")
 
 
-def _send_asset(h, base: Path, path: Path, ctype: str, missing: bytes) -> None:
+def _send_asset(h: Handler, base: Path, path: Path, ctype: str, missing: bytes) -> None:
     """`path` (local, or the server's copy) with an hour of browser cache, else a 404."""
     body = asset_bytes(base, path)
     if body is None:
@@ -301,7 +305,7 @@ def _served_file(base: Path, path: Path) -> bytes | None:
     return path.read_bytes()
 
 
-def serve_jacket(h, rest: str) -> None:
+def serve_jacket(h: Handler, rest: str) -> None:
     """`GET /jacket/<music id>[?w=N]`: a song's jacket from
     dumps/song_jackets/img_music_jacket_<id>.webp. Absent is a 404 -- the picker shows
     the title alone. A truncated (0-byte) master is a 404 too: served as a 200 with an
@@ -325,7 +329,7 @@ def serve_jacket(h, rest: str) -> None:
     h.reply(200, body, "image/webp")
 
 
-def serve_eventart(h, rest: str) -> None:
+def serve_eventart(h: Handler, rest: str) -> None:
     """`GET /eventart/<name>.webp[?w=N]`: an event banner / logo from dumps/event_art/
     (`event_art.py`). Absent is a 404 -- the page keeps its placeholder."""
     name = rest.split("?", 1)[0].strip("/")
@@ -345,7 +349,7 @@ def serve_eventart(h, rest: str) -> None:
     h.reply(200, body, "image/webp")
 
 
-def serve_cardart(h, rest: str) -> None:
+def serve_cardart(h: Handler, rest: str) -> None:
     """`GET /cardart/[full|vert|thumb/]<card-id>[?w=N]`: card art from
     `dumps/card_images/img_card_<family>_<key>.webp`, at NATIVE resolution on disk.
 
@@ -382,7 +386,7 @@ def serve_cardart(h, rest: str) -> None:
     h.reply(200, body, "image/webp", cache="max-age=3600")
 
 
-def serve_itemicon(h, key: str) -> None:
+def serve_itemicon(h: Handler, key: str) -> None:
     """`GET /itemicon/<item_id>`: the game's item icon (Resources view). Tries the
     item_id filename first, then the game's own item->asset map (master `Item` field 8,
     where reward boxes and friends name their icon), then the octo asset-name form
@@ -408,7 +412,7 @@ def serve_itemicon(h, key: str) -> None:
     h.reply(404, b"no item icon", _TEXT)
 
 
-def serve_chricon(h, chr_id: str) -> None:
+def serve_chricon(h: Handler, chr_id: str) -> None:
     """`GET /chricon/chr-XXXXX`: a character's round face icon. Prefers the game's
     512px `img_chr_icon_mini_<num>.webp` (once rendered into card_images), else
     the 256px `member_icons/<chr>.png`. A miss is a 404 — the caller shows the
@@ -430,7 +434,7 @@ def serve_chricon(h, chr_id: str) -> None:
     h.reply(200, body, ctype, cache="max-age=3600")
 
 
-def serve_icon(h, name: str) -> None:
+def serve_icon(h: Handler, name: str) -> None:
     """`GET /icon/<name>.png`: a skill-tree node glyph, from `dumps/skill_icons/` in place.
 
     The mapping from a node's `e.icon` to a file is the identity plus `.png`. There are
@@ -448,7 +452,7 @@ def serve_icon(h, name: str) -> None:
     h.reply(200, body, "image/png", cache="max-age=3600")
 
 
-def serve_chrome(h, name: str) -> None:
+def serve_chrome(h: Handler, name: str) -> None:
     """`GET /chrome/<kind>/<file>.png`: one card-chrome sprite, from `dumps/card_chrome/`.
     A wrong element badge or rarity band is a factual claim about the card, so a miss
     is a 404 and the face draws without that piece."""
@@ -462,7 +466,7 @@ def serve_chrome(h, name: str) -> None:
     h.reply(200, body, "image/png", cache="max-age=86400")
 
 
-def serve_ui_sprite(h, name: str) -> None:
+def serve_ui_sprite(h: Handler, name: str) -> None:
     """`GET /ui/<category>/<sprite>.(png|webp)`: one official UI sprite, from
     `dumps/ui_official/`. A wrong grade letter or skill plate is a factual claim about
     the game, so a miss is a 404 and the page draws without it."""
@@ -476,7 +480,7 @@ def serve_ui_sprite(h, name: str) -> None:
     h.reply(200, body, "image/webp" if name.endswith(".webp") else "image/png", cache="max-age=86400")
 
 
-def serve_font(h) -> None:
+def serve_font(h: Handler) -> None:
     """`GET /font/line-seed-sans-xbd-latin.woff2`: the game's own face. One fixed path, so
     no traversal surface. A missing font is a 404 and `font-display:swap` keeps the
     fallback stack: it must degrade, never block paint."""

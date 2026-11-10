@@ -28,9 +28,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt
       - run: ruff check .
       - run: ruff format --check .
+      - run: mypy
   secrets:
     runs-on: ubuntu-latest
     steps:

@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hbuilder import paths
 from hbuilder.domain.gates import RunState
@@ -44,6 +45,9 @@ from hbuilder.domain.scoring_models import (
     StackingModel,
     TargetSelectionModel,
 )
+
+if TYPE_CHECKING:
+    from hbuilder.domain.board import BoardModel
 
 # The two values `target_selection.under_supply` may take. Both are
 # implemented, never a stub — a user who believes the effect simply does not fire on under-supply can switch to
@@ -475,7 +479,7 @@ class ScoringConfig:
     #
     # `None` by default, and deliberately NOT a `config.json` key: a board is
     # captured account state, like `data/owned.json`, not a modelling choice.
-    board: object | None = None
+    board: BoardModel | None = None
     # How the team's ACTIVE score-up skills combine into one pool. NOT a
     # `config.json` key — see `scoring_models.ACTIVE_STACKING_MODELS`'s own
     # comment for why (the same reasoning as for `REFERENCE_RUN_SECONDS`). It lives on the config object because

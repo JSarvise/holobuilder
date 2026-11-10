@@ -233,7 +233,7 @@ class ThreadingServer(http.server.ThreadingHTTPServer):
     # still fails), so a restart is not refused for a minute after a stop.
     allow_reuse_address = sys.platform != "win32"
 
-    def handle_error(self, request, client_address) -> None:
+    def handle_error(self, request: Any, client_address: Any) -> None:
         """A browser that drops its connection (a closed tab, a reload, an
         EventSource closed once its search ended -- WinError 10053/10054) is not
         a server fault: one line instead of socketserver's traceback. Anything

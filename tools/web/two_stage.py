@@ -26,8 +26,9 @@ import math
 import random
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
+from typing import Any
 
 _KERNEL = Path(__file__).resolve().parent / "kernel"
 if str(_KERNEL) not in sys.path:
@@ -39,7 +40,7 @@ ScoreSets = Callable[[list[tuple[int, ...]]], Sequence[float]]
 
 
 def random_legal_sets(
-    holomems: Sequence[str], count: int, rng: random.Random, exclude=()
+    holomems: Sequence[str], count: int, rng: random.Random, exclude: Iterable[tuple[int, ...]] = ()
 ) -> list[tuple[int, ...]]:
     """`count` distinct legal sets (ascending pool indices, five different
     holomems), uniform over the legal sets, none of them in `exclude`."""
@@ -302,7 +303,7 @@ def objective_scorer(
             groups = [(leader, list(sets)) for leader, sets in groups]
             return [apply(values, sets) for (_l, sets), values in zip(groups, many(groups))]
 
-        wrapped.many = wrapped_many
+        wrapped.many = wrapped_many  # type: ignore[attr-defined]
     return wrapped
 
 
@@ -333,7 +334,7 @@ def search_song(
     seed: int = 20261013,
     deadline: float | None = None,
     on_leader: Callable[[dict], None] | None = None,
-    **search_options,
+    **search_options: Any,
 ) -> dict:
     """The best (leader, five members) of ONE song without a search per leader.
 
@@ -436,7 +437,7 @@ def search_song(
         leader = row["leader"]
         result = search(
             cards,
-            lambda sets, leader=leader: take(leader, sets),
+            lambda sets, leader=leader: take(leader, sets),  # type: ignore[misc]
             seed=seed,
             seeds=[s for _v, s in triage_lists[row["position"]][:triage_top]],
             **search_options,
@@ -535,8 +536,8 @@ def fitted_chart_sample(scores: Sequence[Sequence[float]], count: int) -> list[i
                 err += e * e
             if best is None or err < best[0]:
                 best = (err, k)
-        chosen.append(best[1])
-        sums = [s + row[best[1]] for s, row in zip(sums, teams)]
+        chosen.append(best[1])  # type: ignore[index]
+        sums = [s + row[best[1]] for s, row in zip(sums, teams)]  # type: ignore[index]
     return chosen
 
 
@@ -550,7 +551,7 @@ def search_general(
     gate_of: Callable[[object], tuple | None] | None = None,
     keep: int = 100,
     extra: Sequence[tuple[object, tuple[int, ...]]] = (),
-    **song_options,
+    **song_options: Any,
 ) -> dict:
     """The best (leader, five members) IN GENERAL — over many songs at once.
 
@@ -612,7 +613,7 @@ def search_general(
                 "candidates": len(candidates[k]),
             }
         )
-    by_sample = sorted(pairs, key=lambda r: -r[0])
+    by_sample = sorted(pairs, key=lambda r: -r[0])  # type: ignore[operator]
     best_full = max(v for _s, v in pairs) if pairs else None
     agreement = {
         "candidates": len(pairs),
@@ -620,7 +621,7 @@ def search_general(
         "rank_of_full_best_in_sample_order": (
             next(i for i, (_s, v) in enumerate(by_sample) if v == best_full) + 1 if pairs else None
         ),
-        "sample_best_over_full_best": (by_sample[0][1] / best_full) if pairs else None,
+        "sample_best_over_full_best": (by_sample[0][1] / best_full) if pairs else None,  # type: ignore[operator]
     }
     return {
         "rows": rows,

@@ -40,6 +40,7 @@ import math
 import random
 import time
 from collections.abc import Callable, Sequence
+from typing import Any
 
 import numpy as np
 import surrogate
@@ -89,7 +90,9 @@ class LeaderModel:
     choice steers which teams the search scores, so a last-bit difference here would
     change the answer."""
 
-    def __init__(self, cards, leaders, gate_of) -> None:
+    def __init__(
+        self, cards: Sequence, leaders: Sequence, gate_of: Callable[[Any], tuple | None] | None
+    ) -> None:
         self.cards = list(cards)
         self.leaders = list(leaders)
         self.gates = [gate_of(l) if gate_of is not None else None for l in self.leaders]
@@ -150,9 +153,9 @@ class LeaderModel:
                 rows_f.append(f)
                 rows_h.append(h)
         li_ = np.array(rows_li, dtype=np.intp)
-        y = np.array(rows_y, dtype=float)
-        f = np.array(rows_f, dtype=float)
-        h = np.array(rows_h, dtype=float)
+        y = np.array(rows_y, dtype=float)  # type: ignore[assignment]
+        f = np.array(rows_f, dtype=float)  # type: ignore[assignment]
+        h = np.array(rows_h, dtype=float)  # type: ignore[assignment]
         lens_ = np.array(lens, dtype=np.intp)
         starts = np.concatenate(([0], np.cumsum(lens_)[:-1])).astype(np.intp)
         group = np.repeat(np.arange(len(lens_)), lens_)
@@ -265,6 +268,7 @@ def _gate_sets(cards, gate, count: int, rng: random.Random, holomems) -> list[tu
         match = [i for i, c in enumerate(cards) if target in c.generations]
     else:
         return []
+    out: list[tuple[int, ...]]
     out, seen = [], set()
     for _ in range(count * 30):
         if len(out) >= count:
@@ -299,7 +303,7 @@ def search(
     leaders: Sequence,
     score_pairs: ScorePairs,
     *,
-    gate_of: Callable[[object], tuple | None] | None = None,
+    gate_of: Callable[[Any], tuple | None] | None = None,
     always: Sequence[int] = (),
     always_k: int = 2,
     k: int = 2,
@@ -486,7 +490,7 @@ def search(
             "round": number,
             "pairs": len(scored),
             "sets": len(best_of_set),
-            "best": (top(1) or [(None,)])[0][0],
+            "best": (top(1) or [(None,)])[0][0],  # type: ignore[list-item]
             "exact_seconds": exact_seconds,
             "fit_seconds": fit_seconds,
             "scan_seconds": scan_seconds,
@@ -540,7 +544,7 @@ def search(
         best team (at most REPAIR_CLIMB of them): the climb climbs from these too,
         under their own leader, so a repair one or two swaps off (the wrong member
         left, another card of the same holomem) still reaches the team."""
-        best = (top(1) or [(0.0,)])[0][0]
+        best = (top(1) or [(0.0,)])[0][0]  # type: ignore[list-item]
         lead = {li for _v, li, _s in top(neighbours)}
         near = sorted(
             (r for li, r in repaired_best.items() if li not in lead and r[0] >= (1.0 - REPAIR_MARGIN) * best),
@@ -591,7 +595,7 @@ def search(
         of the best `neighbours` teams' leaders left out (the climb starts from those)."""
         if not region_of:
             return []
-        best = (top(1) or [(0.0,)])[0][0]
+        best = (top(1) or [(0.0,)])[0][0]  # type: ignore[list-item]
         lead = {region_of[li] for _v, li, _s in top(neighbours)}
         own: dict = {}
         for (li, s), v in scored.items():
@@ -815,6 +819,7 @@ def _sets_with(require, holomems, count, rng) -> list[tuple[int, ...]]:
     """`count` random legal sets holding every card in `require`."""
     names = {holomems[i] for i in require}
     rest = [i for i in range(len(holomems)) if holomems[i] not in names]
+    out: list[tuple[int, ...]]
     out, seen = [], set()
     for _ in range(count * 20):
         if len(out) >= count:
@@ -891,10 +896,10 @@ def search_song(
     score: Callable,
     *,
     always: Sequence = (),
-    gate_of=None,
+    gate_of: Callable[[Any], tuple | None] | None = None,
     seed: int = 20261016,
     per_leader: int = 100,
-    **options,
+    **options: Any,
 ) -> dict:
     """`joint_search.search` with `two_stage.search_song`'s interface and result
     shape, so a caller written for that (`event_mode.search_event`) switches

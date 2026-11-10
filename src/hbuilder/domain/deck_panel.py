@@ -405,7 +405,7 @@ def _second_terms(
         memo_key = (key, early)
         term = seen.get(memo_key)
         if term is None:
-            term = (sum(mags[i] * q[i] for i in key), max(floor, sum(q[i] for i in key)))
+            term = (sum(mags[i] * q[i] for i in key), max(floor, sum(q[i] for i in key)))  # type: ignore[index, misc]
             seen[memo_key] = term
         terms.append(term)
     return terms
@@ -591,7 +591,7 @@ def deck_panel(
 
     boosted = [ceil(Fraction(c.magnitude_permil * (1000 + c.effect_up_permil), 1000)) for c in members]
     boosted_pre20 = (
-        [ceil(Fraction(m * (1000 + c.effect_up_permil), 1000)) for m, c in zip(pre20, members)]
+        [ceil(Fraction(m * (1000 + c.effect_up_permil), 1000)) for m, c in zip(pre20, members)]  # type: ignore[arg-type]
         if gated and GATE_BOOSTED_PASS
         else None
     )

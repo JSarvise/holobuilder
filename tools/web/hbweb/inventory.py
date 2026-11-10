@@ -5,7 +5,12 @@ refresh hint; nothing here writes or logs a credential.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from hbweb import basis, config
+
+if TYPE_CHECKING:
+    from hbweb.router import Handler
 
 
 def account_currencies() -> list:
@@ -149,7 +154,7 @@ def account_items() -> dict:
                 "description": lang.get(f"la-{item_id}-description"),
             }
         )
-    names = {}
+    names: dict[str, Any] = {}
     for card in (config.read_json(config.CARDS_PATH) or {}).get("cards", []):
         parts = str(card.get("id", "")).split("-")
         if len(parts) > 1 and card.get("member"):
@@ -170,7 +175,7 @@ def account_items() -> dict:
     }
 
 
-def serve_resources(h) -> None:
+def serve_resources(h: Handler) -> None:
     """`GET /api/resources`: the board MATERIALS (cubes/hexas spent on nodes + the unspent
     wallet), the upgrade CURRENCIES (beads/crystals, hololium, lesson points, hologold),
     and every held item with the holomems' unspent board points."""

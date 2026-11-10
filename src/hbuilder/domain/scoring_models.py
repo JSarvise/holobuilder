@@ -23,6 +23,7 @@ pairs lives in `domain/targets.py`, a sibling of `domain/gates.py`.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 
@@ -166,7 +167,7 @@ class TargetSelectionModel(Protocol):
 
     name: str
 
-    def select(self, candidates: list[tuple[str, int]], count: int) -> list[str]: ...
+    def select(self, candidates: Sequence[tuple[str, float]], count: int) -> list[str]: ...
 
 
 class AdditiveStacking:
@@ -310,7 +311,7 @@ class TopNByBuffedStat:
 
     name = "top_n_by_stat"
 
-    def select(self, candidates: list[tuple[str, int]], count: int) -> list[str]:
+    def select(self, candidates: Sequence[tuple[str, float]], count: int) -> list[str]:
         ordered = sorted(candidates, key=lambda candidate: -candidate[1])
         return [card_id for card_id, _stat_value in ordered[:count]]
 

@@ -12,7 +12,7 @@ per-song scorer that does take a chart is `song.py`.
 from __future__ import annotations
 
 import math  # noqa: E401
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import cache
 
@@ -266,11 +266,11 @@ def _effective_magnitude(resolved: ResolvedSkill) -> object:
     skill, it only decides whether the second magnitude is in play at all."""
     skill = resolved.skill
     if skill.override is not None and resolved.override_gate is not None and resolved.override_gate.fired:
-        return max(skill.override.magnitude, skill.magnitude)
+        return max(skill.override.magnitude, skill.magnitude)  # type: ignore[call-overload, attr-defined]
     return skill.magnitude
 
 
-def active_magnitude_by_card(resolved_skills) -> dict[str, float] | None:
+def active_magnitude_by_card(resolved_skills: Iterable[ResolvedSkill]) -> dict[str, float] | None:
     """Each card's ACTIVE magnitude as the game ranks the recipients of a count-limited
     Score Support: the principal ACTIVE's magnitude at the card's own skill level, with
     a fired override competing with it (`_effective_magnitude`). A support raises no
@@ -398,7 +398,7 @@ def _score_active(resolved: ResolvedSkill, cfg: ScoringConfig, team_rate_up: flo
     # It raises uptime, and the clamp still binds: `duration / interval` never
     # reaches 1 in the real data, but a shortened interval moves it closer, and
     # a skill can never be more than fully live.
-    return _active_occupancy(resolved, cfg, team_rate_up) * _as_rate(float(_effective_magnitude(resolved)))
+    return _active_occupancy(resolved, cfg, team_rate_up) * _as_rate(float(_effective_magnitude(resolved)))  # type: ignore[arg-type]
 
 
 def _active_occupancy(resolved: ResolvedSkill, cfg: ScoringConfig, team_rate_up: float) -> float:
@@ -443,14 +443,14 @@ def _active_occupancy(resolved: ResolvedSkill, cfg: ScoringConfig, team_rate_up:
         cfg.board.uptime_for(resolved.member) if cfg.board is not None else (0.0, 0.0)
     )
     reduction = cfg.active_cooldown_reduction.get(resolved.member, 0.0) + board_cooldown
-    interval = float(slot.interval) / (1.0 + reduction)
+    interval = float(slot.interval) / (1.0 + reduction)  # type: ignore[arg-type]
     # "finite" (in-run, with the start-of-song dead zone) vs "steady" (the
     # deck-screen panel's song-independent reference). See ScoringConfig
     # .active_uptime_model for what separates them.
     if cfg.active_uptime_model == "steady":
-        uptime = min(1.0, float(slot.duration) / interval) if interval > 0.0 else 0.0
+        uptime = min(1.0, float(slot.duration) / interval) if interval > 0.0 else 0.0  # type: ignore[arg-type]
     else:
-        uptime = _finite_window_uptime(float(slot.duration), interval)
+        uptime = _finite_window_uptime(float(slot.duration), interval)  # type: ignore[arg-type]
     base_prob = cfg.probability_tiers[slot.probability_tier]
     prob = cfg.activation_rate_model.apply(base_prob, team_rate_up + board_rate)
     return uptime * prob
@@ -504,7 +504,7 @@ def _special_occupancy(resolved: ResolvedSkill, cfg: ScoringConfig, team_rate_up
     zero client-side consumers. 128.8 is solved
     from ten captured decks (see `scoring_config`)."""
     del team_rate_up  # SPECIAL is gauge-fired, never on an activation roll
-    return cfg.expected_fires_per_run * (float(resolved.skill.duration) / REFERENCE_RUN_SECONDS)
+    return cfg.expected_fires_per_run * (float(resolved.skill.duration) / REFERENCE_RUN_SECONDS)  # type: ignore[arg-type]
 
 
 def _always_on_occupancy(resolved: ResolvedSkill, cfg: ScoringConfig, team_rate_up: float) -> float:
@@ -521,7 +521,7 @@ def _magnitude_rate(resolved: ResolvedSkill) -> float:
     `ScoreUpByRatio` / `ScoreUpBoostByRatio`, which are
     both `FloatFromPermil(this.Value)` — a magnitude with no occupancy term in
     it, which is exactly why it can be maximised over."""
-    return _as_rate(float(_effective_magnitude(resolved)))
+    return _as_rate(float(_effective_magnitude(resolved)))  # type: ignore[arg-type]
 
 
 def _passive_rate(resolved: ResolvedSkill) -> float:
@@ -1752,10 +1752,10 @@ def _score_team(team: Team, cfg: ScoringConfig, *, with_breakdown: bool = False)
                 # `ScoreUpBoostSkillEffect`, so it joins `B` rather than the
                 # ratio (`_score_up_implements_boost`).
                 if _score_up_implements_boost(resolved):
-                    boost_entries.append(entry)
+                    boost_entries.append(entry)  # type: ignore[arg-type]
                     boost_targets.append(None)
                 else:
-                    ratio_entries.append(entry)
+                    ratio_entries.append(entry)  # type: ignore[arg-type]
                     ratio_owners.append(resolved.card_id)
             else:
                 score_rates.append(weighted_rate)
@@ -1785,7 +1785,7 @@ def _score_team(team: Team, cfg: ScoringConfig, *, with_breakdown: bool = False)
             # one boosts only the ACTIVEs of its resolved recipients
             # (`_score_up_pool`, `_support_targets`).
             boost_entries.append(
-                _lattice_entry(resolved, cfg, team_rate_up, weight, state)
+                _lattice_entry(resolved, cfg, team_rate_up, weight, state)  # type: ignore[arg-type]
                 if support_target_ids
                 else (
                     _score_bucket(resolved),
@@ -1850,7 +1850,7 @@ def _score_team(team: Team, cfg: ScoringConfig, *, with_breakdown: bool = False)
     # which is a report-only summary. It is not a `stacking_model` combine,
     # because the game uses the same max-then-add rule here as for the score
     # pool itself.
-    combined_support_rate = cfg.active_stacking_model.combine(boost_entries)
+    combined_support_rate = cfg.active_stacking_model.combine(boost_entries)  # type: ignore[arg-type]
 
     # The board is its OWN multiplicative factor, never a summand of
     # combined_score_rate (`_board_score_rate`), and its POWER half is a
@@ -1898,11 +1898,14 @@ def _score_team(team: Team, cfg: ScoringConfig, *, with_breakdown: bool = False)
             next(card for card in cards if card.id == card_id) for card_id in member_order
         )
         for entry_index, contribution_index in enumerate(stat_contribution_indices):
-            entry = stat_entries[entry_index]
+            entry = stat_entries[entry_index]  # type: ignore[assignment]
             if entry[3] is _FIXED_TARGET:
                 continue
             recipients = _ordered_target_card_ids(
-                entry[3], entry[4], ordered_members, cfg.target_under_supply
+                entry[3],
+                entry[4],  # type: ignore[arg-type]
+                ordered_members,
+                cfg.target_under_supply,
             )
             contributions[contribution_index] = replace(
                 contributions[contribution_index],
@@ -2008,7 +2011,7 @@ def _score_team(team: Team, cfg: ScoringConfig, *, with_breakdown: bool = False)
 
 def score_fast(team: Team, cfg: ScoringConfig) -> float:
     """Hot-loop path: a bare float, no attribution allocation."""
-    return _score_team(team, cfg)
+    return _score_team(team, cfg)  # type: ignore[return-value]
 
 
 @dataclass(frozen=True, slots=True)
@@ -2368,7 +2371,7 @@ def deck_screen_unit_score(breakdown: ScoreBreakdown, *, k: float = UNIT_SCORE_K
 def score_with_breakdown(team: Team, cfg: ScoringConfig) -> ScoreBreakdown:
     """Attribution path: delegates to the same driver as `score_fast`,
     retaining every intermediate `SkillContribution`."""
-    return _score_team(team, cfg, with_breakdown=True)
+    return _score_team(team, cfg, with_breakdown=True)  # type: ignore[return-value]
 
 
 @dataclass(frozen=True, slots=True)
@@ -2739,7 +2742,7 @@ def score_card_set(
             if pool == "stat":
                 stat_rates.append(weighted_rate)
                 stat_entries.append(
-                    (
+                    (  # type: ignore[arg-type]
                         weighted_rate,
                         STAT_NAMES_BY_EFFECT_TYPE[resolved.skill.effect_type],
                         target_ids,
@@ -2915,7 +2918,7 @@ class _SlotOrderTieBreak:
 
     name = "slot_order_tie_break"
 
-    def select(self, candidates: list[tuple[str, int]], count: int) -> list[str]:
+    def select(self, candidates: Sequence[tuple[str, float]], count: int) -> list[str]:
         ordered = sorted(candidates, key=lambda candidate: -candidate[1])
         return [card_id for card_id, _total in ordered[:count]]
 
@@ -2979,7 +2982,7 @@ _first_missing_field_reference = _first_missing_field
 _missing_field_cache: dict[int, tuple] = {}
 
 
-def _first_missing_field(resolved: ResolvedSkill) -> str | None:  # noqa: F811
+def _first_missing_field(resolved: ResolvedSkill) -> str | None:  # type: ignore[no-redef]  # noqa: F811
     """`_first_missing_field_reference`, answered once per slot OBJECT. The
     answer is a function of the (frozen) slot alone; the slot is kept alive in
     the entry so a recycled `id()` cannot serve another slot's answer."""

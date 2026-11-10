@@ -28,8 +28,10 @@ import itertools
 import math
 import os
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any
 
 from hbuilder.domain.board import (
     _GENERATION_BY_GROUPING,
@@ -54,6 +56,9 @@ from hbuilder.domain.scoring import (
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, tree_from_mapping
 from hbuilder.domain.team import Team
+
+if TYPE_CHECKING:
+    from hbuilder.domain.song import SongChart
 
 
 def node_costs_from_master(master_rows: Sequence[Mapping]) -> dict[str, int]:
@@ -335,7 +340,7 @@ def node_values_from_recipes(
             elif eff.scope == "member":
                 # Blues reach the card that SCORES: only a member card, never a
                 # leader-only card (the leader slot adds no Member Parameter).
-                reached = (own_card,) if own_in_members else ()
+                reached = (own_card,) if own_in_members else ()  # type: ignore[assignment]
             elif eff.scope == "grouping":
                 continue  # needs the team's grouping composition — a follow-up
             else:  # "all"/general and account-wide
@@ -475,7 +480,7 @@ def bench_node_values(
     skilltree: Mapping | None = None,
     model_id: str = "",
     own_chr: str = "",
-    cast=None,
+    cast: AbstractSet[str] | None = None,
 ) -> dict[str, float]:
     """`power_node_values` for a character who is NOT on the team (role
     `bench`): its account-global GREENs reach the
@@ -551,7 +556,7 @@ def optimize_team_boards(
     skilltree: Mapping | None = None,
     player_level: int | None = None,
     singer_weight: float = 0.0,
-    singers: frozenset | None = None,
+    singers: AbstractSet[str] | None = None,
 ) -> TeamBoardPlan:
     """Optimise every distinct character's board for this team and sum the gain.
 
@@ -643,7 +648,7 @@ def _chr_of(card: Card) -> str:
     return "chr-" + card.id.split("-")[1]
 
 
-def singer_weight_for(sings, chr_id: str, is_leader: bool) -> float:
+def singer_weight_for(sings: bool | AbstractSet[str], chr_id: str, is_leader: bool) -> float:
     """The singer context of one board: `sings` is either the LEADER's flag (a bool: only
     the leader's board is valued as a singer) or the song's whole cast as a `frozenset` of chr
     ids, which values EVERY board whose holomem sings -- a member singer's solo/group yellows
@@ -655,13 +660,13 @@ def singer_weight_for(sings, chr_id: str, is_leader: bool) -> float:
     return 1.0 if (is_leader and sings) else 0.0
 
 
-def song_scope_of(sings) -> str:
+def song_scope_of(sings: bool | AbstractSet[str] | None) -> str:
     """The song's scope a `sings` context carries (`SongCast.scope`), "" when it
     carries none (a leader flag, a plain set, no cast)."""
     return getattr(sings, "scope", "") or ""
 
 
-def sings_key(sings, chr_id: str, is_leader: bool) -> bool | str:
+def sings_key(sings: bool | AbstractSet[str], chr_id: str, is_leader: bool) -> bool | str:
     """One board's singer context as a plan-cache key part: False when it does not
     sing, else the song's scope (`song_scope_of`) -- a plan for a solo song values
     the solo yellows and one for a group song the group ones, so they are cached
@@ -733,7 +738,7 @@ def _hold(cache: dict, key, entry):
     return entry
 
 
-def plan_node_order(selected) -> list[str]:
+def plan_node_order(selected: Iterable[str]) -> list[str]:
     """A plan's nodes in the order its board lists them: by node id, the order of the
     account's own boards as the game reports them. A board's stat rates, uptime and song
     bonus are float sums over its nodes in list order, and a plan holds its nodes in a
@@ -743,7 +748,7 @@ def plan_node_order(selected) -> list[str]:
     return sorted(selected)
 
 
-def selected_plan_key(chr_id: str, selected) -> tuple:
+def selected_plan_key(chr_id: str, selected: Iterable[str]) -> tuple:
     """The plan cache key of a board plan the cache did not make (one the activation
     refinement changed): the board and its nodes in the set's own order -- the order
     `assembled_for` lists them in, so equal keys are equal assemblies."""
@@ -858,7 +863,7 @@ class PlanCache:
         card: Card,
         role: str,
         budget: int,
-        sings: bool,
+        sings: bool | str,
         *,
         tree: SkillTree,
         node_effect_ids: Mapping[str, list[str]],
@@ -876,7 +881,7 @@ class PlanCache:
             return plan
         self.misses += 1
         if self.store is not None:
-            plan = self.store.get(key)
+            plan = self.store.get(key)  # type: ignore[attr-defined]
             if plan is not None:
                 self.store_hits += 1
                 self.plans[key] = plan
@@ -923,7 +928,7 @@ class PlanCache:
         plan = optimize_board(tree, budget, values, player_level=self.player_level)
         self.plans[key] = plan
         if self.store is not None:
-            self.store.put(key, plan)
+            self.store.put(key, plan)  # type: ignore[attr-defined]
         return plan
 
     # -- the assembled cache ------------------------------------------------
@@ -943,7 +948,9 @@ class PlanCache:
             (offsets, permil, tuple(sorted(ids))) for (offsets, permil), ids in groups.items()
         )
 
-    def recipes_for(self, chr_id: str, node_effect_ids, skilltree) -> tuple:
+    def recipes_for(
+        self, chr_id: str, node_effect_ids: Mapping[str, list[str]], skilltree: Mapping | None
+    ) -> tuple:
         """`compile_node_recipes` for one character, compiled once."""
         r = self._recipes.get(chr_id)
         if r is None:
@@ -952,7 +959,12 @@ class PlanCache:
         return r
 
     def needed_recipes(
-        self, key: tuple, asm: AssembledPlan, chr_id: str, node_effect_ids, skilltree
+        self,
+        key: tuple,
+        asm: AssembledPlan,
+        chr_id: str,
+        node_effect_ids: Mapping[str, list[str]],
+        skilltree: Mapping | None,
     ) -> tuple:
         """`recipes_for(chr_id)` restricted to the nodes plan `key`'s Connect
         assignment reads (`asm.needed`; `None` = every node), in recipe order
@@ -996,14 +1008,18 @@ class PlanCache:
             boards[name], digests[name] = hit[1], hit[2]
         return _hold(self._benches, key, [bench_characters, boards, digests, None])
 
-    def bench_boards(self, bench_characters) -> dict[str, CharacterBoard]:
+    def bench_boards(
+        self, bench_characters: Mapping[str, Sequence[Mapping]] | None
+    ) -> dict[str, CharacterBoard]:
         """The account's bench boards parsed ONCE per mapping object — the same
         `board_from_mapping` parse, its `CharacterBoard`s reused (frozen)."""
         if bench_characters is None:
             return {}
         return self._bench_entry(bench_characters)[1]
 
-    def bench_digests(self, bench_characters) -> dict[str, BoardDigest]:
+    def bench_digests(
+        self, bench_characters: Mapping[str, Sequence[Mapping]] | None
+    ) -> dict[str, BoardDigest]:
         """`bench_boards`' `BoardDigest`s, built ONCE per parse and handed to
         every `BoardModel` assembled over them — the bench is ~50 of a model's
         ~54 boards and identical for every team."""
@@ -1011,7 +1027,7 @@ class PlanCache:
             return {}
         return self._bench_entry(bench_characters)[2]
 
-    def bench_base(self, bench_characters) -> BoardBase | None:
+    def bench_base(self, bench_characters: Mapping[str, Sequence[Mapping]] | None) -> BoardBase | None:
         """The bench as a `BoardBase` — its per-card stat terms summed once
         and corrected per team (`BoardModel._terms_over_base`). `None` with no
         bench."""
@@ -1043,7 +1059,7 @@ class PlanCache:
         board = CharacterBoard(
             holomem=holomem,
             nodes=tuple(
-                BoardNode(node_id=node_id, effects=(eff,), connect_multiplier=mult)
+                BoardNode(node_id=node_id, effects=(eff,), connect_multiplier=mult)  # type: ignore[arg-type]
                 for (node_id, eff), mult in zip(asm.nodes, mults)
             ),
         )
@@ -1052,7 +1068,14 @@ class PlanCache:
         return hit
 
     def assembled_for(
-        self, key: tuple, cplan: BoardPlan, chr_id: str, *, skilltree: Mapping, node_effect_ids, connect_cards
+        self,
+        key: tuple,
+        cplan: BoardPlan,
+        chr_id: str,
+        *,
+        skilltree: Mapping,
+        node_effect_ids: Mapping[str, list[str]],
+        connect_cards: Mapping[str, tuple[Sequence[Sequence[int]], int]] | None,
     ) -> AssembledPlan:
         """The team-invariant half of `board_model_from_plan` for one plan:
         its node list with parsed effects (in node id order, `plan_node_order`), and
@@ -1133,7 +1156,7 @@ def cached_team_plan(
     budget_for: Callable[[Card], int],
     node_effect_ids: Mapping[str, list[str]],
     skilltree: Mapping | None,
-    sings: bool | frozenset = False,
+    sings: bool | AbstractSet[str] = False,
 ) -> TeamBoardPlan:
     """`optimize_team_boards`'s twin on the plan cache: one plan per distinct
     CHARACTER, the leader's at role `leader` (or `leader+member` when a card of
@@ -1204,7 +1227,7 @@ def cached_team_plan(
             PLAN_ROLE_MEMBER,
             budget_for(m),
             m_sings,
-            tree=tree,
+            tree=tree,  # type: ignore[arg-type]
             node_effect_ids=node_effect_ids,
             skilltree=skilltree,
             no_grouping=True,
@@ -1220,7 +1243,7 @@ _SINGER_BENCH: dict = {}
 
 def singer_bench_characters(
     bench_characters: Mapping[str, list] | None,
-    cast,
+    cast: AbstractSet[str] | None,
     *,
     cache: PlanCache,
     cards_by_chr: Mapping[str, Card],
@@ -1254,9 +1277,9 @@ def singer_bench_characters(
         if tree is None or not name:
             continue
         plan = cache.plan_for(
-            card,
+            card,  # type: ignore[arg-type]
             PLAN_ROLE_BENCH,
-            budget_for(card),
+            budget_for(card),  # type: ignore[arg-type]
             scope or True,
             tree=tree,
             node_effect_ids=node_effect_ids,
@@ -1606,7 +1629,7 @@ def _team_connect_assignment(
     for chr_id, (positions, selected, values) in per_char.items():
         if not isinstance(selected, frozenset):
             selected = frozenset(selected)
-        entry = per_board.get((id(positions), selected))
+        entry = per_board.get((id(positions), selected))  # type: ignore[call-overload]
         if entry is None or entry[0] is not positions:
             pos_to_node = {tuple(p): n for n, p in positions.items()}
             rows = []
@@ -1625,7 +1648,7 @@ def _team_connect_assignment(
                     rows.append((socket, permil, tuple(covered), card_ids))
             if len(per_board) > 4096:
                 per_board.clear()
-            entry = per_board[(id(positions), selected)] = (positions, rows)
+            entry = per_board[(id(positions), selected)] = (positions, rows)  # type: ignore[index, assignment]
         for socket, permil, covered, card_ids in entry[1]:
             gain = 0.0
             for node in covered:
@@ -1665,7 +1688,9 @@ class SongCast(frozenset):
     m0198, so their group yellows would be valued 0 and lose their sockets: -1.68 % on
     every top-16 team."""
 
-    def __new__(cls, singers=(), scope: str = ""):
+    scope: str
+
+    def __new__(cls, singers: Iterable[str] = (), scope: str = "") -> SongCast:
         self = super().__new__(cls, singers)
         self.scope = scope
         return self
@@ -1674,12 +1699,12 @@ class SongCast(frozenset):
         return (SongCast, (tuple(self), self.scope))
 
 
-def song_cast(chart) -> SongCast:
+def song_cast(chart: SongChart) -> SongCast:
     """The `SongCast` of one chart: its singers' chr ids at its `singer_type`."""
     return SongCast(chart.singers, getattr(chart, "singer_type", "") or "")
 
 
-def bench_yellow_pays(scope: str | None, chr_id: str, cast) -> bool:
+def bench_yellow_pays(scope: str | None, chr_id: str, cast: AbstractSet[str] | None) -> bool:
     """Whether an OFF-TEAM board's yellow of `scope` reaches this song's score
     (`BoardModel.song_score_bonus_for`): the song's own cast pays the yellows of the
     song's scope whoever is on the team; a song with no cast (a whole-roster song, or
@@ -1746,11 +1771,11 @@ def _bench_bought(bench_characters, name_by_chr) -> dict[str, frozenset] | None:
 
 def held_bench_cards(
     bench_sockets: Mapping[str, Mapping[str, str | None]] | None,
-    team_chrs,
+    team_chrs: AbstractSet[str],
     skilltree: Mapping,
-    connect_cards,
+    connect_cards: Mapping[str, tuple[Sequence[Sequence[int]], int]] | None,
     *,
-    cast=None,
+    cast: AbstractSet[str] | None = None,
     bought: Mapping[str, frozenset] | None = None,
 ) -> frozenset[str]:
     """The cards an OFF-TEAM board's socket holds (`bench_sockets`, chr -> {socket:
@@ -1968,7 +1993,7 @@ def _yellow_capped_assignment(
     def paying(rows):
         return {n: p for n in rows if (p := _yellow_permil(skilltree, n, chr_id, cast, node_effect_ids))}
 
-    room = SONG_ALL_CAP_PERMIL
+    room: float = SONG_ALL_CAP_PERMIL
     for chr_id, e in fixed_rows:
         if chr_id and e.get("node"):
             room -= _yellow_permil(skilltree, e["node"], chr_id, cast, node_effect_ids) * float(
@@ -2133,8 +2158,8 @@ def _env_kernel(env: str) -> Callable | None:
                 module_spec = importlib.util.spec_from_file_location(
                     "_hbuilder_kernel_" + os.path.splitext(os.path.basename(file_name))[0], file_name
                 )
-                module = importlib.util.module_from_spec(module_spec)
-                module_spec.loader.exec_module(module)
+                module = importlib.util.module_from_spec(module_spec)  # type: ignore[arg-type]
+                module_spec.loader.exec_module(module)  # type: ignore[union-attr]
                 _KERNEL_MODULES[file_name] = module
             kernel = getattr(module, attribute)
         except Exception as exc:  # noqa: BLE001 - any failure means "use Python"
@@ -2242,7 +2267,7 @@ def _cached_connect_assignment(
         )
         entries = asm.entries
         if held:
-            entries = [
+            entries = [  # type: ignore[assignment]
                 (socket, permil, covered, kept)
                 for socket, permil, covered, card_ids in entries
                 if (kept := tuple(c for c in card_ids if c not in held))
@@ -2288,7 +2313,7 @@ def board_model_from_plan(
     placements_out: list[SocketPlacement] | None = None,
     bench_characters: Mapping[str, Sequence[Mapping]] | None = None,
     name_by_chr: Mapping[str, str] | None = None,
-    sings: bool = False,
+    sings: bool | AbstractSet[str] = False,
     plan_cache: PlanCache | None = None,
     fixed_slots: Mapping[str, Mapping[str, str]] | None = None,
     socket_bench: bool = False,
@@ -2522,7 +2547,7 @@ def board_model_from_plan(
         ctx.append((card, chr_id, model_id, cplan, base))
     if connect_cards is not None:
         per_char = {
-            chr_id: (skilltree.get("models", {}).get(model_id, {}), cplan.selected, base)
+            chr_id: (skilltree.get("models", {}).get(model_id, {}), cplan.selected, base)  # type: ignore[attr-defined]
             for _card, chr_id, model_id, cplan, base in ctx
             if model_id
         }
@@ -2593,12 +2618,12 @@ def board_model_from_plan(
         and bool(plan.plan_keys)
         and all(card.id in plan.plan_keys for card, *_ in ctx)
     )
-    for card, chr_id, _model_id, cplan, _base in ctx:
+    for card, chr_id, _model_id, cplan, _base in ctx:  # type: ignore[assignment]
         if cached:
             break
         cmult = mults_by_chr.get(chr_id, {})
         nodes = []
-        for node_id in plan_node_order(cplan.selected):
+        for node_id in plan_node_order(cplan.selected):  # type: ignore[union-attr]
             if node_id == ROOT_NODE:
                 continue
             effstr = _effect_string_for(skilltree, node_id, chr_id, node_effect_ids)
@@ -2615,12 +2640,12 @@ def board_model_from_plan(
         # parsed -- the same `CharacterBoard`s, the same scores, ~5 s less per request
         boards = dict(plan_cache.bench_boards(bench_characters))
         digests = dict(plan_cache.bench_digests(bench_characters))
-        for card, chr_id, _model_id, cplan, _base in ctx:
+        for card, chr_id, _model_id, cplan, _base in ctx:  # type: ignore[assignment]
             if cached:
                 key = plan.plan_keys[card.id]
                 asm = plan_cache.assembled_for(
                     key,
-                    cplan,
+                    cplan,  # type: ignore[arg-type]
                     chr_id,
                     skilltree=skilltree,
                     node_effect_ids=node_effect_ids,
@@ -2646,7 +2671,7 @@ def board_model_from_plan(
 def _team_yellow_rows(plan: TeamBoardPlan, leader: Card, members: Sequence[Card]) -> list:
     """`_song_bonus_over_cap`'s team rows with every Connect multiplier at 1: one row per
     character, leader first, as both paths of `board_model_from_plan` build them."""
-    rows, seen = [], set()
+    rows, seen = [], set()  # type: ignore[var-annotated]
     for card in (leader, *members):
         chr_id = "chr-" + card.id.split("-")[1]
         cplan = plan.per_character.get(card.id)
@@ -2672,11 +2697,11 @@ def _board_model_from_cache(
     connect_cards,
     placements_out,
     bench_characters,
-    sings: bool,
+    sings: bool | AbstractSet[str],
     cache: PlanCache,
     held: frozenset = frozenset(),
     incumbent=None,
-) -> BoardModel:
+) -> BoardModel | None:
     """`board_model_from_plan`'s fast path — see its docstring. `held`: cards on the
     off-team boards' sockets, kept out of the team's matching (`held_bench_cards`).
     None when the team's paying yellows exceed the song cap: the matching here does not
@@ -2990,7 +3015,7 @@ def optimize_and_rerank(
     bench_characters: Mapping[str, Sequence[Mapping]] | None = None,
     name_by_chr: Mapping[str, str] | None = None,
     plan_cache: PlanCache | None = None,
-    sings: bool | Callable[[Card], bool] = False,
+    sings: bool | AbstractSet[str] | Callable[[Card], bool | AbstractSet[str]] = False,
     bench_sockets: Mapping[str, Mapping[str, str | None]] | None = None,
 ) -> list[BoardOptimisedTeam]:
     """The bounded JOINT team+board pass: board-optimise every team and RE-RANK by
@@ -3175,7 +3200,7 @@ def cooldown_count_axes(
         key_m = (card_id, selected, drops_only)
         states = memo.get(key_m) if memo is not None else None
         if states is None:
-            budget = budget_for(card)
+            budget = budget_for(card)  # type: ignore[arg-type]
             available = available_cache.setdefault(id(tree), _available(tree, player_level))
             best_by_count: dict[int, tuple[tuple, frozenset[str]]] = {}
             nodes = sorted(family)
@@ -3222,7 +3247,10 @@ def plan_with_counts(
         if sel != old.selected:
             tree = tree_for(cards_by_id[card_id])
             per[card_id] = BoardPlan(
-                selected=sel, spent=tree.cost_of(sel - {ROOT_NODE}), value=old.value, steps=old.steps
+                selected=sel,
+                spent=tree.cost_of(sel - {ROOT_NODE}),  # type: ignore[union-attr]
+                value=old.value,
+                steps=old.steps,
             )
     return replace(plan, per_character=per, plan_keys={})
 
@@ -3368,7 +3396,7 @@ def refine_activation_nodes(
                 continue
             current = plan.per_character[card_id]
             selected = frozenset(current.selected)
-            budget = budget_for(card)
+            budget = budget_for(card)  # type: ignore[arg-type]
             spent = tree.cost_of(selected - {ROOT_NODE})
             candidates: list[tuple[str, frozenset[str]]] = []
             for node in sorted(selected & activation_nodes):
@@ -3418,7 +3446,7 @@ def develop_refined_team(
     bench_characters: Mapping[str, Sequence[Mapping]] | None = None,
     name_by_chr: Mapping[str, str] | None = None,
     plan_cache: PlanCache | None = None,
-    sings: bool = False,
+    sings: bool | AbstractSet[str] = False,
     player_level: int | None = None,
     bench_sockets: Mapping[str, Mapping[str, str | None]] | None = None,
     cooldown_counts: bool = False,
@@ -3491,7 +3519,7 @@ def develop_refined_team(
         tree_for=tree_for,
         budget_for=budget_for,
         activation_nodes=activation_node_ids(skilltree),
-        score=lambda p: charts_score(assemble(p)),
+        score=lambda p: charts_score(assemble(p)),  # type: ignore[arg-type]
         player_level=player_level,
     )
     if cooldown_counts:
@@ -3509,8 +3537,8 @@ def develop_refined_team(
         def screen(variants: Sequence[Mapping[str, float]]) -> list[float]:
             by_holomem = [{members_by_id[cid].member: cd for cid, cd in v.items()} for v in variants]
             if charts_score_variants is not None:
-                return list(charts_score_variants(base, by_holomem))
-            return [charts_score(base.with_cooldowns(v)) for v in by_holomem]
+                return list(charts_score_variants(base, by_holomem))  # type: ignore[arg-type]
+            return [charts_score(base.with_cooldowns(v)) for v in by_holomem]  # type: ignore[union-attr]
 
         plan, value, changes = refine_cooldown_counts(
             plan,
@@ -3519,7 +3547,7 @@ def develop_refined_team(
             budget_for=budget_for,
             cooldown_nodes=cooldown_node_ids(skilltree),
             member_ids=frozenset(members_by_id),
-            score=lambda p: charts_score(assemble(p)),
+            score=lambda p: charts_score(assemble(p)),  # type: ignore[arg-type]
             start_value=value,
             player_level=player_level,
             cooldown_of=cooldown_of if base is not None else None,
@@ -3546,7 +3574,7 @@ def develop_refined_team(
 
 
 def develop_and_refine(
-    team: Team, cfg: ScoringConfig, charts_score: Callable[[BoardModel], float], **kwargs
+    team: Team, cfg: ScoringConfig, charts_score: Callable[[BoardModel], float], **kwargs: Any
 ) -> tuple[BoardModel | None, TeamBoardPlan, float, list[str]]:
     """`develop_refined_team` as `(board, plan, charts_score(board), moves)`."""
     bt, value, moves = develop_refined_team(team, cfg, charts_score, **kwargs)

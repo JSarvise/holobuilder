@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import Any
 
 REGIONS = ("us", "as", "jp")
 RECENT_WINDOW_MS = 12 * 3600 * 1000  # trailing window for the recent pace
@@ -161,7 +162,7 @@ def _median(v: list[float]) -> float:
     return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
 
 
-def _path(now: int, end: int, at: callable) -> list[list[int]]:
+def _path(now: int, end: int, at: Callable[[int], float]) -> list[list[int]]:
     """CURVE_POINTS + 1 evenly spaced points from now to the chapter end."""
     pts = []
     for k in range(CURVE_POINTS + 1):
@@ -314,7 +315,7 @@ def templates_for(store: Path, region: str, kind: str, rank: int, exclude_chapte
         if not cid or cid == exclude_chapter:
             continue
         _m, recs = read_chapter(store, region, cid)
-        kinds = {r.get("kind") for r in recs if (r.get("kind") or "").split(":", 1)[0] == family}
+        kinds: set[Any] = {r.get("kind") for r in recs if (r.get("kind") or "").split(":", 1)[0] == family}
         for k in sorted(kinds):
             curve = normalised_curve(
                 series_for(recs, k, rank), int(meta.get("start_time") or 0), chapter_end(meta)
@@ -395,7 +396,7 @@ def build_view(
     _m, recs = read_chapter(store, region, cid)
     # the kinds READ, plus every song ranking the chapter has: its Song Score tab shows before
     # its first read
-    read = {r.get("kind") for r in recs if r.get("kind")}
+    read: set[Any] = {r.get("kind") for r in recs if r.get("kind")}
     listed = {f"music:{m}" for m in ((meta.get("tiers") or {}).get("music") or {})}
     kinds = sorted(read | listed, key=lambda k: (k != "points", k != "total", k))
     kind = kind or next((k for k in kinds if k in read), kinds[0] if kinds else "points")
@@ -407,7 +408,7 @@ def build_view(
     tiers = []
     for row in tier_rows(meta, kind):
         rank = row.get("end_rank")
-        series = series_for(recs, kind, rank)
+        series = series_for(recs, kind, rank)  # type: ignore[arg-type]
         g = grades.get(row.get("grade_id") or "", {})
         cur = series[-1] if series else None
         prev = series[-2] if len(series) > 1 else None
@@ -434,7 +435,7 @@ def build_view(
                         start=start,
                         end=end,
                         now=now,
-                        templates=templates_for(store, region, kind, rank, cid),
+                        templates=templates_for(store, region, kind, rank, cid),  # type: ignore[arg-type]
                     )
                     if in_last
                     else None
@@ -480,7 +481,7 @@ def build_view(
 
 
 # ------------------------------------------------------------------ event history
-def own_points(store, region: str, event_id: str | None, chapter_id: str | None) -> dict | None:
+def own_points(store: str | Path, region: str, event_id: str | None, chapter_id: str | None) -> dict | None:
     """{value, captured_at} -- the latest own Event Pt of this chapter in
     `<region>/<event_id>.self_points.jsonl` (event_cutoffs.append_points), or None."""
     if not (event_id and chapter_id):
@@ -503,7 +504,7 @@ def own_points(store, region: str, event_id: str | None, chapter_id: str | None)
 
 
 def own_series(
-    store,
+    store: str | Path,
     region: str,
     event_id: str | None,
     chapter_id: str | None,
@@ -549,7 +550,7 @@ def own_series(
     return out
 
 
-def song_view(mid: str, sg: dict, grade, title: str | None) -> dict:
+def song_view(mid: str, sg: dict, grade: Callable[[str | None], dict], title: str | None) -> dict:
     """One song ranking of a chapter for the page: its final borders (with tiers), your read."""
     tiers = sorted(sg.get("tiers") or [], key=lambda t: t.get("rank") or 0)
     final = {b.get("rank"): b.get("score") for b in ((sg.get("final_borders") or {}).get("borders") or [])}

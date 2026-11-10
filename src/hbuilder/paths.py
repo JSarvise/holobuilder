@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from hbuilder.errors import CheckoutMismatch, MissingInput
@@ -318,7 +319,7 @@ SQLCIPHER_INSTALL_HINT = (
 )
 
 
-def sqlcipher_library(platform: str = sys.platform, find=None) -> str:
+def sqlcipher_library(platform: str = sys.platform, find: Callable[[str], str | None] | None = None) -> str:
     """The SQLCipher library the master reader loads (`master_db`). `HOLODREAMS_SQLCIPHER` when
     set; on Windows the game's own `sqlcipher.dll` (`sqlcipher_dll`); elsewhere the system's
     `libsqlcipher`, since the game's dll is a Windows library. Both open the game's databases

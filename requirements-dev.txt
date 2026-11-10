@@ -1,3 +1,4 @@
 # Development tools on top of requirements.txt: lint, format and type checks (the CI's lint job).
 #   pip install -r requirements-dev.txt
 ruff==0.17.4
+mypy==2.4.1

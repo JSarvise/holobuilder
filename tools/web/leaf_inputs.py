@@ -31,8 +31,9 @@ import hashlib
 import importlib.util
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Container, Hashable, Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 _SRC = str(Path(__file__).resolve().parents[2] / "src")  # this checkout's hbuilder
 if _SRC not in sys.path:
@@ -59,6 +60,11 @@ from hbuilder.inputs import (  # noqa: E402
 from hbuilder.solver import members_first as mf  # noqa: E402
 from hbuilder.solver.parallel_refine import RefineContext  # noqa: E402
 
+if TYPE_CHECKING:
+    from hbuilder.domain.card import Card
+    from hbuilder.domain.scoring_config import ScoringConfig
+    from hbuilder.domain.song import SongChart
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -80,7 +86,7 @@ REFRESH_DIR = paths.REFRESH_DIR
 VERSION = "two-stage-build-4"
 # The maxed basis' flat board budget is not here: it is read from the master
 # (`maxed_budget`) and added to every key by `keys_for`.
-SETTINGS = {
+SETTINGS: dict[str, Any] = {
     "uptime": "finite",
     "platform": "mobile",
     "proxy": "nonsinger",
@@ -178,7 +184,9 @@ def _load_precompute():
     return module
 
 
-def load_context(uptime_model: str, flat_budget: int, song: str, difficulty: str = "EXPERT"):
+def load_context(
+    uptime_model: str, flat_budget: int, song: str, difficulty: str = "EXPERT"
+) -> tuple[Sequence[Card], ScoringConfig, RefineContext, SongChart]:
     cards, owned, cfg, _prov = load_inputs(CARDS_PATH, OWNED_PATH)
     cards, basis = apply_collection(
         cards, None, owned_ids=[c.id for c in owned], maxed=True, assume_level="max", assume_bloom="max"
@@ -238,7 +246,7 @@ def _slot_key(slot):
     )
 
 
-def feature_key(card):
+def feature_key(card: Card) -> tuple:
     """Everything a member contributes: stats, type, generations, the three
     normal skill slots (SPECIAL/ACTIVE/PASSIVE with magnitude, interval,
     duration, prob tier, condition, target, override, rider). The costume skill
@@ -252,7 +260,7 @@ def feature_key(card):
     )
 
 
-def build_pool(cards, leader_id: str):
+def build_pool(cards: Iterable[Card], leader_id: str) -> tuple[list[Card], list[Card], list[tuple[str, str]]]:
     five = [c for c in cards if c.rarity.startswith("5")]
     groups: dict[tuple, list] = {}
     for c in five:
@@ -284,7 +292,7 @@ TABLE_SEED = (
 PROXIES = {"nonsinger": "card-04012-5-uniq-0051-00", "singer": "card-04001-5-uniq-0042-00"}
 
 
-def build_maxed(args, proxy_card_id: str | None):
+def build_maxed(args: argparse.Namespace, proxy_card_id: str | None) -> dict[str, Any]:
     """The maxed basis' leaf inputs. `args.budget` is the flat board budget of every
     team holomem; None (or absent) = `maxed_budget()`."""
     difficulty = cert_mod.normalize_difficulty(getattr(args, "difficulty", None))
@@ -332,7 +340,7 @@ def build_maxed(args, proxy_card_id: str | None):
     )
 
 
-def feature_digest(card) -> str:
+def feature_digest(card: Card) -> str:
     """sha256 of `feature_key(card)` — everything a
     member contributes (the outfit excluded). Recorded per pool card so a
     reader can verify that a card is unchanged (the whole-file `inputs_hash`
@@ -350,7 +358,7 @@ def _total(card) -> int:
     return card.stats.performance + card.stats.technique + card.stats.sense
 
 
-def account_cards_and_cfg(args):
+def account_cards_and_cfg(args: argparse.Namespace) -> tuple[Sequence[Card], list[str], ScoringConfig]:
     """(cards restated from the collection, owned ids, config) — everything the
     account's `reference_key` depends on, and cheap (no board export)."""
     from hbuilder.inputs import apply_collection, load_inputs  # noqa: PLC0415
@@ -403,7 +411,7 @@ def _bench_key(bench: str) -> str:
     return f"bench=inventory:{digest}"
 
 
-def account_reference_key(args, bench: str = "captured") -> str:
+def account_reference_key(args: argparse.Namespace, bench: str = "captured") -> str:
     """The account basis's current key, without building the leaf context —
     what a reader needs to tell fresh inputs from stale ones."""
     import hashlib  # noqa: PLC0415
@@ -424,16 +432,20 @@ def developed_bench(seed_ids: list[str], *, max_level: bool, resources: str) -> 
     spec = importlib.util.spec_from_file_location(
         "precompute_optimisations", REFRESH_DIR / "precompute_optimisations.py"
     )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(module)  # type: ignore[union-attr]
     return module.developed_bench_characters(seed_ids, max_level=max_level, resources=resources)
 
 
-def collapse_pool(cards, feature_key, split_key=None):
+def collapse_pool(
+    cards: Iterable[Card],
+    feature_key: Callable[[Card], Hashable],
+    split_key: Callable[[Card], Hashable] | None = None,
+) -> tuple[list[Card], list[tuple[str, str]]]:
     """One representative (lowest id) per group of cards with the same
     `feature_key` and, when given, the same `split_key`. Returns `(reps sorted by
     id, [(dropped id, its representative's id), ...])`."""
-    groups: dict[tuple, list] = {}
+    groups: dict[Hashable, list] = {}
     for card in cards:
         key = feature_key(card)
         groups.setdefault(key if split_key is None else (key, split_key(card)), []).append(card)
@@ -447,13 +459,13 @@ def collapse_pool(cards, feature_key, split_key=None):
 
 
 def build_account(
-    args,
+    args: argparse.Namespace,
     proxy_card_id: str | None = None,
     flat_budget: int | None = None,
     bench: str = "captured",
-    split_key=None,
-    board_state=None,
-):
+    split_key: Callable[[Card], Hashable] | None = None,
+    board_state: Mapping | None = None,
+) -> dict[str, Any]:
     """The account basis as `build_maxed` returns the maxed
     one: `reps` = the owned cards (one per distinct feature set, EVERY rarity),
     `ctx` = the leaf's context with per-character real budgets — or, with
@@ -522,11 +534,11 @@ def build_account(
         )
     if bench != "captured":
         bench = (
-            developed_bench([c.id for c in seed], max_level=flat_budget is not None, resources=bench)
+            developed_bench([c.id for c in seed], max_level=flat_budget is not None, resources=bench)  # type: ignore[assignment]
             or bench_captured
         )
     else:
-        bench = bench_captured
+        bench = bench_captured  # type: ignore[assignment]
     proxy = mf.bare_leader(by_id[proxy_card_id])
     cards.append(proxy)
     by_id[proxy.id] = proxy
@@ -538,7 +550,7 @@ def build_account(
         node_master=node_master,
         node_effect_ids=node_effect_ids_from_master(node_master),
         connect_cards=connect_cards,
-        bench_characters=bench,
+        bench_characters=bench,  # type: ignore[arg-type]
         name_by_chr={"chr-" + c.id.split("-")[1]: c.member for c in cards},
         flat_budget=flat_budget,
         granted=granted,
@@ -800,7 +812,14 @@ def _team_key(row: dict) -> tuple:
     return row["leader"], frozenset(row["members"])
 
 
-def global_ranking(rows: list[dict], pool_ids, reps, name, singing, size: int) -> list[dict]:
+def global_ranking(
+    rows: list[dict],
+    pool_ids: Sequence[str],
+    reps: Sequence[Card],
+    name: Callable[[Card], str],
+    singing: Container[Card],
+    size: int,
+) -> list[dict]:
     """The song's top `size` teams ACROSS leaders: every row's `ranking` (a
     searched leader's search ranking, a triaged leader's short list) merged and
     sorted by score, so a leader's 2nd and 3rd sets appear whenever they beat
@@ -834,7 +853,9 @@ def global_ranking(rows: list[dict], pool_ids, reps, name, singing, size: int) -
     return out
 
 
-def alternatives(row: dict, pool_ids, reps, count: int | None = None) -> list[dict]:
+def alternatives(
+    row: dict, pool_ids: Sequence[str], reps: Sequence[Card], count: int | None = None
+) -> list[dict]:
     """The next best member sets under `row`'s leader, from its `ranking` (the
     search's, or the triage short list's): `{members, member_names, best,
     refined: False}`, best first, the row's own set left out. Plain-leaf

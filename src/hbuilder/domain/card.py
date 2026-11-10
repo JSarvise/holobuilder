@@ -296,7 +296,7 @@ def _override_from_record(record: dict | None) -> object:
         return None
     return SlotOverride(
         magnitude=record["magnitude"],
-        condition=_condition_from_record(record["condition"]),
+        condition=_condition_from_record(record["condition"]),  # type: ignore[arg-type]
     )
 
 

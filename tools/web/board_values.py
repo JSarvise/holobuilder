@@ -152,7 +152,7 @@ def annotate(doc: dict, skilltree: Mapping, collection: Mapping | None, *, maxed
             if not info:
                 sock["connect"] = None
                 continue
-            covers = covered_nodes(positions, sock.get("pos") or positions.get(sock["socket"]), info["cells"])
+            covers = covered_nodes(positions, sock.get("pos") or positions.get(sock["socket"]), info["cells"])  # type: ignore[arg-type]
             sock["connect"] = {
                 "card": card,
                 "level": info["level"],

@@ -22,10 +22,13 @@ import json
 import os
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbuilder import game_day
 from hbweb import config
+
+if TYPE_CHECKING:
+    from hbweb.router import Handler
 
 # `GET /park/<area>.png` -- the area id is lowercase letters, digits and
 # hyphens only (`area-a01`, `area-a02-casino`). No `.` but the literal
@@ -338,7 +341,7 @@ def scan_status(now: datetime.datetime | None = None) -> dict[str, Any]:
     }
 
 
-def serve_park(h) -> None:
+def serve_park(h: Handler) -> None:
     """`GET /api/park`: today's hidden collectables, joined to the offline export.
     The pick is the last account refresh's (`park_saved_state`); this route never logs in."""
     export = park_export()
@@ -385,7 +388,7 @@ def serve_park(h) -> None:
     h.reply_json(200, out)
 
 
-def serve_park_image(h, name: str) -> None:
+def serve_park_image(h: Handler, name: str) -> None:
     """`GET /park/<area>.png`: a RAW area map, from `dumps/park_export/park-<area>.png`.
 
     Guarded twice, like the other image routes: the regex forbids `..`, `/` and any

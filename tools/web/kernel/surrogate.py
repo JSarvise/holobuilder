@@ -15,8 +15,13 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hbuilder.domain.card import Card
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "surrogate.c"
@@ -56,10 +61,10 @@ def build(force: bool = False) -> Path:
     return cbuild.build(SOURCE, LIBRARY, "screen", force)
 
 
-_lib = None
+_lib: ctypes.CDLL | None = None
 
 
-def load():
+def load() -> ctypes.CDLL:
     """The loaded library, built on first use. Raises if it cannot be built."""
     global _lib
     if _lib is None:
@@ -123,7 +128,7 @@ def _executor(threads: int) -> ThreadPoolExecutor:
     return _EXECUTOR[0][1]
 
 
-def set_key(indices) -> int:
+def set_key(indices: Sequence[int]) -> int:
     """The scan's key for a set of ASCENDING pool indices; keys order as the
     sets do lexicographically."""
     a, b, c, d, e = indices
@@ -134,7 +139,7 @@ class Screen:
     """The model over one pool. `cards` is the pool in the order the caller's
     index tuples refer to; only `member`, `type` and `generations` are read."""
 
-    def __init__(self, cards) -> None:
+    def __init__(self, cards: Iterable[Card]) -> None:
         cards = list(cards)
         count = len(cards)
         if count > MAX_CARDS:
@@ -166,8 +171,8 @@ class Screen:
 
     def fit(
         self,
-        sets,
-        log_scores,
+        sets: Sequence[Sequence[int]],
+        log_scores: Sequence[float],
         *,
         sweeps: int = 12,
         lam_card: float = 1.0,
@@ -196,7 +201,7 @@ class Screen:
         self.fitted = True
         return mae
 
-    def predict(self, indices) -> float:
+    def predict(self, indices: Iterable[int]) -> float:
         """The fitted model's value of the cards `indices` (a set or part of one, any order):
         the bias, their card weights, the gate features their kinds switch on and their pair
         weights, as the scan values a full set."""
@@ -220,7 +225,9 @@ class Screen:
                 value += self._pair[cards[a] * self.count + cards[b]]
         return value
 
-    def best(self, want: int, seen=()) -> tuple[list[tuple[int, ...]], list[float], int]:
+    def best(
+        self, want: int, seen: Iterable[Sequence[int]] = ()
+    ) -> tuple[list[tuple[int, ...]], list[float], int]:
         """`(sets, predictions, how many legal sets exist)`: the `want` legal
         sets the model ranks highest, best first, leaving out `seen` (ascending
         index tuples). Before any `fit` the model is flat and the order is the

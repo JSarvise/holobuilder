@@ -13,7 +13,7 @@ import functools
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbuilder.domain.collection import (
     FULLY_SCORABLE_BLOOM,
@@ -30,6 +30,9 @@ from hbuilder.domain.collection import (
 )
 from hbuilder.inputs import _LoadFailure, apply_collection, load_inputs
 from hbweb import board, config, static
+
+if TYPE_CHECKING:
+    from hbweb.router import Handler
 
 # `data/cards.json` carries generation names MIXED: `Advent` and `ReGLOSS` in
 # English beside `0期生` and `ゲーマーズ` in Japanese. `gen_groups.json`, extracted
@@ -169,7 +172,7 @@ def _editor_card(
     }
 
 
-def serve_collection(h) -> None:
+def serve_collection(h: Handler) -> None:
     """`GET /api/collection`: the document on disk plus the bounds the editor needs to
     build its controls: each card's level cap by limit break, its max bloom, and its
     currently-resolved level/bloom (`resolve_card_state` clamps AND reports, which is the
@@ -246,7 +249,7 @@ def serve_collection(h) -> None:
     )
 
 
-def serve_card_states(h) -> None:
+def serve_card_states(h: Handler) -> None:
     """`POST /api/card-states {ids, assumptions?}` -> `{states: {id: {level, bloom,
     limit_break, owned, trial}}}`: each card as a search SCORED it -- the collection
     through the same `_override_collection_levels` the search's `apply_collection`
@@ -297,7 +300,7 @@ def serve_card_states(h) -> None:
     h.reply_json(200, {"states": states})
 
 
-def save_collection(h) -> None:
+def save_collection(h: Handler) -> None:
     """`POST /api/collection`: write the document to `COLLECTION_PATH` and nothing else, ever.
 
     The response carries what the solver made of it (read back through the CLI's own

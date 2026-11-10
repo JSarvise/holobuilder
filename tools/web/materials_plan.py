@@ -23,8 +23,18 @@ from __future__ import annotations
 import dataclasses
 import json
 import sys
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from hbuilder import paths
+
+if TYPE_CHECKING:
+    import threading
+
+    from ondemand import Assumptions
+
+    from hbuilder.domain.card import Card
+    from hbuilder.solver.parallel_refine import RefineContext, RefinePool
 
 if str(paths.REFRESH_DIR) not in sys.path:
     sys.path.insert(0, str(paths.REFRESH_DIR))
@@ -89,7 +99,9 @@ def first_opts(opts: dict) -> dict:
     return {**{k: v for k, v in opts.items() if k != "judge"}, "candidates": FIRST}
 
 
-def judged_opts(opts: dict, assumptions, difficulty: str, leaf, levels=None) -> dict:
+def judged_opts(
+    opts: dict, assumptions: Assumptions, difficulty: str, leaf: RefineContext, levels: object = None
+) -> dict:
     """`opts` with what the judge that picks among the planner's candidates (`leaf_judge`)
     is built from, beyond the account files: the account levers, the difficulty, how the
     run is played (on the leaf's own config) and the level ranges. Held under these, a plan
@@ -124,14 +136,14 @@ def _plan_stamp() -> tuple:
 
 def plan_for(
     leader_id: str,
-    member_ids,
-    song,
+    member_ids: Sequence[str],
+    song: str | None,
     opts: dict,
-    should_stop=None,
-    judge=None,
+    should_stop: Callable[[], bool] | None = None,
+    judge: Callable[[dict, dict], float] | None = None,
     scored: dict | None = None,
     parallel: bool = False,
-):
+) -> tuple[dict, dict, dict] | None:
     """`(team board state, off-team bench characters, the whole plan {chr: {nodes}})`
     of the plan within the wallet, or None when the wallet cannot fund one. The
     whole plan matters for its cost: a from-scratch plan resets EVERY board (the
@@ -227,7 +239,7 @@ def _loose(opts_json: str) -> str:
     )
 
 
-def held_plan(leader_id, member_ids, song, opts):
+def held_plan(leader_id: str, member_ids: Sequence[str], song: str | None, opts: dict) -> tuple | None:
     """`(stamp, plan_for(...), time-limited)` as this process holds it from the account
     files as they are now (`_plan_stamp`), or None: a worker hands it back so the server's
     row detail does not solve the same plan again. The same team, song and options
@@ -256,14 +268,14 @@ def held_plan(leader_id, member_ids, song, opts):
     return held
 
 
-def plan_optimal(leader_id, member_ids, song, opts) -> bool | None:
+def plan_optimal(leader_id: str, member_ids: Sequence[str], song: str | None, opts: dict) -> bool | None:
     """Whether the plan this process holds for the team solved every MILP to optimality
     (False: one stopped on the solver's time limit); None when no plan is held."""
     held = held_plan(leader_id, member_ids, song, opts)
     return None if held is None or len(held) < 3 else held[2] is False
 
 
-def carried_plan(leader_id, member_ids, song, opts):
+def carried_plan(leader_id: str, member_ids: Sequence[str], song: str | None, opts: dict) -> tuple | None:
     """The plan this process holds for the team, to hand to a worker with the task
     (`plan_and_score`'s 7th item), or None. Only one every MILP of which solved to
     optimality: a time-limited plan is whatever the solver had at 60 s under that
@@ -274,14 +286,24 @@ def carried_plan(leader_id, member_ids, song, opts):
     return held if held is not None and len(held) >= 3 and held[2] is False else None
 
 
-def remember(leader_id, member_ids, song, opts, entry) -> None:
+def remember(
+    leader_id: str, member_ids: Sequence[str], song: str | None, opts: dict, entry: tuple | None
+) -> None:
     """Hold a plan a worker solved (`held_plan` there), while the account files are
     the ones it was solved from."""
     if entry is not None and entry[0] == _plan_stamp():
         _hold(_plan_key(leader_id, member_ids, song, opts), entry)
 
 
-def leaf_judge(leaf, by_id, tree_for, budget_for, leader_id, member_ids, chart_indices=None):
+def leaf_judge(
+    leaf: RefineContext,
+    by_id: Mapping[str, Card],
+    tree_for: Callable[..., Any],
+    budget_for: Callable[..., Any],
+    leader_id: str,
+    member_ids: Sequence[str],
+    chart_indices: Sequence[int] | None = None,
+) -> Callable[[dict, dict], float]:
     """`plan_for`'s judge on a ranking leaf: a plan scored as `plan_and_score` scores a row --
     the team's boards and the off-team bench from the plan, root sockets chosen with the
     team's, `parallel_refine.evaluate` on the leaf's charts."""
@@ -315,7 +337,7 @@ def _leaf_side(local, generation):
     return pr._CTX, pr._BY_ID, pr._tree_for, pr._budget_for, should_stop
 
 
-def plan_and_score(item, local=None):
+def plan_and_score(item: Sequence[Any], local: tuple | None = None) -> tuple:
     """`(index, leader_id, member_ids, song, chart_indices, plan options[, carried plan[,
     generation]])` -> `(index, score or None, team board state or None, reason, the held
     plan for `remember`)`. In a RefinePool worker (`local` None) the leaf context is the
@@ -368,7 +390,7 @@ def plan_and_score(item, local=None):
         return index, None, None, f"{type(exc).__name__}: {exc}", None
 
 
-def refine_and_score(item, local=None):
+def refine_and_score(item: Sequence[Any], local: tuple | None = None) -> tuple:
     """`(index, leader_id, member_ids, song, chart_indices, plan options, the row's held first
     plan (`first_opts`), candidate[, generation])` -> `(index, candidate, score or None,
     (team board state, bench, whole plan) or None, time-limited)`: one of the planner's other
@@ -446,7 +468,12 @@ class _BestCandidate:
         }
 
 
-def refine_rows(pool, rows, cancel=None, progress=None) -> dict:
+def refine_rows(
+    pool: RefinePool,
+    rows: Iterable[Sequence[Any]],
+    cancel: threading.Event | None = None,
+    progress: Callable[[int, int], None] | None = None,
+) -> dict:
     """The rows a search shows, re-planned with the planner's other candidates in the
     engine's workers (one task per candidate, `refine_and_score`). `rows`: `[(index,
     leader_id, member_ids, song, chart_indices, plan options, the held first plan, its
@@ -462,7 +489,17 @@ def refine_rows(pool, rows, cancel=None, progress=None) -> dict:
     return acc.refined()
 
 
-def plan_and_refine(pool, items, *, opts, shown: int, rank, cancel=None, progress=None, on_plan=None) -> dict:
+def plan_and_refine(
+    pool: RefinePool,
+    items: Sequence[Sequence[Any]],
+    *,
+    opts: dict,
+    shown: int,
+    rank: Callable[[Any, float], Any],
+    cancel: threading.Event | None = None,
+    progress: Callable[[int, int], None] | None = None,
+    on_plan: Callable[[tuple], None] | None = None,
+) -> dict:
     """`dispatch` (each team's first plan; `items` as there) and then `refine_rows` for the
     `shown` best planned rows, OVERLAPPED: a row's candidates start as soon as it is certain
     to be among the rows shown -- fewer than `shown` rows can still rank above it: those
@@ -528,7 +565,12 @@ def plan_and_refine(pool, items, *, opts, shown: int, rank, cancel=None, progres
     return acc.refined()
 
 
-def dispatch(pool, items, cancel=None, task=None):
+def dispatch(
+    pool: RefinePool,
+    items: Iterable[Sequence[Any]],
+    cancel: threading.Event | None = None,
+    task: Callable[..., tuple] | None = None,
+) -> Iterator[tuple]:
     """`plan_and_score` over `items` in the engine's `RefinePool` `pool`, yielding each
     result as it completes. At most one task per worker process is in flight, the next
     submitted as one finishes, in `items` order -- the throughput of `imap_unordered`, but

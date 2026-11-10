@@ -8,12 +8,15 @@ absence costs the page its titles or filters and never a number.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
 import certificate as cert_mod
 
 from hbweb import basis, config
+
+if TYPE_CHECKING:
+    from hbweb.router import Handler
 
 # The picker's filter tokens, from the Music master's own enums. Keyed by the
 # suffix after the last underscore, because the wire spells the whole thing out
@@ -151,7 +154,7 @@ def _song_row(
     }
 
 
-def serve_songs(h) -> None:
+def serve_songs(h: Handler) -> None:
     """`GET /api/songs[?difficulty=EASY|NORMAL|HARD|EXPERT]`: the songs the page may rank
     against, with what each one is.
 
