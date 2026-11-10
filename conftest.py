@@ -13,14 +13,25 @@ boards): SKIPPED, naming the file, until a refresh has built it.
 
 KNOWN_FAILING are open issues tracked upstream: marked xfail (not hidden), so a fix shows up as
 XPASS.
+
+Every session also installs the write guard (tests/support/write_guard.py) before any test module
+is imported: no test may write into your real `state/` or `tools/recon/proxy/dumps/`.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tests"))      # `support`, as the tests themselves import it
+from support import write_guard  # noqa: E402
+
+sys.path.remove(str(ROOT / "tests"))
+write_guard.install()
+
 DATA = ROOT / "tools" / "recon" / "proxy" / "dumps"
 HAS_DATA = (DATA / "charts.json").is_file()
 
