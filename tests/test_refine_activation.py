@@ -1,4 +1,4 @@
-"""`board_plan.refine_activation_nodes` — the joint choice of the team's
+"""`board_refine.refine_activation_nodes` — the joint choice of the team's
 activation-frequency / activation-probability nodes on the REAL score.
 
 Why it exists:
@@ -11,7 +11,8 @@ tests hold it to: never worse, never over budget, never disconnected."""
 from __future__ import annotations
 
 from hbuilder.domain.board_optimizer import BoardPlan
-from hbuilder.domain.board_plan import TeamBoardPlan, activation_node_ids, refine_activation_nodes
+from hbuilder.domain.board_plan import TeamBoardPlan
+from hbuilder.domain.board_refine import activation_node_ids, refine_activation_nodes
 from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, TreeNode, neighbours
 
 # A line board: S-001 - B-001 - B-013 - B-020 , and a side branch S-001 - G-001

@@ -10,6 +10,7 @@ on a frozen copy of the account, outside the live paths a refresh rewrites.
 | `site/sitecustomize.py` | Loaded by every process of a golden run: a fixed wall clock, a file-access log, and no network beyond loopback. Inert unless the runner sets its variables. |
 | `golden.py` | The sample: per-song and every-song searches (account and maxed), the event search with a song and with Highlight, event points, row detail, the account board plan, the Versus compare and timelines, and the Optimizer's "Now" compare. Each search runs in a fresh server. |
 | `refresh_offline.py` | Runs the offline refresh steps in a sandbox and hashes every file they leave. |
+| `serve.py` | A test server for checks in the browser: the web server in a sandbox, on a fresh copy of the checkout's inputs (`--fresh`) or on a snapshot (`--frozen`); `--art` copies the pictures and models too. Its writes reach only the copies, deleted when it stops. |
 
 ```
 python tests/golden/freeze.py --source <live checkout> --out <snapshot>
@@ -17,6 +18,7 @@ python tests/golden/golden.py record  --frozen <snapshot>
 python tests/golden/golden.py compare --frozen <snapshot>
 python tests/golden/golden.py compare --frozen <snapshot> --serial    # one worker: search_song_account, event_song_account
 python tests/golden/refresh_offline.py run --frozen <snapshot> --out <snapshot>/refresh_x.json --against <snapshot>/refresh_baseline.json
+python tests/golden/serve.py --fresh [--art]       # a test server on copies, for browser checks
 ```
 
 `golden.py` strips only what changes between two runs of the same code: run times, job ids, the

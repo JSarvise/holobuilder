@@ -6,8 +6,7 @@ what the search relies on: it visits exactly the legal sets, never proposes a
 scored one, returns its candidates in its own model's order, and is
 deterministic. The search is held to the property that makes it safe: every
 score it returns is the exact scorer's, and on pools small enough to brute-force
-it finds the true best. Synthetic pools only; the recall measured on the real
-enumerations is on the archive/research branch.
+it finds the true best. Synthetic pools only.
 """
 
 from __future__ import annotations

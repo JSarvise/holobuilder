@@ -148,7 +148,9 @@ def load_music_coefficients() -> dict:
     for r in mc.rows("MusicDifficulty"):
         d = r["data"]
         out[_f(d, 4)] = (_f(d, 3), _f(music[_f(d, 1)], 17))
-    json.dump(out, open(MUSIC_CACHE, "w", encoding="utf-8"))
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    atomic_io.write_text(MUSIC_CACHE, json.dumps(out), "utf-8")
     return out
 
 
@@ -374,8 +376,9 @@ def rebuild_caches_if_stale() -> bool:
         if os.path.exists(path):
             os.replace(path, path + ".stale")
     cache = build_chart_cache()
-    with open(CHART_CACHE, "w", encoding="utf-8") as fh:
-        json.dump(cache, fh)
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    atomic_io.write_text(CHART_CACHE, json.dumps(cache), "utf-8")
     coef = load_music_coefficients()  # rebuilds + writes when absent
     print(f"  rebuilt: lattice {len(cache)} charts, music_coef {len(coef)} rows")
     return True
@@ -410,9 +413,11 @@ def main(argv=None) -> int:
     if args.rebuild_caches:
         rebuild_caches_if_stale()
 
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
     document = build(args.difficulty)
-    with open(args.out, "w", encoding="utf-8") as fh:
-        json.dump(document, fh, separators=(",", ":"))
+    # whole or not at all: the server reads these while a refresh rebuilds them
+    atomic_io.write_text(args.out, json.dumps(document, separators=(",", ":")), "utf-8")
 
     charts = document["charts"]
     notes = sum(len(c["notes"]) for c in charts.values())
@@ -428,8 +433,7 @@ def main(argv=None) -> int:
 
     if args.all_out and args.all_out != args.out:
         every = build("ALL")
-        with open(args.all_out, "w", encoding="utf-8") as fh:
-            json.dump(every, fh, separators=(",", ":"))
+        atomic_io.write_text(args.all_out, json.dumps(every, separators=(",", ":")), "utf-8")
         # The check that keeps the two files honest: the all-difficulty build must
         # reproduce the ranking library EXACTLY on the difficulty it also covers.
         # If it ever does not, one of the two is scoring a different chart.

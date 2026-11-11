@@ -232,7 +232,7 @@ function render(ctx, res) {
   loadStates(rows.flatMap(T => [T.leader, ...T.members]), levers).then(changed => { if (changed && cache === res) render(ctx, res); });
   if (!rows.length) {
     ctx.out().innerHTML = res.cached
-      ? `<section class="o-empty"><h2>No cached answer for this yet</h2><p>${cacheLine(res.doc)} Press Find best team to search now.</p></section>`
+      ? `<section class="o-empty"><h2>No team for this search</h2><p>${cacheLine(res.doc)} Change the options, then press Find best team.</p></section>`
       : `<div class="o-error">The search returned no team.</div>`;
     return;
   }
@@ -289,15 +289,17 @@ function select(ctxT, i) {
   if (el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: "start", behavior: "smooth" });
   after(ctxT, ctxT.rows[i], i);
 }
-// one line: the cache state + how many teams it scored exactly + when; everything else in the popover
+// one line: the search's state + how many teams it scored exactly + when; everything else in the popover
 function setProv(res) {
   const el = byId("prov"); if (!el) return;
   if (!res.cached) { el.innerHTML = ""; return; }
   const d = res.doc, st = d.on_demand ? ["fresh", "Searched now"] : d.state === "fresh" ? ["fresh", "Up to date"] : d.state === "missing" ? ["missing", "Not computed yet"] : ["stale", "Older data"];
   NOTES.prov = `${NOTES.cached || ""}<br><br>${cacheLine(d)}`;
-  const n = (d.exact_evals && d.legal_sets ? `${fmt(d.exact_evals)} of ${fmt(d.legal_sets)} teams scored exactly` : "Cached search")
+  const n = (d.exact_evals && d.legal_sets ? `${fmt(d.exact_evals)} of ${fmt(d.legal_sets)} teams scored exactly` : "Search")
     + (d.on_demand && d.seconds != null ? ` in ${Number(d.seconds).toFixed(1)} s` : "");
-  el.innerHTML = `<span class="o-state ${st[0]}">${st[1]}</span><span class="o-provtxt">${n}${d.written ? ` · ${esc(when(d.written))}` : ""}</span>${info("prov")}`;
+  // the worker processes failed during the search (the batches finished in one process)
+  const warn = (d.warnings || []).length ? `<span class="o-provwarn" title="${esc(d.warnings.join("\n"))}">${esc(d.warnings[0])}</span>` : "";
+  el.innerHTML = `<span class="o-state ${st[0]}">${st[1]}</span><span class="o-provtxt">${n}${d.written ? ` · ${esc(when(d.written))}` : ""}</span>${warn}${info("prov")}`;
 }
 function cacheLine(doc) {
   const bits = [];
@@ -318,7 +320,7 @@ function runLine(res, S) {
 const lineup = (T, cardOf) => [{ c: cardOf(T.leader) || { id: T.leader, member: T.leader }, slot: 0, lead: true },
   ...T.members.map((id, k) => ({ c: cardOf(id) || { id, member: id }, slot: T.ordered ? k + 1 : 0, lead: false }))];
 const scoreLabel = T => T.od ? "Expected Score" : T.source === "cached" ? "Score (cached search)" : T.boards === "current" ? "Score" : T.kind === "song" ? "Expected Score" : T.kind === "across" ? "Average score" : "Unit Score";
-const scoreNote = T => T.source === "cached" ? "cached" : T.boards === "current" ? "expected_cur" : T.kind === "song" ? "expected" : T.kind === "across" ? "across" : "unitscore";
+const scoreNote = T => T.boards === "current" ? "expected_cur" : T.kind === "song" ? "expected" : T.kind === "across" ? "across" : "unitscore";
 
 function perf({ c, slot, lead }, k) {
   return `<figure class="o-perf" style="--i:${k}">
@@ -354,8 +356,11 @@ function block(ctxT, T, i) {
   if (T.boards !== "current" && T.kind !== "unit") side.push(`<div class="stat-tile"><div><span class="lbl">Now ${info("now")}</span>${now != null ? score(now) : det.curErr ? dash : pend(150)}<small>${general ? "average, boards as they are" : "boards as they are"}</small></div></div>`);
   if (T.kind !== "unit") side.push(`<div class="stat-tile"><div><span class="lbl">Unit Score ${info("grade")}</span>${us != null ? score(us) : srcErr ? dash : pend(110)}<small>${general ? "boards as they are" : "this team's board"}</small></div></div>`);
   side.push(`<div class="stat-tile"><div><span class="lbl">Overall Power</span>${op != null ? `<span class="n o-num">${fmt(op)}</span>` : srcErr ? dash : pend(110)}<small>${general ? "boards as they are" : "this team's board"}</small></div></div>`);
-  // the run spread on one line under the hero score (served on the top cached rows)
-  const spread = T.p10 != null && T.p90 != null ? `p10 ${fmt(T.p10)} · p50 ${fmt(T.p50)} · p90 ${fmt(T.p90)}` : "";
+  // the run spread on one line under the hero score: the row's own when served, else its
+  // detail's run law once that has arrived (a general row's figure is an average: no spread)
+  const law = !general && f && f.distribution && f.distribution.available !== false ? f.distribution : null;
+  const q = T.p10 != null && T.p90 != null ? T : law && law.p10 != null ? law : null;
+  const spread = q ? `p10 ${fmt(q.p10)} · p50 ${fmt(q.p50)} · p90 ${fmt(q.p90)}` : "";
   // the expected score is never graded: the one grade of the view is the Unit Score below
   const head = `<div class="o-thead">
       <div class="o-who"><span class="rk-n">${i + 1}</span><h2>${esc(L.member || T.leader)} <small>leads${L.costume_name ? " · " + esc(L.costume_name) : ""}</small></h2></div>
@@ -480,14 +485,23 @@ function boardDoc(ctxT, T, i, det, bs, cards) {
     .then(d => { det.doc = d; det.docErr = null; }).catch(e => { det.docErr = e.message; });
 }
 
-/* the row's run distribution, asked on its own after the figures (it takes ~5 s more, so
-   the figures are not held back for it) */
+/* the row's run distribution, asked on its own after the figures (it takes seconds more, so
+   the figures are not held back for it); then, on its own again, the score pace of each bar's
+   runs (as long again or longer), so the distribution is not held back for the pace */
 export async function withDistribution(det, body, paint) {
-  if (!det.fig) return;
+  const fig = det.fig;
+  if (!fig) return;
   det.distLoading = true; paint();
-  try { det.fig.distribution = (await postJSON("/api/row-detail", { ...body, distribution: true })).distribution || null; }
-  catch (e) { det.fig.distribution = { available: false, reason: e.message }; }
+  try { fig.distribution = (await postJSON("/api/row-detail", { ...body, distribution: true })).distribution || null; }
+  catch (e) { fig.distribution = { available: false, reason: e.message }; }
   det.distLoading = false;
+  if (!fig.distribution || fig.distribution.available === false) return;
+  paint();
+  try {
+    const d = (await postJSON("/api/row-detail", { ...body, distribution: true, pace: true })).distribution;
+    // the same law (the request differs only in "pace"): its pmf is the one on screen
+    if (d && d.pace && det.fig === fig && fig.distribution.pmf && d.pmf && d.pmf.start === fig.distribution.pmf.start) fig.distribution.pace = d.pace;
+  } catch (_) { /* no pace: the lane stays away, the distribution stays */ }
 }
 
 /* a general (across) cached row on ONE song: /api/row-detail for that song */

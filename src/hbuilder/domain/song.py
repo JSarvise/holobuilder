@@ -1,53 +1,40 @@
-"""The per-song scorer: *what will this team actually score on THIS chart* —
-a second scoring entry point, never a parameter on the first.
+"""The per-song scorer: what a team scores on one chart, as an absolute run score.
 
-`scoring.py` answers "which team is best" and is deliberately free of any
-song-length or per-song term (correctly so: `CalcScore` divides by
-`NotesPerfectCoefficientSum`, the chart-wide sum, so length genuinely cancels
-and a per-song scalar cannot reorder two teams). This module answers the other
-question — the absolute one — and it needs a **time axis**, because three
-things do NOT cancel:
+A second scoring entry point, never a parameter on `scoring.score_card_set` (that would
+add a per-song term for every caller). `scoring.py` ranks with no song-length term:
+`CalcScore` divides by `NotesPerfectCoefficientSum`, so length cancels. This module needs
+a time axis, because three things do not cancel:
 
-1. `LiveScoreMusicCoefficient = 1 + (Music.liveScoreCoefficient
-   Permil/1000) x (difficultyLevel - 5)`, range **0.968 .. 1.200** over the
-   real charts. Easy charts are score-*penalised*, expert rewarded.
-2. SPECIAL fire times are written into the chart — channel
-   `#mmm0B`, one cue per deck slot, exactly five on every real chart. They are
-   not probabilistic and not uniformly spread.
-3. A SPECIAL Score UP is a `ScoreUpBoostSkillEffect`
-   (`scoring._score_up_implements_boost`): it multiplies the ACTIVE maximum and
-   is worth **nothing** where no ACTIVE is live. That is a statement about
-   *when*, and it is uncomputable without a time axis. `scoring._score_up_pool`
-   says so itself and points here.
+1. `LiveScoreMusicCoefficient = 1 + (Music.liveScoreCoefficientPermil/1000) x
+   (difficultyLevel - 5)`, 0.968 .. 1.200 over the real charts.
+2. SPECIAL fire times are written into the chart (channel `#mmm0B`, one cue per deck
+   slot, five on every real chart): not probabilistic, not uniformly spread.
+3. A SPECIAL Score UP is a `ScoreUpBoostSkillEffect` (`scoring._score_up_implements_boost`):
+   it multiplies the ACTIVE maximum and is worth nothing where no ACTIVE is live.
 
-**The governing premise is full-perfect play** (LIFE never leaves 1000, every
-note PERFECT). That removes judgement variance entirely and makes the chart
-deterministic; what remains stochastic is the ACTIVE activation roll, and this
-module takes its **exact expectation** rather than sampling — see `_ratio_at`.
+The premise is full-perfect play (LIFE never leaves 1000, every note PERFECT), or the
+AUTO column (`cfg.song_auto`). What remains random is the ACTIVE activation roll, whose
+exact expectation is taken (`_ratio_at`). The whole model is in `docs/score-model.md`.
 
-**What this module deliberately does not do:** it does not touch
-`scoring.score_card_set`, `score_fast` or `_score_active`. Adding a song
-parameter to those would silently add a per-song term for every existing caller.
-`score_song` mirrors `score_card_set`'s positional signature exactly so a solver
-need not know which of the two it is calling.
+Entry points: `score_song` (`score_card_set`'s positional signature, so a solver need not
+know which it calls), `score_song_detailed` (with the slot order and the deck power),
+`overall_power_for`, `timeline`, and `load_charts` / `ChartLibrary` (defined, with the
+chart data types, in `song_chart` and re-exported here).
 
-The model reproduces a fully-recorded run (801087 on `m0001` easy) to within
-the five-run scatter, and rejects the alternative "SPECIAL adds" reading at +4.4
-standard errors **at its own floor**, i.e. at every possible skill level.
+The model reproduces a fully recorded run (801,087 on `m0001` easy) within the five-run
+scatter, and rejects the alternative "SPECIAL adds" reading at +4.4 standard errors.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import itertools
-import json
 import math
 import os
 import sys
 from bisect import bisect_left
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hbuilder.domain import targets
@@ -60,19 +47,13 @@ from hbuilder.domain.gates import (
 )
 from hbuilder.domain.schema import STAT_NAMES
 
-# Every name below is `scoring.py`'s, imported rather than re-implemented, for
-# exactly the reason `_score_up_pool` and `_board_bonus` are shared inside
-# that module: one arithmetic definition, several readers, so the per-song
-# scorer and the ranking scorer cannot silently drift apart. If one of these is
-# renamed this module fails at IMPORT time — loudly, and before any number is
-# produced — which is the intended failure mode.
+# `scoring.py`'s own arithmetic, imported rather than re-implemented, so the
+# per-song scorer and the ranking scorer cannot drift apart (a rename fails at
+# import time).
 #
-# ⚠ This must be `_board_bonus`, not the narrower `_board_score_rate`.
-# `_board_score_rate` reads ONLY the `cfg.board_score_bonus` dict; `_board_bonus`
-# dispatches to `cfg.board` when a real `BoardModel` is set and returns a THIRD
-# term. Calling the narrower one would leave two of the board's three channels
-# silently zero here while `score_card_set` applies both. See
-# `test_song_board_skill_effect_up.py`.
+# This must be `_board_bonus`, not the narrower `_board_score_rate`, which reads
+# only `cfg.board_score_bonus`: `_board_bonus` dispatches to `cfg.board` and
+# returns all three board channels (`test_song_board_skill_effect_up.py`).
 from hbuilder.domain.scoring import (
     _FIXED_TARGET,
     STAT_NAMES_BY_EFFECT_TYPE,
@@ -94,14 +75,27 @@ from hbuilder.domain.scoring import (
     score_with_breakdown,
 )
 from hbuilder.domain.scoring_config import (
-    DEFAULT_PLATFORM as _DEFAULT_PLATFORM,
-)
-from hbuilder.domain.scoring_config import (
-    PLATFORMS as _PLATFORMS,
-)
-from hbuilder.domain.scoring_config import (
     ScoringConfig,
 )
+
+# The chart data types and chart loading live in `song_chart`; re-exported here so
+# `song.X` keeps working for every importer and stays a module global for the hot code.
+from hbuilder.domain.song_chart import _CHARTS_SCHEMA as _CHARTS_SCHEMA
+from hbuilder.domain.song_chart import DEFAULT_PLATFORM as DEFAULT_PLATFORM
+from hbuilder.domain.song_chart import FLICK_MOBILE_PERMIL as FLICK_MOBILE_PERMIL
+from hbuilder.domain.song_chart import HIDDEN_POINT_PERMIL as HIDDEN_POINT_PERMIL
+from hbuilder.domain.song_chart import LIVE_COMBO_TIERS as LIVE_COMBO_TIERS
+from hbuilder.domain.song_chart import PLATFORMS as PLATFORMS
+from hbuilder.domain.song_chart import SCORE_COEFFICIENT as SCORE_COEFFICIENT
+from hbuilder.domain.song_chart import SPECIAL_CUE_COUNT as SPECIAL_CUE_COUNT
+from hbuilder.domain.song_chart import ChartLibrary as ChartLibrary
+from hbuilder.domain.song_chart import ChartNote as ChartNote
+from hbuilder.domain.song_chart import SongChart as SongChart
+from hbuilder.domain.song_chart import SongError as SongError
+from hbuilder.domain.song_chart import SongScore as SongScore
+from hbuilder.domain.song_chart import _chart_note as _chart_note
+from hbuilder.domain.song_chart import charts_from_mapping as charts_from_mapping
+from hbuilder.domain.song_chart import load_charts as load_charts
 from hbuilder.domain.unknown import is_known
 
 if TYPE_CHECKING:
@@ -129,291 +123,14 @@ __all__ = [
 ]
 
 
-class SongError(Exception):
-    """Raised when a `SongChart` is structurally invalid, or when a team is the
-    wrong shape for one. Mirrors `SchemaError`/`ScoringError`'s discipline: the
-    message always names the field and the count, so a malformed chart surfaces
-    as a named failure and never as a plausible wrong number."""
-
-
-# `Setting.live_deck_evaluation_coefficient_permil_multiply = 2300`, from the
-# game's master data. It is `_scoreCoefficient` @ `this+0x10` in
-# `Vision.LiveCore!LiveScoreCalculator`.
-#
-# ⚠ Deliberately NOT a `config.json` key, for the same reason as
-# `REFERENCE_RUN_SECONDS`: it is read out of the game's own master data, so there
-# is no choice for a user to make. Adding it would report a defaulted value with
-# `"file"` provenance for every existing config, which is the failure
-# `load_scoring_config` exists to prevent.
-#
-# It is also **not** the `K = 2.0373445` of `Unit Score = Overall Power x
-# (1 + Score Bonus) x K`. Unit Score (the deck screen) and the in-run score are
-# different computations, and `2.0373445 / 2.300 = 0.885802` is unexplained; the
-# two must not be conflated.
-SCORE_COEFFICIENT = 2.300
-
-# A slide's invisible point (hidden relay or curve point) in `GetNotesPerfectCoefficientSum`:
-# the client maps `NoteType` 5, 6 and 7 (LongRelayActive / LongRelayDeActive / LongBezierPoint)
-# to the LONG_RELAY row, whose PERFECT weight is 100 permil on both columns.
-HIDDEN_POINT_PERMIL = 100
-
-# The `LiveCombo` master table, group `live_combo-1`, all 11 rows:
-# `(combo_count_from, permil)`. `CalcScore`'s `(1 + ComboCoefficient)` reads the
-# highest tier the running combo has reached, so a full combo on a 136-note
-# chart never leaves the first two tiers.
-LIVE_COMBO_TIERS: tuple[tuple[int, int], ...] = (
-    (0, 0),
-    (100, 10),
-    (200, 20),
-    (300, 30),
-    (400, 40),
-    (500, 50),
-    (600, 60),
-    (700, 70),
-    (800, 80),
-    (900, 90),
-    (1000, 100),
-)
-
-# Channel `#mmm0B` carries exactly five cues on every real chart, with cell
-# values `01 02 03 04 05` in strictly ascending time order — zero exceptions.
-# The only charts that differ are the tutorial song `m9999`'s four
-# difficulties, which carry two cues each. So the slot -> cue binding is
-# unambiguous: slot i fires the i-th cue in time.
-SPECIAL_CUE_COUNT = 5
-
-# The one cell of the master's `LiveNote` PERFECT row that differs between the
-# mobile and PC columns: FLICK is 1050 permil on mobile, 1000 on PC
-# (`main_LiveNote.json`). `ChartNote.perfect_permil` is the PC
-# base; `ChartNote.perfect_permil_for(platform)` applies this. Re-exported from
-# `scoring_config` so `ScoringConfig.platform` and the chart agree on the names.
-FLICK_MOBILE_PERMIL = 1050
-PLATFORMS = _PLATFORMS
-DEFAULT_PLATFORM = _DEFAULT_PLATFORM
-
-
-@dataclass(frozen=True, slots=True)
-class ChartNote:
-    """One scored note. `perfect_permil` is already
-    `map[PERFECT][ConvertNoteTypeToLiveNoteType(rawNoteType)]` — the lookup is
-    done by whoever builds the chart, not here, because two corrections make it
-    easy to get wrong and both belong at the boundary:
-
-    - the map is indexed `[judgement][noteType]`, not the other way round,
-      and **a missing pair scores 0.0, not a default** (both lookups are
-      `TryGetValue` and both failure paths fall to `0.0f`). So a GHOST note,
-      which has no PERFECT row, contributes `0` — not `1000`.
-    - the PC (Steam) client reads the **PC** column, `LiveNote +0x2c`
-      `pcScoreCoefficientPermilMultiply_`, where a FLICK is **1000 permil**.
-      The mobile client's column (`scoreCoefficientPermilMultiply`) differs in
-      exactly one cell of the 38: FLICK at PERFECT is **1050**
-      (`main_LiveNote.json`; the mobile binary itself was not decompiled).
-      `perfect_permil` therefore holds the **PC-column base** and `flick` marks
-      the one note kind whose weight is platform-dependent;
-      `perfect_permil_for(platform)` resolves it at scoring time
-      (`ScoringConfig.platform`, default mobile), so the chart files never
-      bake a platform in.
-
-    `time` is seconds from measure 0 of the beatmap — the same origin the ACTIVE
-    cooldown lattice uses, which is why the two
-    can share one axis with no offset."""
-
-    time: float
-    perfect_permil: int
-    flick: bool = False
-
-    def perfect_permil_for(self, platform: str = DEFAULT_PLATFORM) -> int:
-        """`map[PERFECT][type]` in the given client's column. Only a FLICK
-        moves: 1050 on mobile, the PC base otherwise. A LONG_FLICK_END is 1000
-        in both columns and is NOT flagged `flick`."""
-        if self.flick and platform == "mobile":
-            return FLICK_MOBILE_PERMIL
-        return self.perfect_permil
-
-    @property
-    def auto_permil(self) -> int:
-        """`map[AUTO=100][type]` — the numerator an AUTO-play run scores with.
-
-        `LiveScoreCalculator::CalcScore` looks
-        up `JudgementCoefficient` by the note's ACTUAL judgement. On AUTO that is
-        `LIVE_NOTE_JUDGEMENT_TYPE_AUTO = 100`, whose PC column weights a
-        tap/flick/long-start/long-end at **800 permil (0.80x** of PERFECT's 1000)
-        and leaves hold-ticks at 100; a no-row note stays 0. Since `perfect_permil`
-        already holds the PC-column PERFECT value — 1000 (taps) / 100 (ticks) /
-        0 (ghost) — the AUTO map is exactly `1000 -> 800`, else identity.
-        Platform-independent: the AUTO row is 800 in BOTH columns for every
-        tap kind, FLICK included (`main_LiveNote.json` note_type 2 judgement
-        100: 800/800), so a mobile flick loses its +50 on AUTO."""
-        return 800 if self.perfect_permil == 1000 else self.perfect_permil
-
-
-@dataclass(frozen=True, slots=True)
-class SongChart:
-    """One chart, reduced to exactly what `CalcScore` reads. Pure data, built by
-    hand in tests and by `tools/refresh/` from a `.sus` plus the master
-    tables — `src/` never reads `dumps/`, which is gitignored.
-
-    `difficulty_level` is `MusicDifficulty` field 3 and
-    `live_score_coefficient_permil` is `Music` field 17; the two are kept as
-    separate fields rather than one pre-multiplied coefficient so that
-    `music_coefficient()`'s expression stays visible and testable in `src/`."""
-
-    music_id: str
-    difficulty: str
-    difficulty_level: int
-    live_score_coefficient_permil: int
-    notes: tuple[ChartNote, ...]
-    special_cues: tuple[float, ...]
-    combo_tiers: tuple[tuple[int, int], ...] = LIVE_COMBO_TIERS
-    # The song's CAST, and the kind of song it is. Not read by `CalcScore` —
-    # these are the inputs to the two Holomem Board terms that are functions of
-    # who sings rather than of the chart: the singer-conditional
-    # `skill_effect_up` (e.g. 41 permil on Aki's own song, 0 without one) and
-    # `song_score_bonus` at `solo`/`group` scope.
-    #
-    # `singer_type` is the game's `musicSingerType_`: 3 whole / 2 unit / 1 solo,
-    # spelled here as `all` / `group` / `solo` to match `BoardEffect.song_scope`.
-    # Both default to "absent", and absent means no singer-conditional board
-    # term applies, so a chart without a cast scores exactly as a cast-blind
-    # one.
-    singers: tuple[str, ...] = ()
-    singer_type: str = ""
-    # The slides' invisible points: hidden relay points (`LongRelayDeActive`) and curve
-    # points (`LongBezierPoint`). They are never judged, so they score nothing and carry no
-    # combo, and are not in `notes`; but the client builds a note for each and
-    # `GetNotesPerfectCoefficientSum` weighs it as a LONG_RELAY (100 permil) in the divisor.
-    hidden_points: int = 0
-
-    def __post_init__(self) -> None:
-        if not self.notes:
-            raise SongError(f"chart {self.music_id}/{self.difficulty} has no notes")
-        previous = self.notes[0].time
-        for note in self.notes[1:]:
-            if note.time < previous:
-                raise SongError(
-                    f"chart {self.music_id}/{self.difficulty} notes are not in "
-                    f"ascending time order ({note.time} after {previous})"
-                )
-            previous = note.time
-        if len(self.special_cues) != SPECIAL_CUE_COUNT:
-            raise SongError(
-                f"chart {self.music_id}/{self.difficulty} must carry exactly "
-                f"{SPECIAL_CUE_COUNT} `#mmm0B` SPECIAL cues, one per deck slot; "
-                f"got {len(self.special_cues)}"
-            )
-        # The cast is validated rather than normalised, because every way of
-        # getting it wrong produces a PLAUSIBLE number instead of an error. A
-        # `solo` scope holding MANY singers silently pools their boards and clamps
-        # to a total that looks reasonable (e.g. 120 permil where the real answer
-        # is 40, from pooling every character). A genuine DUO act (FUWAMOCO:
-        # chr-04016 + chr-04017) is a real 2-singer `solo`, which sums both members' `solo`-scope nodes under ONE cap
-        # (`CalculateCurrentEffectValue` aggregates over the song's own singers,
-        # filtered by `musicSingerType_`), which is exactly what
-        # `song_score_bonus_for` does — so 1 OR 2 singers is admissible and 3+ is
-        # the mislabel guard.
-        if self.singer_type not in ("", "solo", "group", "all"):
-            raise SongError(
-                f"chart {self.music_id}/{self.difficulty} has singer_type "
-                f"{self.singer_type!r}; expected one of 'solo', 'group', 'all' "
-                f"(the game's musicSingerType_ 1/2/3) or '' for an unknown cast"
-            )
-        if self.singer_type and not self.singers:
-            raise SongError(
-                f"chart {self.music_id}/{self.difficulty} declares singer_type "
-                f"{self.singer_type!r} but names no singers"
-            )
-        if self.singers and not self.singer_type:
-            raise SongError(
-                f"chart {self.music_id}/{self.difficulty} names singers but no "
-                f"singer_type; the scope decides which board effects apply and "
-                f"guessing it from the count is not the game's rule"
-            )
-        if self.singer_type == "solo" and not 1 <= len(set(self.singers)) <= 2:
-            raise SongError(
-                f"chart {self.music_id}/{self.difficulty} is singer_type 'solo' "
-                f"but names {len(set(self.singers))} distinct singers; 'solo' admits "
-                f"one, or two for a duo act (e.g. FUWAMOCO); got {self.singers}"
-            )
-        if list(self.special_cues) != sorted(self.special_cues):
-            raise SongError(
-                f"chart {self.music_id}/{self.difficulty} SPECIAL cues must be "
-                f"in ascending time order — slot i fires the i-th cue "
-                f"(true of every real chart); got {self.special_cues}"
-            )
-        if self.notes_perfect_coefficient_sum() <= 0.0:
-            raise SongError(
-                f"chart {self.music_id}/{self.difficulty} has a zero "
-                f"NotesPerfectCoefficientSum — every note would score "
-                f"infinitely; its note weights are wrong"
-            )
-
-    def music_coefficient(self) -> float:
-        """`1 + (permil/1000) x (level - 5)`, read verbatim from
-        `LiveScoreCalculator`'s ctor. `level - 5` is NEGATIVE below level 5, so
-        an easy chart is score-*penalised*; over the real charts the value spans
-        **0.968 .. 1.200** and never reaches zero."""
-        return 1.0 + (self.live_score_coefficient_permil / 1000.0) * (self.difficulty_level - 5)
-
-    def notes_perfect_coefficient_sum(self, platform: str = DEFAULT_PLATFORM) -> float:
-        """`(1/1000) x SUM over notes of map[PERFECT][type]`,
-        in the given client's column (`platform`; default mobile, where a FLICK
-        weighs 1050 — see `ChartNote.perfect_permil_for`).
-
-        The game accumulates **int32 permil** and calls `FloatFromPermil` once
-        at the end, not per note, so this sums ints and divides once — a
-        float-per-note version is not wrong but is a different rounding path.
-
-        This is the divisor that makes chart length cancel in the ranking. The client sums
-        it over EVERY note it built from the chart, the slides' invisible points included
-        (`hidden_points`, `HIDDEN_POINT_PERMIL` each on both columns): they score nothing,
-        so on a chart with many curved slides every real note is worth less (m0528 EXPERT,
-        194 points: 2.65 % less)."""
-        return (
-            sum(note.perfect_permil_for(platform) for note in self.notes)
-            + HIDDEN_POINT_PERMIL * self.hidden_points
-        ) / 1000.0
-
-    def combo_coefficient(self, combo: int) -> float:
-        """`FloatFromPermil` of the highest `LiveCombo` tier the running combo
-        has reached. Under the full-perfect premise the combo never resets, so
-        the caller passes `note_index + 1`."""
-        permil = 0
-        for threshold, tier_permil in self.combo_tiers:
-            if combo >= threshold:
-                permil = tier_permil
-        return permil / 1000.0
-
-
-@dataclass(frozen=True, slots=True)
-class SongScore:
-    """One leader's per-song answer, with the two things a `LeaderScore` cannot
-    carry: the slot order that achieved it, and the deck power it was computed
-    against.
-
-    `member_order` is never `None` here, unlike `ScoreBreakdown.member_order`.
-    The SPECIAL cue assignment binds on **every** team — a chart always has five
-    cues and the members' SPECIALs differ in magnitude and duration — so there is
-    always an order to report, and a tool which recommends a team without its slot order is handing the player the
-    median case instead of the best one."""
-
-    leader_id: str
-    total_score: float
-    member_order: tuple[str, ...]
-    deck_power: float
-
-
 # ---------------------------------------------------------------------------
 # The timeline
 # ---------------------------------------------------------------------------
 #
 # A `_Term` is one effect placed on the time axis: the same `(bucket, magnitude,
-# occupancy)` triple `scoring._bucket_entry` builds, with the run-average
-# occupancy REPLACED by an instantaneous one, plus the windows it is live in.
-#
-# `magnitude` comes from `_bucket_entry` rather than being recomputed, so the
-# family weight, the override gate and the `state != "applied"` zeroing are all
-# the shared implementations and cannot drift. **Only the occupancy differs, and
-# that difference is the whole of this module:**
+# occupancy)` triple `scoring._bucket_entry` builds (family weight, override gate
+# and `state != "applied"` zeroing shared), with the run-average occupancy replaced
+# by an instantaneous one, plus the windows it is live in:
 #
 #   ACTIVE   `p` while a window is open, `0` otherwise, where `p` is the
 #            activation probability — so the per-instant `E[max]` is an exact
@@ -440,10 +157,9 @@ class _Term:
     # the one term whose liveness depends on the slot order. `None` otherwise.
     special_member: int | None
     special_duration: float
-    # `scoring._score_up_pool`'s per-member targeting (deck panel `.3.100.6`):
-    # the card that owns a ratio
-    # term, and — for a `score_support` — `None` when it is team-wide or the
-    # RESOLVED recipient set when it is count-targeted.
+    # `scoring._score_up_pool`'s per-member targeting: the card that owns a ratio
+    # term, and for a `score_support` `None` when it is team-wide or the resolved
+    # recipient set when it is count-targeted.
     owner: str | None = None
     targets: frozenset[str] | None = None
     # An ACTIVE term's activation probability, kept apart: the tier's base and the
@@ -454,6 +170,10 @@ class _Term:
     # A rider term's coverage, per SPECIAL slot: the `[start, end)` seconds it is
     # live for when its host sits in that slot, or `None` (not live there).
     slot_cover: tuple[tuple[float, float] | None, ...] | None = None
+    # A rider term's ACTIVE term (its index among the terms): two riders of one ACTIVE
+    # term live at one note cover the same check, and only the stronger counts
+    # (`_strongest_riders`)
+    rider_base: int | None = None
 
 
 def _active_windows(
@@ -461,34 +181,21 @@ def _active_windows(
 ) -> tuple[tuple[float, float], ...]:
     """Every window an ACTIVE skill can open, on its cooldown lattice.
 
-    The clock starts at **measure 0
-    of the beatmap**, not at the first note, so activation check `k` sits at
-    `k * interval` for `k = 1, 2, ...` — there is no check at `t = 0`.
+    The clock starts at measure 0 of the beatmap, not at the first note, so check `k`
+    sits at `k * interval` for `k = 1, 2, ...` (no check at `t = 0`).
 
-    Only the Holomem Board shortens a cooldown, and it DIVIDES
-    (`interval / (1 + reduction)`), keyed by HOLOMEM. That is the same
-    expression `scoring._active_occupancy` uses; it is spelled out again here
-    rather than imported because that function returns `min(1, duration /
-    interval) * p` — a run average with the lattice already collapsed into it,
-    and the lattice is precisely what a time axis needs back.
+    The Holomem Board shortens a cooldown by dividing (`interval / (1 + reduction)`),
+    keyed by holomem, as `scoring._active_occupancy` does; that function returns a run
+    average with the lattice collapsed, so the expression is restated here. Duration
+    never reaches the cooldown in the real data, so a window cannot overlap the next
+    check of the same skill.
 
-    Duration never reaches the cooldown in the real data, so a window cannot
-    overlap the next check of the same skill; `scoring._score_active`'s
-    self-overlap clamp is the run-average analogue of that fact and has no
-    counterpart here.
-
-    ⚠ The window end is deliberately **not** clamped to `song_seconds`, even
-    though `tools/refresh/chart_timeline.py` clamps it for display. Windows
-    are half-open `[start, end)`, so clamping would push the song's LAST note
-    out of a window that in fact covers it — a silent one-note loss on every
-    skill still live at the end of the chart, and the last note is the one
-    carrying the highest combo multiplier. A window running past the end simply
-    covers no further notes."""
-    # The Holomem Board's Act.CD nodes shorten this holomem's cooldown too, exactly
-    # as `scoring._active_occupancy` folds them in — read the board's `uptime_for`
-    # cooldown term ALONGSIDE the hand-supplied reduction, or the per-song scorer
-    # values every board cooldown node at 0 and per-song plans under-develop them
-    # (the general scorer already adds it; the two must not disagree on the interval).
+    The window end is not clamped to `song_seconds` (unlike the display in
+    `tools/refresh/chart_timeline.py`): windows are half-open `[start, end)`, so
+    clamping would push the song's last note, the one with the highest combo
+    multiplier, out of a window that covers it."""
+    # the board's Act.CD nodes (`uptime_for`) add to the hand-supplied reduction, as
+    # in `scoring._active_occupancy`, so the two scorers agree on the interval
     board_cooldown = cfg.board.uptime_for(resolved.member)[1] if cfg.board is not None else 0.0
     reduction = cfg.active_cooldown_reduction.get(resolved.member, 0.0) + board_cooldown
     interval = float(resolved.skill.interval) / (1.0 + reduction)  # type: ignore[arg-type]
@@ -497,9 +204,8 @@ def _active_windows(
 
 
 # `(interval, duration, song_seconds) -> the windows`, one tuple OBJECT per
-# lattice. The windows are a function of those three numbers alone, and a
-# search asks for the same few lattices millions of times; returning the same
-# object is also what lets `_window_note_ranges` key on identity.
+# lattice: a search asks for the same few lattices millions of times, and the
+# shared object lets `_window_note_ranges` key on identity.
 _lattice_windows_cache: dict[tuple[float, float, float], tuple] = {}
 
 
@@ -557,32 +263,25 @@ def _term_for(
 ) -> _Term:
     """One resolved Score UP or Score Support, placed on the time axis."""
     weight = cfg.family_weights[resolved.family]
-    # The fourth field — `ActiveTerm`'s `exclusive` — is READ AND DISCARDED, on
-    # purpose. It says "over a whole run these five SPECIAL windows do not
-    # collide", a fact `scoring._windows_are_mutually_exclusive` measures across
-    # the chart corpus and which lets the run-average path sum the SPECIAL
-    # bucket instead of discounting it for collisions that never happen. This
-    # module does not need it and must not use it: it has the actual cue times
-    # of the actual chart on an actual axis, so on the 0.64 % of cue pairs a
-    # long SPECIAL really can bridge it SEES the overlap, and the maximum has to
-    # be taken for real. `_ratio_at` therefore emits `exclusive=False` for every
-    # term. A corpus-level fact must never overrule ground truth.
+    # The fourth field, `ActiveTerm`'s `exclusive`, is discarded on purpose: it is
+    # the run-average path's corpus-level licence to sum the SPECIAL bucket. Here
+    # the actual cue times are on the axis, so on the 0.64 % of cue pairs a long
+    # SPECIAL can bridge, the overlap is seen and the maximum taken (`_ratio_at`
+    # emits `exclusive=False` for every term).
     bucket, magnitude, _run_average_occupancy, _interval, _corpus_exclusive = _bucket_entry(
         resolved, cfg, team_rate_up, weight, state
     )
     is_boost = _pool_for(resolved) == "support" or _score_up_implements_boost(resolved)
     if state != "applied":
-        # `_bucket_entry` already zeroed the magnitude; the occupancy is zeroed
-        # too, for the reason it states — a zero magnitude alone would still
-        # consume the `E[max]` walk's remaining probability, letting a gate that
-        # did not fire suppress a skill that did.
+        # `_bucket_entry` already zeroed the magnitude; the occupancy is zeroed too,
+        # or the zero term would still consume the `E[max]` walk's remaining
+        # probability and let a gate that did not fire suppress a skill that did.
         return _Term(bucket, 0.0, 0.0, is_boost, (), None, 0.0, resolved.card_id, targets)
 
     kind = resolved.skill.kind
     if kind == "ACTIVE":
-        # Fold the board's activation-rate (Act.Prob) term into the proc chance too,
-        # mirroring `scoring._active_occupancy` (`apply(base_prob, team_rate_up +
-        # board_rate)`). Without it the per-song scorer ignores every board rate node.
+        # the board's activation-rate (Act.Prob) term joins the proc chance, as in
+        # `scoring._active_occupancy` (`apply(base_prob, team_rate_up + board_rate)`)
         board_rate = cfg.board.uptime_for(resolved.member)[0] if cfg.board is not None else 0.0
         base_probability = cfg.probability_tiers[resolved.skill.probability_tier]
         probability = cfg.activation_rate_model.apply(base_probability, team_rate_up + board_rate)
@@ -612,11 +311,8 @@ def _term_for(
                 card_id=resolved.card_id,
                 slot_kind=kind,
             )
-        # Occupancy `1.0`, not `cfg.expected_fires_per_run * duration /
-        # REFERENCE_RUN_SECONDS`: the chart states the fire time, so on a
-        # concrete song a SPECIAL is not an expectation at all. This is exactly
-        # the term `scoring._special_occupancy` warns is uncomputable without a
-        # time axis.
+        # Occupancy 1.0, not the run-average `scoring._special_occupancy`: the chart
+        # states the fire time, so on a concrete song a SPECIAL is certain.
         return _Term(
             bucket,
             magnitude,
@@ -641,10 +337,8 @@ def _combo_split(
     rest. The value snapshots at the check, as the game's effect is registered then.
     `gates` resolves the override once from the static `run_state.combo` (100), which
     would grant it from the first check, so the combo is re-read at each check here.
-    AUTO keeps the static premise -- the combo never accumulates there, so the
-    override never fires. The
-    two parts never share a note (a skill's windows do not overlap), so the walk's
-    `E[max]` is unchanged in kind."""
+    AUTO keeps the static premise (the combo never accumulates there). The two parts
+    never share a note (a skill's windows do not overlap)."""
     override = resolved.skill.override
     condition = getattr(override, "condition", None)
     if (
@@ -708,30 +402,29 @@ def _rider_terms(
 ) -> list[_Term]:
     """The SPECIAL activation-rate riders, on the time axis.
 
-    About 30 cards' SPECIAL carries a second
-    in-run effect, `live_active_skill_activation_probability_up_permil_up` (350-550
-    permil), live for the SPECIAL's own duration. Every ACTIVE check in that window
-    rolls `trunc(base x (1 + (maxACTIVE + maxSPECIAL + extra)/1000))`: the rider is
-    `maxSPECIAL`, deck-wide (it raises EVERY member's ACTIVE) and a maximum (two live
+    About 30 cards' SPECIAL carries a second in-run effect,
+    `live_active_skill_activation_probability_up_permil_up` (350-550 permil), live for the
+    SPECIAL's own duration. Every ACTIVE check in that window rolls
+    `trunc(base x (1 + (maxACTIVE + maxSPECIAL + extra)/1000))`: the rider is
+    `maxSPECIAL`, deck-wide (it raises every member's ACTIVE) and a maximum (two live
     riders do not stack). The run-average path folds it time-averaged
     (`scoring._fold_rider_activation_rate_up`); on a chart the cue times are known.
 
-    A boosted check is the SAME roll with `p'` for `p`. Each becomes one extra term:
+    A boosted check is the same roll with `p'` for `p`. Each becomes one extra term:
     the ACTIVE term's bucket, magnitude and owner, occupancy `q = (p' - p)/(1 - p)`,
-    live on that window only when the rider's host sits in a slot whose SPECIAL
-    window holds the check. In `E[max]` two terms of one magnitude and bucket with
-    `p` and `q` are exactly one term with `1 - (1-p)(1-q) = p'` (the walk's survival
-    product over an equal-magnitude block is order-free), so this is exact, and it
-    is slot-dependent like a SPECIAL -- `special_member` = the host, which the
-    120-order walk and the C kernel already handle. One term per (ACTIVE, host,
-    k-th covered window), since a term's coverage is one range per slot.
+    live on that window only when the rider's host sits in a slot whose SPECIAL window
+    holds the check. In `E[max]` two terms of one magnitude and bucket with `p` and `q`
+    are exactly one term with `1 - (1-p)(1-q) = p'`, so this is exact, and slot-dependent
+    like a SPECIAL (`special_member` = the host). One term per (ACTIVE, host, k-th
+    covered window), since a term's coverage is one range per slot.
 
-    Two riders live on one check would combine as `1 - (1-p)(1-q1)(1-q2)` here, not
-    the game's maximum: SPECIAL windows almost never overlap (about 0.64 % of cue
-    pairs), so the difference is treated as negligible."""
+    Two riders live on one check do not combine: the game rolls the check with the larger
+    (`maxSPECIAL`), so each rider term names its ACTIVE term (`rider_base`) and only the
+    strongest live one counts (`_strongest_riders`, `_dominated_riders`). SPECIAL windows
+    rarely overlap (about 0.64 % of cue pairs)."""
     out: list[_Term] = []
     for member, rate, spans in _rider_hosts(normal_resolved, member_index_by_id, cfg, chart, times):
-        for term in member_terms:
+        for base, term in enumerate(member_terms):
             if term.active_base is None or not term.windows or term.occupancy <= 0.0:
                 continue
             boosted = cfg.activation_rate_model.apply(term.active_base, term.active_rate + rate)
@@ -754,9 +447,72 @@ def _rider_terms(
                         term.owner,
                         term.targets,
                         slot_cover=tuple(ws[k] if k < len(ws) else None for ws in per_slot),
+                        rider_base=base,
                     )
                 )
     return out
+
+
+def _strongest_riders(live: list[_Term]) -> list[_Term]:
+    """`live` with only the strongest SPECIAL rider of each ACTIVE term: the game rolls a
+    check at `base x (1 + rate + the LARGEST live rider)` (`CalcActivationProbabilityPermil`
+    takes the SPECIALs' maximum). Two rider terms of one ACTIVE term live at one note cover
+    the same check, since an ACTIVE's windows never overlap. Ties keep the first."""
+    best: dict[int, _Term] = {}
+    riders = 0
+    for t in live:
+        if t.rider_base is None:
+            continue
+        riders += 1
+        held = best.get(t.rider_base)
+        if held is None or t.occupancy > held.occupancy:
+            best[t.rider_base] = t
+    if len(best) == riders:
+        return live
+    keep = {id(t) for t in best.values()}
+    return [t for t in live if t.rider_base is None or id(t) in keep]
+
+
+def _dominated_riders(terms: list[_Term], slot_of_member: Mapping[int, int]) -> set[int]:
+    """The bits of the rider terms another rider of the same ACTIVE term outranks on the same
+    window, in one fixed slot order (`slot_of_member`: member index -> slot): there each
+    rider term covers one window, and only the strongest rider counts on its check."""
+    best: dict[tuple, int] = {}
+    live: list[int] = []
+    for bit, t in enumerate(terms):
+        if t.rider_base is None or t.slot_cover is None or t.occupancy <= 0.0:
+            continue
+        slot = slot_of_member[t.special_member]  # type: ignore[index]
+        span = t.slot_cover[slot] if slot < len(t.slot_cover) else None
+        if span is None:
+            continue
+        live.append(bit)
+        key = (t.rider_base, span)
+        if key not in best or t.occupancy > terms[best[key]].occupancy:
+            best[key] = bit
+    keep = set(best.values())
+    return {bit for bit in live if bit not in keep}
+
+
+def _riders_share_a_check(terms: list[_Term]) -> bool:
+    """Whether two riders of one ACTIVE term, on different hosts, can cover the same window
+    in some slot order (the compiled walk knows no `_strongest_riders`, so such a team is
+    walked in Python)."""
+    by_base: dict[int, list[_Term]] = {}
+    for t in terms:
+        if t.rider_base is not None and t.slot_cover is not None:
+            by_base.setdefault(t.rider_base, []).append(t)
+    for ts in by_base.values():
+        for i, a in enumerate(ts):
+            for b in ts[i + 1 :]:
+                if a.special_member == b.special_member:
+                    continue
+                for sa, wa in enumerate(a.slot_cover or ()):
+                    if wa is not None and any(
+                        sb != sa and wb == wa for sb, wb in enumerate(b.slot_cover or ())
+                    ):
+                        return True
+    return False
 
 
 def _rider_hosts(
@@ -805,49 +561,27 @@ def _ratio_at(
 ) -> float:
     """`SkillScoreUpRatio` at one instant, through `scoring._score_up_pool`.
 
-    The whole per-song model is this one substitution: `_score_up_pool` is
-    handed the SAME `(bucket, magnitude, occupancy)` triples the ranking scorer
-    builds, with `occupancy` now meaning *"is this effect live at this tick, and
-    with what probability"* instead of *"what fraction of the run is it live"*.
-    Everything downstream — both `E[max]` calls, the `B` multiplier, the SPECIAL
-    collapse — is `scoring.py`'s, unchanged and unforked. Swapping
-    `cfg.active_stacking_model` to the alternative `SummedActiveSkills` therefore
-    still works here, and still means the same thing.
+    The whole per-song model is this one substitution: `_score_up_pool` is handed the
+    same `(bucket, magnitude, occupancy)` triples the ranking scorer builds, with
+    `occupancy` meaning "is this effect live at this tick, and with what probability"
+    instead of "what fraction of the run is it live". Everything downstream (both
+    `E[max]` calls, the `B` multiplier, the SPECIAL collapse) is `scoring.py`'s.
 
-    Two consequences, and they are what make this exact rather than a
-    simulation:
+    This is exact, not a simulation: at an instant each live ACTIVE is an independent
+    Bernoulli(p) and `ExpectedMaximumActiveSkill` computes `E[max]` exactly, and the
+    score is linear in the ratio, so summing per-note expectations gives the exact
+    expectation of the run total (modulo the per-note `ceil`).
 
-    - **The ACTIVE roll's expectation is closed-form.** At an instant each live
-      ACTIVE is an independent Bernoulli(p) and `ExpectedMaximumActiveSkill`
-      computes `E[max]` over them exactly. No sampling, no seed, no variance.
-    - **Expectation is linear and the score is linear in the ratio**, so summing
-      the per-note expectations gives the exact expectation of the run total
-      (modulo the per-note `ceil`, see `score_song_detailed`). Neighbouring notes
-      share rolls, which matters for a variance estimate and not for a mean.
+    `skill_effect_up` is the Holomem Board's `SkillEffectUpPermilUp`, in the slot
+    `CalcScoreUpRatio` puts it: inside the `(1 + SkillEffectUpPermilUp/1000 + B)`
+    parenthesis that multiplies the ACTIVE pool, never a summand of the combined rate.
 
-    `skill_effect_up` is the Holomem Board's `SkillEffectUpPermilUp`, passed
-    through to exactly the slot `CalcScoreUpRatio` puts it in — INSIDE the
-    `(1 + SkillEffectUpPermilUp/1000 + B)` parenthesis that multiplies the
-    ACTIVE pool, never as a summand of the combined rate. It defaults to `0.0`
-    because that IS the answer for a team with no board — which also means a
-    test without board data cannot tell whether it is applied.
-
-    **And it is why `exclusive` is `False` on every term this builds.** That flag
-    is the run-average path's licence to sum a bucket instead of maximising it,
-    earned by the chart corpus's cue geometry. Here the caller has already
-    filtered `live_ratio`/`live_boost` to the effects live AT THIS INSTANT and
-    each carries occupancy `1.0` (SPECIAL) or `P(tier)` (ACTIVE), so
-    `ExpectedMaximumActiveSkill`'s ordinary walk takes the true maximum: two
-    SPECIALs live together contribute `mag_1 * 1.0 + mag_2 * 1.0 * (1 - 1.0)`,
-    i.e. the bigger one and nothing else. Passing `exclusive=True` here would
-    SUM them, which is right on the 99.4 % of cue pairs that cannot overlap and
-    silently double-counts on the rest — the one case this module exists to get
-    right."""
-    # `interval` is `0` on every term: the per-song scorer places effects on a
-    # real time axis and always runs under the default `max` combiner, which
-    # ignores the element. It emits `exclusive=False` for the reason the
-    # docstring gives; the lattice group key is irrelevant here and 0 keeps the
-    # 5-tuple shape `_score_up_pool` unpacks.
+    `exclusive` is `False` on every term: the caller has already filtered
+    `live_ratio`/`live_boost` to the effects live at this instant, so the ordinary walk
+    takes the true maximum (two SPECIALs live together give the bigger one), where
+    `exclusive=True` would sum them."""
+    # `interval` is 0 on every term: the per-song scorer runs under the default
+    # `max` combiner, which ignores it; 0 keeps the 5-tuple `_score_up_pool` unpacks.
     return _score_up_pool(
         [(term.bucket, term.magnitude, term.occupancy, 0, False) for term in live_ratio],
         [(term.bucket, term.magnitude, term.occupancy, 0, False) for term in live_boost],
@@ -867,29 +601,20 @@ def overall_power_for(members: tuple[Card, ...], leader: Card, cfg: ScoringConfi
     """The deck screen's own **Overall Power** for one (leader, members) pair —
     the right `deck_power` for an ABSOLUTE per-song score.
 
-    `score_song_detailed`'s default is `stat_sum + board_power`, the modelled
-    stat pool. Overall Power additionally carries the two account scalars (the
-    Memory Bonus and the power-up permyriad) and uses the float32-ceiling stat
-    block, and it is the quantity the game multiplies. It matches the server
-    bit-exact, so this DELEGATES rather than re-deriving: a private
-    second copy would drift out of that agreement with nothing to notice.
+    `score_song_detailed`'s default is `stat_sum + board_power`, the modelled stat pool.
+    Overall Power also carries the two account scalars (Memory Bonus and Member
+    Power-Up) and the float32-ceiling stat block; it is the quantity the game multiplies,
+    and this delegates to the scorer that matches the server bit-exact.
 
-    ⚠ **It is a function of the LEADER**, which is why it takes one rather than
-    a whole `leaders` tuple — the leader's own board power and the leader-scoped
-    stat effects are both in it. Pass it to `score_song_detailed` as the
-    per-leader callable:
+    It is a function of the leader (her board power and leader-scoped stat effects), so
+    pass it per leader, not as a scalar computed for the first one:
 
         score_song_detailed(members, leaders, chart, cfg,
                             deck_power=lambda ldr: overall_power_for(members, ldr, cfg))
 
-    NOT as a scalar computed once for the first leader: that is invisible, since
-    every leader then scales by the same wrong factor and only the absolute
-    numbers are wrong.
-
-    This is the SONG-LESS figure (the deck screen with no song chosen). It is
-    returned as an `OverallPower`, which also carries the per-member Member
-    Power-Up bases, so `score_song_detailed` can raise it to the song's own
-    Overall Power (`song_overall_power`) without scoring the team again."""
+    The song-less figure (the deck screen with no song chosen), as an `OverallPower`
+    that also carries the per-member Member Power-Up bases, so `score_song_detailed` can
+    raise it to the song's own Overall Power (`song_overall_power`)."""
     from hbuilder.domain.team import Team
 
     breakdown = score_with_breakdown(Team(leader=leader, members=members), cfg)
@@ -933,11 +658,10 @@ class OverallPower:
     joins each member's power-up base and the power-up's per-member ceilings are
     paid again (`cast_power_up`).
 
-    It is a type of its own, not a float, so the scorer can tell it from a bare
-    number: a bare float carries no bases, and scoring it as a deck power would
-    silently pay 0 extra Power-Up on a song whose singer holds a conditional stat
-    node. `overall_power_for` builds the real one; `OverallPower.fixed` is the one
-    way to ask for a raw figure, and it declares no bases."""
+    A type of its own, not a float: a bare float carries no bases and would silently
+    pay 0 extra Power-Up on a song whose singer holds a conditional stat node.
+    `overall_power_for` builds the real one; `OverallPower.fixed` asks for a raw
+    figure and declares no bases."""
 
     value: float
     power_up_bases: tuple[float, ...] | None = None
@@ -984,8 +708,7 @@ def cast_power_up(
     The deck screen pays Member Power-Up per member over
     `MemberParameter + Outfit + Passive + Holomem Board`; on a song whose singer
     holds a conditional stat node (R-044/062/063), that node's power is part of
-    the Holomem Board line, so it is part of the base too
-    (9,301 -> 9,701 on a five-card team gaining 12,013 board power).
+    the Holomem Board line, so it is part of the base too.
     `power` is an `OverallPower` (from `overall_power_for`) for the same
     members; an `OverallPower.fixed` carries no bases and gets 0, and anything
     that is not an `OverallPower` raises `TypeError`."""
@@ -1058,27 +781,16 @@ def score_song(
             x (1 + SkillScoreUpRatio(t))           # <- the time axis
             x (1 + ScoreUpBonusRatioBySkillTree) )
 
-    maximised over the 120 slot orders (jointly with the count-limited passive
-    term when one binds — see `score_song_detailed`).
+    maximised over the 120 slot orders, which decide the chart cue that fires each
+    member's SPECIAL (see `score_song_detailed`). The `ceil` is per note, as in
+    `CalcScore`.
 
-    **The `ceil` is applied per note, which is the only place it belongs**:
-    `CalcScore` computes ONE note's score and the run
-    total is the sum of per-note `ceil`s. It is deliberately NOT applied to a
-    ranking quantity, where it would quantise the ordering and hand the
-    tie-break to a card id.
+    `deck_power` defaults to the modelled stat pool `score_card_set` uses
+    (`_effective_stat_sum`), not the game's deck power: for an absolute number pass
+    the deck screen's Overall Power (`overall_power_for`, per leader). A bare number
+    raises `TypeError`; a fixed raw figure is `OverallPower.fixed(value)`.
 
-    `deck_power` defaults to the same `_effective_stat_sum` `score_card_set`
-    uses. ⚠ **That is the modelled stat pool, not the game's `DeckPower`**,
-    which additionally carries the passive-skill uplift, the Holomem Board and
-    the Memory Bonus, and which `data/cards.json` does not hold. For an
-    absolute number that means anything, pass the deck screen's own Overall
-    Power (`overall_power_for`, per leader). For a *comparison* between teams on
-    one song the default is the right quantity and the absolute scale is
-    arbitrary. A bare number raises `TypeError`: a fixed raw figure is
-    `OverallPower.fixed(value)`.
-
-    Use `score_song_detailed` when the slot order matters to the caller — on a
-    real recommendation it always does."""
+    Use `score_song_detailed` when the slot order matters to the caller."""
     return tuple(
         LeaderScore(leader_id=score.leader_id, total_score=score.total_score)
         for score in score_song_detailed(members, leaders, chart, cfg, deck_power=deck_power, auto=auto)
@@ -1096,21 +808,13 @@ def timeline(
     Five lanes, the chart's own SPECIAL cues, and each ACTIVE's cooldown
     lattice.
 
-    ⛔ **It reuses `_active_windows` and `chart.special_cues` rather than
-    recomputing either.** A display that derives its own windows is a SECOND
-    definition of when a skill is live, and the first time the two disagree the
-    picture becomes an argument against the score instead of an explanation of
-    it. Everything here is read off the same functions `score_song` scores with.
+    Everything is read off the functions `score_song` scores with (`_active_windows`,
+    `chart.special_cues`, `_rider_hosts`), so the picture cannot disagree with the
+    score. `member_order` is the slot order: lane `i` is the member the chart's `i`-th
+    cue fires.
 
-    `member_order` is the slot order, so lane `i` is the member the chart's
-    `i`-th cue fires (cue values `01..05` in ascending time on every real
-    chart), and that binding is the whole reason the order matters.
-
-    Returns plain data — no rendering decisions, which belong to whatever draws
-    it. Times are seconds from measure 0, and windows are half-open `[start,
-    end)`, exactly as `_active_windows` produces them: NOT clamped to the song's
-    end, because clamping would push the last note out of a window that covers
-    it, and the last note carries the highest combo multiplier."""
+    Returns plain data. Times are seconds from measure 0, and windows are half-open
+    `[start, end)`, unclamped, exactly as `_active_windows` produces them."""
     by_id = {card.id: card for card in members}
     gates = resolve_card_set_gates(members, cfg.run_state)
     song_seconds = chart.notes[-1].time if chart.notes else 0.0
@@ -1131,16 +835,16 @@ def timeline(
             p = float(term.occupancy)
             if term.active_base is None or p >= 1.0:
                 return p, []
-            miss, hosts = 1.0 - p, []
+            # the check rolls with the LARGEST live rider (two never combine)
+            best, hosts = p, []
             for slot, rate, spans in riders:
                 span = spans[slot] if slot < len(spans) else None
                 if span is None or not span[0] <= start < span[1]:
                     continue
                 boosted = cfg.activation_rate_model.apply(term.active_base, term.active_rate + rate)
-                if boosted > p:
-                    miss *= 1.0 - (boosted - p) / (1.0 - p)
-                    hosts.append(by_id[member_order[slot]].member)
-            return 1.0 - miss, hosts
+                if boosted > best:
+                    best, hosts = boosted, [by_id[member_order[slot]].member]
+            return best, hosts
 
         return at
 
@@ -1162,9 +866,7 @@ def timeline(
                         {
                             "start": start,
                             "end": end,
-                            # The probability is why an ACTIVE window is a CHANCE and
-                            # a SPECIAL window is a fact. Drawing them identically
-                            # would state something the model does not.
+                            # An ACTIVE window is a chance, a SPECIAL window a fact.
                             # `probability`: this check's chance as scored (the team's and
                             # the board's rate-up, and `rider_from`'s SPECIAL riders live at
                             # its start); `probability_base`: the card's tier alone.
@@ -1222,27 +924,25 @@ def notes_per_second(note_times: Sequence[float]) -> list[int]:
     return bins
 
 
-# An optional compiled replacement for the separable fast path's note walk in
-# `score_song_detailed`. INJECTED by the web/recon layer (`tools/web/kernel`),
-# never imported here, so this package keeps `dependencies = []`. It is called as
+# An optional compiled replacement for the note walk in `score_song_detailed`,
+# injected by the web layer (`tools/web/kernel`), never imported here, so this
+# package keeps `dependencies = []`. It is called as
 #
 #     kernel(note_weights, liveness, constant, terms, score_rates,
 #            board_skill_effect_up, special_terms, cover_range, member_ids, cfg)
 #
-# where `liveness` is `(always_mask, ((bit, note-index ranges), ...))` — the
-# per-note live-term bitmask in the form it is known BEFORE it is spread over
-# the notes (`_window_note_ranges`), so a kernel spreads it itself —
-# and returns `(total, permutation)` — or `None` to decline, in which case the
-# Python below runs. The contract is BIT-IDENTITY with that Python, held by
-# `tools/web/kernel/test_notewalk.py`; a kernel that approximates is a bug.
+# where `liveness` is `(always_mask, ((bit, note-index ranges), ...))`, the
+# live-term bitmask before it is spread over the notes (`_window_note_ranges`),
+# and returns `(total, permutation)`, or `None` to decline (the Python below then
+# runs). The contract is bit-identity with that Python
+# (`tools/web/kernel/test_notewalk.py`); a kernel that approximates is a bug.
 NOTE_WALK_KERNEL: Callable | None = None
 
-# The same hook for WORKER PROCESSES. On Windows a pool spawns fresh interpreters,
-# so a kernel assigned to `NOTE_WALK_KERNEL` in the parent is not there in the
-# children — but the environment is inherited. `HBUILDER_NOTE_WALK_KERNEL` names
-# a Python FILE and an attribute, `<dir>/notewalk.py:walk`; it is loaded by path
-# on first use, so this package still imports nothing it does not ship. A kernel
-# that fails to load is reported once on stderr and the Python path is used.
+# The same hook for worker processes: a spawned interpreter does not inherit
+# `NOTE_WALK_KERNEL`, but it inherits the environment. `HBUILDER_NOTE_WALK_KERNEL`
+# names a Python file and an attribute, `<dir>/notewalk.py:walk`, loaded by path on
+# first use. A kernel that fails to load is reported once on stderr and the Python
+# path is used.
 NOTE_WALK_KERNEL_ENV = "HBUILDER_NOTE_WALK_KERNEL"
 _env_kernel_state: tuple[str, Callable | None] = ("", None)
 
@@ -1319,15 +1019,13 @@ def _cooldown_screen_kernel() -> Callable | None:
     return kernel
 
 
-# `(note_weights, perfect_sum)` per chart, platform and judgement column. Both
-# are functions of the chart alone, and rebuilding them costs ~7 % of every call
-# (~2,900 calls per team into `combo_coefficient` / `perfect_permil_for`). Keyed
-# by object identity with the chart kept alive in the entry, so a recycled `id()` can never serve another chart's weights.
+# `(note_weights, perfect_sum)` per chart, platform and judgement column: functions
+# of the chart alone, which cost ~7 % of every call to rebuild. Keyed by object
+# identity with the chart kept alive in the entry, so a recycled `id()` can never
+# serve another chart's weights.
 _chart_weights_cache: dict[tuple[int, str, bool], tuple] = {}
 
-# The chart's note times as one tuple, per chart — the same identity-keyed
-# shape as the weights above, and for the same reason: a function of the chart
-# alone that every call would otherwise rebuild note by note.
+# The chart's note times as one tuple, per chart, keyed as the weights above.
 _chart_times_cache: dict[int, tuple] = {}
 
 
@@ -1363,14 +1061,9 @@ def _chart_weights(chart: SongChart, platform: str, auto: bool) -> tuple[tuple[f
 def _activation_probability(resolved, cfg: ScoringConfig) -> float | None:
     """The ACTIVE's per-check proc chance, or `None` when it cannot be stated.
 
-    ⚠ The BASE tier only. `scoring._score_active` also folds in `team_rate_up`
-    and the board's `uptime_for` rate through `cfg.activation_rate_model`; both
-    need the whole team's resolved rate-up fold, which this function does not
-    take. So this is a LOWER bound on the real chance and the caller must label
-    it as one rather than print it as the number.
-
-    `None` and not a default when the tier is missing: a lane drawn at a
-    made-up probability would look like a measurement."""
+    The base tier only: `team_rate_up` and the board's rate need the whole team's
+    rate-up fold, so this is a lower bound on the real chance and the caller labels it
+    as one. `None`, not a default, when the tier is missing."""
     tier = getattr(resolved.skill, "probability_tier", None)
     if not tier:
         return None
@@ -1400,37 +1093,24 @@ def score_song_detailed(
 
     `deck_power` is `None` (the modelled stat pool), an `OverallPower`, or a
     per-leader callable returning one (`lambda ldr: overall_power_for(members,
-    ldr, cfg)`). Anything else -- a bare float or int, or a callable returning
-    one -- raises `TypeError`, because a bare number carries no Member Power-Up
-    bases and would silently score a singing leader's conditional stat node
-    without its Power-Up. `OverallPower.fixed(value)` asks for a raw figure.
+    ldr, cfg)`). Anything else raises `TypeError` (a bare number carries no Member
+    Power-Up bases); `OverallPower.fixed(value)` asks for a raw figure.
 
     `order_totals` (a dict, opt-in): every leader's 120 slot orders are walked by the
-    verbatim reference walk below -- the one the fast paths are proven bit-identical to --
-    and each order's total is recorded as `order_totals[(leader_id, member_order)]`. The
-    returned scores are the same; only the per-order totals are new. For a team played
-    on many songs with ONE slot order (the event's Highlight), never inside a search.
+    reference walk below (the one the fast paths are bit-identical to) and each order's
+    total is recorded as `order_totals[(leader_id, member_order)]`. For a team played
+    on many songs with one slot order (the event's Highlight), never inside a search.
 
     `note_rows` (a dict, opt-in): the same reference walk, and for each leader's best
     slot order the note-by-note breakdown, `note_rows[leader_id]` = one `NoteRow` per
     note, whose `expected_value`s add up to that leader's `total_score` exactly (they
     are the walk's own per-note terms). For an export, never inside a search.
 
-    **The slot order is a JOINT maximum, not two separate ones.** Slot order
-    binds on two independent mechanisms — which chart cue fires each member's
-    SPECIAL (always), and which members receive a count-limited passive stat
-    buff (only when a target's matchers outnumber its own `count`,
-    `scoring._order_varying_indices`). Maximising the two separately would report
-    an order achieving both optima at once where no single deck can, i.e. an
-    **upper** bound — the one direction the `>=` lower-bound marker cannot
-    express. So when the passive term binds, both are evaluated
-    inside the same 120-permutation walk. When it does not — the common case,
-    and the O(5) precondition — the stat sum is order-invariant and the joint
-    maximum reduces exactly to the cue assignment, at no extra cost.
-
-    Cost is `O(leaders x 120 x notes)` dict lookups plus `O(distinct live sets)`
-    calls to `_score_up_pool`. That is a per-song answer, not a hot loop: call it
-    on a shortlist the ranking solver produced, never inside `C(N,6)`."""
+    The slot order is the best of the 120 orders, and it decides one thing: which
+    chart cue fires each member's SPECIAL. The stat pool does not depend on it (a
+    count-limited passive stat buff reaches the members with the highest stat it
+    raises, `scoring_config.SLOT_ORDER_RULES`), so the deck power is the same for
+    every order and the maximum is the cue assignment."""
     return _score_song(
         members,
         leaders,
@@ -1606,11 +1286,9 @@ def _member_setup(members: tuple[Card, ...], cfg: ScoringConfig) -> tuple:
             recipes.append((resolved, state, index, None))
         else:
             active_elsewhere |= resolved.skill.kind == "ACTIVE"
-            # `life` / `judgment` effects, and PASSIVE/COSTUME Score UPs. They
-            # stay individually summed exactly as `_score_team` sums them:
-            # whether a PASSIVE Score UP is in the game's effect collection at
-            # all is not known (`scoring._is_score_up_effect`), and between two
-            # unverified readings the one that changes nothing wins.
+            # `life` / `judgment` effects, and PASSIVE/COSTUME Score UPs: summed
+            # individually, exactly as `_score_team` sums them
+            # (`scoring._is_score_up_effect`).
             member_score_rates.append(rate * weight)
 
     active_elsewhere |= any(
@@ -1712,8 +1390,7 @@ def _score_song(
 
     # --- the leader half ----------------------------------------------------
     # The principal, then the outfit's scored `score_support` rider
-    # (`gates.resolve_leader_costume_skills`) — walked per leader below in the
-    # same order `score_card_set` walks them.
+    # (`gates.resolve_leader_costume_skills`), in `score_card_set`'s order.
     leader_costumes: dict[str, tuple[ResolvedSkill, ...]] = {}
     for card in leaders:
         costume_skills = resolve_leader_costume_skills(card, card_set_gates.aggregates, cfg.run_state)
@@ -1725,21 +1402,17 @@ def _score_song(
     # FLICK weighs 1050 or 1000, in BOTH the divisor and the per-note numerator.
     platform = cfg.platform
 
-    # `w_n x (1 + combo_n)` — the note's whole chart-side weight. Order- and
-    # leader-invariant, so it is built once. The JUDGEMENT numerator swaps to the
-    # AUTO column for an auto-play run; the NPCS DIVISOR (`perfect_sum`, above)
-    # STAYS on PERFECT — in `CalcScore` the Judgement is read by the
-    # note's actual judgement while GetNotesPerfectCoefficientSum is frozen at the
-    # Perfect column.
+    # `w_n x (1 + combo_n)`, the note's whole chart-side weight, built once. The
+    # judgement numerator swaps to the AUTO column for an auto-play run; the divisor
+    # (`perfect_sum`) stays on PERFECT, as `GetNotesPerfectCoefficientSum` does.
     # `auto` None: the config's own premise (`cfg.song_auto`), so a caller that does
     # not pass it (e.g. `parallel_refine`) still scores an AUTO config on the AUTO column
     if auto is None:
         auto = bool(cfg.song_auto)
     note_weights, perfect_sum = _chart_weights(chart, platform, auto)
 
-    # ⚠ The stat entries are PER LEADER, because a leader's stat outfit is one
-    # of them. They cannot be hoisted out of the loop below: hoisting them would
-    # score every leader with the same outfit.
+    # The stat entries are per leader (a leader's stat outfit is one of them), so
+    # they cannot be hoisted out of the loop below.
     member_stat_entries = stat_entries
     orderings_cache: dict = {}
     leader_bases: dict = held[3]
@@ -1752,16 +1425,10 @@ def _score_song(
         base = leader_bases.get(leader.id)
         if base is not None:
             return base
-        # ⚠ Read PER LEADER, and it cannot be hoisted. `skill_effect_up` is
-        # leader-scoped — a red node applies to the whole team, but only while
-        # its own holomem leads — so hoisting it out of this loop would hand
-        # every leader the first one's board and erase the one board channel
-        # that can reorder leaders at all. (`score_bonus_rate` IS leader-
-        # invariant; it is returned from the same call rather than computed
-        # separately so the two cannot drift.)
-        #
-        # The power term joins the modelled stat pool only when the caller
-        # passes no `deck_power`; a caller's Overall Power already carries it.
+        # Read per leader: `skill_effect_up` is leader-scoped (a red node applies to
+        # the whole team only while its own holomem leads), the board channel that
+        # can reorder leaders. The power term joins the modelled stat pool only when
+        # the caller passes no `deck_power`; a caller's Overall Power carries it.
         board_bonus = _board_bonus(leader, members, cfg)
         costume_recipes: list[tuple] = []
         score_rates = list(member_score_rates)
@@ -1780,14 +1447,10 @@ def _score_song(
                     else:
                         score_rates.append(rate * weight)
                 elif pool == "stat":
-                    # ⚠ Without this branch the whole per-song score is
-                    # LEADER-BLIND. The leader contributes no stats OF ITS OWN
-                    # CARD, but its OUTFIT skill raises the MEMBERS' stats, and
-                    # `score_card_set` builds `stat_entries` **per leader**,
-                    # starting with exactly this entry (`scoring.py`, the
-                    # `ordered_resolved` loop), before calling the same
-                    # `_effective_stat_sum`. Almost every leader outfit is
-                    # `stat_up`, so skipping it would flatten every ranking.
+                    # The leader contributes no stats of her own card, but her
+                    # outfit raises the members' stats: `score_card_set` builds
+                    # `stat_entries` per leader starting with this entry, and almost
+                    # every outfit is `stat_up`.
                     target_ids = frozenset()
                     if state == "applied":
                         target_ids = targets.resolve_target_card_ids(
@@ -1806,12 +1469,9 @@ def _score_song(
                         costume.card_id,
                     )
 
-        # The leader's outfit goes FIRST, which is `Team.effective_skill_
-        # instances()`'s order and the order `score_card_set` builds
-        # `ordered_resolved` in. It is not cosmetic: `_order_varying_indices`
-        # returns INDICES into this list and `_stat_sum` aligns `recipients`
-        # with it positionally, so a different order silently mis-assigns
-        # recipients.
+        # The leader's outfit goes first (`Team.effective_skill_instances()`'s and
+        # `score_card_set`'s order): `_order_varying_indices` returns indices into
+        # this list and `_stat_sum` aligns `recipients` with it positionally.
         stat_entries = (
             [leader_stat_entry, *member_stat_entries]
             if leader_stat_entry is not None
@@ -1824,11 +1484,9 @@ def _score_song(
         base = leader_bases[leader.id] = (board_bonus, tuple(costume_recipes), score_rates, fixed_stat_sum)
         return base
 
-    # `deck_power` may be a per-leader CALLABLE (see `overall_power_for`), and it
-    # is resolved ONCE per leader, here — never inside the note walk or the
-    # 120-order loop, which run millions of times on a real chart and would pay
-    # a caller's real work (scoring a whole team) every iteration. Its result is
-    # type-checked here too, once per leader.
+    # `deck_power` may be a per-leader callable (see `overall_power_for`), resolved
+    # and type-checked once per leader here, never inside the note walk or the
+    # 120-order loop.
     def prepare_leader(leader):
         """Everything of one leader's walk that no cooldown moves."""
         if resolve_power is not None:
@@ -1850,27 +1508,19 @@ def _score_song(
         # The two terms that are functions of the SONG'S CAST rather than of the
         # chart. Both are no-ops for a chart with no cast.
         if cfg.board is not None and chart.singers:
-            # `song_score_bonus` at this song's own scope SUPERSEDES the pooled
-            # `all` bucket `_board_bonus` returned. Pooling is exact for a
-            # whole-roster song and over-counts `solo` and `group` — `all` is
-            # the only scope where the two agree, and there they agree exactly.
+            # `song_score_bonus` at this song's own scope supersedes the pooled
+            # `all` bucket `_board_bonus` returned (pooling over-counts `solo` and
+            # `group`; on `all` the two agree exactly).
             board_score_rate = cfg.board.song_score_bonus_for(chart.singers, scope=chart.singer_type)
-            # ...and the conditional `skill_effect_up` joins the unconditional
-            # one. They are the SAME addend in `CalcScoreUpRatio`'s parenthesis,
-            # so they add here rather than entering separately.
+            # ...and the conditional `skill_effect_up` joins the unconditional one:
+            # the same addend in `CalcScoreUpRatio`'s parenthesis.
             board_skill_effect_up += cfg.board.conditional_skill_effect_up_for(
                 members, None if leader is None else leader.member, chart.singers
             )
             # ...and the singer-conditional STAT power (R-044/062/063: "+stat% to
             # all when this holomem sings") joins the board's Overall-Power summand,
-            # since `_board_bonus`/`_terms` leave it out as conditional. A no-op for a
-            # cast none of whose singers hold such a node.
-            #
-            # ⚠ It also rides ON TOP of a caller's `deck_power` (the deck screen's
-            # Overall Power, the leaf's default): that figure has no song cast, so
-            # it cannot carry these nodes, and taking it in place of `board_power`
-            # would drop them (an R-044 node would score +0.00 % instead of about
-            # +2.58 %).
+            # since `_board_bonus`/`_terms` leave it out as conditional. It also rides
+            # on top of a caller's `deck_power`, which has no song cast.
             cast_power = cfg.board.conditional_stat_power_for(
                 members, None if leader is None else leader.member, chart.singers
             )
@@ -1914,18 +1564,14 @@ def _score_song(
         ) = prepared
         terms = list(member_terms) + costume_terms
 
-        # Liveness as a bitmask per note, so the 120-permutation walk is dict
-        # lookups rather than interval arithmetic. Bit `i` is `terms[i]`.
-        # Built with `bisect` over the ascending note times rather than a
-        # per-note scan. `times` is ascending (`SongChart.__post_init__`
-        # enforces it), so `[bisect_left(times, start), bisect_left(times, end))`
-        # is exactly `{i : start <= times[i] < end}`, the per-note scan's
-        # predicate (`tests/test_score_song.py` keeps that scan as the reference).
-        # A per-note scan costs ~31 % of the fast path.
+        # Liveness as a bitmask per note (bit `i` is `terms[i]`), so the
+        # 120-permutation walk is dict lookups. `times` is ascending
+        # (`SongChart.__post_init__`), so `[bisect_left(times, start),
+        # bisect_left(times, end))` is exactly `{i : start <= times[i] < end}`
+        # (`tests/test_score_song.py` keeps the per-note scan as the reference).
         note_count = len(times)
-        # The always-live terms first, so every note STARTS from their mask
-        # instead of having it OR-ed in by a second pass over the notes. Bitwise
-        # OR on ints: the order the bits arrive in cannot change the result.
+        # The always-live terms first, so every note starts from their mask (bitwise
+        # OR: the order the bits arrive in cannot change the result).
         always_mask = 0
         for bit, term in enumerate(terms):
             if term.special_member is None and term.windows is None:
@@ -1955,9 +1601,8 @@ def _score_song(
 
         fixed_bits: list[int] | None = None
 
-        # `cover_range[bit][slot]` — the half-open note-INDEX range a SPECIAL
-        # covers when its member sits in that slot. Same membership as the list
-        # it replaces (`cue <= t < cue + duration`), five slots, computed once.
+        # `cover_range[bit][slot]`: the half-open note-INDEX range a SPECIAL covers
+        # when its member sits in that slot (`cue <= t < cue + duration`).
         cover_range = {
             bit: [
                 (
@@ -1981,7 +1626,9 @@ def _score_song(
             """The score rate for a live-set bitmask, memoised per leader."""
             combined = pool_cache.get(live)
             if combined is None:
-                live_ratio = [term for bit, term in enumerate(terms) if live >> bit & 1 and not term.is_boost]
+                live_ratio = _strongest_riders(
+                    [term for bit, term in enumerate(terms) if live >> bit & 1 and not term.is_boost]
+                )
                 live_boost = [term for bit, term in enumerate(terms) if live >> bit & 1 and term.is_boost]
                 combined = cfg.stacking_model.combine(
                     [
@@ -1996,33 +1643,24 @@ def _score_song(
         # The 5x5 assignment decomposition, and the two conditions it needs.
         # ------------------------------------------------------------------
         # The permutation-dependent part of the total is a 5x5 (member -> slot)
-        # cost matrix, i.e. a linear assignment, under exactly two conditions,
-        # and both are CHECKED here rather than assumed —
-        # which is what makes the fast path provably exact rather than
-        # optimistically so.
+        # cost matrix, i.e. a linear assignment, under two conditions, both
+        # checked here:
         #
-        # 1. Power must be permutation-invariant. When the count-limited
-        #    passive term binds, `power` varies with the order and multiplies
-        #    every note INSIDE the `ceil`, so no note's value is
-        #    order-independent and the joint maximum this function's docstring
-        #    warns about is real. An explicit `deck_power` makes it moot: the
-        #    walk discards the per-permutation stat sum anyway.
-        # 2. No note may be reachable from two DIFFERENT slots' cue windows by
-        #    two DIFFERENT members' SPECIALs. Two members in one slot cannot
-        #    happen; one member across two slots cannot either. But two members
-        #    in two slots covering one note makes the per-note combine a `max`
-        #    across them, which does not split into independent per-slot
-        #    contributions. This happens on about 3 % of (team, chart) pairs.
+        # 1. Only the best order is asked for: `order_totals` and `note_rows` need
+        #    every order's own walk. (Power never varies with the order: the stat
+        #    stage is order-invariant, `scoring_config.SLOT_ORDER_RULES`.)
+        # 2. No note is reachable from two different slots' cue windows by two
+        #    different members' SPECIALs (the per-note `max` across them would not
+        #    split per slot). This happens on about 3 % of (team, chart) pairs.
         #
         # When both hold, every note is touched by at most one assigned member:
         #
         #     total(perm) = fixed_total + SUM over slots s of delta[perm[s]][s]
         #
-        # Every per-note value is `math.ceil(...)` of the identical expression
-        # the walk computes, so every summand is an integer-valued float far
-        # below 2^53 and re-associating the sum is EXACT — the 120 totals are
-        # bit-identical to the walk's, so the argmax and the strict-`>`
-        # tie-break pick the identical `member_order`.
+        # Every per-note value is `math.ceil(...)` of the walk's expression, so every
+        # summand is an integer-valued float far below 2^53 and re-associating the
+        # sum is exact: the 120 totals are bit-identical to the walk's, and the
+        # strict-`>` tie-break picks the same `member_order`.
         separable_power = order_totals is None and note_rows is None
         coupled = False
         if separable_power and special_terms:
@@ -2045,7 +1683,8 @@ def _score_song(
             # The identical expression in the identical order as the walk's.
             constant = power * SCORE_COEFFICIENT * music_coefficient / perfect_sum * (1.0 + board_score_rate)
             kernel_result = None
-            note_walk_kernel = _note_walk_kernel()
+            # (not when two riders can share a check: the kernel would combine them)
+            note_walk_kernel = None if _riders_share_a_check(terms) else _note_walk_kernel()
             if note_walk_kernel is not None:
                 kernel_result = note_walk_kernel(
                     note_weights,
@@ -2102,12 +1741,9 @@ def _score_song(
                         )
                     delta[owner][slot] = change
 
-            # The 120 sums are enumerated rather than solved with Hungarian /
-            # Jonker-Volgenant, and that is deliberate: at n=5 the argmax is
-            # ~600 additions against a cost-matrix build that IS the whole
-            # cost, and enumeration reproduces the walk's strict-`>`
-            # first-permutation tie-break for free where a solver would have to
-            # re-derive it.
+            # The 120 sums are enumerated rather than solved (Hungarian): at n=5 the
+            # argmax is ~600 additions against a cost-matrix build that is the whole
+            # cost, and enumeration reproduces the walk's strict-`>` tie-break.
             best_total: float | None = None  # type: ignore[no-redef]
             best_permutation: tuple[int, ...] | None = None  # type: ignore[no-redef]
             for permutation in itertools.permutations(range(SPECIAL_CUE_COUNT)):
@@ -2129,9 +1765,9 @@ def _score_song(
             # The coupled case with an order-invariant power: the kernel walks the
             # 120 orders itself (`hd_walk_general`), bit-identical to the walk below.
             # A SPECIAL rider's boosted ACTIVE window running into the next slot's
-            # SPECIAL makes this common (e.g. 134 of 200 random teams on m0334),
-            # and the Python walk is ~100x the kernel.
-            note_walk_kernel = _note_walk_kernel()
+            # SPECIAL makes this common, and the Python walk is ~100x the kernel.
+            # (not when two riders can share a check: the kernel would combine them)
+            note_walk_kernel = None if _riders_share_a_check(terms) else _note_walk_kernel()
             if note_walk_kernel is not None:
                 power = (fixed_stat_sum + board_power) if leader_power is None else leader_power + cast_power
                 constant = (
@@ -2159,10 +1795,8 @@ def _score_song(
                         deck_power=power,
                     )
 
-        # The verbatim 120-permutation walk, kept as the fallback for the two
-        # cases the decomposition cannot serve. It is unchanged apart from
-        # reading `cover_range` and the shared `_combined` — so the fast path
-        # can be compared against it directly, forever, by a test.
+        # The reference 120-permutation walk: the fallback for the cases the
+        # decomposition cannot serve, and what the tests compare the fast paths to.
         best: SongScore | None = None
         if fixed_bits is None:
             fixed_bits = _spread_liveness()
@@ -2541,18 +2175,13 @@ def _support_state(
     state: str,
     active_rank: dict[str, float] | None,
 ) -> tuple[str, frozenset[str] | None]:
-    """`scoring._bucket_term`'s support rule, restated for the timeline: a
-    support whose resolved target set is EMPTY never enters the effect
-    collection and contributes nothing.
+    """`scoring._bucket_term`'s support rule, restated for the timeline: a support
+    whose resolved target set is empty contributes nothing.
 
-    Returned as a *state* rather than as a separate flag so that `_term_for`
-    zeroes both the magnitude and the occupancy through the one shared
-    `_bucket_entry` path — the reason that function gives for zeroing both.
-
-    The second element is `scoring._support_targets`' answer — `None` for a
-    team-wide support, the resolved recipient set for a count-targeted one —
-    so `_ratio_at` can hand `_score_up_pool` the same per-member targeting
-    the ranking drivers use."""
+    Returned as a state, so `_term_for` zeroes both magnitude and occupancy through
+    the shared `_bucket_entry` path. The second element is
+    `scoring._support_targets`' answer (`None` for a team-wide support, the resolved
+    recipient set for a count-targeted one), the targeting the ranking drivers use."""
     if state != "applied":
         return state, None
     target_ids = targets.resolve_target_card_ids(
@@ -2567,190 +2196,3 @@ def _support_state(
     if not target_ids:
         return "gate_not_met", None
     return "applied", _support_targets(resolved, target_ids)
-
-
-# ---------------------------------------------------------------------------
-# Loading real charts
-# ---------------------------------------------------------------------------
-_CHARTS_SCHEMA = (
-    '\nexpected {"schema_version": "charts-2", "charts": '
-    '{"<music_id>/<DIFFICULTY>": {"music_id": "m0001", '
-    '"difficulty": "EXPERT", "difficulty_level": 26, '
-    '"live_score_coefficient_permil": 4, '
-    '"notes": [[time, permil], [time, permil, flick01], ...], '
-    '"special_cues": [t, ...]}}}'
-)
-
-
-@dataclass(frozen=True, slots=True)
-class ChartLibrary:
-    """Every chart a run may score against, keyed `"<music_id>/<DIFFICULTY>"`.
-
-    A library rather than a bare dict because two questions are asked of it
-    constantly and both should have one answer: *which songs are held?* and
-    *which chart is this song's, at this difficulty?* Doing that at the call
-    site invites two spellings of the key.
-
-    ⚠ **`src/` never reads `dumps/`** — this takes a PATH, exactly as
-    `load_board` does, and the default the CLI passes happens to point there.
-    The file is built by `tools/refresh/build_charts.py`."""
-
-    charts: Mapping[str, SongChart]
-    source: str = "<mapping>"
-
-    @staticmethod
-    def key(music_id: str, difficulty: str) -> str:
-        return f"{music_id}/{difficulty.upper()}"
-
-    def get(self, music_id: str, difficulty: str = "EXPERT") -> SongChart | None:
-        return self.charts.get(self.key(music_id, difficulty))
-
-    def at(self, difficulty: str = "EXPERT") -> tuple[SongChart, ...]:
-        """Every chart at one difficulty, in music-id order.
-
-        EXPERT is the default because the ranking mode is *always* Expert —
-        a mode that silently averaged four difficulties
-        would answer a question nobody asked."""
-        wanted = difficulty.upper()
-        return tuple(
-            chart for _key, chart in sorted(self.charts.items()) if chart.difficulty.upper() == wanted
-        )
-
-    def select(self, music_ids: Sequence[str] | None, difficulty: str = "EXPERT") -> tuple[SongChart, ...]:
-        """The charts a run is ranked on: `music_ids` at `difficulty`, in
-        music-id order. `None` or empty means every song, i.e. `at()`.
-
-        This exists so "which songs, at which difficulty" is resolved in ONE
-        place. `at()` answers "every song, one difficulty"; a player plays a
-        handful of songs and not always on Expert.
-
-        **A song it cannot serve is a NAMED refusal, never a shorter answer.**
-        Dropping one silently turns "the mean over the five songs you play"
-        into a mean over four, with nothing in the output to say so — the same
-        class of failure as a chart filed under the wrong key, and the reason
-        that one is checked at load. The message separates the two causes,
-        because they have different fixes: a song the library has never heard
-        of is a typo, and a song with no chart AT THIS DIFFICULTY means the
-        library is the EXPERT-only `charts.json` and the caller wants
-        `charts_all.json` (`build_charts.py --all-out`).
-
-        A repeated song collapses rather than being weighted twice."""
-        wanted = difficulty.upper()
-        if not music_ids:
-            return self.at(wanted)
-
-        ordered: list[str] = []
-        for music_id in music_ids:
-            if music_id not in ordered:
-                ordered.append(music_id)
-
-        known = set(self.music_ids)
-        unknown = [m for m in ordered if m not in known]
-        missing = [m for m in ordered if m in known and self.get(m, wanted) is None]
-        if unknown or missing:
-            parts = []
-            if unknown:
-                parts.append(f"no song {', '.join(sorted(unknown))} in {self.source} ({len(known)} songs)")
-            if missing:
-                parts.append(
-                    f"no {wanted} chart for {', '.join(sorted(missing))} — this "
-                    f"library holds "
-                    f"{', '.join(sorted({c.difficulty for c in self.charts.values()}))}; "
-                    f"build every difficulty with "
-                    f"`build_charts.py --all-out dumps/charts_all.json`"
-                )
-            raise SongError("; ".join(parts))
-
-        return tuple(chart for chart in (self.get(m, wanted) for m in sorted(ordered)) if chart is not None)
-
-    @property
-    def music_ids(self) -> tuple[str, ...]:
-        return tuple(sorted({chart.music_id for chart in self.charts.values()}))
-
-    def __len__(self) -> int:
-        return len(self.charts)
-
-
-def _chart_note(entry: object) -> ChartNote:
-    """One `notes` row of the chart file, either shape (see `charts_from_mapping`)."""
-    if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3):
-        raise ValueError(f"note {entry!r} is not [time, permil] or [time, permil, flick]")
-    time, permil = entry[0], entry[1]
-    flick = bool(int(entry[2])) if len(entry) == 3 else False
-    return ChartNote(time=float(time), perfect_permil=int(permil), flick=flick)
-
-
-def charts_from_mapping(raw: object, *, source: str = "<mapping>") -> ChartLibrary:
-    """The parsing half of `load_charts`, split out so a caller holding an
-    already-decoded mapping (a recon tool, a test) need not write a file first.
-
-    Every failure names the chart it came from. A chart library is thousands of
-    numbers produced by a pipeline, and "invalid chart" without a key is not a
-    diagnosis — it is a search."""
-    if not isinstance(raw, dict):
-        raise SongError(f"{source}: chart file must be an object{_CHARTS_SCHEMA}")
-    charts_raw = raw.get("charts")
-    if not isinstance(charts_raw, dict):
-        raise SongError(f"{source}: missing object key 'charts'{_CHARTS_SCHEMA}")
-
-    charts: dict[str, SongChart] = {}
-    for key, row in charts_raw.items():
-        if not isinstance(row, dict):
-            raise SongError(f"{source}: charts[{key!r}] must be an object")
-        try:
-            # `[time, permil]` (charts-1) or `[time, permil, flick]` (charts-2):
-            # `permil` is the PC-column base and `flick` (0/1) marks the notes
-            # whose weight is platform-dependent. A two-element row reads as
-            # flick-less, i.e. it scores on PC weights.
-            notes = tuple(_chart_note(entry) for entry in row["notes"])
-            chart = SongChart(
-                music_id=str(row["music_id"]),
-                difficulty=str(row["difficulty"]).upper(),
-                difficulty_level=int(row["difficulty_level"]),
-                live_score_coefficient_permil=int(row["live_score_coefficient_permil"]),
-                notes=notes,
-                special_cues=tuple(float(cue) for cue in row.get("special_cues", ())),
-                # Both default to absent, and absent is the honest state for a
-                # chart built without a cast: the singer-conditional board
-                # terms then behave as they do for a song whose cast is not
-                # known, rather than as if the song
-                # had none. `SongChart.__post_init__` refuses the half-filled
-                # combinations, so a partially-populated file fails loudly.
-                singers=tuple(str(c) for c in row.get("singers", ())),
-                singer_type=str(row.get("singer_type", "")),
-                # absent in a chart file built before the field: 0, the old divisor
-                hidden_points=int(row.get("hidden_points", 0)),
-            )
-        except SongError as exc:
-            # SongChart's own __post_init__ checks (no notes, times out of
-            # order). Re-raised with the key so the message locates the chart.
-            raise SongError(f"{source}: charts[{key!r}]: {exc}") from exc
-        except (KeyError, TypeError, ValueError) as exc:
-            raise SongError(f"{source}: charts[{key!r}] is malformed: {exc}{_CHARTS_SCHEMA}") from exc
-
-        expected = ChartLibrary.key(chart.music_id, chart.difficulty)
-        if key != expected:
-            raise SongError(
-                f"{source}: charts[{key!r}] describes {expected!r} — a key that "
-                f"disagrees with its own contents would make `get` miss it"
-            )
-        charts[key] = chart
-    return ChartLibrary(charts=charts, source=source)
-
-
-def load_charts(path: str | Path) -> ChartLibrary | None:
-    """A `ChartLibrary` from a chart file, or `None` if the file is absent.
-
-    `None` for an absent file is the same first-class-state contract
-    `load_board` and `load_scoring_config` have: `data/` ships no charts
-    because they are ~3 MB of extracted game data, and a run without them
-    simply cannot answer a per-song question — which is a refusal to make,
-    not an error to raise here."""
-    file_path = Path(path)
-    if not file_path.exists():
-        return None
-    try:
-        raw = json.loads(file_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise SongError(f"{file_path}: unreadable chart file: {exc}") from exc
-    return charts_from_mapping(raw, source=str(file_path))

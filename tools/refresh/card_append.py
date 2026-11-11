@@ -8,36 +8,28 @@ The rule:
     `load_cards` accepting the card with no `unknown_fields`; a card that cannot be
     translated cleanly is REPORTED, never guessed. Write BYTES, not text.
 
-Why the rule is shaped that way, so nobody softens it later: if nothing could write the
-file, the game could ship a card and the tool would answer "your best team" without it,
-and the player would never learn the card existed. But the file also carries hand
-corrections that no extraction can reproduce, so the write has to be strictly additive.
+Without the write, the game could ship a card and the tool would answer "your best team"
+without it; the file also carries hand corrections no extraction can reproduce, so the
+write is strictly additive.
 
-What this module guarantees, and how each one is CHECKED rather than intended
------------------------------------------------------------------------------
-1. **The encoder cannot reformat.** Before writing anything, the UNMODIFIED document
-   is re-encoded and compared byte-for-byte against the file on disk. If they differ,
-   the file is not in this module's canonical form and the write is REFUSED -- because
-   a mismatch means the eventual diff would be a whole-file reformat wearing an
-   addition's clothes. `Path.write_text`
-   re-translates `\\n` on Windows, so hand-produced CRLF becomes `\\r\\r\\n` and a 226-line
-   addition renders as an **18,215-line diff**. Hence `write_bytes`.
-2. **No existing entry moves.** Pre-existing records are carried over by IDENTITY, never
-   rebuilt, and after the write the file is re-read and every pre-existing id compared
-   for deep equality. Their relative order is asserted unchanged too.
+Guarantees, each CHECKED
+------------------------
+1. **The encoder cannot reformat.** The UNMODIFIED document is re-encoded and compared
+   byte-for-byte with the file on disk; a mismatch REFUSES the write (the addition would
+   arrive as a whole-file reformat). Bytes, not text: `Path.write_text` re-translates
+   `\\n` on Windows, turning CRLF into `\\r\\r\\n`.
+2. **No existing entry moves.** Pre-existing records are carried over by IDENTITY, and
+   after the write the file is re-read and every pre-existing id compared for deep
+   equality, their relative order included.
 3. **Nothing enters that cannot be read back.** Each candidate must pass `validate_card`,
    construct through `card_from_record`, and carry no UNKNOWN anywhere in the resulting
    object graph. Anything else is reported by id with its reason and left out.
-4. **A failed verification restores the original bytes.** The file is never left in a
-   state this module has not re-read and agreed with.
+4. **A failed verification restores the original bytes.**
 
-⚠ On gate 3, and it is not a detail: `Card.unknown_fields()` walks the SLOT-level fields
-only -- it does not descend into `override` or `rider`. So an untranscribed target INSIDE
-a rider passes it silently: a card's `costume_skill.rider.target` can sit as UNKNOWN
-under a completeness report that reads "0 cards with unknown fields".
-`nested_unknown_paths` covers precisely that blind spot,
-and `baseline_unknown_paths` says which nested unknowns are normal -- see their
-docstrings for why the check has to be comparative rather than absolute.
+⚠ On gate 3: `Card.unknown_fields()` walks the SLOT-level fields only, not `override` or
+`rider`, so an untranscribed `costume_skill.rider.target` would pass it.
+`nested_unknown_paths` covers that, and `baseline_unknown_paths` says which nested
+unknowns are normal (the check is comparative; see their docstrings).
 
 Usage:
     python card_append.py [--dry-run] [--draft PATH] [--cards PATH]
@@ -330,11 +322,14 @@ def apply_additions(
     if dry_run:
         return Result(sorted(added_ids), plan.rejections, len(raw), len(out), False)
 
-    cards_path.write_bytes(out)
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    # whole or not at all: a reader (the server, mid-refresh) never sees a cut-short catalogue
+    atomic_io.write_bytes(cards_path, out)
     try:
         verify(cards_path, existing, added_ids)
     except Exception:
-        cards_path.write_bytes(raw)  # never leave it in an unverified state
+        atomic_io.write_bytes(cards_path, raw)  # never leave it in an unverified state
         raise
     return Result(sorted(added_ids), plan.rejections, len(raw), len(out), True)
 

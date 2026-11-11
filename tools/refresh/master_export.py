@@ -37,9 +37,11 @@ def export(table: str) -> Path:
     records = mc.rows(table)
     if not records:
         raise SystemExit(f"{table}: 0 rows — refusing to write an empty export")
-    DUMPS.mkdir(exist_ok=True)
+    DUMPS.mkdir(parents=True, exist_ok=True)
     out = DUMPS / f"master_{table}.json"
-    out.write_text(json.dumps(records, ensure_ascii=False), "utf8")
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    atomic_io.write_text(out, json.dumps(records, ensure_ascii=False), "utf8")
     print(f"{table}: {len(records)} rows -> {out}")
     return out
 

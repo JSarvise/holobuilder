@@ -20,6 +20,7 @@ from hbuilder import paths
 from hbuilder.inputs import (
     COLLECTION_CAPS_PATH,
     COLLECTION_CURVE_PATH,
+    COLLECTION_POSTER_PATH,
     DEFAULT_BOARD_PATH,
     DEFAULT_CHARTS_PATH,
 )
@@ -113,9 +114,6 @@ GACHA_STORE_DIR = REPO_ROOT / "data" / "gacha"
 GACHA_ART_DIR = GACHA_STORE_DIR / "art"
 GACHA_SYNC_SCRIPT = REFRESH_DIR / "gacha_sync.py"
 GACHA_EXPORT_SCRIPT = REFRESH_DIR / "gacha_export.py"
-# The credential the live Park read spends: checked before the read so its absence is a
-# named state rather than the `MissingInput` of `account_snapshot.load_credential`.
-ACCOUNT_CREDENTIAL_PATH = paths.STATE / "account_credential.json"
 # The Park export (`park_export.py`): the maps and where every named spot lands on them.
 PARK_EXPORT_DIR = DUMPS / "park_export"
 PARK_SPOTS_PATH = PARK_EXPORT_DIR / "park_spots.json"
@@ -168,3 +166,34 @@ def read_json(path: Path) -> Any | None:
     if not path.is_file():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+MASTER_INDEX_PATH = DUMPS / "master_index.json"
+# The master `Poster` table: how many posters the game has, the maxed basis's Memory Bonus.
+POSTER_PATH = REPO_ROOT / COLLECTION_POSTER_PATH
+
+
+def missing_search_inputs(*, account: bool, materials: bool) -> list[Path]:
+    """The files a search cannot run without that are not on disk. Every basis reads the
+    catalogue, the boards and the game's level and board tables. The maxed basis also reads the
+    master `Poster` table (its Memory Bonus counts every poster the game has). The account basis
+    reads the account instead (owned cards, collection, snapshot, boards as bought), the skill
+    rungs its card levels buy and the master index its board prices are read through; boards
+    planned within the account's materials read its inventory. A file whose absence would only
+    drop a bonus is listed too: a score that silently changes is worse than a search that does
+    not start. The charts are checked where they are read (`leaf_inputs.chart_library`)."""
+    need = [
+        CARDS_PATH,
+        REPO_ROOT / BOARD_PATH,
+        CAPS_PATH,
+        CURVE_PATH,
+        SKILLTREE_PATH,
+        NODE_MASTER_PATH,
+    ]
+    if account:
+        need += [OWNED_PATH, COLLECTION_PATH, SNAPSHOT_PATH, BOARD_STATE_PATH, LADDER_PATH, MASTER_INDEX_PATH]
+    else:
+        need.append(POSTER_PATH)
+    if account and materials:
+        need.append(INVENTORY_PATH)
+    return [p for p in need if not p.is_file()]

@@ -333,7 +333,9 @@ def main():
     mdb.close()
     out.sort(key=lambda r: r["id"])
     dst = os.path.join(DUMPS, "cards_enriched.json")
-    json.dump(out, open(dst, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    atomic_io.write_text(dst, json.dumps(out, indent=2, ensure_ascii=False), "utf-8")
     with_stats = sum(1 for r in out if r["stats"])
     print(f"{len(out)} cards -> {dst}  ({with_stats} with gRPC stats, {len(out) - with_stats} metadata-only)")
     print(f"members resolved: {len(set(r['member'] for r in out if r['member']))}")

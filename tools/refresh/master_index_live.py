@@ -141,7 +141,7 @@ def main() -> int:
         print("refusing to write an empty index", file=sys.stderr)
         return 1
 
-    INDEX.parent.mkdir(exist_ok=True)
+    INDEX.parent.mkdir(parents=True, exist_ok=True)
     atomic_io.write_text(INDEX, json.dumps(fresh, indent=1, ensure_ascii=False), "utf8")
     print(f"written   : {INDEX}")
     return 0

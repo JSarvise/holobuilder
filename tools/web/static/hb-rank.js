@@ -1,5 +1,4 @@
-// hb-rank.js — the ranking ("setlist") list and the search progress block (Night Deck
-// components).
+// hb-rank.js — the ranking ("setlist") list (a Night Deck component).
 //
 // Every row shows ONE score set (the row's own: `best` or `song_est`, never a cached figure
 // beside a detail figure), its p10–p90 run spread on ONE axis shared by all rows, and, when
@@ -62,22 +61,4 @@ export function shownRows(rows, opts = {}) {
   }).slice(0, opts.limit ?? Infinity);
 }
 
-/** The long-search block: keeps the cached answer in view (the caller renders it below),
- *  shows stage, done/total, elapsed, ETA and the provisional best. p: {stage, done, total,
- *  elapsed_s, eta_s?, best_so_far?, cached_score?}. With no served total the count reads
- *  "n scored" (never "n / 0"); with no count either, nothing. The Cancel button carries data-cancel. */
-export function progress(p) {
-  const f = s => s == null ? "—" : s >= 60 ? `${Math.floor(s / 60)}m ${String(Math.round(s % 60)).padStart(2, "0")}s` : `${Math.round(s)}s`;
-  const frac = p.total ? Math.min(1, (p.done ?? 0) / p.total) : 0;
-  const num = v => Number(v).toLocaleString("en-US");
-  const count = p.total ? `${num(p.done ?? 0)} / ${num(p.total)}` : p.done != null ? `${num(p.done)} scored` : "";
-  return `<div class="hb-progress" role="status" aria-live="polite">
-    <div class="pg-top"><b>${esc(p.stage || "Searching")}</b><span class="n">${count}</span>
-      <span class="pg-t">elapsed <b class="n">${f(p.elapsed_s)}</b> · ETA <b class="n">${f(p.eta_s)}</b></span>
-      <button class="btn small" data-cancel>Cancel</button></div>
-    <div class="pg-bar"><i style="width:${(frac * 100).toFixed(1)}%"></i></div>
-    <div class="pg-best">${p.best_so_far != null ? `Provisional best ${score(p.best_so_far)}` : "No provisional best yet"}${p.cached_score != null ? ` <span class="sub">· the cached answer below stays valid until this finishes (${score(p.cached_score)})</span>` : ""}</div>
-  </div>`;
-}
-
-if (typeof window !== "undefined") window.HBRank = { list, progress, beats };
+if (typeof window !== "undefined") window.HBRank = { list, beats };

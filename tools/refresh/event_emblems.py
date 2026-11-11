@@ -87,7 +87,9 @@ def main() -> int:
             im = im.resize((WIDTH, round(im.height * WIDTH / im.width)))
             buf = io.BytesIO()
             im.save(buf, "WEBP", quality=88)
-            (OUT / fname).write_bytes(buf.getvalue())
+            import atomic_io  # noqa: PLC0415 -- beside this script
+
+            atomic_io.write_bytes(OUT / fname, buf.getvalue())
             done += 1
             break
         else:

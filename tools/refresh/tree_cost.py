@@ -1,18 +1,13 @@
 """tree_cost.py -- what a Holomem Board node actually costs.
 
-SkillTreeNode field 9 sums to 1002 over the tree and field 13 sums to 420 --
-which is the point cost? It is field 9. Settled from the binary, not from this
-data: SkillTreeNode::InternalWriteTo writes tag 0x48 == (9<<3) for the field at
-+0x50, which the client's field map names
-`consumptionSkillTreePointQuantity_`. Field 13 (+0x54, tag 0x68) is
-`autoSelectionPriority_` and is not a price at all.
+The point cost is SkillTreeNode field 9: the client's SkillTreeNode::InternalWriteTo writes
+tag 0x48 == (9<<3) for `consumptionSkillTreePointQuantity_`. Field 13 (tag 0x68) is
+`autoSelectionPriority_`, not a price. Field 1000 (`consumptions_`) adds an ITEM cost in
+coloured cubes, the group-id prefix being the colour; this report reads only its first entry
+(`node_price.py` reads them all). It also computes the per-character tree ceiling, which is
+not the sum over all rows: 3 groups carry one row per character.
 
-What this script adds on top of that: points are only half the price. Field 1000
-(`consumptions_`) carries an ITEM cost in coloured cubes, and the group-id prefix
-is the colour. It also computes the true per-character tree ceiling, which is NOT
-the 1002 sum -- 3 groups carry one row per character.
-
-Read-only. Touches nothing under data/.
+Read-only.
 
 Usage:
     python tree_cost.py            # full report
@@ -93,10 +88,9 @@ def blob_bytes(s: str) -> bytes:
 def load(table: str) -> list[dict]:
     """Rows with `data` as {str(field): [values]}, values kept as BYTES where binary.
 
-    master_cache.rows() decodes every value with errors="replace", which silently
-    destroys any byte >= 0x80 -- and field 1000 is a raw protobuf blob whose amount
-    varint is exactly where those bytes live. So go to the DB directly. The dumped
-    master_*.json files carry the same damage and are only a last-resort fallback.
+    master_cache.rows() decodes every value with errors="replace", destroying any byte
+    >= 0x80, where field 1000's amount varint lives; so the DB is read directly. The
+    dumped master_*.json files carry the same damage and are only a last-resort fallback.
     """
     sys.path.insert(0, HERE)
     try:
@@ -299,7 +293,7 @@ def section_owner(nodes: list[dict]) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--owner", action="store_true", help="only the owner's-board check")
+    ap.add_argument("--owner", action="store_true", help="only the account's-board check")
     args = ap.parse_args()
 
     nodes = load("SkillTreeNode")

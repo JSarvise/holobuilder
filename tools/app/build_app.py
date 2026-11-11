@@ -183,6 +183,14 @@ def build_runtime(dest: Path) -> None:
     (site / "sitecustomize.py").write_text(SITECUSTOMIZE, "utf8")
 
 
+VERSION_SOURCE = REPO / "src" / "hbuilder" / "VERSION"
+
+
+def source_version() -> str:
+    """The version the checkout declares (`src/hbuilder/VERSION`, which pyproject.toml reads too)."""
+    return VERSION_SOURCE.read_text("utf8").strip()
+
+
 def build(version: str) -> Path:
     if OUT.exists():
         shutil.rmtree(OUT)
@@ -241,11 +249,30 @@ def changelog(version: str, notes: str) -> None:
     CHANGELOG.write_text(head.rstrip("\n") + "\n\n" + entry + ("\n## " + rest if rest else ""), "utf8")
 
 
+def setup_exe_for_release() -> Path:
+    """The installer this release names (build_setup.py's exe): every install and update puts
+    it next to app/, so the next update runs this release's installer.py. Refused when it was
+    built from other sources than this checkout's."""
+    sys.path.insert(0, str(HERE))
+    import build_setup  # noqa: PLC0415
+
+    exe, stamp = build_setup.EXE, build_setup.STAMP
+    built_from = stamp.read_text("utf8").strip() if stamp.is_file() else ""
+    if not exe.is_file() or built_from != build_setup.sources_digest():
+        raise SystemExit(
+            f"{exe} is missing or was built from other sources than this checkout's "
+            "(installer.py, setup_exe.py, signing.py, system_trust.py, ui/): run "
+            "tools/app/build_setup.py first, then publish"
+        )
+    return exe
+
+
 def publish(zpath: Path, version: str, min_version: str | None, notes: str) -> None:
     sys.path.insert(0, str(HERE))
     import publish as pub  # noqa: PLC0415
 
     target = pub.ssh_target()
+    setup = setup_exe_for_release()
     sha = hashlib.sha256(zpath.read_bytes()).hexdigest()
     meta = {
         "latest": version,
@@ -256,11 +283,18 @@ def publish(zpath: Path, version: str, min_version: str | None, notes: str) -> N
         "sha256": sha,
         "size": zpath.stat().st_size,
         "published_at": int(time.time()),
+        # this release's installer (setup_exe.py): the next update runs it
+        "setup_url": f"app/{setup.name}",
+        "setup_sha256": hashlib.sha256(setup.read_bytes()).hexdigest(),
+        "setup_size": setup.stat().st_size,
     }
     import signing  # noqa: PLC0415
 
     meta["sig"] = signing.sign(signing.canonical(meta))
     subprocess.run(["scp", "-q", str(zpath), f"{target}:{REMOTE_APP}/{zpath.name}"], check=True)
+    # the exe version.json names, complete before it is named: a temporary name, then renamed
+    subprocess.run(["scp", "-q", str(setup), f"{target}:{REMOTE_APP}/.{setup.name}.tmp"], check=True)
+    pub.ssh(target, f"cd {REMOTE_APP} && mv .{setup.name}.tmp {setup.name}")
     pub.ssh(
         target,
         f"cd {REMOTE_APP} && cat > .version.json.tmp && mv .version.json.tmp version.json",
@@ -344,7 +378,12 @@ def smoke(port: int = 8799, timeout_s: float = 90.0) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("version", help="X.Y.Z")
+    ap.add_argument(
+        "version",
+        nargs="?",
+        default=None,
+        help="X.Y.Z; default and only accepted value: src/hbuilder/VERSION, the version's one source",
+    )
     ap.add_argument("--publish", action="store_true", help="upload and make it the latest")
     ap.add_argument(
         "--min-version",
@@ -354,6 +393,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--notes", default="", help="one line shown in the update banner")
     args = ap.parse_args(argv)
+    declared = source_version()
+    if args.version is None:
+        args.version = declared
+    elif args.version != declared:
+        ap.error(f"src/hbuilder/VERSION says {declared}: change it there first, then build")
     if args.publish:
         gate_tests()
     z = build(args.version)

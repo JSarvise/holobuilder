@@ -56,7 +56,7 @@ def test_run_state_gate_compares_against_its_own_threshold(life, threshold, shou
     )
     assert resolution.actual_count == life, (
         "actual_count must report the real run-state value, not a 1/0 "
-        "coercion — the breakdown shows the owner what the gate was "
+        "coercion — the breakdown shows the user what the gate was "
         "compared against (SCOR-08)"
     )
 

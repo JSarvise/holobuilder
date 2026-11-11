@@ -9,16 +9,12 @@
 # which puts the R arm at the top, G at the bottom, and B/Y left and right. There is no single
 # shared layout: Character.f24 picks one of four `tree-model-00N`, which differ only by mirroring
 # the B/Y pair and/or the sub-branches of R, so every member has to be drawn with their own model.
-#
-# Verified against a screenshot of Ninomae Ina'nis (chr-04003, tree-model-002) plus her real
-# unlocked set from dumps/board_state.json: the rendered rows match the capture cell for cell
-# (e.g. screen row -8 is 16 nodes spanning x -6..+9, of which x -1..+5 are unlocked), and the
-# 29 stored ids are the 28 the game reports plus the free starting node S-001.
+# A rendered board matches the game's own cell for cell; the stored ids are the ones the game
+# reports plus the free starting node S-001.
 #
 # COLOUR = the group_id prefix, and it is the in-game colour. The game's own help text
-# (LangHelpContent_Eng ::
-# la-help_category-help-character-3-text) names the tile types, and every node's effect target
-# agrees with it:
+# (LangHelpContent_Eng :: la-help_category-help-character-3-text) names the tile types, and
+# every node's effect target agrees with it:
 #     R  red     Leader type   - 63 nodes, all `set_live_leader`      (only while she leads)
 #     B  blue    Member type   - 31 nodes, all `skill_tree_character` (her own card, always)
 #     G  green   Support type  - 182 rows, `character_grouping`/`all`, always
@@ -49,13 +45,10 @@ OUT = os.path.join(DUMPS, "skilltree.json")
 BOARD = os.path.join(DUMPS, "board_state.json")
 S = lambda v: v - 2**64 if isinstance(v, int) and v > 2**63 else v
 
-# The extents use the same axis pairing as the node positions -- swapping the axes drops best-slot
-# coverage from 499/505 tiles to 485. The signs are NOT determinable from the data (all four
-# (+-x, +-y) combinations also cover 499/505, because the four tree-models ARE those mirrors), so
-# both were settled by observing the game:
+# The extents use the same axis pairing and signs as the node positions. The signs cannot be
+# read from the data (the four tree-models are the four mirrors), so they come from the game:
 #   y: Mori Calliope 5* is center_area-001, whose raw cells are +y, and in game its buff points UP.
 #   x: the six content_area-003 cards ([[-3,0],[-2,0],[-1,0]] here) buff 3 tiles to the LEFT.
-# So the extents share the node table's convention exactly, and negating y is right.
 EXTENT_SIGN = (1, -1)  # (x, y) -> (x, -y): same convention as the node positions, both axes checked in game
 
 # Tile types, straight from the in-game help text. `hue` is the drawing colour.
@@ -294,7 +287,9 @@ def main():
         "unlocked": unlocked,
         "placed": placed,
     }
-    json.dump(out, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    atomic_io.write_text(OUT, json.dumps(out, ensure_ascii=False, separators=(",", ":")), "utf-8")
     print(
         f"{len(nodes)} nodes x {len(models)} layouts, {len(members)} members, "
         f"{len(extents)} connect areas, {len(card_connect)} cards with a connect bonus, "

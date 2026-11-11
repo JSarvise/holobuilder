@@ -19,8 +19,10 @@ tiers) is written beside it as `<chapter_id>.meta.json`. Only rank and score are
 names, no user ids, no profiles -- a cutoff needs none of them.
 
 `--self` additionally reads the USER's own rank in their region with their own account
-(`Grade` carries `self_rank` / `self_score`). Off by default: a headless login on the
-main account can end a running game session.
+(`Grade` carries `self_rank` / `self_score`). The refresh always passes it
+(`refresh_steps.cmd_event_cutoffs`); run by hand without it, the script signs in with guest
+accounts only, because a sign-in on the user's account can end a game session open on
+another device.
 
 DATE_CHANGED: a GUEST whose last home login is from an earlier game day is refused; the
 fetcher then does what the client does -- one `Home/Login` (guest-only,
@@ -521,14 +523,14 @@ def main() -> int:
         "--region",
         choices=REGIONS + ("all", "own"),
         default="all",
-        help="'own' = only the owner's own region, read with his account (--self): "
+        help="'own' = only the account's own region, read with the account itself (--self): "
         "the desktop app's refresh, which has no guest accounts",
     )
     ap.add_argument(
         "--self",
         dest="self_",
         action="store_true",
-        help="read the owner's own region with the owner's account (own rank)",
+        help="read the account's own region with the account itself (own rank)",
     )
     ap.add_argument("--songs", action="store_true", help="also read per-song borders")
     args = ap.parse_args()

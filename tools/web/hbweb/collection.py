@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import functools
 import json
+import os
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -300,6 +302,33 @@ def serve_card_states(h: Handler) -> None:
     h.reply_json(200, {"states": states})
 
 
+# beside the collection: the file as it was before the last save from the page
+PREVIOUS_NAME = "collection.previous.json"
+
+
+def _write_collection(body: str) -> None:
+    """`COLLECTION_PATH` replaced whole: the text goes to a sibling temp file, then one
+    `os.replace` swaps it in, so a reader (a search starting) sees the old file or the new
+    one, never a cut-short one. A replace Windows refuses while a reader holds the file is
+    retried for a few seconds. The file it replaces is kept as PREVIOUS_NAME."""
+    staged = f".{config.COLLECTION_PATH.name}.{os.getpid()}.tmp"
+    config.COLLECTION_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        config.COLLECTION_PATH.with_name(staged).write_text(body, encoding="utf-8")
+        if config.COLLECTION_PATH.is_file():
+            config.COLLECTION_PATH.with_name(PREVIOUS_NAME).write_bytes(config.COLLECTION_PATH.read_bytes())
+        for attempt in range(6):
+            try:
+                os.replace(config.COLLECTION_PATH.with_name(staged), config.COLLECTION_PATH)
+                break
+            except PermissionError:
+                if attempt == 5:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
+    finally:
+        config.COLLECTION_PATH.with_name(staged).unlink(missing_ok=True)
+
+
 def save_collection(h: Handler) -> None:
     """`POST /api/collection`: write the document to `COLLECTION_PATH` and nothing else, ever.
 
@@ -314,19 +343,27 @@ def save_collection(h: Handler) -> None:
     if not isinstance(document, dict) or not isinstance(document.get("cards", {}), dict):
         h.reply_json(400, {"error": "a collection document must be an object with a 'cards' object"})
         return
-
-    body = json.dumps(document, indent=1, sort_keys=True) + "\n"
-    config.COLLECTION_PATH.parent.mkdir(parents=True, exist_ok=True)
-    config.COLLECTION_PATH.write_text(body, encoding="utf-8")
-
-    # Read it back through the CLI's own loader and report what the SOLVER
-    # made of it -- not what this handler believes it wrote.
-    try:
-        cards, _owned, _cfg, _prov = load_inputs(config.CARDS_PATH, config.OWNED_PATH)
-    except _LoadFailure:
-        h.reply_json(200, {"saved": True, "path": str(config.COLLECTION_PATH)})
+    # as the account merge refuses a snapshot without cards: a save that would empty a
+    # collection holding cards is a page (or a request) gone wrong, not an edit
+    if not document.get("cards") and (config.read_json(config.COLLECTION_PATH) or {}).get("cards"):
+        h.reply_json(400, {"error": "this document has no cards: refusing to empty the saved collection"})
         return
-    _restated, basis = apply_collection(tuple(cards), str(config.COLLECTION_PATH))
+
+    # The solver's own loader judges the document BEFORE it reaches the disk: one it refuses
+    # would otherwise sit in state/ and stop every account search until fixed by hand.
+    try:
+        cards, _owned, _cfg, _prov = load_inputs(config.CARDS_PATH, None)
+    except _LoadFailure:
+        h.reply_json(
+            503, {"error": "the card catalogue could not be read: the collection was not checked, nor saved"}
+        )
+        return
+    try:
+        _restated, basis = apply_collection(tuple(cards), str(config.COLLECTION_PATH), document=document)
+    except Exception as exc:  # noqa: BLE001 -- the loader's refusal, whatever its type
+        h.reply_json(400, {"error": f"the solver refuses this collection, nothing was saved: {exc}"})
+        return
+    _write_collection(json.dumps(document, indent=1, sort_keys=True) + "\n")
     h.reply_json(
         200,
         {

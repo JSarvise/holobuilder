@@ -8,8 +8,8 @@
 import { esc, KINDS, KIND_LABEL, sentence, slotAt, SKILL_FACETS } from "/cards-skills.js";
 import { doc, fetchCollection, adopt, discard, valuesOf, setCard, clearCard, entryOf, player, touch, save, fingerprint, isTrial, setTrial } from "/cards-doc.js";
 
-const byId = id => document.getElementById(id);   // not `$`: test_id_contract checks `$("…")` against index.html only
-const F = window.HBFmt;   // hb-format.js: exact numbers, one placeholder (PASS-04)
+const byId = id => document.getElementById(id);
+const F = window.HBFmt;   // hb-format.js: exact numbers, one placeholder
 const fmt = n => (n == null || Number.isNaN(+n) ? F.NA : F.num(Math.round(+n)));
 const pctOf = permil => `+${(permil / 10).toFixed(permil % 10 ? 1 : 0)}${F.SP}%`;
 const chrOf = id => "chr-" + String(id).split("-")[1];

@@ -231,7 +231,7 @@ def cutoff_results(store: Path, region: str) -> dict[str, dict]:
             row["event_pt"] = {
                 "value": pts,
                 "captured_at": last.get("captured_at"),
-                "source": "Marathon/Top (the owner's own Event Pt)",
+                "source": "Marathon/Top (the account's own Event Pt)",
             }
     return out
 

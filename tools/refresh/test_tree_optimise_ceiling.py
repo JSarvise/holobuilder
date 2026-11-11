@@ -1,18 +1,8 @@
-"""The `--ceiling` preset and its `all_invited` scope rule.
+"""The branch-scope rule `_move_in_scope`, which "all invited" planning relies on.
 
-`--ceiling` reproduces the ceiling toggles of the community tool holodori.best's
-Board Optimizer so the two tools can be compared on the same footing: bare boards
-(respec), infinite
-cubes/hexas, max board points (361) for EVERY holomem, and "all invited" -- the
-account-global GREEN/YELLOW branches searched on every board, not just the team's
-six. RED/BLUE stay leader/character-scoped, so off-team they are worth exactly 0
-and are never searched there.
-
-`_move_in_scope` is that rule as one pure predicate, shared by `cmd_plan` and
-`_plan_for_team`'s all-invited pass, so
-the two cannot drift. It is tested here directly -- no dumps, no Oracle, no
-1-2 minute plan -- because the scope rule is exactly the thing the all-invited
-extension turns on and it must not silently regress to team-only.
+"All invited" searches the account-global GREEN/YELLOW branches on every board, not just
+the team's six; RED/BLUE stay leader/character-scoped, so off-team they are worth exactly 0
+and are never searched there. Tested directly: no dumps, no Oracle, no plan.
 """
 
 from __future__ import annotations
@@ -23,10 +13,8 @@ import tree_optimise as to
 def test_off_team_allows_account_global_green_and_yellow():
     """Off a team, only the account-global branches (G/Y) may be bought.
 
-    This is the whole of 'all invited': a green or yellow node pays from ANY
-    board (G-001/Y-004 measured at +176.8/+561.6 on off-team characters), so
-    the ceiling search must reach them on every holomem,
-    not only the five members plus leader."""
+    A green or yellow node pays from ANY board (G-001/Y-004 at +176.8/+561.6 on
+    off-team characters), so the search must reach them on every holomem."""
     for target in ("G-001", "G-006", "Y-004", "Y-018"):
         assert to._move_in_scope(target, on_team=False), (
             f"{target} is account-global and must be searchable off-team"
@@ -35,8 +23,7 @@ def test_off_team_allows_account_global_green_and_yellow():
 
 def test_off_team_excludes_leader_and_character_scoped_red_blue():
     """Off a team, RED (leader-only) and BLUE (that character's own cards only)
-    are worth exactly 0, so searching them on 34 boards is pure waste and would
-    also pollute the plan with worthless purchases. They must be excluded."""
+    are worth exactly 0, so they are excluded."""
     for target in ("R-001", "R-032", "B-001", "B-030"):
         assert not to._move_in_scope(target, on_team=False), (
             f"{target} is character/leader-scoped and worth 0 off-team; it must not be searched there"

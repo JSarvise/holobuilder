@@ -1,23 +1,15 @@
 """The canonical cards.json / owned.json contract. Pure, no I/O.
 
-This module is the single source of truth for field names, enums, and
-validation rules. Nothing here reads a file; `domain/loader.py` is the only
-I/O boundary for canonical data.
+The single source of truth for field names, enums and validation rules;
+`domain/loader.py` is the only I/O boundary for canonical data.
 
-Absent-vs-zero encoding (strict-explicit): every schema field listed in
-`_CARD_REQUIRED_FIELDS` must be present in every card entry. A missing key
-is a validation error naming
-the offending card id and field. JSON `null` is the only on-disk encoding
-for "unknown / never populated" — see `domain/unknown.py` for the `UNKNOWN`
-sentinel that `null` is converted into once a `Card` is constructed.
-
-`condition` is covered by this rule too. `null` means UNKNOWN, exactly like
-`duration`/`interval`/`magnitude` — it does not mean "ungated".
-`{"kind": "ungated"}` is the affirmative on-disk encoding for a skill with no gate at all, and its `target`/`count`
-are structurally absent, never null. This makes the invariant exact across
-the whole schema: `absent` means "not applicable to this kind" and `null`
-means "UNKNOWN (tainting)" — a third representation for anything would
-break that one-meaning-per-encoding property.
+Every field in `_CARD_REQUIRED_FIELDS` must be present in every card entry (a
+missing key is an error naming the card and field). One meaning per encoding
+across the whole schema: an ABSENT key means "not applicable to this kind", JSON
+`null` means UNKNOWN (tainting; `domain/unknown.py`'s `UNKNOWN` sentinel once a
+`Card` is built), and "nothing here" is an affirmative marker, e.g.
+`{"kind": "ungated"}` for a skill with no gate (whose `target`/`count` are absent,
+never null). So a `null` `condition` is unknown, never "ungated".
 """
 
 from __future__ import annotations
@@ -49,117 +41,85 @@ SKILL_SLOT_KINDS: tuple[str, ...] = ("SPECIAL", "ACTIVE", "PASSIVE")
 COSTUME_SLOT_KIND = "COSTUME"
 
 PROBABILITY_TIERS: tuple[str, ...] = ("Low", "Medium", "High")
-# "run_state" is a third condition kind, distinct from "type" and
-# "generation" — it resolves against a play-through snapshot (RunState),
-# never against the assembled team. See RUN_STATE_DIMENSIONS below.
+# "run_state" resolves against a play-through snapshot (RunState), never against
+# the assembled team. See RUN_STATE_DIMENSIONS below.
 CONDITION_KINDS: tuple[str, ...] = ("type", "generation", "run_state")
 
-# The affirmative on-disk encoding for "this skill has no gate at
-# all". Deliberately not a fourth CONDITION_KINDS member: that tuple names
-# GatePredicate dimensions, and "ungated" is not a dimension — it gets its
-# own branch in validate_skill_slot instead of a GatePredicate.
+# The affirmative on-disk encoding for "this skill has no gate at all". Not a
+# CONDITION_KINDS member: that tuple names GatePredicate dimensions, and "ungated"
+# is not one; it gets its own branch in validation instead.
 UNGATED_CONDITION_KIND: str = "ungated"
 
-# The effect *target* is a clause structurally
-# independent of the gate `condition` — "With 2+ Cute Members, Grants
-# Score Support of 6% to 3 Cute Members" carries a gate AND a target, and
-# many gateless PASSIVEs carry a target with no gate at all.
-# Element-for-element the kinds
-# `tools/refresh/skills.py::parse_target` emits.
+# The effect *target* is independent of the gate `condition`: "With 2+ Cute
+# Members, Grants Score Support of 6% to 3 Cute Members" carries both, and many
+# PASSIVEs carry a target with no gate. The kinds `tools/refresh/skills.py::
+# parse_target` emits.
 TARGET_KINDS: tuple[str, ...] = ("self", "all", "type", "generation")
 
-# The affirmative on-disk marker for "this effect reaches the whole
-# team" — exactly as UNGATED_CONDITION_KIND is the affirmative marker for
-# "this skill has no gate", never inferred from a missing key. A slot
-# whose `target` is JSON null is UNKNOWN (untranscribed), never team-wide.
+# The affirmative marker for "this effect reaches the whole team", never inferred
+# from a missing key. A `target` of JSON null is UNKNOWN, never team-wide.
 TEAM_WIDE_TARGET_KIND: str = "all"
 
-# The team size (leader + 5 members), hardcoded here rather than imported:
-# schema.py must not import team.py (schema.py is the base contract team.py
-# itself builds on), so the bound this constant enforces (an effect cannot
-# target more cards than exist in a team) is named explicitly instead.
+# The team size (leader + 5 members): an effect cannot target more cards. Not
+# imported from team.py, which builds on this module.
 MAX_TARGET_COUNT: int = 6
 
-# The shared affirmative "this slot carries no second effect of this shape"
-# marker, used by both `override` (a gated override of the slot's own base
-# magnitude) and `rider` (a second, differently-typed effect) — the same
-# idiom `UNGATED_CONDITION_KIND` and `TEAM_WIDE_TARGET_KIND` use for their
-# own fields, rather than a new encoding. Like its siblings, it is never
-# inferred from a missing key.
+# The affirmative "this slot carries no second effect of this shape" marker, for
+# both `override` (a gated override of the slot's own base magnitude) and `rider`
+# (a second, differently-typed effect). Never inferred from a missing key.
 SECOND_EFFECT_ABSENT_KIND: str = "none"
 
-# `override`'s two possible `kind` values: the shared absent marker, or a
-# populated gated override of the slot's own base magnitude.
-# The override carries no `family`/`effect_type` of its own — by
-# definition it overrides the principal's magnitude, and a second copy of
-# the family could only ever disagree with the first.
+# `override`'s two `kind` values: the absent marker, or a gated override of the
+# slot's own base magnitude. It carries no `family`/`effect_type` of its own: it
+# overrides the principal's magnitude, and a second copy could only disagree.
 OVERRIDE_KINDS: tuple[str, ...] = (SECOND_EFFECT_ABSENT_KIND, "override")
 
-# `rider`'s two possible `kind` values: the shared absent marker, or a
-# populated second, differently-typed effect, retained rather than dropped.
+# `rider`'s two `kind` values: the absent marker, or a second, differently-typed
+# effect.
 RIDER_KINDS: tuple[str, ...] = (SECOND_EFFECT_ABSENT_KIND, "rider")
 
-# "Structurally absent" table for `override`: the absent
-# marker has no payload at all (no dimension to override, no gate to
-# check), so both `magnitude` and `condition` are structurally absent for
-# it, never null. A populated override requires both.
+# The absent override marker has no payload, so its fields are absent, never
+# null. A populated override requires `magnitude` and `condition`.
 NOT_APPLICABLE_OVERRIDE_FIELDS_BY_OVERRIDE_KIND: dict[str, frozenset[str]] = {
     SECOND_EFFECT_ABSENT_KIND: frozenset({"magnitude", "condition", "family", "effect_type"}),
     "override": frozenset(),
 }
 
-# Import-time guarantee, same style as the condition/target-kind asserts
-# above: adding an override kind without deciding its not-applicable
-# fields must fail at import, never at load time.
+# Adding a kind without deciding its not-applicable fields fails at import.
 assert set(NOT_APPLICABLE_OVERRIDE_FIELDS_BY_OVERRIDE_KIND) == set(OVERRIDE_KINDS), (
     "NOT_APPLICABLE_OVERRIDE_FIELDS_BY_OVERRIDE_KIND must cover every "
     "OVERRIDE_KINDS member — adding an override kind without deciding its "
     "not-applicable fields must fail at import, never at load time"
 )
 
-# Same mechanism for `rider`: the absent marker has no payload at all, so
-# every one of its five fields is structurally absent, never null. A
-# populated rider requires all five.
+# The same for `rider`: a populated rider requires all five fields.
 NOT_APPLICABLE_RIDER_FIELDS_BY_RIDER_KIND: dict[str, frozenset[str]] = {
     SECOND_EFFECT_ABSENT_KIND: frozenset({"family", "effect_type", "magnitude", "condition", "target"}),
     "rider": frozenset(),
 }
 
-# Import-time guarantee, same style as the assert above: adding a rider
-# kind without deciding its not-applicable fields must fail at import,
-# never at load time.
 assert set(NOT_APPLICABLE_RIDER_FIELDS_BY_RIDER_KIND) == set(RIDER_KINDS), (
     "NOT_APPLICABLE_RIDER_FIELDS_BY_RIDER_KIND must cover every "
     "RIDER_KINDS member — adding a rider kind without deciding its "
     "not-applicable fields must fail at import, never at load time"
 )
 
-# The only two run-state DIMENSIONS gate resolution may
-# reference. Named element-for-element the same as
-# `hbuilder.domain.gates.RunState`'s two int fields, so the two declarations
-# cannot drift apart silently (pinned by a structural test in
-# tests/test_schema.py).
-#
-# They are numeric, not booleans: a boolean folds the threshold INTO the flag
-# name, so it can express exactly one threshold per dimension — and real cards
-# carry different LIFE thresholds (600 and 1000) on different skills. The
-# threshold is therefore a PER-SKILL parameter carried by the condition's
-# `count`, and the run state carries the numeric value it is compared against.
+# The run-state DIMENSIONS gate resolution may reference, named as
+# `hbuilder.domain.gates.RunState`'s two int fields (pinned by tests/test_schema.py).
+# Numeric, not booleans: real cards carry different LIFE thresholds (600 and 1000),
+# so the threshold is a per-skill parameter (the condition's `count`) and the run
+# state carries the value it is compared against.
 RUN_STATE_DIMENSIONS: tuple[str, ...] = ("life", "combo")
 
-# The comparison operators a run_state gate may carry. "gte" is the default
-# (and the only value type/generation gates ever take); "lte" exists for the
-# game's LIFE_LTE=11 comeback/desperation triggers (thresholds 500/700/950),
-# which fire when LIFE is at or BELOW the threshold — the inverse of "gte".
-# Validated only on run_state below; forbidden on every other condition kind,
-# so an operator typed on a type/generation/ungated gate is a loud load-time
-# failure, not a silently ignored key.
+# The comparison operators a run_state gate may carry. "gte" is the default;
+# "lte" is for the game's LIFE_LTE=11 triggers (thresholds 500/700/950), which fire
+# when LIFE is at or BELOW the threshold. Forbidden on every other condition kind,
+# so a stray operator fails at load instead of being ignored.
 CONDITION_OPERATORS: tuple[str, ...] = ("gte", "lte")
 
 STAT_NAMES: tuple[str, ...] = ("performance", "technique", "sense")
 
-# The six skill families are distinct fields of the model, never
-# variants of one generic effect — one slot carries exactly one family.
+# The six skill families; one slot carries exactly one family.
 SKILL_FAMILIES: tuple[str, ...] = (
     "score_support",
     "conditional_score_up",
@@ -169,22 +129,11 @@ SKILL_FAMILIES: tuple[str, ...] = (
     "judgment_enhancement",
 )
 
-# Which `effect_type` values each family may carry. `stat_up` maps to the
-# three individual stat names — this is what makes a stat-scaling skill
-# address one named stat, never the stat sum — plus a fourth
-# sentinel, `all_stats`, naming all three at once. Every
-# other family maps to a single fixed effect_type naming what it affects.
-#
-# `all_stats` is the domain's name for the game's own `all_parameter_up`
-# ("All Stats UP"), found on many PASSIVE and outfit slots.
-# It is deliberately a fourth `effect_type` of the existing `stat_up`
-# family, never a seventh `SKILL_FAMILIES` member: a seventh family would
-# force an invented default `scoring_config.DEFAULT_CONFIG["family_weights"]`
-# entry with no basis to choose it. Not named `"all"`: that literal is
-# already a `TARGET_KINDS` member meaning "reaches every card" — reusing it
-# here would make `effect_type=all` and `target.kind=all` visually
-# identical in `--explain` output and in every grep, while meaning two
-# unrelated things.
+# Which `effect_type` values each family may carry. `stat_up` names one stat
+# (never the stat sum), or `all_stats`: the game's `all_parameter_up` ("All Stats
+# UP"), on many PASSIVE and outfit slots. It is an effect_type of `stat_up`, not a
+# seventh family (which would need an invented `family_weights` default), and not
+# named "all", which is the `TARGET_KINDS` "every card" marker.
 EFFECT_TYPES_BY_FAMILY: dict[str, frozenset[str]] = {
     "score_support": frozenset({"score"}),
     "conditional_score_up": frozenset({"score"}),
@@ -194,10 +143,9 @@ EFFECT_TYPES_BY_FAMILY: dict[str, frozenset[str]] = {
     "judgment_enhancement": frozenset({"judgment"}),
 }
 
-# Fields that structurally do not exist for a given slot kind. Populating
-# one anyway is the most damaging data defect — routing a
-# gauge-fired (SPECIAL) or always-on (PASSIVE/COSTUME) skill through the
-# ACTIVE formula — caught here at load time rather than at score time.
+# Fields that do not exist for a slot kind. Populating one would route a
+# gauge-fired (SPECIAL) or always-on (PASSIVE/COSTUME) skill through the ACTIVE
+# formula, so it fails at load time.
 NOT_APPLICABLE_FIELDS_BY_SLOT_KIND: dict[str, frozenset[str]] = {
     "ACTIVE": frozenset(),
     "SPECIAL": frozenset({"interval", "probability_tier"}),
@@ -205,14 +153,8 @@ NOT_APPLICABLE_FIELDS_BY_SLOT_KIND: dict[str, frozenset[str]] = {
     COSTUME_SLOT_KIND: frozenset({"duration", "interval", "probability_tier"}),
 }
 
-# The same "structurally absent" mechanism, generalized to key on
-# condition kind as well as slot kind — no new concept. `target` and
-# `count` do not exist for an ungated condition: there is no dimension to
-# target and no threshold to meet, so both must be structurally absent,
-# the same way SPECIAL's `interval`/`probability_tier` are structurally
-# absent above. Every real CONDITION_KINDS member has nothing
-# not-applicable — this map exists so ungated's exception is expressed in
-# the same shape as every other not-applicable rule, not as a special case.
+# The same rule keyed on condition kind: an ungated condition has no dimension to
+# target and no threshold, so its `target` and `count` must be absent.
 NOT_APPLICABLE_CONDITION_FIELDS_BY_CONDITION_KIND: dict[str, frozenset[str]] = {
     "type": frozenset(),
     "generation": frozenset(),
@@ -220,9 +162,6 @@ NOT_APPLICABLE_CONDITION_FIELDS_BY_CONDITION_KIND: dict[str, frozenset[str]] = {
     UNGATED_CONDITION_KIND: frozenset({"target", "count"}),
 }
 
-# Import-time guarantee, same style as the assertions immediately below:
-# adding a condition kind without deciding its not-applicable fields must
-# fail at import, never at load time.
 assert set(NOT_APPLICABLE_CONDITION_FIELDS_BY_CONDITION_KIND) == set(CONDITION_KINDS) | {
     UNGATED_CONDITION_KIND
 }, (
@@ -232,12 +171,8 @@ assert set(NOT_APPLICABLE_CONDITION_FIELDS_BY_CONDITION_KIND) == set(CONDITION_K
     "at import, never at load time"
 )
 
-# The same "structurally absent" mechanism as
-# NOT_APPLICABLE_CONDITION_FIELDS_BY_CONDITION_KIND, keyed on target kind.
-# "self" and the affirmative "all" marker have no dimension to target and
-# no count to select (self is always exactly the source card; "all" is
-# always every card) — both `value` and `count` are structurally absent
-# for them, never null. "type" and "generation" require both.
+# The same rule keyed on target kind: "self" (the source card) and "all" (every
+# card) have no `value` or `count`; "type" and "generation" require both.
 NOT_APPLICABLE_TARGET_FIELDS_BY_TARGET_KIND: dict[str, frozenset[str]] = {
     "self": frozenset({"value", "count"}),
     TEAM_WIDE_TARGET_KIND: frozenset({"value", "count"}),
@@ -245,41 +180,26 @@ NOT_APPLICABLE_TARGET_FIELDS_BY_TARGET_KIND: dict[str, frozenset[str]] = {
     "generation": frozenset(),
 }
 
-# Import-time guarantee, same style as the condition-kind assert above:
-# adding a target kind without deciding its not-applicable fields must
-# fail at import, never at load time.
 assert set(NOT_APPLICABLE_TARGET_FIELDS_BY_TARGET_KIND) == set(TARGET_KINDS), (
     "NOT_APPLICABLE_TARGET_FIELDS_BY_TARGET_KIND must cover every "
     "TARGET_KINDS member — adding a target kind without deciding its "
     "not-applicable fields must fail at import, never at load time"
 )
 
-# This map constrains a slot's PRINCIPAL family only — the value of
-# `record["family"]`, never a slot's `rider.family`. A slot's rider is
-# deliberately NOT checked against this map: the map exists solely to keep a
-# family's *formula* paired with the slot kind that formula's inputs assume,
-# and a rider is never dispatched through the principal's formula. Scoring a
-# rider needs its own arithmetic (the rider's slot kind is whatever the
-# *principal* slot happens to be, e.g. SPECIAL for the activation-rate rider),
-# never `_score_active` reused as-is; this map would not change to permit
-# that; a rider-shaped fold is added alongside it instead.
-# `validate_skill_slot` makes the scope explicit in code, not just here:
-# the local it consults is named `principal_family`, never the bare
-# `family` a reader could mistake for "the whole slot's family".
+# Keeps a family's formula paired with the slot kind its inputs assume. It
+# constrains a slot's PRINCIPAL family only (`record["family"]`), never
+# `rider.family`: a rider is never dispatched through the principal's formula and
+# is scored by its own fold.
 #
-# `activation_rate_up` is tied to ACTIVE because its fold discounts it by
-# uptime and proc chance — the ACTIVE formula's own inputs. In the game's own
-# data it never occurs as a PRINCIPAL effect; it appears only as a RIDER on
-# SPECIAL slots, which this map never checks (see above). The ACTIVE-principal
-# path this guard protects is exercised only by the synthetic six-card
-# fixture `fubuki_01` in `data/cards.json`, which the test suite depends on.
-# The guard stays, both for that fixture and as defence in depth.
+# `activation_rate_up` is tied to ACTIVE because its fold discounts it by uptime
+# and proc chance, the ACTIVE formula's inputs. In the game's data it occurs only
+# as a RIDER on SPECIAL slots; the ACTIVE-principal path is exercised by the
+# synthetic fixture `fubuki_01` in `data/cards.json`, which the tests depend on.
 FAMILY_REQUIRES_SLOT_KIND: dict[str, str] = {
     "activation_rate_up": "ACTIVE",
 }
 
-# Import-time guarantee: a renamed family or slot kind must fail at import,
-# never silently disable this rule.
+# A renamed family or slot kind fails at import instead of disabling this rule.
 assert all(family in SKILL_FAMILIES for family in FAMILY_REQUIRES_SLOT_KIND), (
     "FAMILY_REQUIRES_SLOT_KIND keys must all be members of SKILL_FAMILIES"
 )
@@ -318,10 +238,8 @@ _CARD_REQUIRED_FIELDS: tuple[str, ...] = (
 class SchemaError(Exception):
     """Raised when on-disk data violates the canonical contract.
 
-    `card_id` and `field` are attached whenever known so a validation
-    failure is always attributable to a specific card and field, never a
-    silently-skipped entry. `str()` appends both whenever set, in
-    addition to whatever the `message` itself already says.
+    `card_id` and `field` are attached whenever known, and `str()` appends them
+    to the message.
     """
 
     def __init__(
@@ -403,19 +321,16 @@ def validate_owned_document(doc: object) -> list[str]:
 
 
 def validate_skill_slot(record: object, card_id: str, slot_kind: str) -> list[str]:
-    """Validate one skill-slot (or costume_skill) value against the full
-    slot contract.
+    """Validate one skill-slot (or costume_skill) value against the slot contract.
 
-    `record` may be JSON `null` — the card has no skill in this slot at
-    all, which is valid and distinct from a populated slot whose
-    individual fields are `null` (unknown). A populated slot must carry
-    every field in `_SKILL_SLOT_REQUIRED_FIELDS`; each missing field is
-    reported as its own error so an empty object names every field it
-    lacks rather than one generic message.
+    `record` may be JSON `null`: the card has no skill in this slot, which is
+    distinct from a populated slot whose fields are `null` (unknown). A populated
+    slot must carry every field in `_SKILL_SLOT_REQUIRED_FIELDS`; each missing one
+    is its own error.
 
-    Returns error strings, each naming `card_id`, `slot_kind` and the
-    offending field path (`condition.count` for a nested field). Reports
-    only — never clamps, rounds, or normalizes a value.
+    Returns error strings naming `card_id`, `slot_kind` and the field path
+    (`condition.count` for a nested field). Reports only: never clamps, rounds or
+    normalizes a value.
     """
     if record is None:
         return []
@@ -429,12 +344,7 @@ def validate_skill_slot(record: object, card_id: str, slot_kind: str) -> list[st
 
     not_applicable = NOT_APPLICABLE_FIELDS_BY_SLOT_KIND.get(slot_kind, frozenset())
 
-    # This is the slot's PRINCIPAL family — record["family"] — never
-    # a rider's family. Named principal_family, not family, so a
-    # reader consulting FAMILY_REQUIRES_SLOT_KIND below cannot mistake this
-    # for a slot-wide rule (`_validate_rider` deliberately never runs this
-    # same check against `rider.family` — see FAMILY_REQUIRES_SLOT_KIND's
-    # own comment).
+    # the slot's PRINCIPAL family, never a rider's (FAMILY_REQUIRES_SLOT_KIND)
     principal_family = record.get("family")
     if "family" in record and principal_family not in SKILL_FAMILIES:
         errors.append(
@@ -485,7 +395,7 @@ def validate_skill_slot(record: object, card_id: str, slot_kind: str) -> list[st
         elif field == "interval" and value == 0:
             errors.append(
                 f"interval: card '{card_id}' {slot_kind} slot interval must "
-                f"be greater than 0 when known — Phase 2 divides by it, got 0"
+                f"be greater than 0 when known — the scorer divides by it, got 0"
             )
 
     if "probability_tier" in record:
@@ -522,23 +432,13 @@ def validate_skill_slot(record: object, card_id: str, slot_kind: str) -> list[st
 def _validate_condition(
     condition: object, card_id: str, slot_kind: str, *, field: str = "condition"
 ) -> list[str]:
-    """The `condition` (gate) validation rule, extracted so the override's
-    own condition and the rider's own condition can reuse this exact rule
-    rather than a second/third copy of it — the `_REQUIRED_KNOWN_FIELDS`
-    comment in `scoring.py` names writing the same rule twice as the
-    failure mode this avoids.
-
-    `field` is the dotted path this call reports under: `"condition"` for
-    the slot's own gate (the default), `"override.condition"` for the
-    override's nested gate, `"rider.condition"` for the rider's nested
-    gate — one rule, three callers, each naming its own field path."""
+    """The `condition` (gate) validation rule, shared by the slot, its override and
+    its rider. `field` is the dotted path errors are reported under (`"condition"`,
+    `"override.condition"` or `"rider.condition"`)."""
     errors: list[str] = []
     if condition is None:
-        # null is UNKNOWN, not "ungated" — the transcriber has
-        # not yet recorded whether this skill is gated at all. Valid,
-        # and deliberately runs no sub-field validation: an unknown
-        # condition taints the card via Card.unknown_fields() later,
-        # it is never scrutinized as if it were a populated gate.
+        # null is UNKNOWN, not "ungated": valid, and not validated further; it
+        # taints the card via Card.unknown_fields()
         pass
     elif not isinstance(condition, dict):
         errors.append(f"{field}: card '{card_id}' {slot_kind} slot {field} must be a JSON object or null")
@@ -552,14 +452,10 @@ def _validate_condition(
                 f"{list(allowed_kinds)}"
             )
         elif kind == UNGATED_CONDITION_KIND:
-            # Real card text puts the gate in the second
-            # sentence of the skill description — "For 9s, Score UP
-            # 50%. ... When LIFE is 600 or higher, Score UP 100%."
-            # Transcribing sentence one and stopping is the single
-            # most likely data-entry error in this project; requiring
-            # target/count to be structurally absent here converts
-            # that error from a silent overstatement into a schema
-            # failure the moment someone types a target/count anyway.
+            # Card text often puts the gate in the second sentence ("For 9s, Score
+            # UP 50%. ... When LIFE is 600 or higher, Score UP 100%."); requiring
+            # target/count to be absent turns a gate typed as "ungated" plus a
+            # target/count into a load error instead of a silent overstatement.
             not_applicable = NOT_APPLICABLE_CONDITION_FIELDS_BY_CONDITION_KIND[kind]
             if "target" in not_applicable and "target" in condition:
                 errors.append(
@@ -609,19 +505,11 @@ def _validate_condition(
                     f"{field}.count must be an integer >= 1, got "
                     f"{count!r}"
                 )
-            # NO `count != 1` pin for run_state: `count` is the real numeric
-            # threshold the run-state dimension is compared against
-            # ("LIFE >= 600" is count=600), so pinning it to 1 would make
-            # every real run-state gate unrepresentable. The generic
-            # `count >= 1` check above still applies.
+            # no `count != 1` pin for run_state: `count` is the numeric threshold
+            # ("LIFE >= 600" is count=600); the generic `count >= 1` still applies
 
-            # `operator` (gte|lte) is optional and meaningful ONLY on a
-            # run_state gate — LIFE_LTE=11 fires at or below its threshold,
-            # the inverse of the default gte. On a type/generation gate it
-            # is structurally meaningless (set-membership counts are always
-            # gte), so its mere presence there is a load-time failure rather
-            # than a silently ignored key — the same "populated-where-absent"
-            # discipline as NOT_APPLICABLE_CONDITION_FIELDS_BY_CONDITION_KIND.
+            # `operator` (gte|lte) is optional and meaningful only on a run_state
+            # gate (CONDITION_OPERATORS); anywhere else its presence is an error
             if "operator" in condition:
                 operator = condition.get("operator")
                 if kind != "run_state":
@@ -643,20 +531,12 @@ def _validate_condition(
 
 
 def _validate_target(target: object, card_id: str, slot_kind: str, *, field: str = "target") -> list[str]:
-    """The effect-target validation rule, a sibling of
-    `_validate_condition` rather than a variant of it — `condition` and
-    `target` are structurally independent clauses (a slot can carry a
-    gate AND a target, a target with no gate at all, or (rarely) neither).
+    """The effect-target validation rule (independent of the gate: a slot can carry
+    either, both or neither).
 
-    `None` (JSON null) is valid and runs no sub-field validation — the
-    transcriber has not recorded who this effect reaches, and it taints the
-    card via `Card.unknown_fields()` later, exactly like an untranscribed
-    `condition`. `{"kind": "all"}` is the affirmative "reaches the whole
-    team" marker, never inferred from a missing key.
-
-    `field` is the dotted path this call reports under: `"target"` for the
-    slot's own target (the default), `"rider.target"` for the rider's
-    nested target — one rule, two callers."""
+    `None` (JSON null) is valid and not validated further: it is unknown and taints
+    the card via `Card.unknown_fields()`. `field` is the dotted path errors are
+    reported under (`"target"` or `"rider.target"`)."""
     errors: list[str] = []
     if target is None:
         pass
@@ -672,9 +552,7 @@ def _validate_target(target: object, card_id: str, slot_kind: str, *, field: str
         else:
             not_applicable = NOT_APPLICABLE_TARGET_FIELDS_BY_TARGET_KIND[kind]
             if not_applicable:
-                # "self" / "all": no dimension to target, no count to
-                # select — present-anyway is a loud schema failure, the
-                # same discipline applied to an ungated condition.
+                # "self" / "all": no dimension to target, no count to select
                 if "value" in not_applicable and "value" in target:
                     errors.append(
                         f"{field}.value: card '{card_id}' {slot_kind} slot "
@@ -726,25 +604,13 @@ def _validate_target(target: object, card_id: str, slot_kind: str, *, field: str
 
 
 def _validate_override(override: object, card_id: str, slot_kind: str) -> list[str]:
-    """The `override` validation rule: the three-state contract
-    (unknown / absent / populated) applied to a slot's optional gated
-    override of its own base magnitude.
+    """The `override` validation rule: unknown (`None`, taints) / absent
+    (`{"kind": "none"}`) / populated, for a slot's optional gated override of its
+    own base magnitude (no `family`/`effect_type`, `OVERRIDE_KINDS`).
 
-    `None` (JSON null) is valid and runs no sub-field validation — the
-    transcriber has not recorded whether this slot carries an override at
-    all, and it taints the card via `Card.unknown_fields()` later, exactly
-    like an untranscribed `condition`/`target`. `{"kind": "none"}` is the
-    affirmative "this slot carries no override" marker, never inferred
-    from a missing key.
-
-    The override deliberately carries no `family`/`effect_type` of its
-    own: by definition it overrides the principal's magnitude, and a
-    second copy of the family could only ever disagree with the first.
-    Its nested `condition` delegates to `_validate_condition` (one rule,
-    three callers) — but a populated override's condition must itself be
-    both present and gated: `null` (unknown) and `{"kind": "ungated"}`
-    are both rejected here, because an override with no gate at all is
-    not an override, it is simply a different base magnitude."""
+    A populated override's `condition` must be present and gated: `null` and
+    `{"kind": "ungated"}` are rejected, because an override with no gate is simply
+    a different base magnitude."""
     errors: list[str] = []
     if override is None:
         pass
@@ -760,12 +626,7 @@ def _validate_override(override: object, card_id: str, slot_kind: str) -> list[s
         else:
             not_applicable = NOT_APPLICABLE_OVERRIDE_FIELDS_BY_OVERRIDE_KIND[kind]
             if not_applicable:
-                # Mirrors `_validate_rider`'s not-applicable loop: a "none"-kind
-                # override rejects a stray `family`/`effect_type` key exactly like
-                # the populated ("override") branch below already rejects them on
-                # a populated override — a hand-authored `{"kind": "none",
-                # "family": ...}` must not validate clean just because the
-                # payload is empty.
+                # a "none" override rejects a stray `family`/`effect_type` too
                 for override_field in (
                     "magnitude",
                     "condition",
@@ -780,11 +641,7 @@ def _validate_override(override: object, card_id: str, slot_kind: str) -> list[s
                             f"no second payload"
                         )
             else:
-                # A populated override deliberately carries no `family`/
-                # `effect_type` of its own:
-                # by definition it overrides the principal's magnitude,
-                # and a second copy of the family could only ever
-                # disagree with the first.
+                # no `family`/`effect_type` of its own (OVERRIDE_KINDS)
                 for stray_field in ("family", "effect_type"):
                     if stray_field in override:
                         errors.append(
@@ -850,19 +707,10 @@ def _validate_override(override: object, card_id: str, slot_kind: str) -> list[s
 
 
 def _validate_rider(rider: object, card_id: str, slot_kind: str) -> list[str]:
-    """The `rider` validation rule: a slot's optional second,
-    differently-typed effect, retained rather than dropped.
-
-    Same three-state contract as `override`: `None` taints, `{"kind":
-    "none"}` is the affirmative "no rider" marker, and a populated
-    `{"kind": "rider", ...}` carries its own `family`/`effect_type`/
-    `magnitude`/`condition`/`target`, the last two delegating to the
-    existing `_validate_condition`/`_validate_target` helpers.
-
-    Deliberately does NOT apply `FAMILY_REQUIRES_SLOT_KIND` to the rider's
-    family here — see that map's own comment for why: it
-    constrains a slot's principal family only, by design, not as a gap
-    still to be closed."""
+    """The `rider` validation rule: a slot's optional second, differently-typed
+    effect. Same three-state contract as `override`; a populated
+    `{"kind": "rider", ...}` carries its own `family`/`effect_type`/`magnitude`/
+    `condition`/`target`. `FAMILY_REQUIRES_SLOT_KIND` does not apply to a rider."""
     errors: list[str] = []
     if rider is None:
         pass

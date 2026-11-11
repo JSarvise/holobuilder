@@ -342,8 +342,10 @@ def main():
         out = argv[argv.index("--out") + 1]
     songs = build()
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w", encoding="utf-8") as fh:
-        json.dump({"rewards": global_rewards(), "songs": songs}, fh, ensure_ascii=False, indent=1)
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    document = {"rewards": global_rewards(), "songs": songs}
+    atomic_io.write_text(out, json.dumps(document, ensure_ascii=False, indent=1), "utf-8")
     print(f"{len(songs)} songs -> {out}  ({os.path.getsize(out) / 1024:.0f} KB)")
     if "--quiet" not in argv:
         coverage(songs)

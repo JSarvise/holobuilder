@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.request
@@ -128,11 +129,25 @@ SERIAL_GROUPS = ("search_song_account", "event_song_account")
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
+# each server's session key (hbweb/session.py), read once from a page it serves, as the
+# pages themselves carry it: a POST without it is refused
+_KEYS: dict[str, str] = {}
+
+
+def _session_key(base: str) -> str:
+    if base not in _KEYS:
+        with _OPENER.open(base + "/optimizer", timeout=60) as resp:
+            page = resp.read().decode("utf-8")
+        found = re.search(r'<meta name="hb-session" content="([^"]+)">', page)
+        _KEYS[base] = found.group(1) if found else ""
+    return _KEYS[base]
+
+
 def _post(base: str, route: str, body: dict, timeout: float = 900) -> tuple[int, dict]:
     req = urllib.request.Request(
         base + route,
         data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "X-HB-Session": _session_key(base)},
         method="POST",
     )
     try:

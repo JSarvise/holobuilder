@@ -16,8 +16,10 @@ it silently. Everything that function guarantees still holds —
     count, which drives the Memory Bonus; `player.level` and `player.power_up_permyriad` are
     hand-entered, a snapshot has no notion of them, and writing the candidate over the top
     would destroy them.
-  * `dumps/collection_before_import.json` is written once, the first time, and never replaced —
-    a backup that re-backs-up on every run has overwritten the thing it was protecting.
+  * every merge backs the file up first, into its own timestamped copy under
+    `dumps/collection_backups/` (the newest are kept, none overwritten by the next merge);
+    `dumps/collection_before_import.json` keeps the first state ever merged.
+  * a snapshot without cards is refused, here and in the live merge alike.
   * `data/cards.json` and `data/owned.json` are never touched.
 
 ⚠ **This writes the user's own account file, as a deliberate exception.** The project's
@@ -150,8 +152,7 @@ def main() -> int:
         print("\n--dry-run: nothing written.")
         return 0
 
-    merge_collection(snapshot)
-    return 0
+    return 0 if merge_collection(snapshot) else 2
 
 
 if __name__ == "__main__":

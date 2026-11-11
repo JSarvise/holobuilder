@@ -206,3 +206,10 @@ def test_card_bonus_table_gives_live_and_song_permil_per_card():
     table = card_bonus_table([a, b], ev, blooms={a.id: 5, b.id: 3}, music_id="m0354")
     assert table == ((600, 100), (0, 0))
     assert card_bonus_table([a], ev, blooms={a.id: 5}, music_id=None) == ((600, 0),)
+
+
+def test_event_points_without_a_base_needs_the_score_and_the_bonus():
+    from hbuilder.domain.marathon import event_points
+
+    with pytest.raises(ValueError, match="score"):
+        event_points(None, 300, boosts=1, length_permil=1000, holopass=False)

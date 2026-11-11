@@ -1,4 +1,5 @@
-"""Event Points mode for the web server: the newest open event,
+"""Event Points mode for the web server: the event chapter open now (the one whose
+window holds the current time, `marathon.pick_chapter`),
 which cards and songs carry its bonus, and the account-basis search that ranks
 teams by Event Points (or Event Song Score) instead of by score.
 
@@ -69,12 +70,10 @@ CERTIFY_LIMIT = 400_000
 SEED = 20261013
 
 # --- the song-length multiplier L -------------------------------------------------
-# 50 free seconds, then a slope of 10/29 % a second (a game update changed these from
-# 90 s and 100/190, and the master's Setting no longer carries the constants). Checked
-# against a result screen: Shallow Shadow (123 s, 3 boosts) shows +31 %, which 10/29
-# gives. The boost term (300/200/200 permil for 1/2/3 boosts, 0 at 4+) is not in the
-# master but the +31 % needs it, so it is presumably still applied server-side. L is
-# computed by the server; the client never does.
+# 50 free seconds, then a slope of 10/29 % a second. The master's Setting does not carry the
+# constants; a result screen fixes them: Shallow Shadow (123 s, 3 boosts) shows +31 %. The
+# boost term (300/200/200 permil for 1/2/3 boosts, 0 at 4+) is not in the master either, but
+# the +31 % needs it. L is computed by the server; the client never does.
 LENGTH_FREE_SECONDS = 50
 LENGTH_SLOPE = (10, 29)  # percent per second, as an exact fraction
 LENGTH_BOOST_UP = {1: 300, 2: 200, 3: 200}
@@ -91,24 +90,19 @@ EP_SCORE_NOTE = (
 
 # --- Highlight ---------------------------------------------------------------------
 # The multi Live pick "Highlight" (client enum LiveMultiMusicSelectionType.PICKUP = 3) draws a
-# random WHOLE song among every song sung by one of the chapter's Event Bonus holomems (its
-# character-only live rows), group songs included, and its song-length multiplier L is the
-# length formula's for a HIGHLIGHT_SECONDS song whatever song is drawn: +54 % at 1 boost, +50 % at
-# 2-3, +42 % at 4+ (the boost term applies as for any song). Result screens show "Highlight
-# Bonus +42%" at 4 and 10 boosts and +50 % at 3; +54 % at 1 comes from a player's report.
-# 169 s and 170 s give the same L at every boost count and the bonus is rounded to a whole
-# percent before it applies, so the exact base never matters (a flat x1.5 is right only at
-# 2-3 boosts). Everything else in Event Pt is as for any song. The draw is taken as UNIFORM
-# over the pool (an assumption: the client does not show the weights), so a team's expected
-# score is the MEAN of its score over the pool's charts.
+# random whole song among every song sung by one of the chapter's Event Bonus holomems (its
+# character-only live rows), group songs included. Its L is the length formula's for a
+# HIGHLIGHT_SECONDS song whatever is drawn: +54 % at 1 boost, +50 % at 2-3, +42 % at 4+ (result
+# screens show "Highlight Bonus +42%"). The bonus is rounded to a whole percent, so 169 s and
+# 170 s give the same L. The draw is taken as uniform over the pool (the client does not show
+# the weights), so a team's expected score is the mean of its score over the pool's charts.
 HIGHLIGHT = "highlight"
 HIGHLIGHT_SECONDS = 170
-# Highlight on a sample (the Score search's In general recipe; the default,
-# opts["hl_sample"] False turns it off): the search ranks by the mean over HIGHLIGHT_SAMPLE of
-# the pool's charts (`two_stage.chart_sample`), then its best HIGHLIGHT_RESCORE teams are scored
-# on every chart of the pool and re-ranked. On 4 setups (the page's own options, account
-# plain, maxed, boards as they are) the served top 5-10 is identical to the full-pool search,
-# and the whole search goes 160 -> 89 s, 62 -> 39 s, 131 -> 80 s, 68 -> 34 s.
+# Highlight on a sample (the Score search's In general recipe; the default, opts["hl_sample"]
+# False turns it off): the search ranks by the mean over HIGHLIGHT_SAMPLE of the pool's charts
+# (`two_stage.chart_sample`), then its best HIGHLIGHT_RESCORE teams are scored on every chart
+# of the pool and re-ranked. On 4 setups the served top 5-10 matches the full-pool search in
+# about half the time (e.g. 160 -> 89 s).
 HIGHLIGHT_SAMPLE = 6
 HIGHLIGHT_RESCORE = 200
 HIGHLIGHT_NOTES = (
@@ -228,8 +222,8 @@ def parse_event_body(body: Mapping) -> dict:
     if not isinstance(certify, bool):
         raise EventRequestError(f"'certify' must be true or false, got {certify!r}")
     # the Score search's levers (`ondemand.Assumptions`, `ondemand.Filters`), checked
-    # here and kept as plain JSON (the job echoes its opts); absent -> the account
-    # basis this route always used
+    # here and kept as plain JSON (the job echoes its opts); absent -> the default
+    # account basis (`run_account_search`)
     assumptions = body.get("assumptions")
     if assumptions is not None:
         import ondemand  # noqa: PLC0415
@@ -507,7 +501,11 @@ def songs_payload(
     if event is not None:
         for row in event.rows_for(mar.MUSIC_CHANNEL):
             if row.music_id:
-                event_songs.setdefault(row.music_id, []).append(row.card_id or row.character_id)  # type: ignore[arg-type]
+                # a row names a card or a holomem; one that names neither still makes it an event song
+                holder = row.card_id or row.character_id
+                cards_of_song = event_songs.setdefault(row.music_id, [])
+                if holder:
+                    cards_of_song.append(holder)
     songs: list[dict[str, Any]] = []
     for data in music_rows:
         music_id = str(data.get("id") or "")
@@ -859,7 +857,7 @@ def event_points_for(body: Mapping) -> dict:
     """`POST /api/event/points {score, live_permil, boosts, length_permil, holopass,
     multi_score?}` -> `{event_points, event_points_base, multi}`: one team's Event Pt per
     Live, solo or -- with the room's MULTI SCORE the player types in -- multi
-    (`marathon.event_points_base`, checked on 2 multi Lives). EventRequestError on a bad
+    (`marathon.event_points_base`, checked on 3 multi Lives). EventRequestError on a bad
     field."""
     if not isinstance(body, Mapping):
         raise EventRequestError("the body must be a JSON object")
@@ -956,7 +954,7 @@ def row_payload(
     return out
 
 
-# rows that also get the run-score quantiles (p10/p50/p90), as the two-stage cache's ORDER_ROWS
+# rows that also get the run-score quantiles (p10/p50/p90)
 QUANTILE_ROWS = 1
 # rows re-developed inside the job (the rest on demand by the page)
 DETAIL_ROWS = 3
@@ -1020,8 +1018,7 @@ def add_row_detail(
 
 
 # --- the real account basis -------------------------------------------------------
-# the rows re-planned when a board constraint applies (the Score search's
-# `ondemand.REPLAN_CANDIDATES`)
+# the rows re-planned when a board constraint applies
 REPLAN_CANDIDATES = 24  # `ondemand.REPLAN_CANDIDATES` (20 rows shown)
 # the rows the re-plan picks its REPLAN_CANDIDATES from (`ondemand.REPLAN_SCREEN`)
 REPLAN_SCREEN = 96
@@ -1233,7 +1230,6 @@ def run_account_search(
     import leaf_inputs  # noqa: PLC0415
     import two_stage  # noqa: PLC0415
 
-    from hbuilder.domain.song import load_charts  # noqa: PLC0415
     from hbuilder.solver import members_first as mf  # noqa: PLC0415
 
     song, difficulty, objective = opts["song"], opts["difficulty"], opts["objective"]
@@ -1270,8 +1266,8 @@ def run_account_search(
     import ondemand  # noqa: PLC0415
 
     # the Score search's levers: the account as it is by default, each assumption a
-    # switch (`ondemand.Assumptions`); no `assumptions` -> the basis this route
-    # always used (each team's boards planned on its real points, bench as captured)
+    # switch (`ondemand.Assumptions`); no `assumptions` -> the default basis: each team's
+    # boards planned on its real points, bench as captured
     raw_a = opts.get("assumptions")
     assumptions = ondemand.parse_assumptions(raw_a) if raw_a is not None else None
     if assumptions is not None and assumptions.bloom != "account":
@@ -1319,7 +1315,7 @@ def run_account_search(
         # every chart of the pool in the leaf's context, a board per chart: a batch with
         # no chart_indices scores the MEAN over them (`RefinePool.batch_score`), as the
         # Score search's In general does (`ondemand.Engine`)
-        library = load_charts(str(leaf_inputs.charts_path(difficulty))).at(difficulty)  # type: ignore[union-attr]
+        library = leaf_inputs.chart_library(leaf_inputs.charts_path(difficulty)).at(difficulty)
         ctx, pool_charts, lost = highlight_context(built["ctx"], library, pool_ids)
         pool_skipped = sorted(set(pool_skipped) | set(lost))
         if not pool_charts:
@@ -1596,12 +1592,11 @@ def run_account_search(
         )
         for k, r in enumerate(found["rows"][: opts["top"]], 1)
     ]
-    # ONE number set per row (row_detail): each shown team re-developed on the
-    # leaf that scored it (plain, no activation refinement — the event leaf),
-    # for its slot order, board, deck power and Unit Score panel.
-    # only the first DETAIL_ROWS here (~3-4 s a row, one process); the page asks
-    # /api/row-detail for any other row it opens
-    # Highlight: a row's detail (slot order, board, Unit Score panel) is one chart's: none
+    # ONE number set per row (row_detail): each shown team re-developed on the leaf that scored
+    # it (plain, no activation refinement — the event leaf) for its slot order, board, deck
+    # power and Unit Score panel. Only the first DETAIL_ROWS here (~3-4 s a row, one process);
+    # the page asks /api/row-detail for any other row. Highlight: a row's detail is one
+    # chart's, so none
     n_detail = 0 if highlight else min(len(rows), DETAIL_ROWS)
     emit({"type": "stage", "stage": "detail", "state": "active", "total": n_detail})
     for k, (row, r) in enumerate(zip(rows[:n_detail], found["rows"][:n_detail])):

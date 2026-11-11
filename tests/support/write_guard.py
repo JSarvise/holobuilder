@@ -1,6 +1,9 @@
-"""The test sessions' write guard: no test may write into the checkout's real `state/` or `dumps/`.
+"""The test sessions' write guard: no test may write into the checkout's real `state/` or `dumps/`,
+nor `data/owned.json` or `data/cards.json`.
 
-They hold the account, this PC's server key and ~11 GB of data no test can rebuild. A Python audit
+They hold the account, this PC's server key, ~11 GB of data no test can rebuild, and the two files
+with the strictest rules of all (the account's owned cards, append-only; the catalogue, whose
+entries carry hand corrections). A Python audit
 hook turns every write into one of them -- a file opened for writing (also the temp file of an
 atomic write), a rename or replace onto one, a delete, a new directory -- into a PermissionError
 that names the path. Reading stays allowed: many tests read the real data. Write to `tmp_path`
@@ -28,18 +31,24 @@ GUARDED = tuple(
         for form in (str(p.resolve()), os.path.abspath(p))
     )
 )
+# the two files of data/ under the strictest rules (data/ itself holds fixtures tests may write)
+GUARDED_FILES = frozenset(
+    os.path.normcase(form)
+    for p in (paths.DATA / "owned.json", paths.DATA / "cards.json")
+    for form in (str(p.resolve()), os.path.abspath(p))
+)
 WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
 
 
 def guarded(path) -> str | None:
-    """The real path when `path` lies inside a guarded folder, else None."""
+    """The real path when `path` lies inside a guarded folder or is a guarded file, else None."""
     if isinstance(path, int) or path is None:
         return None
     try:
         full = os.path.normcase(os.path.abspath(os.fsdecode(path)))
     except (TypeError, ValueError):
         return None
-    return full if (full + os.sep).startswith(GUARDED) else None
+    return full if (full + os.sep).startswith(GUARDED) or full in GUARDED_FILES else None
 
 
 def _refuse(what: str, path: str) -> None:

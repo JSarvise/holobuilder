@@ -1,9 +1,8 @@
-"""Certificate helpers shared by the web server and the recon probes:
-`inputs_hash` (the certificate hashing recipe), `git_state`, `cfg_json`,
+"""Certificate helpers for the web server and the leaf builder:
+`inputs_hash` (the certificate hashing recipe), `cfg_json`,
 and the `MODEL_VERSION` re-export.
 
-Read-only: it hashes files, it never writes any. Lives on the recon/web side,
-beside the dumps it hashes.
+Read-only: it hashes files, it never writes any.
 """
 
 from __future__ import annotations
@@ -12,7 +11,6 @@ import dataclasses
 import enum
 import hashlib
 import json
-import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -111,32 +109,6 @@ def inputs_hash(
     return hashlib.sha256("\n".join(lines).encode()).hexdigest(), per
 
 
-def git_state(repo: Path = REPO) -> dict:
-    def run(*args):
-        return subprocess.run(
-            ["git", *args], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace"
-        ).stdout
-
-    try:
-        head = run("rev-parse", "HEAD").strip()
-        tracked = run("status", "--porcelain", "--untracked-files=no").strip()
-        untracked = run("ls-files", "--others", "--exclude-standard").strip()
-        diff = run("diff", "HEAD")
-        # `dirty` = TRACKED files differ from HEAD (the code / data the run used
-        # is not what the commit says). Untracked paths are listed separately:
-        # a run's own output directory is untracked until it is committed and
-        # must not make the certificate read as taken on a modified tree.
-        return {
-            "head": head,
-            "dirty": bool(tracked),
-            "status_porcelain": tracked.splitlines(),
-            "untracked": untracked.splitlines(),
-            "diff_head_sha256": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
-        }
-    except Exception as exc:  # noqa: BLE001
-        return {"head": None, "dirty": None, "error": str(exc)}
-
-
 def scenario_hash(
     cfg: ScoringConfig,
     bench: dict,
@@ -183,7 +155,6 @@ __all__ = [
     "inputs_hash",
     "scenario_hash",
     "try_scenario_hash",
-    "git_state",
     "cfg_json",
 ]
 
@@ -224,7 +195,7 @@ def certificate_basis(
 
     `leaf` (developed rows only): WHICH board the row's
     number was scored on — "plan_cache" (the FIXED per-(character, role,
-    budget, singer-context) plan, the v2 objective the certificates certify)
+    budget, singer-context) plan, the objective the certificates certify)
     or "develop" (the per-team greedy re-develop, a labelled what-if). Absent
     (None) on rows that develop nothing."""
     out = {
@@ -235,9 +206,8 @@ def certificate_basis(
         "uptime_model": uptime_model,
         "platform": platform,
     }
-    # `difficulty`: the chart difficulty the rows were scored on.
-    # Present ONLY when it is not EXPERT, so every EXPERT basis keeps its
-    # original shape (an absent field reads as EXPERT).
+    # `difficulty`: the chart difficulty the rows were scored on, present ONLY when
+    # it is not EXPERT (an absent field reads as EXPERT).
     if difficulty is not None and str(difficulty).upper() != CHART_DIFFICULTY:
         out["difficulty"] = str(difficulty).upper()
     if leaf is not None:
@@ -261,26 +231,23 @@ __all__ += ["try_inputs_hash", "certificate_basis", "universe_name"]
 
 
 # ---------------------------------------------------------------------------
-# The MEMBERS-FIRST enumeration's OWN validity key. `inputs_hash`
-# digests charts.json AS A WHOLE, so a new song landing in charts.json would
-# retire every cached enumeration — but an enumeration's bare scores depend on
-# ONE chart (its own song's), never on the others. Two keys, shared by the
-# enumeration run (which stamps them into the meta) and the web index
-# (the members-first store guards by them):
+# The MEMBERS-FIRST enumeration's OWN validity key. `inputs_hash` digests charts.json
+# AS A WHOLE, so a new song would retire every cached enumeration, yet an enumeration's
+# bare scores depend on ONE chart (its own song's). Two keys, shared by the enumeration
+# run (which stamps them into the meta) and the web index (the members-first store
+# guards by them):
 #
 #   reference_key   = sha256 over the NON-chart lines — cards / collection /
 #                     board / skilltree / master_stn / cfg / model_version —
-#                     what a cross-song TRANSFER reference must share with
-#                     the run (the chart it was scored on is irrelevant: its
-#                     bare ranking is re-scored on the run's song);
-#   enumeration_key = the same lines + `chart=<chart_digest>` — what the
-#                     run's OWN-song source must share, `chart_digest` being
-#                     the sha256 of the canonical JSON of THAT song's entry
-#                     in charts.json (`charts["<song>/EXPERT"]`).
+#                     what a cross-song TRANSFER reference must share with the
+#                     run (its bare ranking is re-scored on the run's song);
+#   enumeration_key = the same lines + `chart=<chart_digest>` — what the run's
+#                     OWN-song source must share, `chart_digest` being the
+#                     sha256 of the canonical JSON of THAT song's entry in
+#                     charts.json (`charts["<song>/EXPERT"]`).
 #
-# Every per-file digest comes from `inputs_hash`'s `per` dict (the recipe's
-# own lines, unchanged), so the keys add no new hashing of the big files.
-# ---------------------------------------------------------------------------
+# Every per-file digest comes from `inputs_hash`'s `per` dict, so the keys add no
+# new hashing of the big files.
 CHARTS_PATH = REPO / dict(INPUT_FILES)["charts"]
 CHART_DIFFICULTY = "EXPERT"
 # Every difficulty the game ships, easiest first (`build_charts.DIFFICULTY`).
@@ -309,8 +276,8 @@ def charts_path_for(
     charts_path: Path | None = None,
     charts_all_path: Path | None = None,
 ) -> Path:
-    """The chart file that holds `difficulty`: charts.json for EXPERT (so every
-    EXPERT digest and cache key stays what it was), charts_all.json otherwise."""
+    """The chart file that holds `difficulty`: charts.json for EXPERT (so EXPERT
+    digests and cache keys never depend on charts_all.json), charts_all.json otherwise."""
     if normalize_difficulty(difficulty) == CHART_DIFFICULTY:
         return Path(charts_path) if charts_path is not None else CHARTS_PATH
     return Path(charts_all_path) if charts_all_path is not None else CHARTS_ALL_PATH

@@ -6,6 +6,8 @@ h2==4.3.0
 hpack==4.2.0
 hyperframe==6.1.0
 highspy==1.15.1
+# the joint search and the board planner import it; highspy would pull it unpinned
+numpy==2.5.4
 pillow==12.3.0
 pywebview==5.4
 # HTTPS verified by Windows itself (tools/app/system_trust.py)

@@ -51,7 +51,7 @@ board), `POST /api/board-plan-account` (what to buy and reset) and, on Compare,
 | `row_detail.py`, `compare_view.py`, `board_values.py` | a row's detail, Compare, board node values |
 | `gacha_view.py` | the Gacha page |
 | `certificate.py`, `job_progress.py` | input hashing, job progress events |
-| `kernel/` | the C kernels (note walk, Connect, surrogate), built with gcc on first use |
+| `kernel/` | the four C kernels (note walk, cooldown variants, Connect and board assembly, the surrogate screen), built with gcc on first use |
 | `static/` | the pages (`<name>.html`, served at `/<name>`) and their modules |
 
 ## Guards

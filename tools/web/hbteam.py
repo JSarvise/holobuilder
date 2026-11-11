@@ -175,7 +175,7 @@ def document(
         "format": FORMAT,
         "format_version": FORMAT_VERSION,
         "about": "A holobuilder team row and the account files its score reads. Replay it with "
-        "tools/web/hbteam.py replay <file>.",
+        "tools/refresh/team_file.py replay <file>.",
         "created_at": _dt.datetime.fromtimestamp(now, _dt.UTC).isoformat(timespec="seconds"),
         "created_unix": int(now),
         "app": app_info(),

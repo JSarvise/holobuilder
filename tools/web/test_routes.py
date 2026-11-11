@@ -158,3 +158,33 @@ def test_a_malformed_document_is_rejected_and_not_written(web_base, tmp_path, mo
     assert status == 400
     assert "error" in data
     assert not written.exists(), "a rejected document was written anyway"
+
+
+def test_a_document_the_solver_refuses_never_replaces_the_saved_one(web_base, tmp_path, monkeypatch):
+    """The solver's own loader judges the document before it reaches the disk: a collection it
+    refuses (here a `player` that is not an object) would otherwise sit in state/ and stop every
+    account search. The saved file stays byte for byte, and no temp file is left beside it."""
+    written = tmp_path / "collection.json"
+    written.write_text('{"cards": {}}', encoding="utf-8")
+    monkeypatch.setattr(config, "COLLECTION_PATH", written)
+
+    status, data = _post(web_base + "/api/collection", {"cards": {}, "player": "not an object"})
+
+    assert status == 400 and "nothing was saved" in data["error"], data
+    assert written.read_text(encoding="utf-8") == '{"cards": {}}'
+    status, saved = _post(web_base + "/api/collection", {"cards": {}, "player": {"level": 31}})
+    assert status == 200 and saved["saved"] is True
+    assert json.loads(written.read_text(encoding="utf-8")) == {"cards": {}, "player": {"level": 31}}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["collection.json", "collection.previous.json"]
+    assert (tmp_path / "collection.previous.json").read_text(encoding="utf-8") == '{"cards": {}}'
+
+
+def test_a_save_never_empties_a_collection_that_holds_cards(web_base, tmp_path, monkeypatch):
+    written = tmp_path / "collection.json"
+    saved = '{"cards": {"card-00001-3-nrml-0000-00": {"level": 10}}}'
+    written.write_text(saved, encoding="utf-8")
+    monkeypatch.setattr(config, "COLLECTION_PATH", written)
+    for document in ({}, {"cards": {}}, {"cards": {}, "player": {"level": 31}}):
+        status, data = _post(web_base + "/api/collection", document)
+        assert status == 400 and "no cards" in data["error"], data
+    assert written.read_text(encoding="utf-8") == saved

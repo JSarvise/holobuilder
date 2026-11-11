@@ -184,7 +184,7 @@ def test_bench_is_54_boards_at_max_level_with_level_2_sockets():
     # the "current" board of this basis is the bench as a BoardModel
     assert scenario.board_model is not None
     assert len(scenario.board_model.characters) == 54
-    # the same catalogue-wide, level-2 Connect pool the parity probe used
+    # the catalogue-wide, level-2 Connect pool
     assert len(scenario.connect_cards) == 150  # every 4★/5★ of the 204 (204 - 54 three-stars)
     # cached per process: a second build at the same cfg IS the same object
     _c2, _cfg2, _b2, again = basis.apply_basis(

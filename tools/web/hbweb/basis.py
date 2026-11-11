@@ -4,6 +4,14 @@ A basis says which collection a team is scored over: `account` (the cards as the
 has them), `maxed` (every card at max level and bloom, the account's own boards and
 bonuses), `maxed-account` (the maxed cards on a fully maxed account, the reference
 scenario below). `apply_basis` is the one place a request's basis becomes cards + config.
+
+Two tables use the word `maxed`. Here (the routes that score a given team: compare, timeline,
+board documents) `maxed` keeps the account's own captured bench boards, and `maxed-account` is
+the fully maxed account. In `leaf_inputs.BASES` (the search and `/api/row-detail`) `maxed` has
+every bench holomem's board developed too (`leaf_inputs._with_maxed_bench`). So a row the Optimizer found on its
+"maxed" basis is re-scored by `/api/row-detail` on the maxed account, while a follow-up sent
+here with `basis: "maxed"` (the row's "Now" through `/api/compare`) scores the same maxed cards
+on the account's captured boards.
 """
 
 from __future__ import annotations
@@ -97,30 +105,28 @@ def charts_path(difficulty: str = "EXPERT") -> Path:
 
 
 # ---------------------------------------------------------------------------
-# The MAXED-ACCOUNT basis: "best team on a FULLY MAXED account", on the SAME
-# basis the community tool holodori.best answers it, so the numbers are
-# comparable. The `maxed` basis maxes the CARDS but keeps the account's captured
-# bench boards and account counters (2.76 M vs 3.42 M average song score on the
-# same kind of roster). This basis is `maxed` + the reference scenario
-# (`precompute_optimisations.py`, bottom):
-#   * account bonuses = `maxed_account_bonuses`: Memory posters = the MASTER's
-#     poster count, Member Power-Up = the roster ceiling
-#     (derived from the roster) — the same two rates holodori.best uses;
+# The MAXED-ACCOUNT basis: "best team on a FULLY MAXED account", on the same basis the
+# community tool holodori.best answers it, so the numbers are comparable. The `maxed` basis
+# maxes the CARDS but keeps the account's captured bench boards and account counters (2.76 M
+# vs 3.42 M average song score on the same kind of roster). This basis is `maxed` + the
+# reference scenario (`precompute_optimisations.py`, bottom):
+#   * account bonuses = `maxed_account_bonuses`: Memory posters = the MASTER's poster count,
+#     Member Power-Up = the roster ceiling — the same two rates holodori.best uses;
 #   * bench = `maxed_account_bench`: EVERY holomem at max level, her points
-#     (`max_level_board_points`) on what of her board reaches a team from the
-#     bench, its Connect sockets filled at level 2 from the whole catalogue by
-#     the domain's exact assignment, valued at a FIXED nominal team — so the
-#     bench is a function of the inputs only, never of the team being scored;
+#     (`max_level_board_points`) on what of her board reaches a team from the bench, its
+#     Connect sockets filled at level 2 from the whole catalogue by the domain's exact
+#     assignment, valued at a FIXED nominal team — so the bench never depends on the team
+#     being scored;
 #   * connect pool = `connect_cards_for("maxed-account")` (every card, level 2);
 #   * the developed board budget defaults to the same max-level points
 #     (`maxed_account_budget`): no account holds more, the whole tree costs more.
-# The bench takes a few seconds to build (54 boards, one exact matching), so
-# it is cached per process, keyed by the resolved config it was linearised
-# at (`cert_mod.cfg_json`) — the same key the certificate hashes.
+# The bench takes a few seconds to build (54 boards, one exact matching), so it is cached per
+# process, keyed by the resolved config it is linearised at (`cert_mod.cfg_json`) — the same
+# key the certificate hashes.
 # ---------------------------------------------------------------------------
-# The nominal team the bench sockets are valued at: holodori.best v3.1.1's recommended
-# roster, fixed here so the bench is a function of the inputs only. Noel Soleil Kiss
-# (leader + member), Matsuri VCS, Flare EGG, Fubuki KR, Hajime BSG.
+# The nominal team the bench sockets are valued at: holodori.best's recommended roster, fixed
+# here so the bench is a function of the inputs only. Noel Soleil Kiss (leader + member),
+# Matsuri VCS, Flare EGG, Fubuki KR, Hajime BSG.
 MAXED_ACCOUNT_NOMINAL_TEAM = (
     "card-00022-5-uniq-0063-00",
     (
@@ -357,7 +363,7 @@ def certificate_meta(
     basis' account bonuses. A missing dump makes the hash `null` with the
     reason, never a hash over whatever files happened to exist. On the
     maxed-account basis the collection line is the scenario literal + the
-    generated bench's digest (`cert_mod.scenario_hash`, the probes' recipe)."""
+    generated bench's digest (`cert_mod.scenario_hash`, the offline certificates' recipe)."""
     if basis_name == MAXED_ACCOUNT_BASIS and scenario is not None:
         h, per, err = cert_mod.try_scenario_hash(
             dataclasses.replace(cfg, board=None), scenario.bench, scenario.literal
@@ -439,17 +445,12 @@ def parse_assume(body: Mapping, key: str, lo: int, hi: int) -> object:
         return None
 
 
-# Which deck power the per-song numbers are on, as a request knob beside
-# `uptime_model` and `platform`. The DEFAULT (`song_absolute_deck_power=True`)
-# is the deck screen's own Overall Power, the quantity the game multiplies.
-#
-# `"modelled"` asks for the stat-pool basis, and it exists for ONE reason
-# worth stating: the parity references against the community tool
-# holodori.best are measured on it. That comparison is one of the few
-# genuinely NON-CIRCULAR checks this project has — a third-party
-# implementation, not this project's own output — so it must keep asking the
-# question it was calibrated for. Re-baselining it against the deck-power
-# number would turn an independent check into a self-recording.
+# Which deck power the per-song numbers are on, a request knob beside `uptime_model` and
+# `platform`. The DEFAULT (`song_absolute_deck_power=True`) is the deck screen's own Overall
+# Power, the quantity the game multiplies. `"modelled"` asks for the stat-pool basis: the
+# parity references against the community tool holodori.best are measured on it, one of the
+# few NON-CIRCULAR checks available (a third-party implementation), so it keeps asking the
+# question it was calibrated for instead of being re-baselined on this project's own number.
 DECK_POWER_BASES = {"server": True, "modelled": False}
 
 

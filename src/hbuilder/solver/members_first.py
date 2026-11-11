@@ -1,56 +1,41 @@
-"""MEMBERS FIRST, LEADER SECOND — the reusable, file-free core of the
-members-first search.
+"""MEMBERS FIRST, LEADER SECOND: the reusable, file-free core of the members-first
+search.
 
-The per-(song, leader) objective `S(T, C)` depends on the leader only through
-(a) its outfit skill — a team-wide stat_up / score_support gated on the FIVE
-members' type or generation counts, plus its scored rider — (b) its own
-holomem's plan role (leader / leader+member) and singer context, and (c)
-nothing else. So:
+The per-(song, leader) objective depends on the leader only through its outfit
+skill (a team-wide stat_up / score_support gated on the five members' type or
+generation counts, plus its rider) and its own holomem's plan role and singer
+context. So:
 
-1. **Enumerate once, no leader.** Every legal member 5-set of the pool is
-   scored ONE time under a BARE proxy leader (`bare_leader`: a real card with
-   its outfit skill removed — same holomem, so the plan role and `sings`
-   behave like a real leader of that holomem). The scores are kept in
-   `legal_rosters` order (lexicographic 5-combinations of pool
-   indices with distinct holomems) — the caller owns the bytes.
-2. **Per real leader, re-score only what can matter** (`candidate_tiers`):
-   the top-K sets by bare score overall, the top-K among the sets that
-   SATISFY the leader's outfit gate (a gated outfit can only win on a set
-   that fires it), and the top-K among the sets containing the leader's own
-   holomem (the leader+member role). Their union (≈ 2K … 3K sets) is scored
-   on the exact leaf under the real leader; the best is the members-first
-   answer for that leader.
+1. **Enumerate once, no leader.** Every legal member 5-set of the pool is scored
+   ONE time under a BARE proxy leader (`bare_leader`: a real card without its outfit
+   skill, so the plan role and `sings` behave as for a real leader of that holomem).
+   The scores are kept in `legal_rosters` order; the caller owns the bytes.
+2. **Per real leader, re-score only what can matter** (`candidate_tiers`): the
+   top-K sets by bare score, the top-K that SATISFY the leader's outfit gate (a
+   gated outfit can only win on a set that fires it) and the top-K containing the
+   leader's own holomem (the leader+member role). Their union (2K to 3K sets) is
+   scored on the exact leaf under the real leader.
 
-Measured on song m0334 against the complete exact table (66 leaders, B&B): K=2,000
-reproduces every certified row — 66/66, 0 loss, same rosters; K=100 misses
-4 GATED outfits whose optimum is a gate-specific kit far down the bare ranking.
-K is empirical; the answer per leader is HEURISTIC until a B&B row certifies it.
+K is empirical, so the answer per leader is a heuristic: on one song against the
+complete exact table (66 leaders), K=2,000 reproduces every row, while K=100 misses
+4 gated outfits whose optimum is a gate-specific kit far down the bare ranking.
 
-`tabulate` packs the per-set aggregates the tiers filter on into flat arrays
-(5 bytes + 4 + 8 + 8 per set — ~210 MB for the 8,441,052 sets of the 66-card
-5★ pool, built in ~8 s): type counts as nibbles, generation PRESENCE as a
-bitmask (a count-gate on a generation re-reads the roster, since presence
-cannot count), holomem set as a bitmask.
+`tabulate` packs the per-set aggregates the tiers filter on into flat arrays (~210 MB
+and ~8 s for the 8.4 M sets of a 66-card pool): type counts as nibbles, generation
+PRESENCE as a bitmask (a count gate on a generation re-reads the roster), holomem
+set as a bitmask.
 
-INCREMENTAL UPDATE (`extended_order` / `merge_scores`). A new
-card lands in the pool; the old enumeration (pool P, scores in
-`legal_rosters(P)` order) is EXTENDED to P' ⊇ P without re-scoring a single
-old set: both orders are lexicographic over pool indices sorted by id, and
-the old pool's order is the restriction of the new one's (a monotone index
-map preserves lexicographic order, and legality depends only on the
-holomems, which do not change), so the sets made only of old cards appear in
-the new enumeration in exactly the old order — ONE pass over the new
-`legal_rosters` consumes the old scores in sequence and sends ONLY the sets
-that contain a new card to the scorer (≈ C(n-1, 4)-scale for one new card,
-minutes, not the hour of a full enumeration). An old card that left the pool
-(a representative change — the web's `leaf_inputs.build_pool` collapses
-identical-feature cards to one representative) is handled the same way in
-reverse: its old sets are skipped, not reused.
+INCREMENTAL UPDATE (`extended_order` / `merge_scores`): when cards join the pool,
+the old enumeration is extended without re-scoring an old set. Both orders are
+lexicographic over pool indices sorted by id and legality depends only on the
+holomems, so the sets made only of old cards appear in the new enumeration in the
+old order: ONE pass over the new `legal_rosters` consumes the old scores in
+sequence and sends only the sets containing a new card to the scorer. A card that
+left the pool (the web's `leaf_inputs.build_pool` collapses identical-feature cards
+to one representative) has its old sets skipped.
 
-Stdlib only; no file I/O; nothing here writes anything. The scoring callback
-(`batch_score`) is injected — the web server hands in
-`parallel_refine.RefinePool.batch_score`, the same leaf the exhaustive route
-and the branch-and-bound use.
+Stdlib only, no file I/O. The scoring callback (`batch_score`) is injected, e.g.
+`parallel_refine.RefinePool.batch_score`.
 """
 
 from __future__ import annotations
@@ -339,12 +324,9 @@ def best_of(score_of: Mapping[int, float], candidates: Iterable[int]) -> tuple[i
 # ---------------------------------------------------------------------------
 def extended_order(old_pool_ids: Sequence[str], new_pool_ids: Sequence[str]) -> tuple[int, ...]:
     """Per OLD pool card, its index in the NEW pool (-1 when the card left the
-    pool). The old pool's order must be the restriction of the new one's —
-    the present cards' new indices strictly increase — else ValueError: that
-    is the property `merge_scores` relies on to reuse the old scores by
-    POSITION (both enumerations are lexicographic over pool indices, so a
-    monotone index map carries old-only sets to the new enumeration in the
-    old order). Duplicate ids raise too."""
+    pool). The present cards' new indices must strictly increase (the property
+    `merge_scores` relies on to reuse old scores by position), else ValueError;
+    duplicate ids raise too."""
     old = tuple(old_pool_ids)
     new = tuple(new_pool_ids)
     if len(set(old)) != len(old) or len(set(new)) != len(new):

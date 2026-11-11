@@ -1,42 +1,20 @@
 """Headless account snapshot: Auth/Login -> User/Get -> decoded JSON, with no game client.
 
-Why this exists
----------------
-The same mechanism the ranking poller uses also reads the user's OWN account. A
-`state/collection.json` of `card_default: "max"` with no per-card overrides makes the solver
-assume every card owned and fully upgraded, while a real account owns fewer, most of them
-nowhere near max. This shows that gap without typing the whole collection by hand.
-
-What it does NOT do
--------------------
-It never writes `data/cards.json` (authoritative, hand-edited) and writes
-`state/collection.json` (the user's account) only on an explicit `--merge-collection`.
-Otherwise it writes a snapshot to `dumps/` and prints a diff.
+Reads the account's real cards, levels and boards, so the solver need not assume every card
+owned and maxed. It never writes `data/cards.json`, and writes `state/collection.json` only on
+an explicit `--merge-collection`; otherwise it writes a snapshot to `dumps/` and prints a diff.
 
 Safety
 ------
-  * READ-ONLY WHITELIST enforced in code. The credential can reach write endpoints; this
-    client refuses to call anything not on the list. Keep it that way.
-
-    ⚠ Concretely, and this is why the whitelist is not ceremony: the User service is
-
-          rpc Get    (google.protobuf.Empty) returns (UserGetResponse)
-          rpc Delete (google.protobuf.Empty) returns (UserDeleteResponse)
-
-    `User/Delete` takes the SAME empty request as `User/Get` and differs only in the path
-    string. There is no confirmation field, no argument to get wrong, nothing to fail on --
-    an empty message sent to the wrong path deletes the account. The `SkillTree` service is
-    the same hazard in a different shape: it exposes ReleaseNode / ConnectNode / ResetNode
-    and NO read method at all, so every path on it is destructive.
-
-    Therefore: never build a path by string interpolation, never take a path from config or
-    argv, and never widen ALLOWED to a prefix or a regex. Add exact literals only, one at a
-    time, and only after checking the method is a read in the .proto.
-  * The credential IS the account -- 255 opaque bytes, full access, no second factor, and unlike
-    the guest ones it is not disposable. It lives in `state/` (gitignored). Never printed here,
-    never logged, never committed.
-  * Does not send `x-app-steam-id`: tying the user's Steam ID to a guest account is gratuitous,
-    and the server does not miss it.
+  * READ-ONLY WHITELIST enforced in code (`ALLOWED`). The credential can reach write
+    endpoints, and `User/Delete` takes the SAME empty request as `User/Get`, differing only in
+    the path string: an empty message sent to the wrong path deletes the account. The
+    `SkillTree` service has no read method at all. So: never build a path by interpolation,
+    never take one from config or argv, never widen ALLOWED to a prefix or a regex; add exact
+    literals only, after checking the method is a read in the .proto.
+  * The credential IS the account (255 opaque bytes, full access, no second factor). It lives
+    in `state/` (gitignored) and is never printed, logged or committed.
+  * Guests do not send `x-app-steam-id`: the server does not need it.
 
 Usage
 -----
@@ -99,49 +77,18 @@ def _seed(seed: bytes | None = None) -> bytes:
 # Read-only, enforced here rather than by the account.
 #
 # ⚠ /rpc.api.User/Delete takes the SAME empty request as /rpc.api.User/Get and differs only in
-#   this string. One typo here deletes the account -- no confirmation, no argument to get wrong.
-#   Exact literals only. Never a prefix, never a regex, never interpolated. See the module
-#   docstring's Safety section before touching this line.
-#   frozenset, not set, so no code path can ALLOWED.add(...) its way past this at runtime.
-#
-#   /rpc.api.Master/Get was added after checking the .proto per the rule above: the Master
-#   service has exactly ONE method, `Get (Empty) returns (MasterGetResponse)`, and it declares
-#   both `disabled_game_auth_token` and `disabled_master_version` -- it is an unauthenticated
-#   read, and there is no write method on that service to typo into.
-#   /rpc.api.Card/GetParameters was added the same way, and needs MORE care than the others
-#   because the Card service is NOT read-only: it also carries LevelUp, LevelLimitBreak and
-#   UpgradePotential. `GetParameters (Empty) returns (CardGetParametersResponse)` is the read.
-#   This is exactly why the rule is "exact literals, never a prefix" -- a prefix on
-#   /rpc.api.Card/ would expose three write methods.
-#   AccountMigration is the same trap again. `List (Empty) returns (AccountMigrationListResponse)`
-#   is a pure read -- it reports whether a transfer id/password has been set -- but its siblings
-#   on the SAME service (SetPassword, PrepareMigrationPassword, Migrate, Unlink) all mutate who
-#   owns the account. It is deliberately NOT listed here: nothing needs it yet, and an unused
-#   entry on a safety rail is a liability. If a live migration-status check is ever wanted, add
-#   the exact literal "/rpc.api.AccountMigration/List" and nothing broader.
-#   /rpc.api.Live/GetDeck was added after checking live.gen.proto per the rule above:
-#   `GetDeck (LiveGetDeckRequest) returns (LiveGetDeckResponse)` with enabled_response_cache=true
-#   -- a pure read that returns the deck positions and the server's LiveDeckEvaluation (the Unit
-#   Score decomposition oracle). Its SIBLING /rpc.api.Live/SaveDeck WRITES the deck and is the
-#   trap the "exact literals, never a prefix" rule guards against -- so GetDeck is listed and
-#   SaveDeck is not. GetDeck takes a real request (character_id + number), never an empty body,
-#   so it cannot be confused with a destructive empty-request method.
-#   /rpc.api.Live/GetDraftDeckInfo and /rpc.api.Live/GetDeckCandidateCardParameters were added
-#   after checking live.gen.proto:
-#   `GetDraftDeckInfo (LiveGetDraftDeckInfoRequest{character_id, costume_id, deck_positions[<=5],
-#   music_id}) returns (LiveGetDraftDeckInfoResponse{live_deck_power, deck_positions})` -- it
-#   EVALUATES an UNSAVED, caller-composed deck and returns POWER only; it persists NOTHING (no
-#   `number` slot, unlike SaveDeck), so it is a pure read despite taking a rich request.
-#   `GetDeckCandidateCardParameters (…{character_id, costume_id, music_id}) returns
-#   (…{parameter_infos[]})` is a pure per-card stat lookup. Their mutating sibling SaveDeck stays
-#   OFF the list. All three are exact literals, never a prefix.
-#   /rpc.api.Live/ListRecommendCharacterDeck was added after checking its proto per the rule above:
-#   `ListRecommendCharacterDeck (LiveListRecommendCharacterDeckRequest{musicId, currentCharacterId,
-#   currentDeckNumber}) returns (LiveListRecommendCharacterDeckResponse{strongLiveDecks[],
-#   highScoreRatingTargetLiveDecks[]})`. It is the game's OWN team optimizer: it returns two ranked
-#   server-evaluated 5-card deck lists (max-power and max-score-rating) and persists NOTHING — no
-#   `number` write slot, unlike SaveDeck. A pure read despite taking a rich request, exactly like
-#   GetDraftDeckInfo. Its mutating siblings (SaveDeck) stay OFF the list. Exact literal, never a prefix.
+#   this string. One typo here deletes the account. Exact literals only: never a prefix, a
+#   regex or an interpolation. A frozenset, so nothing can ALLOWED.add(...) past it at runtime.
+#   Each entry is a read in the .proto; the services' write siblings stay off:
+#   - Master/Get: the service's only method, unauthenticated.
+#   - Card/GetParameters: Card also carries LevelUp, LevelLimitBreak and UpgradePotential, so a
+#     /rpc.api.Card/ prefix would expose three writes.
+#   - Live/GetDeck (the server's LiveDeckEvaluation), GetDraftDeckInfo (evaluates an unsaved
+#     deck, power only), GetDeckCandidateCardParameters (per-card stats) and
+#     ListRecommendCharacterDeck (the game's own two ranked deck lists): none has the `number`
+#     slot their sibling SaveDeck writes, and SaveDeck stays off.
+#   AccountMigration/List is a read too, but its siblings change who owns the account and
+#   nothing needs it, so it is not listed.
 ALLOWED = frozenset(
     {
         "/rpc.api.Master/Get",
@@ -154,33 +101,20 @@ ALLOWED = frozenset(
         "/rpc.api.Live/ListRecommendCharacterDeck",
         "/rpc.api.System/GetSystemInfo",  # read-only, unauth, single-method service; server-info probe
         "/rpc.api.ParkQuest/GetLiveFixedCharacterDeck",  # quest deck evaluation read; exact literal, never a prefix
-        # the open events and their bonus tables. merged.proto:
-        # `rpc ListEventInfo (.google.protobuf.Empty) returns (EventListEventInfoResponse)` -- an
-        # empty request, a pure read. Its sibling ListEventInfoForPortal stays off; exact literal.
+        # the open events and their bonus tables (empty request); ListEventInfoForPortal stays off
         "/rpc.api.Event/ListEventInfo",
-        # event cutoffs: the ranking BORDERS -- one rank_info per reward-tier boundary, plus the caller's own rank. merged.proto:
-        # `ListMarathonScoreRankingGrade (…{marathon_chapter_id}) returns (…{MarathonScoreRankingResult})`
-        # and the two Score-Challenge twins (total / per song, `{marathon_chapter_id[, music_id]}`).
-        # Pure reads; the Marathon service's one mutator is `ReadTop` (marks the top screen seen) and it
-        # stays OFF, as do the *Top / *AroundSelf lists nothing needs yet. Exact literals, never a prefix.
+        # Marathon reads. The service's one mutator, ReadTop (marks the top screen seen), stays
+        # off, as do the *AroundSelf lists.
+        # The ranking borders (one rank_info per reward tier, plus the caller's own rank) and
+        # the two Score-Challenge twins (total / per song):
         "/rpc.api.Marathon/ListMarathonScoreRankingGrade",
         "/rpc.api.Marathon/ListTotalMusicHighestScoreRankingGrade",
         "/rpc.api.Marathon/ListMusicHighestScoreRankingGrade",
-        # the event tracker: the chapter's TOP-100 board. merged.proto: `ListMarathonScoreRankingTop
-        # (…{marathon_chapter_id}) returns (…{MarathonScoreRankingResult})` and its Score-Challenge
-        # twin `ListTotalMusicHighestScoreRankingTop` -- same request as the Grade reads, pure reads.
-        # ReadTop and the *AroundSelf lists stay OFF. Exact literals, never a prefix.
+        # the event tracker's top-100 boards (same requests as the Grade reads):
         "/rpc.api.Marathon/ListMarathonScoreRankingTop",
         "/rpc.api.Marathon/ListTotalMusicHighestScoreRankingTop",
-        # a chapter's SONG ranking, top 100: merged.proto
-        # `ListMusicHighestScoreRankingTop ({marathon_chapter_id=1, music_id=2})`, the Grade read's
-        # song twin; same result message as the two above. Pure read.
         "/rpc.api.Marathon/ListMusicHighestScoreRankingTop",
-        # event history: the account's own result per chapter.
-        # merged.proto: `rpc Top (MarathonTopRequest{marathon_id}) returns (MarathonTopResponse{
-        # marathon{chapters[{id, character_id, score, ...}], ...}, ranking_result{chapters[{
-        # marathon_chapter_id, marathon_score_rank, ...}]}})` -- a pure read; the screen-seen mark is
-        # its sibling `ReadTop`, which stays OFF. Exact literal, never a prefix.
+        # event history: the account's own score and rank per chapter
         "/rpc.api.Marathon/Top",
     }
 )
@@ -190,25 +124,21 @@ ALLOWED = frozenset(
 #
 #   rpc Login (.google.protobuf.Empty) returns (.rpc.api.HomeLoginResponse)   [merged.proto]
 #
-# `Home/Login` is the client's daily "home login" (Auth/Login -> User/Get -> Home/Login in all
-# 13 startup captures). It stamps `UserTime.last_login_time`, settles expired resources and
-# licence renewals. The server answers `grpc-status 3 DATE_CHANGED` (ERROR_CODE 2005) to an
-# account whose last_login_time is from an earlier game day; the client handles that by an
-# out-game reload (`DateChangedOutGameReloadTrace`, global-metadata strings) that runs the
-# startup again. A guest whose last_login_time is from an earlier day gets DATE_CHANGED; a
-# guest with NO last_login_time is never refused; User/Get does not clear it. Only the
-# project's disposable GUEST accounts (state/ranking_accounts.json) may call
-# it, through `guest_home_login`, which checks the account name and host. Its sibling
-# Home/AgreeRule stays off. Exact literal, never a prefix.
+# `Home/Login` is the client's daily "home login" (Auth/Login -> User/Get -> Home/Login at
+# startup). It stamps `UserTime.last_login_time` and settles expired resources and licence
+# renewals. The server answers `grpc-status 3 DATE_CHANGED` (ERROR_CODE 2005) to an account
+# whose last_login_time is from an earlier game day (a guest with none is never refused); the
+# client then reloads and runs the startup again. Only the disposable guest accounts
+# (state/ranking_accounts.json) may call it, through `guest_home_login`, which checks the
+# account name and host. Its sibling Home/AgreeRule stays off.
 GUEST_ONLY_ALLOWED = frozenset(
     {
         "/rpc.api.Home/Login",
     }
 )
 
-# Fallback only. The real value is fetched from Master/Get at startup, exactly as the client
-# does (t+0.49s in the capture, before it logs in). Kept so the tool still runs if that call
-# fails, but a stale value here is the thing most likely to break login after a game update.
+# Fallback only: the real value comes from Master/Get before login, as the client does. A
+# stale value here is the likeliest thing to break login after a game update.
 MASTER_VERSION_FALLBACK = "24afa2c641f4a831c024ac2e912972b2accb695ad0dd3a63fc47a2ffaa69e121"
 
 PROFILE_FILE = STATE / "client_profile.json"
@@ -217,15 +147,9 @@ PROFILE_FILE = STATE / "client_profile.json"
 # (written by --import-from-capture) its captured headers are used instead for 'main', which is
 # both coherent and truthful for the user's own account.
 #
-# `x-app-store-type` is required: the server REQUIRES the store type and does NOT require
-# `x-app-steam-id`. Against us.game-hololive-dreams.com, /rpc.api.Master/Get, same second, no
-# credential on any of them:
-#     generic                 -> grpc-status 3 INVALID_ARGUMENT
-#     generic + store-type    -> grpc-status 0
-#     full profile - identity -> grpc-status 0
-# So store-type present and steam-id absent is exactly the combination the server accepts, and
-# it is the one that leaks least. Without this line every guest login dies at the very first
-# call.
+# The server requires `x-app-store-type` (without it Master/Get answers grpc-status 3
+# INVALID_ARGUMENT) and does not require `x-app-steam-id`: store type present, Steam ID absent
+# is accepted and leaks least.
 GENERIC_HEADERS = [
     ("user-agent", "grpc-dotnet/2.76.0 (Mono Unity; CLR 4.0.30319.17020; netstandard2.1; windows; x64)"),
     ("x-app-version", "1.2.1"),  # fallback only -- see app_version()
@@ -250,10 +174,8 @@ WIRE_HEADERS = [
     ("content-type", "application/grpc+proto-enc"),
 ]
 
-# The order the game's client sends its headers in (captured traffic shows this one, minus the
-# headers a call leaves out). HTTP/2 keeps the order on the wire, so a request in any other
-# order is one no real client makes. A header not listed here
-# goes just before the Steam ID.
+# The order the game's client sends its headers in. HTTP/2 keeps the order on the wire, so any
+# other order is one no real client makes. A header not listed goes just before the Steam ID.
 CLIENT_ORDER = [
     "user-agent",
     "te",
@@ -324,19 +246,13 @@ def app_version() -> str | None:
     """The client version the server will accept, or None to keep the header as written.
 
     The server refuses a client older than its current minimum with `grpc-status 3
-    OUTDATED_APP` (e.g. on Master/Get: 1.2.1 accepted, 1.2.0 refused). Both places a version
-    is written down (GENERIC_HEADERS and the captured client_profile.json) are frozen at
-    whatever the client was that day, so a hardcoded version breaks every call here after a
-    game update.
+    OUTDATED_APP`, so a hardcoded version breaks every call after a game update.
 
-    `HOLODREAMS_APP_VERSION` wins. Otherwise it is read off the installed client: Unity's
-    PlayerSettings.bundleVersion in data.unity3d. UnityPy cannot read that object's type tree
-    on this build, so the raw object is scanned; it holds exactly one X.Y.Z string,
-    and anything other than exactly one is treated as unreadable rather than guessed at.
-
-    On a PC without the game (the desktop app) the last fallback is
-    `dumps/client_version.json`: written by `tools/app/publish.py` from the publisher's install
-    and synced to the app.
+    `HOLODREAMS_APP_VERSION` wins. Otherwise Unity's PlayerSettings.bundleVersion is read off
+    the installed client's data.unity3d (the raw object is scanned, since UnityPy cannot read
+    its type tree; anything but exactly one X.Y.Z string counts as unreadable). Without the
+    game (the desktop app) the fallback is `dumps/client_version.json`, written by
+    `tools/app/publish.py`.
     """
     env = os.environ.get("HOLODREAMS_APP_VERSION", "").strip()
     if env:
@@ -494,11 +410,9 @@ def guest_home_login(account: str, host: str, token: str, ident, master_version:
 
 
 # An HTTP CONNECT proxy for the game's API hosts only (`host:port`, IP-whitelisted, no
-# credentials), for a host whose own egress the API edge refuses. From one datacenter VPS,
-# direct calls were refused (grpc 7, Google's HTML 403) with a Chrome AND a libcurl TLS
-# fingerprint alike and answered through a residential proxy -- for that host the refusal is
-# on the IP, not the fingerprint; other hosts may behave differently. The CDN hosts
-# (static./asset.) never go through it: they answer any IP and are the heavy part.
+# credentials), for a host whose own egress the API edge refuses (on one datacenter VPS the
+# refusal was on the IP, not the TLS fingerprint; other hosts may differ). The CDN hosts
+# (static./asset.) answer any IP and never go through it.
 API_PROXY = os.environ.get("HB_API_PROXY", "").strip()
 _DIRECT_HOSTS = ("static.game-hololive-dreams.com", "asset.game-hololive-dreams.com")
 
@@ -594,7 +508,7 @@ def _exchange(sock, conn, sid: int):
     if reset is not None:
         raise RuntimeError(
             f"stream reset, error_code={reset}. A PROTOCOL_ERROR (1) here usually means a "
-            f"malformed header value, not a bad endpoint -- see RANKING-TOOL-SPEC.md 11f."
+            f"malformed header value (one the server's HTTP/2 layer refuses), not a bad endpoint."
         )
     return rh, tr, payload
 
@@ -613,8 +527,8 @@ class Channel:
     def ping(self, timeout: float = 10) -> bool:
         """An HTTP/2 PING on the open connection, waiting for its ACK. False (and the
         connection closed) when there is none to ping or it has died; the next `call` opens
-        a fresh one. Through the proxy an idle connection is closed after 50-60 s; with a
-        PING every 20 s it survives a 330 s gap and is reused. A fresh connection costs ~6.1 KB on the wire, a PING round trip under 100 B."""
+        a fresh one. The proxy closes an idle connection after 50-60 s; a PING (under 100 B)
+        every 20 s keeps it, against ~6.1 KB for a fresh connection."""
         if self.sock is None:
             return False
         try:
@@ -734,7 +648,7 @@ def call(
     if reset is not None:
         raise RuntimeError(
             f"stream reset, error_code={reset}. A PROTOCOL_ERROR (1) here usually means a "
-            f"malformed header value, not a bad endpoint -- see RANKING-TOOL-SPEC.md 11f."
+            f"malformed header value (one the server's HTTP/2 layer refuses), not a bad endpoint."
         )
     return rh, tr, payload
 
@@ -742,12 +656,9 @@ def call(
 def fetch_master_version(host: str, ident) -> str:
     """Current master-data version, unauthenticated.
 
-    `MasterGetResponse { string version = 1; repeated MasterTagPack master_tag_packs = 2 }`,
-    and the Master service declares disabled_game_auth_token + disabled_master_version -- so
-    this needs no credential and no prior version. It is what the real client does at t+0.49s,
-    before it logs in. Fetching it beats hardcoding: the master version identifies which build
-    of the game's master data the client claims to hold, and a stale one is the most likely cause of a
-    login being refused after a game update.
+    `MasterGetResponse { string version = 1; ... }`; the service needs no credential and no
+    prior version. The real client calls it before logging in; a stale master version is the
+    likeliest cause of a refused login after a game update.
     """
     data = master_get(host, ident)
     for msg in unframe(data):
@@ -767,11 +678,9 @@ def master_get(host: str, ident) -> bytes:
     rh, tr, data = call(host, "/rpc.api.Master/Get", frame(b""), ident=ident)
     st = tr.get("grpc-status", rh.get("grpc-status"))
     if st == "3" and "OUTDATED_APP" in tr.get("grpc-message", ""):
-        # The version SENT may not be the current one: a captured client profile is frozen at
-        # its capture (a profile's 1.1.1 is OUTDATED_APP while 1.2.1 is accepted). Retry once
-        # with `app_version()` (the environment, this PC's install, or the published
-        # client_version.json; the generic header's version when none is known). No version
-        # is guessed: game versions jump (1.2.1 -> 1.2.101).
+        # A captured client profile is frozen at its capture's version. Retry once with
+        # `app_version()` (else the generic header's). No version is guessed: game versions
+        # jump (1.2.1 -> 1.2.101).
         current = app_version() or dict(GENERIC_HEADERS)["x-app-version"]
         sent = next((v for k, v in (ident or GENERIC_HEADERS) if k.lower() == "x-app-version"), None)
         if current != sent:
@@ -833,10 +742,8 @@ EVENT_INFO_PATH = DUMPS / "event_info_live.bin"
 def refresh_event_info(host: str, token: str, ident, master_version: str) -> Path:
     """`Event/ListEventInfo` -> the decrypted response, written to dumps/event_info_live.bin.
 
-    It nests the open marathon's bonus tables (`MarathonLiveMarathonScoreBonus`, the event bonus
-    the optimiser's Event Pt / Event Song Score modes need); `marathon_bonus.py` reads the file
-    the same way it reads a capture. The optimiser must always work with the CURRENT event, so
-    the refresh fetches it."""
+    It nests the open marathon's bonus tables (`MarathonLiveMarathonScoreBonus`) that the
+    optimiser's Event Pt / Event Song Score modes need; `marathon_bonus.py` reads the file."""
     rh, tr, data = call(
         host,
         "/rpc.api.Event/ListEventInfo",
@@ -955,7 +862,7 @@ DECK = {2: "character_id", 3: "number", 4: "name", 5: "costume_id"}
 POS = {2: "character_id", 3: "number", 4: "position", 5: "card_id"}
 POSTER = {2: "poster_id"}
 # UserMission. `progress` against MissionProgress.threshold is what says an achievement
-# is done (the separate pokajan tool reads this list from the snapshot).
+# is done (other tools read this list from the snapshot).
 MISSION = {2: "mission_id", 4: "progress", 5: "reward_received_thresholds"}
 EMBLEM = {2: "emblem_id", 5: "last_activated_time"}
 
@@ -966,18 +873,13 @@ WANT = {
     "user_skill_tree_point_list": ("board_points", POINT),
     "user_live_deck_list": ("decks", DECK),
     "user_live_deck_position_list": ("deck_positions", POS),
-    # The poster COUNT drives the Memory Bonus rate (memory_bonus_permil,
-    # PosterCollectEffect); user_poster_list makes it a live read instead of a
-    # hand-entered value in state/collection.json's player block.
+    # The poster count drives the Memory Bonus rate (memory_bonus_permil, PosterCollectEffect).
     "user_poster_list": ("posters", POSTER),
-    # Read-only, and it costs nothing extra: User/Get already returns this collection
-    # and decode_snapshot already walked past it. It says which achievements are done
-    # from the account itself (read by the separate pokajan tool).
+    # Which achievements are done (other tools read it from the snapshot).
     "user_mission_list": ("missions", MISSION),
-    # Event history: a marathon's ranking reward includes one emblem per chapter and tier
-    # (`emblem-marathon_score_ranking_rank_reward-<chapter>-<grade>`), so the emblems held
-    # say which tier the account reached in every past event -- the one record of events
-    # older than the tool's own reads. Same User/Get response, nothing extra fetched.
+    # A marathon's ranking reward includes one emblem per chapter and tier
+    # (`emblem-marathon_score_ranking_rank_reward-<chapter>-<grade>`): the tier reached in
+    # every past event, including events older than the tool's own reads.
     "user_emblem_list": ("emblems", EMBLEM),
 }
 
@@ -985,11 +887,9 @@ WANT = {
 def load_level_curves() -> tuple[dict, dict]:
     """(card_id -> cardLevelGroupId, group_id -> sorted [(cum_exp, level)]).
 
-    The chain is `Card.card_level_group_id` -> `CardLevel.group_id`, and CardLevel rows are
-    `{group_id, level, parameter_base_value, exp, live_deck_power_permyriad_up}` where `exp` is
-    the CUMULATIVE exp needed to reach that level. 27 groups (9 per rarity), 60/70/80 rows each,
-    matching the rarity caps. Resolving a level is a bisect: the highest level whose threshold
-    the card's exp has passed.
+    `Card.card_level_group_id` -> `CardLevel.group_id`; a CardLevel row's `exp` is the
+    CUMULATIVE exp to reach its level, so a card's level is the highest threshold its exp has
+    passed (a bisect).
     """
     holo = DUMPS / "holodori"
     cf, lf = holo / "main_Card.json", holo / "main_CardLevel.json"
@@ -1095,10 +995,8 @@ def diff_against_collection(snap: dict) -> None:
 def propose_collection(snap: dict) -> None:
     """Write a CANDIDATE collection.json to dumps/ -- never to state/.
 
-    `data/cards.json` is authoritative and hand-edited, and `state/collection.json` is the
-    user's account; this path writes neither. It produces a
-    file to read, check and copy across deliberately -- the review is the point, not a
-    formality: every value here is derived from one snapshot at one moment.
+    It writes neither `data/cards.json` nor `state/collection.json`: the file is for review,
+    since every value comes from one snapshot at one moment.
     """
     cards = snap.get("cards", [])
     entries = {}
@@ -1130,7 +1028,7 @@ def propose_collection(snap: dict) -> None:
         "card_default": "unknown",
         "cards": dict(sorted(entries.items())),
     }
-    DUMPS.mkdir(exist_ok=True)
+    DUMPS.mkdir(parents=True, exist_ok=True)
     path = DUMPS / "collection_proposed.json"
     atomic_io.write_text(path, json.dumps(out, indent=1, ensure_ascii=False), "utf8")
     print(f"\nproposed  : {path}")
@@ -1143,13 +1041,9 @@ def propose_collection(snap: dict) -> None:
 def refresh_card_params(host: str, token: str, ident, master_version: str) -> None:
     """Re-fetch `Card/GetParameters` live and rewrite dumps/card_params.json.
 
-    Per-card parameter records read live from the account. The refresh takes the account's
-    card ids from this file (`merge_owned`) and `build_cards_dataset.py` its stats, so it must
-    be re-read whenever a card is acquired.
-
-    `CardGetParametersResponse.ParameterInfo { card_id=1, parameter=2, performance=3,
-    technique=4, sense=5 }` -- so the studio's own schema NAMES the fields:
-    stat3/4/5 = Performance/Technique/Sense.
+    The refresh takes the account's card ids from this file (`merge_owned`) and
+    `build_cards_dataset.py` its stats. `ParameterInfo { card_id=1, parameter=2,
+    performance=3, technique=4, sense=5 }`: stat3/4/5 = Performance/Technique/Sense.
     """
     rh, tr, data = call(
         host,
@@ -1193,7 +1087,7 @@ def refresh_card_params(host: str, token: str, ident, master_version: str) -> No
     if not rows:
         raise RuntimeError("Card/GetParameters returned no parameter_infos")
 
-    DUMPS.mkdir(exist_ok=True)
+    DUMPS.mkdir(parents=True, exist_ok=True)
     out = DUMPS / "card_params.json"
     prev = len(json.loads(out.read_text("utf8"))) if out.exists() else 0
     atomic_io.write_text(out, json.dumps(rows, indent=1, ensure_ascii=False), "utf8")
@@ -1209,19 +1103,13 @@ def refresh_card_params(host: str, token: str, ident, master_version: str) -> No
 def refresh_board_state(snap: dict) -> None:
     """Write `dumps/board_state.json` from the live snapshot.
 
-    That file is `build_board.py`'s input, and until now it only came from a hand-taken capture
-    so it aged the moment a node was unlocked. Its shape is exactly what
-    `UserCharacterSkillTree` already carries:
+    `build_board.py`'s input, in the shape `UserCharacterSkillTree` carries:
 
         {"chr-00004": {"nodes": ["G-001", ...], "slots": {"S-001": "card-..."}}}
 
-    `released_skill_tree_node_group_ids` -> `nodes`, and the connected node/card lists arrive
-    positionally paired -> `slots`. No mapping table, no master lookup: the ids are already in
-    `domain/board.py`'s vocabulary.
-
-    This does NOT regenerate `board.json` -- run `build_board.py` after, which performs the
-    three joins (character name, effect ids, Connect multiplier) that this file deliberately
-    knows nothing about.
+    `released_skill_tree_node_group_ids` -> `nodes`; the connected node/card lists arrive
+    positionally paired -> `slots`. The ids are already `domain/board.py`'s vocabulary.
+    Run `build_board.py` after to regenerate `board.json`.
     """
     boards = snap.get("boards", [])
     if not boards:
@@ -1240,18 +1128,17 @@ def refresh_board_state(snap: dict) -> None:
                 f"{cid}: {len(gids)} connected nodes vs {len(cids)} connected cards -- the "
                 f"lists are positionally paired, so a length mismatch means the decode is wrong"
             )
-        # UNION, not just `released`. The server can report a socket as connected (it holds a
-        # card) while omitting it from released_skill_tree_node_group_ids -- chr-04003 has
-        # S-001 carded but unreleased, S-002 in both. A socket holding a card is unlocked by
-        # definition, so taking released verbatim would silently drop it and shrink the board.
+        # UNION, not just `released`: the server can report a socket as connected (it holds a
+        # card) while omitting it from released_skill_tree_node_group_ids. A socket holding a
+        # card is unlocked by definition.
         nodes = sorted(set(released) | set(gids))
         out_doc[cid] = {"nodes": nodes, "slots": dict(zip(gids, cids))}
 
-    DUMPS.mkdir(exist_ok=True)
+    DUMPS.mkdir(parents=True, exist_ok=True)
     path = DUMPS / "board_state.json"
     prev = json.loads(path.read_text("utf8")) if path.exists() else {}
-    # Write the backup ONCE. Overwriting it every run means the second run destroys the only
-    # copy of the pre-tool file and "backup" silently becomes "the previous run's output".
+    # Back up ONCE: overwriting it every run would replace the pre-tool file with the previous
+    # run's output.
     backup = DUMPS / "board_state_before_refresh.json"
     if prev and not backup.exists():
         atomic_io.write_text(backup, json.dumps(prev, indent=1, ensure_ascii=False), "utf8")
@@ -1272,29 +1159,57 @@ def refresh_board_state(snap: dict) -> None:
     print("            now run build_board.py to regenerate dumps/board.json")
 
 
-def merge_collection(snap: dict) -> None:
+# Every merge first saves the file it is about to change, into its own timestamped backup, and
+# keeps the newest COLLECTION_BACKUPS_KEPT: a backup per merge, none overwritten by the next.
+# The first state ever merged also stays in `collection_before_import.json`.
+COLLECTION_BACKUPS_KEPT = 20
+
+
+def backup_collection(state: Path, dumps: Path) -> Path | None:
+    """Copy `state` (the collection about to be merged) to
+    `dumps/collection_backups/collection-<UTC time>.json`; None when there is nothing yet."""
+    if not state.exists():
+        return None
+    folder = dumps / "collection_backups"
+    folder.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime(now)) + f"-{int(now * 1e6) % 1_000_000:06d}"
+    backup = folder / f"collection-{stamp}.json"
+    atomic_io.write_bytes(backup, state.read_bytes())
+    kept = sorted(folder.glob("collection-*.json"), key=lambda p: (p.stat().st_mtime_ns, p.name))
+    for old in kept[:-COLLECTION_BACKUPS_KEPT]:
+        old.unlink()
+    return backup
+
+
+def merge_collection(snap: dict) -> bool:
     """MERGE the snapshot's cards into state/collection.json, preserving everything else.
 
-    Explicitly opt-in (`--merge-collection`), never automatic: that file is the user's account.
-    It merges rather than overwrites for a concrete reason -- collection.json
-    carries hand-entered `player` data (level, power_up_permyriad) that a snapshot has no
-    notion of, so writing the candidate over the top would silently destroy it. `cards` and
-    `card_default` are replaced, and `player.posters` is set from the account's own
-    `user_poster_list` count when the snapshot carries it (it drives the Memory Bonus permil;
-    a hand-entered count one behind the account shows as a power residual on every deck). `player.level` and `player.power_up_permyriad` stay hand-entered.
-    Every other key is left exactly as it was.
+    Opt-in (`--merge-collection`). It merges because the file carries hand-entered `player`
+    data a snapshot has no notion of. `cards` and `card_default` are replaced, and
+    `player.posters` is set from the account's `user_poster_list` count (it drives the Memory
+    Bonus permil). `player.level` and `player.power_up_permyriad` stay hand-entered; every
+    other key is kept as it was. `data/cards.json` is never touched.
 
-    `data/cards.json` is never touched.
+    A snapshot without cards is refused (False, nothing written): an account always owns cards,
+    so an empty list is a failed read, and merging it would empty the collection. Every merge
+    backs up the file first (`backup_collection`).
     """
     state = STATE / "collection.json"
+    if not snap.get("cards"):
+        print(
+            f"the snapshot carries no 'cards' -- refusing to merge an empty collection; {state} unchanged",
+            file=sys.stderr,
+        )
+        return False
     cur = json.loads(state.read_text("utf8")) if state.exists() else {"schema_version": "collection-1"}
 
-    DUMPS.mkdir(exist_ok=True)
-    # Once only -- see refresh_board_state. Re-backing-up on every run replaces the pre-tool
-    # file with the previous run's output, which is the opposite of what a backup is for.
-    backup = DUMPS / "collection_before_import.json"
-    if state.exists() and not backup.exists():
-        atomic_io.write_text(backup, state.read_text("utf8"), "utf8")
+    DUMPS.mkdir(parents=True, exist_ok=True)
+    # The first state ever merged, once, as in refresh_board_state; and a backup per merge.
+    first = DUMPS / "collection_before_import.json"
+    if state.exists() and not first.exists():
+        atomic_io.write_text(first, state.read_text("utf8"), "utf8")
+    backup = backup_collection(state, DUMPS)
 
     entries = {}
     for c in snap.get("cards", []):
@@ -1321,14 +1236,10 @@ def merge_collection(snap: dict) -> None:
         player["posters"] = len(snap["posters"])
         merged["player"] = player
         posters_note = f"player.posters {before_p!r} -> {player['posters']}"
-    # A collection born from a snapshot (the desktop app's first refresh) has no
-    # `power_up_permyriad`, and absent is "not told" -> no Member Power-Up Bonus at all
-    # (a Unit Score several % below the game's). "auto" derives it
-    # from the account's own cards (`collection.POWER_UP_AUTO`), so it guesses nothing;
-    # a value already there, typed or "auto", is kept.
-    # Cards TRIED as if owned (the Collection page's "Try as owned") end at the refresh: the
-    # account is read again and it does not have them. One the account now owns is simply
-    # owned.
+    # Cards tried as if owned (the Collection page's "Try as owned") end at the refresh.
+    # A collection born from a snapshot has no `power_up_permyriad`, which would mean no
+    # Member Power-Up Bonus at all; "auto" derives it from the account's own cards
+    # (`collection.POWER_UP_AUTO`). A value already there is kept.
     if merged.get("trial"):
         posters_note += ("; " if posters_note else "") + f"trial cards cleared ({len(merged['trial'])})"
     merged.pop("trial", None)
@@ -1338,7 +1249,7 @@ def merge_collection(snap: dict) -> None:
     atomic_io.write_text(state, json.dumps(merged, indent=1, ensure_ascii=False), "utf8")
 
     print(f"\nmerged    : {state}")
-    if state.exists():
+    if backup is not None:
         print(f"            backup -> {backup}")
     print(f"            cards {before_n} -> {len(entries)}; card_default {before_def!r} -> 'unknown'")
     if posters_note:
@@ -1348,20 +1259,17 @@ def merge_collection(snap: dict) -> None:
         + ("; player.level / power_up_permyriad kept" if "player" in preserved else "")
     )
     print("            data/cards.json and data/owned.json not touched.")
+    return True
 
 
 # ---------------------------------------------------------------- credential handling
 def import_from_localstore(path: str, host: str = "us.game-hololive-dreams.com") -> None:
     """Lift the persistent account credential out of the game's OWN LocalLow store.
 
-    The WorldWide (Steam) client persists the login credential as a standalone BOM-prefixed
-    file under %USERPROFILE%/AppData/LocalLow/QualiArts, Inc_/hololive-Dreams/. It is the SAME
-    255-byte credential the client sends in its Auth/Login request body -- read from the
-    game's own data on the user's own machine.
-
-    The value is written to state/ (gitignored) and NEVER printed. The host defaults to the
-    WorldWide region (US, lowest ping for a European player); a login that returns grpc-status
-    16 means the account lives in another region -- rerun with --host jp or --host as.
+    The Steam client keeps the 255-byte credential it sends in Auth/Login as a BOM-prefixed
+    file under %USERPROFILE%/AppData/LocalLow/QualiArts, Inc_/hololive-Dreams/. The value is
+    written to state/ (gitignored) and never printed. A login answering grpc-status 16 means
+    the account lives in another region: rerun with --host jp or --host as.
     """
     raw = Path(path).read_bytes()
     cred = raw[3:] if raw[:3] == b"\xef\xbb\xbf" else raw  # strip a UTF-8 BOM if present
@@ -1370,7 +1278,7 @@ def import_from_localstore(path: str, host: str = "us.game-hololive-dreams.com")
             f"unexpected credential length {len(cred)} B (expected ~255) -- refusing to "
             f"write a guess; is {path} really the credential file?"
         )
-    STATE.mkdir(exist_ok=True)
+    STATE.mkdir(parents=True, exist_ok=True)
     atomic_io.write_text(
         CRED_FILE,
         json.dumps(
@@ -1383,6 +1291,7 @@ def import_from_localstore(path: str, host: str = "us.game-hololive-dreams.com")
             indent=1,
         ),
         "utf8",
+        private=True,
     )
     print(f"wrote {CRED_FILE}  (credential {len(cred)} B, host {host}; value not printed)")
 
@@ -1449,7 +1358,7 @@ def main() -> None:
     ap.add_argument(
         "--propose-collection",
         action="store_true",
-        help="write a CANDIDATE collection.json to dumps/ for the owner to review",
+        help="write a CANDIDATE collection.json to dumps/ to review by hand",
     )
     ap.add_argument(
         "--merge-collection",
@@ -1546,7 +1455,7 @@ def main() -> None:
             f"player.posters follows it on --merge-collection)"
         )
 
-    DUMPS.mkdir(exist_ok=True)
+    DUMPS.mkdir(parents=True, exist_ok=True)
     out = Path(args.out) if args.out else DUMPS / f"account_snapshot_{args.account}.json"
     atomic_io.write_text(out, json.dumps(snap, indent=1, ensure_ascii=False), "utf8")
     print(f"written   : {out}")
@@ -1559,28 +1468,20 @@ def main() -> None:
     if args.propose_collection:
         propose_collection(snap)
 
-    # ⚠ ORDER MATTERS, and it is the opposite of the obvious one. Everything
-    # here except `--refresh-card-params` is a pure function of the snapshot
-    # ALREADY IN HAND, so none of it may be hostage to one more network call:
-    # if `Card/GetParameters` comes back DATE_CHANGED, the exception unwinds
-    # `main`, and `--merge-collection` would never run -- leaving the solver
-    # scoring cards at stale levels while every counter reports success. So
-    # the offline work runs FIRST.
+    # ⚠ The offline work runs FIRST: it depends only on the snapshot in hand, and must not be
+    # lost if a later network call (Card/GetParameters on DATE_CHANGED) ends `main`.
     if args.refresh_board_state:
         refresh_board_state(snap)
 
-    if args.merge_collection:
-        merge_collection(snap)
+    merge_refused = bool(args.merge_collection) and not merge_collection(snap)
 
     if args.diff:
         diff_against_collection(snap)
 
-    # `User/Get` succeeds while `Event/ListEventInfo` and `Card/GetParameters` are
-    # refused `grpc-status 3 DATE_CHANGED` once the in-game day has rolled over
-    # (`hbuilder.game_day`: the master's Setting.resetTimingHour, JST) and the CLIENT has not processed the reset yet. Not rate limiting,
-    # not a stale credential: it clears as soon as the game itself is opened once.
-    # Diagnosed rather than raised, because a traceback here reads as "the account
-    # broke"; each call is still tried, so one that is answered is not lost.
+    # Once the in-game day rolls over (`hbuilder.game_day`, Setting.resetTimingHour JST),
+    # `Event/ListEventInfo` and `Card/GetParameters` are refused `grpc-status 3 DATE_CHANGED`
+    # until the game client processes the reset (opened once); `User/Get` still succeeds.
+    # Reported as a diagnosis, not a traceback; each call is still tried.
     refused = []
     for wanted, rpc, read in (
         (args.refresh_events, "Event/ListEventInfo", refresh_event_info),
@@ -1610,6 +1511,8 @@ def main() -> None:
         ):
             print(line, file=sys.stderr)
         sys.exit(1)
+    if merge_refused:
+        sys.exit(2)
 
 
 if __name__ == "__main__":

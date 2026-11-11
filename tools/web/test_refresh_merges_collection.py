@@ -13,8 +13,8 @@ because she is already in the set.
 
 The merge is the single authorised writer (`account_snapshot.py
 --merge-collection` -> `collection_from_snapshot`): it guesses nothing, every
-value is the account's own read back from `User/Get`, and it backs up once to
-`dumps/collection_before_import.json`. The button only decides WHO invokes it.
+value is the account's own read back from `User/Get`, and it backs up the file before every
+merge (`dumps/collection_backups/`). The button only decides WHO invokes it.
 
     python -m pytest tools/web/test_refresh_merges_collection.py
 """

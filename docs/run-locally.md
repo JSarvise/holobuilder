@@ -19,7 +19,7 @@ do the same thing and take the same options; [On Linux](#on-linux) lists what di
 - **Python 3.13** from [python.org](https://www.python.org/downloads/windows/), with *Add
   python.exe to PATH* ticked. 3.12 and newer work; 3.13 is the version the project is tested on.
   `setup.cmd` names an older Python it finds and stops; a `.venv` made with one is made again.
-- **gcc**, a C compiler. The team search runs three small C kernels that are compiled on your PC.
+- **gcc**, a C compiler. The team search runs four small C kernels that are compiled on your PC.
   The easiest is WinLibs: `winget install BrechtSanders.WinLibs.POSIX.UCRT` (or download it from
   [winlibs.com](https://winlibs.com/) and add its `mingw64\bin` folder to the PATH). Open a new
   window afterwards so the PATH is read again.
@@ -101,6 +101,10 @@ copied from its own cache instead of downloaded.
 the game has not been opened since, the server refuses part of the account read with
 `DATE_CHANGED` until the game runs its daily reset. The refresh says so, keeps what it could read,
 and the next refresh after opening the game completes it.
+
+**A refresh signs in to your account** a few times (the account itself, your event rank, your
+pull history), each time as the game does when it starts. Signing in can end a game session
+open on this PC or another device, so close the game before refreshing.
 
 Downloads from the game's servers go at one request per second and are cached on disk.
 

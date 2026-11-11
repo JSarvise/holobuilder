@@ -4,67 +4,42 @@
     python tools/refresh/refresh_all.py --offline  # local rebuilds only
     python tools/refresh/refresh_all.py --dry-run  # plan + current state, run nothing
 
-The chain, in dependency order:
+The chain is the `STEPS` table in `refresh_steps.py`, in dependency order, one line per
+step saying what it builds; `--dry-run` prints it with each step's current state. By kind:
 
-    1. master        hololive-dreams-master's own dump (scripts\\run-local.ps1)
-    2. master_index  dumps/master_index.json from a live Master/Get
-    3. account       Auth/Login -> User/Get -> card_params + board_state
-    4. cards         dumps/cards_enriched.json from the masters + card_params
-    5. import        dumps/cards_import_draft.json, the schema-valid proposal
-    6. add_cards     APPEND-ONLY additions to data/cards.json
-    7. catalog       dumps/octocacheevai_prod.dec from the client's own install
-    8. charts        download the .sus charts the catalogue names and disk lacks
-    9. songs         dumps/songs.json from the masters + the charts on disk
-   10. song_meta     Music (casts) + LangMusic_Eng (titles) + runtime tables, from the master
-   11. chart_lib     lattice/music_coef caches if stale -> dumps/charts.json --verify
-   12. jackets       song jackets the catalogue names and disk lacks + render
-   13. board         dumps/board.json from board_state
-   (6b. card_art     portrait + square WEBP for cards the art dir lacks, after add_cards)
-   (6c. event_art    open events' title/kind/times + banner -> dumps/event_meta.json, event_art/)
-   (6d. event_cutoffs tier borders, all regions + the account's rank -> dumps/cutoffs/; soft)
-   (6e. event_history every event seen + the account's result -> dumps/event_history.json; soft)
-   (7b. item_icons   item/resource thumbs from the LOCAL Octo cache -> dumps/item_icons/; soft)
-   (12b. member_icons, skill_icons  holomem faces + board node glyphs, LOCAL Octo cache; soft)
-   (14. park_export  Parkview maps + spot positions -> dumps/park_export/; soft)
-   (11b. park_moves  the Park scan's quest data -> dumps/park_export/park_moves.json; soft)
+    master tables  master, master_index, level_tables, node_master, song_meta, park_moves
+    the account    account, event_bonus, inventory, board, board_export
+    the catalogue  cards, level_curve, caps, import, add_cards (APPEND-ONLY), skilltree
+    songs          catalog, charts, songs, chart_lib
+    events         event_art, event_cutoffs, event_history, event_emblems
+    pictures       card_art, item_icons, ui_assets, jackets, member_icons, skill_icons,
+                   live2d, chibi, park_export
 
-The whole point of this tool is the *diff*: it loads six JSON artefacts, takes set
-differences over card ids and table names, and counts nodes and slots. It runs the
-same on Windows and Linux. The one step that is not Python is `master`, the sibling
-hololive-dreams-master repo's own Windows script (run-local.ps1): it runs on Windows
-when that repo is checked out, and is skipped elsewhere (`master_index` and the
-synced export cover what the refresh reads).
+A `soft` step's failure is printed as a warning and the chain goes on. The `--dry-run`
+plan marks the steps a run would skip, and why.
 
-What this tool may and may not write
-------------------------------------
-The two authoritative files answer two different questions, and they have two
-different rules:
+The point of this tool is the *diff*: every step is judged by comparing its artefacts on
+disk before and after, and the report names what changed (table, card, node and slot counts,
+and the ids that appeared or vanished). The one step that is not Python is `master`, the
+sibling hololive-dreams-master repo's Windows script; it is skipped elsewhere
+(`master_index` and the synced export cover what the refresh reads).
 
-`data/owned.json` is the USER'S COLLECTION. This tool MAY
-APPEND to it: a card the account owns and the file lacks is added, with the ids
-taken from `card_params.json`, which is the account's own `User/Get` read back
-from the server -- so nothing is guessed. It may never modify or remove an
-existing entry, `owned_guard` verifies that after the run, and the writer refuses
-to touch the file at all unless re-serialising the unchanged data reproduces it
-byte for byte.
+What this tool may write
+------------------------
+Both authoritative files are APPEND-ONLY: a whole new id may appear, an existing entry may
+never be modified or removed.
 
-`data/cards.json` is the GAME'S CATALOGUE, which is not the user's data. The
-`add_cards` step MAY ADD a card the game ships and the file lacks; it may never
-modify or remove an existing entry, and a card it cannot translate cleanly is
-reported by id with its reason rather than guessed. The guard here is stronger
-than a digest because "append-only" is not a statement a digest can make: every
-record present before the run is compared for deep equality afterwards, and
-only whole new ids may appear.
+`data/owned.json` is the account's collection. A card the account owns and the file lacks is
+appended, its id taken from `card_params.json` (the account's own `User/Get`), so nothing is
+guessed. `owned_guard` verifies the rule after the run, and the writer refuses to write unless
+re-serialising the unchanged data reproduces the file byte for byte.
 
-A blanket "never write either" would let new cards sit unnoticed -- the tool
-would answer "your best team" without them and the user would never learn they
-existed. `--dry-run-adds` writes nothing, for a run where you want to look first.
+`data/cards.json` is the game's catalogue. `add_cards` adds a card the game ships and the file
+lacks; a card it cannot translate cleanly is reported with its reason, never guessed.
+`catalogue_guard` compares every pre-existing record for deep equality after the run.
 
-Reporting rule
---------------
-"Step 4 OK" proves nothing. Every step is judged by comparing the artefact on
-disk before and after, and the report names what changed: table counts, card
-counts, node counts, slots, and the specific ids that appeared or vanished.
+Writing neither would let a new card sit unnoticed: the tool would answer "your best team"
+without it. `--dry-run-adds` writes nothing.
 """
 
 from __future__ import annotations
@@ -82,6 +57,7 @@ from pathlib import Path
 from typing import Any
 
 import atomic_io
+from refresh_steps import ACCOUNT_STEPS, PICTURE_STEPS, STEP_NAMES, STEPS, Step, _pyexe
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
@@ -93,27 +69,10 @@ STATE = paths.STATE
 DATA = paths.DATA
 MASTER_REPO = paths.MASTER_REPO
 
-# The user's own account.
-#
-# `data/owned.json` may be APPENDED TO by this tool when the account has a card
-# the file lacks: the refresh is what should notice a new card and add it.
-#
-# A pipeline must not be able to replace hand-entered truth with a guess. So
-# this is append-only, on the
-# same contract as `data/cards.json` -- a whole new id may appear, an existing
-# entry may never be modified or removed -- and it is enforced after the run by
-# `owned_guard`, not merely intended.
-
-# Append-only, and verified as such after the run. `cards.json` is the game's
-# catalogue and `owned.json` is the user's collection; they are different things
-# with the same write contract.
+# The account's collection: append-only, enforced after the run by `owned_guard`.
 APPEND_ONLY_OWNED = DATA / "owned.json"
 
-# The game's CATALOGUE, which is a different thing. The `add_cards` step may ADD a card the game ships and
-# this file lacks; it may never modify or remove an existing entry. A digest
-# check cannot express that, so this file gets a stronger guard instead: every
-# record present before the run is compared for deep equality after it, and only
-# whole new ids may appear. See `catalogue_guard`.
+# The game's catalogue: append-only, enforced record by record by `catalogue_guard`.
 APPEND_ONLY = DATA / "cards.json"
 
 # The four `m9999` tutorial difficulties carry two SPECIAL cues instead of five,
@@ -205,9 +164,8 @@ def probe_songs() -> Snap:
 def probe_chart_library() -> Snap:
     """`charts.json` -- the EXPERT chart library `--song`/`--across-songs` score on.
 
-    Reported as its own artefact rather than folded into the songs probe because
-    it is TWO rebuilds downstream of a chart landing on disk (the parsed-note
-    cache, then this), and each of those is a place the chain can silently stop.
+    Its own probe because it is two rebuilds downstream of a chart landing on disk, and the
+    chain can silently stop at either.
     """
 
     def extract(doc: Any) -> tuple[dict, dict]:
@@ -261,14 +219,10 @@ def probe_card_art() -> Snap:
 
 
 def chart_cache_state() -> list[str]:
-    """Whether the two parsed-chart caches have caught up with the .sus files.
+    """Whether the parsed-chart caches have caught up with the .sus files.
 
-    The parsed cache is not rebuilt by a plain `build_charts.py` run, so
-    downloading twenty new charts leaves the solver quietly scoring
-    the old set — the artefact reports success and the number it produces is
-    computed over content that no longer matches the disk. That is exactly the
-    "verify artefacts, not counters" failure, so it is named here rather than
-    left to be noticed.
+    A plain `build_charts.py` run does not rebuild the parsed cache, so new charts on disk
+    leave the solver scoring the old set while every step reports success.
     """
     sus_dir = DUMPS / "charts_cdn"
     if not sus_dir.is_dir():
@@ -283,9 +237,6 @@ def chart_cache_state() -> list[str]:
         parsed = len(json.loads(cache.read_text(encoding="utf-8")))
     except Exception as exc:  # noqa: BLE001
         return lines + [f"  lattice_charts.json unreadable: {exc}"]
-    # The four `m9999` tutorial difficulties carry two SPECIAL cues instead of
-    # five and are skipped by design, so the cache is expected to sit exactly
-    # four below the file count -- not equal to it.
     expected = on_disk - TUTORIAL_CHART_COUNT
     if parsed < expected:
         lines.append(
@@ -324,11 +275,7 @@ def probe_board_state() -> Snap:
 
 
 def probe_inventory() -> Snap:
-    """dumps/inventory.json -- the ITEM balances.
-
-    It holds how many Red Cubes (and other materials) the account has, which is
-    half of what a board node costs. The balance is in `User/Get`, readable only
-    once the reader inflates the body."""
+    """dumps/inventory.json -- the item balances, incl. the materials a board node costs."""
 
     def extract(doc: Any) -> tuple[dict, dict]:
         tree = doc.get("skill_tree") or {}
@@ -357,10 +304,8 @@ def probe_board() -> Snap:
 def probe_board_export() -> Snap:
     """`dumps/board_export.json` — the web frontend's view of the board.
 
-    ⚠ It must be part of this pipeline: if the file on disk falls behind
-    `board.json`, the web server diffs its buy/sell proposal against a
-    stale "current board" and budgets plans against stale `points.granted`, and
-    nothing says so unless something is watching it."""
+    Behind `board.json`, it makes the web server diff its buy/sell proposal against a stale
+    current board and budget plans against stale `points.granted`, silently."""
 
     def extract(doc: Any) -> tuple[dict, dict]:
         chars = doc.get("characters") or []
@@ -394,14 +339,9 @@ def derived_artefact_drift() -> list[tuple[str, str, float]]:
     """`(derived, source, hours_behind)` for every derived file OLDER than the
     file it is built from.
 
-    ⚠ This exists because a derived artefact going stale is SILENT: if
-    `account_snapshot.py` refreshes `dumps/board_state.json` and nobody runs
-    build_board.py, `dumps/board.json` keeps describing the previous board, and
-    the solver can score a card WITHOUT her board's cooldown shorten with
-    nothing saying a word.
-
-    The full chain rebuilds these in order, so this is a guard on the paths that
-    are NOT the full chain — a direct `account_snapshot.py`, an interrupted run.
+    A stale derived file is silent (e.g. `board.json` still describing the previous board
+    after a direct `account_snapshot.py`). The full chain rebuilds them in order; this guards
+    the other paths: a single step run by hand, an interrupted run.
     """
     pairs = [
         (DUMPS / "board.json", DUMPS / "board_state.json"),
@@ -425,19 +365,11 @@ def collection_level_drift(
     """`(card_id, field, in_collection, on_account)` for every card the two
     disagree about. Empty when they agree, or when either file is absent.
 
-    ⚠ **The id-set comparison below is not enough.** It can report
-    "state/collection.json matches the live account" while a card sits at level
-    1 in the collection and level 70 on the account: she is in BOTH sets, so
-    nothing is missing, and the solver goes on scoring her at a fraction of her
-    real stats — a card that cannot be recommended, with no line anywhere
-    saying why.
-
-    No level curve and no derivation: `account_snapshot_*.json` carries `level`,
-    `bloom` and `limit_break` verbatim, so this compares the two numbers that
-    are supposed to be the same number. A field the snapshot OMITS is not drift
-    — absent is not evidence of zero, and treating it as drift would flag most
-    of the collection and train the operator to ignore the warning. Cards only
-    one side knows are the id probe's business, not this one's."""
+    The id-set comparison cannot see a card held in both at different levels, which the
+    solver would score at a fraction of her real stats. The snapshot carries `level`, `bloom`
+    and `limit_break` verbatim, so the numbers are compared directly. A field the snapshot
+    omits is not drift (absent is not zero). Cards only one side knows are the id probe's
+    business."""
     try:
         collection = json.loads(collection_path.read_text(encoding="utf-8"))
         snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
@@ -562,22 +494,6 @@ def missing_keys(step_names) -> bool:
     return game_keys.grpc_seed(required=False) is None
 
 
-@dataclass
-class Step:
-    name: str
-    what: str
-    network: bool
-    probes: list[str]
-    build: Callable[[argparse.Namespace], tuple[list[str], dict[str, str], Path]]
-    # A soft step's failure is printed as a WARN and never fails the refresh: a
-    # convenience artefact (an icon) must not turn the daily command red.
-    soft: bool = False
-
-
-def _pyexe(args: argparse.Namespace) -> str:
-    return args.python or sys.executable
-
-
 PICTURES_LOCK_MAX_S = 6 * 3600  # a picture run's lock older than this is a stopped run's leftover
 
 
@@ -679,566 +595,10 @@ def start_pictures(pyexe: str, steps: list[str], offline: bool) -> str:
     )
 
 
-def cmd_master(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    script = MASTER_REPO / "scripts" / "run-local.ps1"
-    cmd = [
-        "powershell",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-NoProfile",
-        "-File",
-        str(script),
-    ]
-    env = {"FORCE_RUN": "1"} if args.force else {}
-    return cmd, env, MASTER_REPO
-
-
-def cmd_master_index(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    # NO `--account`. `master_index_live.py` takes only `--dry-run`: it calls
-    # `Master/Get`, which declares `disabled_game_auth_token`, so it needs no
-    # credential and has no account to choose. Passing one makes argparse exit 2
-    # and the step fail on every run.
-    return [_pyexe(args), str(HERE / "master_index_live.py")], {}, HERE
-
-
-def cmd_event_bonus(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "marathon_bonus.py")], {}, HERE
-
-
-def cmd_inventory(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "inventory_snapshot.py")], {}, HERE
-
-
-def cmd_account(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    cmd = [
-        _pyexe(args),
-        str(HERE / "account_snapshot.py"),
-        "--account",
-        args.account,
-        "--snapshot",
-        "--refresh-card-params",
-        "--refresh-board-state",
-        "--diff",
-    ]
-    # The desktop app gets the open event from the publisher, and
-    # ListEventInfo is the call a not-yet-reset game day refuses (DATE_CHANGED).
-    if not getattr(args, "account_only", False):
-        cmd.insert(-1, "--refresh-events")
-    if args.merge_collection:
-        cmd.append("--merge-collection")
-    return cmd, {}, HERE
-
-
-def cmd_cards(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "build_cards_dataset.py")], {}, HERE
-
-
-def cmd_level_curve(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "card_level_curve.py")], {}, HERE
-
-
-def cmd_caps(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "card_caps.py")], {}, HERE
-
-
-# The master tables the runtime reads as dumps/holodori/main_<T>.json, written from the local
-# master by master_json.py (the directory name only reflects the export format it mirrors).
-# Writing them locally means they never lag the game.
-LEVEL_TABLES = ("Card", "CardLevel", "LiveNote", "SkillTreeNode", "CharacterLevel")
-# the open event's title (event_art.py), written with the level tables so that the FIRST refresh's
-# event_art step has them: song_meta runs after it
-EVENT_TITLE_TABLES = ("Poster", "LangPoster_Eng", "LangEventStoryChapter_Eng")
-SONG_META_TABLES = (
-    "Music",
-    "LangMusic_Eng",
-    "Poster",
-    # read by the web/app
-    "Setting",
-    "LangItem_Eng",
-    "LangMarathonRankingGrade_Eng",
-    "MarathonRankingGrade",
-    "LiveDeckEvaluationRank",
-    "LiveScoreEvaluationRank",
-    "SkillTreeEffectValueLimit",
-    "Character",
-    "CharacterGrouping",
-    "SdCostume",
-)
-
-
-def cmd_level_tables(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "master_json.py"), *LEVEL_TABLES, *EVENT_TITLE_TABLES], {}, HERE
-
-
-def cmd_import(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "import_to_cards.py")], {}, HERE
-
-
-def cmd_add_cards(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    cmd = [_pyexe(args), str(HERE / "card_append.py")]
-    if args.dry_run_adds:
-        cmd.append("--dry-run")
-    return cmd, {}, HERE
-
-
-def cmd_catalog(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "octo_catalog.py")], {}, HERE
-
-
-def cmd_charts(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "chart_download.py")], {}, HERE
-
-
-def cmd_songs(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "build_songs.py")], {}, HERE
-
-
-def cmd_song_meta(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    # casts (Music) + titles (LangMusic_Eng), from the master (master_json.py).
-    # ...and Poster: `maxed_account_bonuses` counts its rows as "every poster the
-    # game has shipped", so it must follow the game as posters are added.
-    return [_pyexe(args), str(HERE / "master_json.py"), *SONG_META_TABLES], {}, HERE
-
-
-def cmd_park_moves(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "park_scan.py"), "--write-moves"], {}, HERE
-
-
-def cmd_chart_lib(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return (
-        [
-            _pyexe(args),
-            str(HERE / "build_charts.py"),
-            "--rebuild-caches",
-            "--all-out",
-            str(DUMPS / "charts_all.json"),
-            "--verify",
-        ],
-        {},
-        HERE,
-    )
-
-
-def cmd_jackets(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "song_jackets.py"), "--sync"], {}, HERE
-
-
-def cmd_card_art(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "card_art_sync.py")], {}, HERE
-
-
-def cmd_event_art(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    # Exits 0 whatever is missing: a banner the CDN will not serve is a printed line
-    # and a null title/art on the Event page, never a failed refresh.
-    return [_pyexe(args), str(HERE / "event_art.py")], {}, HERE
-
-
-def cmd_event_cutoffs(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    # Every region's tier borders (guests) plus the account's own rank in its region (the
-    # account this refresh already logged in with). An ended chapter the server still lists
-    # is read once more for its finals. Reading them on every refresh keeps the Event page
-    # from sitting on an old read and missing the event's end and the final rank.
-    own = ["--region", "own"] if getattr(args, "account_only", False) else []
-    return [_pyexe(args), str(HERE / "event_cutoffs.py"), "--self", "--songs", *own], {}, HERE
-
-
-def cmd_event_emblems(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    # after event_history: it names the chapters on record (each one's exact medal)
-    return [_pyexe(args), str(HERE / "event_emblems.py")], {}, HERE
-
-
-def cmd_event_history(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    # Offline: folds event_meta (archived before the event leaves the list), the cutoff store
-    # (the account's rank, Event Pt, final borders) and the emblems held into event_history.json.
-    return [_pyexe(args), str(HERE / "event_history.py")], {}, HERE
-
-
-def cmd_item_icons(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    # Reads the client's own Octo cache; downloads nothing. A new item's icon arrives
-    # with the refresh rather than waiting for a hand run.
-    return [_pyexe(args), str(HERE / "item_icons.py")], {}, HERE
-
-
-def cmd_ui_assets(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "ui_assets.py")], {}, HERE
-
-
-def cmd_node_master(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "master_export.py"), "SkillTreeNode", "SkillTreeEffect"], {}, HERE
-
-
-def cmd_skilltree(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "build_skilltree.py")], {}, HERE
-
-
-def cmd_member_icons(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "member_icons.py")], {}, HERE
-
-
-def cmd_skill_icons(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "skill_icons.py")], {}, HERE
-
-
-def cmd_park_export(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "park_export.py")], {}, HERE
-
-
-def cmd_board(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    cmd = [
-        _pyexe(args),
-        str(HERE / "build_board.py"),
-        "--connect-level",
-        args.connect_level,
-    ]
-    return cmd, {}, HERE
-
-
-def cmd_board_export(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "board_export.py")], {}, HERE
-
-
-def cmd_live2d(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    # The leaders' Live2D figures for the Optimizer (live2d_build.py): every outfit of the
-    # game's catalogue that is not converted yet, so a NEW card's leader figure appears without
-    # a hand run, owned or not -- "Maxed account" and the pulls page lead with any card,
-    # unowned ones included. Built models are skipped, so a
-    # refresh with nothing new downloads nothing; a new outfit is ~4.5 MB.
-    return [_pyexe(args), str(HERE / "live2d_build.py"), "--all"], {}, HERE
-
-
-def cmd_chibi(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    # The Optimizer's progress-bar runners (chibi_build.py): only the SD
-    # outfits of the game's current master SdCostume with no model yet, so a new outfit runs
-    # without a hand run; a refresh with nothing new downloads nothing.
-    return [_pyexe(args), str(HERE / "chibi_build.py"), "--new"], {}, HERE
-
-
-# What the desktop app refreshes (`--account-only`): the steps that read the account itself,
-# and the two boards built from its board state. Everything else is shared content the
-# publisher's full refresh builds and tools/app/publish.py serves.
-# event_cutoffs reads only the account's own region there (`--region own`): the app has no guest
-# accounts, and the borders come from the tracker; what only this account can read is its own
-# rank and Event Pt (without this step the app's Event page shows no points after a refresh).
-ACCOUNT_STEPS = ("account", "inventory", "board", "board_export", "event_cutoffs", "event_history")
-
-# Steps that only bring pictures: nothing the optimizer scores reads them, and the pages draw
-# without them (a missing picture is a 404). On a first refresh they are most of the time
-# (chibis ~50 min and card art / jackets / Live2D from the CDN without a game cache), so
-# `--pictures-later` runs everything else first and these in the background afterwards.
-PICTURE_STEPS = ("card_art", "event_emblems", "jackets", "live2d", "chibi", "park_export")
-
-STEPS: list[Step] = [
-    Step(
-        "master",
-        "hololive-dreams-master dump (fetch + decrypt + commit + push)",
-        network=True,
-        probes=["master_tables"],
-        build=cmd_master,
-    ),
-    Step(
-        "master_index",
-        "dumps/master_index.json from a live Master/Get",
-        network=True,
-        probes=["master_index"],
-        build=cmd_master_index,
-    ),
-    # The account step turns each card's exp into a LEVEL through the Card +
-    # CardLevel tables (main_*.json). A card newer than those tables has no row
-    # there, so it would merge into state/collection.json with NO level -- and
-    # `power_up_permyriad: "auto"` sums over every owned card's level, so one
-    # missing level moves the Member Power-Up line of every deck. LiveNote and
-    # SkillTreeNode are the other two tables live code reads. Written from the
-    # local master (master_json.py), after master_index so a table the game just
-    # changed is read at its new seed.
-    Step(
-        "level_tables",
-        "Card + CardLevel (exp -> level) + LiveNote + SkillTreeNode from our master",
-        network=True,
-        probes=[],
-        build=cmd_level_tables,
-    ),
-    Step(
-        "account",
-        "Auth/Login -> User/Get -> card_params.json + board_state.json",
-        network=True,
-        probes=["snapshot", "card_params", "board_state", "collection"],
-        build=cmd_account,
-    ),
-    Step(
-        "event_bonus",
-        "dumps/marathon_bonus.json -- the open event's bonus tables (Event/ListEventInfo)",
-        network=False,
-        probes=["event_bonus"],
-        build=cmd_event_bonus,
-    ),
-    Step(
-        "inventory",
-        "dumps/inventory.json -- every item balance, incl. the 8 board currencies",
-        network=True,
-        probes=["inventory"],
-        build=cmd_inventory,
-    ),
-    Step(
-        "cards",
-        "dumps/cards_enriched.json from the masters + card_params",
-        network=False,
-        probes=["cards_enriched"],
-        build=cmd_cards,
-    ),
-    # Two more files read off the masters. If they fall behind the game, newer
-    # cards cannot be restated at their real level and the account basis scores
-    # them at their MAXED stats -- a wrong ranking, with nothing saying so.
-    Step(
-        "level_curve",
-        "dumps/card_level_curve.json -- per-level stat multipliers and each card's group",
-        network=False,
-        probes=[],
-        build=cmd_level_curve,
-    ),
-    Step(
-        "caps",
-        "dumps/card_caps.json -- level / bloom / limit-break caps by rarity",
-        network=False,
-        probes=[],
-        build=cmd_caps,
-    ),
-    Step(
-        "import",
-        "dumps/cards_import_draft.json -- the schema-valid proposal",
-        network=False,
-        probes=["cards_json"],
-        build=cmd_import,
-    ),
-    Step(
-        "add_cards",
-        "APPEND-ONLY: add cards the game ships and data/cards.json lacks",
-        network=False,
-        probes=["cards_json"],
-        build=cmd_add_cards,
-    ),
-    # `catalog` precedes everything that asks the Octo CDN for an asset BY NAME.
-    # After `card_art`, the first refresh after an update would look the new cards'
-    # art up in the previous catalogue and fail ("NOT IN CAT").
-    Step(
-        "catalog",
-        "dumps/octocacheevai_prod.dec from the client's own install (no network)",
-        network=False,
-        probes=[],
-        build=cmd_catalog,
-    ),
-    # Item/resource thumbs for the Resources view. Needs `catalog` (md5 -> asset
-    # name). Local only, and soft: a missing cache or a bad bundle is a WARN line.
-    Step(
-        "item_icons",
-        "dumps/item_icons/ -- item + resource thumbs from the local Octo cache "
-        "(no network; never fails the refresh)",
-        network=False,
-        probes=[],
-        build=cmd_item_icons,
-        soft=True,
-    ),
-    # The card chrome and the official UI sprites the pages draw (ui_assets.json says which);
-    # after item_icons, whose thumbs it copies. Local install only, soft.
-    Step(
-        "ui_assets",
-        "dumps/card_chrome/ + dumps/ui_official/ -- the game's own UI sprites the pages draw "
-        "(local install, no network; never fails the refresh)",
-        network=False,
-        probes=[],
-        build=cmd_ui_assets,
-        soft=True,
-    ),
-    Step(
-        "card_art",
-        "portrait + square WEBP for cards the art dir lacks (Octo CDN by name, 1 req/s)",
-        network=True,
-        probes=["card_art"],
-        build=cmd_card_art,
-    ),
-    # The open events' title (master Poster name), kind, times and banner/logo art.
-    # Needs `account` (event_info_live.bin), `master` (the Poster tables) and
-    # `catalog` (asset names) before it.
-    Step(
-        "event_art",
-        "dumps/event_meta.json + dumps/event_art/ -- event title, kind, times, banner "
-        "(Octo CDN by name, 1 req/s; never fails the refresh)",
-        network=True,
-        probes=[],
-        build=cmd_event_art,
-    ),
-    Step(
-        "event_cutoffs",
-        "dumps/cutoffs/<region>/ -- every region's tier borders + the owner's own rank "
-        "(appended; an ended chapter read once more for its finals; never fails the refresh)",
-        network=True,
-        probes=[],
-        build=cmd_event_cutoffs,
-        soft=True,
-    ),
-    Step(
-        "event_history",
-        "dumps/event_history.json -- every event seen, the owner's result and the final borders "
-        "(additive: an event once seen is never dropped; offline, never fails the refresh)",
-        network=False,
-        probes=[],
-        build=cmd_event_history,
-        soft=True,
-    ),
-    Step(
-        "event_emblems",
-        "dumps/event_art/emblem-<chapter>-<grade>.webp -- every chapter's ranking medal as the game "
-        "draws it (Octo CDN, new ones only; published with the event art; never fails the refresh)",
-        network=True,
-        probes=[],
-        build=cmd_event_emblems,
-        soft=True,
-    ),
-    # The song chain, and it is three steps because a song shipping is three
-    # separate things going stale: a stale catalogue does not name a new song's
-    # charts, so the downloader cannot ask for them, so songs.json has no chart to
-    # point at. Nothing reports a problem — `songs.json` gives the old count and
-    # means it.
-    Step(
-        "charts",
-        "download .sus charts the catalogue names and disk lacks (1 req/s, md5-verified)",
-        network=True,
-        probes=[],
-        build=cmd_charts,
-    ),
-    Step(
-        "songs",
-        "dumps/songs.json from the masters + the charts on disk",
-        network=False,
-        probes=["songs"],
-        build=cmd_songs,
-    ),
-    # ...and a NEW SONG is three more things going stale after songs.json: its
-    # cast + title (Music, LangMusic_Eng), the parsed-chart caches the solver scores
-    # from (charts.json is TWO rebuilds downstream of a .sus landing), and its
-    # jacket. With all three stale a song has no cast (so every singer node is
-    # inert on it), "(no title on file)" and no jacket.
-    Step(
-        "song_meta",
-        "Music (casts) + LangMusic_Eng (titles) + the other runtime tables from our master",
-        network=True,
-        probes=["song_casts", "song_titles"],
-        build=cmd_song_meta,
-    ),
-    # The Park scan's quest data (park_scan.py --write-moves): the master's AREA_MOVE quest steps
-    # and its areas, with the hashes of the tables they come from; the scan stops when the live
-    # master no longer carries them. In park_export/, so the app gets it with the maps. Soft.
-    Step(
-        "park_moves",
-        "dumps/park_export/park_moves.json -- the Park scan's quest data, from our master",
-        network=True,
-        probes=[],
-        build=cmd_park_moves,
-        soft=True,
-    ),
-    Step(
-        "chart_lib",
-        "lattice/music_coef caches if stale, then dumps/charts.json + "
-        "dumps/charts_all.json (every difficulty, --verify)",
-        network=False,
-        probes=["chart_library"],
-        build=cmd_chart_lib,
-    ),
-    Step(
-        "jackets",
-        "song jackets the catalogue names and disk lacks (Octo CDN, 1 req/s) + render",
-        network=True,
-        probes=["jackets"],
-        build=cmd_jackets,
-    ),
-    # The Connect effects build_board resolves sockets against. A stale file has
-    # no Connect effect for a newer socketed card and `board` fails outright.
-    # Offline, from the masters, a second or two.
-    # build_board, tree_optimise, the CLI and the web server all read the node table
-    # as dumps/master_SkillTreeNode.json, which must follow the game when it adds
-    # nodes to the trees.
-    Step(
-        "node_master",
-        "dumps/master_SkillTreeNode.json + master_SkillTreeEffect.json from the masters",
-        network=False,
-        probes=[],
-        build=cmd_node_master,
-    ),
-    Step(
-        "skilltree",
-        "dumps/skilltree.json (board graph + card Connect effects) from the masters",
-        network=False,
-        probes=[],
-        build=cmd_skilltree,
-    ),
-    # The web's pictures (holomem faces, board glyphs), so a clean checkout gets them without a
-    # hand run. Local Octo cache, no network; soft, like item_icons.
-    Step(
-        "member_icons",
-        "dumps/member_icons/ -- the round holomem faces (/chricon, the board export) from the "
-        "local Octo cache (never fails the refresh)",
-        network=False,
-        probes=[],
-        build=cmd_member_icons,
-        soft=True,
-    ),
-    Step(
-        "skill_icons",
-        "dumps/skill_icons/ -- the board node glyphs (/icon) from the local Octo cache, plus "
-        "what octo_fetch pulled (never fails the refresh)",
-        network=False,
-        probes=[],
-        build=cmd_skill_icons,
-        soft=True,
-    ),
-    Step(
-        "board",
-        "dumps/board.json from board_state.json",
-        network=False,
-        probes=["board"],
-        build=cmd_board,
-    ),
-    Step(
-        "board_export",
-        "dumps/board_export.json -- the web frontend's board (nodes, costs, "
-        "sockets, points.granted). MUST follow `board`.",
-        network=False,
-        probes=["board_export"],
-        build=cmd_board_export,
-    ),
-    Step(
-        "live2d",
-        "dumps/live2d/ -- the leaders' Live2D figures (every new outfit of the game)",
-        network=True,
-        probes=[],
-        build=cmd_live2d,
-    ),
-    Step(
-        "chibi",
-        "dumps/chibi/ -- the Optimizer's running chibis (new SD outfits of the game only)",
-        network=True,
-        probes=[],
-        build=cmd_chibi,
-    ),
-    # Parkview's raw maps + every spot's pixel position (park_export.py). The map bundles come
-    # from the Octo CDN once, then the export is offline. Soft.
-    Step(
-        "park_export",
-        "dumps/park_export/ -- Parkview's maps and spot positions (Octo CDN once; never fails the refresh)",
-        network=True,
-        probes=[],
-        build=cmd_park_export,
-        soft=True,
-    ),
-]
-
-STEP_NAMES = [s.name for s in STEPS]
-
-
 def probe_event_bonus() -> Snap:
     """dumps/marathon_bonus.json -- the event bonus tables, and which groups are open NOW.
 
-    The optimiser must always work with the current event, so the tables are read on every
-    refresh rather than taken from hand-made captures."""
+    Read on every refresh so the optimiser always works with the current event."""
 
     def extract(doc: Any) -> tuple[dict, dict]:
         groups = doc.get("groups") or []
@@ -1341,21 +701,13 @@ def _owned_bytes(payload: dict[str, Any]) -> bytes:
 def merge_owned(account: str) -> tuple[list[str], bool]:
     """APPEND cards the account owns and `data/owned.json` lacks. Never anything else.
 
-    Three things make this safe enough to be automatic:
-
-    1. The ids come from `card_params.json`, which is the account's own `User/Get`
-       read back from the server -- nothing is guessed.
-    2. It is append-only: existing entries are carried across untouched, and
-       `owned_guard` verifies that after the run rather than trusting it.
-    3. It refuses to write unless re-serialising the UNCHANGED data reproduces the
-       file byte for byte, so a formatting drift can never be smuggled in with an
-       addition. A 26-line append must not become a whole-file reformat.
+    The ids come from the account's own `User/Get`; existing entries are carried across
+    untouched (`owned_guard` checks it); and it refuses to write unless re-serialising the
+    unchanged data reproduces the file byte for byte, so an append never becomes a reformat.
     """
     created = False
     if not APPEND_ONLY_OWNED.exists():
-        # A fresh desktop-app install ships no account: the file is
-        # born empty in this tool's own format and filled below -- appending to nothing.
-        # Where the file exists this never runs.
+        # A fresh desktop-app install ships no account: start an empty file in this format.
         atomic_io.write_bytes(APPEND_ONLY_OWNED, _owned_bytes({"owned": [], "schema_version": "2"}))
         created = True
     have = owned_ids()
@@ -1365,9 +717,8 @@ def merge_owned(account: str) -> tuple[list[str], bool]:
     if params.exists and not params.error:
         ids, source = params.ids["card"], "card_params.json"
     else:
-        # Card/GetParameters is the call a not-yet-reset game day refuses (DATE_CHANGED); the
-        # collection merged a moment ago is the same account's own User/Get, so its card ids
-        # are just as much the account's word. Nothing guessed either way.
+        # Card/GetParameters is refused on a not-yet-reset game day (DATE_CHANGED); the
+        # collection just merged from the same account's User/Get holds the same card ids.
         try:
             ids = set(json.loads((STATE / "collection.json").read_text("utf-8"))["cards"])
             source = "state/collection.json"
@@ -1375,10 +726,8 @@ def merge_owned(account: str) -> tuple[list[str], bool]:
             return [f"card_params.json unavailable ({params.error}) and no collection -- not merging"], True
 
     missing = sorted(set(ids) - set(have))
-    # only cards the catalogue knows: an owned id that data/cards.json lacks makes the whole
-    # app refuse to load ("_LoadFailure: 3" on the page, e.g. a new event's card pulled
-    # before the app's synced catalogue has it). Such a card is held back and appended
-    # by the first refresh after the catalogue gains it (append-only either way).
+    # Only cards the catalogue knows: an owned id that data/cards.json lacks makes the app
+    # refuse to load ("_LoadFailure: 3"). Such a card is held back until the catalogue has it.
     catalogue = catalogue_records()
     later = [cid for cid in missing if catalogue is not None and cid not in catalogue]
     missing = [cid for cid in missing if cid not in later]
@@ -1441,9 +790,7 @@ def owned_guard(before: list[str] | None) -> tuple[list[str], bool]:
 def catalogue_records() -> dict[str, Any] | None:
     """`data/cards.json` as {id: record}, or None if it cannot be read.
 
-    Deliberately the whole record and not a digest: the guard has to distinguish
-    "two cards were appended" from "one card's magnitude changed", and a sha256
-    says only that the bytes moved.
+    Whole records, not a digest: the guard must tell an append from a modified record.
     """
     try:
         doc = json.loads(APPEND_ONLY.read_bytes().decode("utf-8"))
@@ -1455,10 +802,8 @@ def catalogue_records() -> dict[str, Any] | None:
 def catalogue_guard(before: dict[str, Any] | None) -> tuple[list[str], bool]:
     """Enforce append-only on `data/cards.json`, by comparing records.
 
-    The rule allows exactly one kind of change: whole new ids appearing. A
-    modified record, a vanished record, or a file that stopped parsing are all
-    failures, and each is named rather than summarised -- if this ever fires,
-    the useful output is WHICH card moved.
+    Only whole new ids may appear. A modified or vanished record, or an unparseable file, is
+    a failure, and each offending card is named.
     """
     after = catalogue_records()
     if before is None or after is None:
@@ -1527,20 +872,11 @@ def _compare(
 def hand_merge_report(account: str = "main") -> tuple[list[str], bool]:
     """Everything the derived artefacts know that the hand-edited files do not.
 
-    Two independent comparisons, because the two authoritative files answer two
-    different questions:
-
-      data/cards.json  -- the card CATALOGUE, and NOT the user's data. Compared
-                          against cards_enriched.json, which is rebuilt from the
-                          game's own Card master. A gap here means the game shipped
-                          a card the catalogue has not heard of. The `add_cards` step closes
-                          such a gap automatically -- append-only -- so a gap
-                          surviving to this report means the add REFUSED the card
-                          and said why, or the step was skipped.
-      data/owned.json  -- the user's COLLECTION. Compared against card_params.json,
-                          which is a live Card/GetParameters of the real account. A
-                          gap here means the account acquired a card and the
-                          append (`merge_owned`) has not happened.
+    data/cards.json  -- the catalogue, against cards_enriched.json (the game's Card
+                        master). A gap surviving `add_cards` means it refused the card
+                        and said why, or the step was skipped.
+    data/owned.json  -- the collection, against card_params.json (the account's live
+                        Card/GetParameters). A gap means `merge_owned` has not run.
     """
     lines, need_a = _compare(
         probe_cards_enriched(),
@@ -1557,13 +893,11 @@ def hand_merge_report(account: str = "main") -> tuple[list[str], bool]:
         "captured",
         "owned",
         "The merge_owned step appends them (append-only, guarded by owned_guard).",
-        policy="is the owner's account: the refresh may append a card, never modify or remove one.",
+        policy="is the account itself: the refresh may append a card, never modify or remove one.",
     )
     lines += more
 
-    # state/collection.json is not hand-only -- the tool CAN write it, but only
-    # when asked. Say when it has fallen behind the live account rather than
-    # merging silently.
+    # state/collection.json is written only on --merge-collection: report when it is behind.
     params, coll = probe_card_params(), probe_collection()
     if params.exists and coll.exists and not (params.error or coll.error):
         behind = params.ids["card"] - coll.ids["card"]
@@ -1577,10 +911,7 @@ def hand_merge_report(account: str = "main") -> tuple[list[str], bool]:
             )
             if behind:
                 lines.append(f"     + {_fmt_ids(behind)}")
-        # ...and the half the id sets cannot see: a card that IS in both but at
-        # the wrong level. Reported whether or not the sets agree, because the
-        # two failures are independent and the "matches" line below must not
-        # hide this one.
+        # A card in both at a different level: independent of the id sets, so always checked.
         drift = collection_level_drift(STATE / "collection.json", DUMPS / f"account_snapshot_{account}.json")
         if drift:
             lines.append(
@@ -1605,9 +936,7 @@ def hand_merge_report(account: str = "main") -> tuple[list[str], bool]:
     else:
         lines.append("  derived files are newer than their sources.")
 
-    # The song chain has no hand-edited authority to compare against, so its
-    # staleness is reported here rather than as a merge: the failure it guards
-    # is the solver scoring a chart set that no longer matches the disk.
+    # The song chain has no authority file to compare against: report the cache staleness.
     lines.append("")
     lines += chart_cache_state()
     library = probe_chart_library()
@@ -1663,10 +992,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--connect-level",
         # "auto": each socket's level from its card's bloom in state/collection.json
-        # (bloom 5 on a 4/5-star = level 2). The collection holds every owned card's
-        # bloom from User/Get, so auto is the account. On an account with 10 bloom-5
-        # socket cards, "1" reads Overall Power 335,354 and its board 93,999 against
-        # the game's 335,758 / 94,389; "auto" reproduces both exactly.
+        # (bloom 5 on a 4/5-star = level 2). With 10 bloom-5 socket cards, "1" reads Overall
+        # Power 335,354 / board 93,999 against the game's 335,758 / 94,389; "auto" matches.
         default="auto",
         choices=("auto", "1", "2"),
         help="passed through to build_board.py (default: auto, from each socket card's bloom)",
@@ -1680,11 +1007,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--verbose", action="store_true", help="print full output of every step")
     args = ap.parse_args(argv)
 
-    # Print in UTF-8 whatever the console/pipe claims to be.
-    # Redirected to a file, stdout can come up as cp1252, and the FIRST step whose output
-    # carries a U+FFFD (e.g. build_charts' progress line) would kill the whole refresh with
-    # UnicodeEncodeError mid-report. A refresh must not die over how a subprocess spelled a
-    # character; `errors="replace"` keeps the line, mangled at worst.
+    # Print in UTF-8 whatever the console/pipe claims to be: redirected, stdout can be cp1252,
+    # and one U+FFFD in a step's output would kill the refresh with UnicodeEncodeError.
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -1763,10 +1087,8 @@ def main(argv: list[str] | None = None) -> int:
             print("  " + line)
         return 0
 
-    # The game in maintenance refuses every call (each network step would fail on its own
-    # and the gacha sync would die in a traceback). One
-    # anonymous Master/Get first: in maintenance nothing runs, nothing is written, and the
-    # exit code says why (EXIT_MAINTENANCE), so the page can say so instead of "partial".
+    # In maintenance the game refuses every call. One anonymous Master/Get first: if it says
+    # maintenance, nothing runs and the exit code (EXIT_MAINTENANCE) lets the page say so.
     if any(selected(s)[0] and s.network for s in STEPS):
         import account_snapshot  # noqa: PLC0415
 
@@ -1775,10 +1097,8 @@ def main(argv: list[str] | None = None) -> int:
             print("Nothing was refreshed and nothing was written; refresh again once it ends.")
             return EXIT_MAINTENANCE
 
-    # Without the client's payload seed every API step would fail on its own, one traceback
-    # after another, while the downloads around them ran for nothing: say what is missing
-    # once, and run nothing. (The maintenance probe above needs no seed: a refusal carries no
-    # sealed body, and without a seed it answers "unknown".)
+    # Without the client's payload seed every API step would fail: say so once and run
+    # nothing. (The maintenance probe needs no seed; without one it answers "unknown".)
     if missing_keys(s.name for s in STEPS if selected(s)[0]):
         print("\nTHE GAME CLIENT'S BUILD CONSTANTS ARE NOT ON THIS PC -- the game's API cannot be read.")
         print("Find them in your own game install (one anonymous request, nothing printed):")
@@ -1807,12 +1127,8 @@ def main(argv: list[str] | None = None) -> int:
 
         before = {key: probes[key]() for key in step.probes}
         cmd, env, cwd = step.build(args)
-        # A step whose working directory is absent (e.g. the `master` step's
-        # hololive-dreams-master repo on a machine that has not cloned it) cannot
-        # run -- and launching a subprocess with a missing cwd raises
-        # NotADirectoryError, which would crash the WHOLE refresh on the first
-        # step so nothing after it ran. Skip it as a first-class "not here" state,
-        # exactly like a deselected step, and let the rest of the refresh proceed.
+        # A step whose working directory is absent (the `master` repo not cloned here) is
+        # skipped like a deselected one: a missing cwd would raise and end the whole refresh.
         if not Path(cwd).is_dir():
             print(f"[skip] {step.name} -- working dir not here: {cwd}")
             results.append((step.name, f"skipped (dir missing: {cwd})", []))

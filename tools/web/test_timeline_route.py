@@ -145,7 +145,7 @@ def test_active_windows_are_ordered_and_never_silently_clamped(web_base):
 def test_the_timeline_honours_the_level_bloom_what_if(web_base):
     """The same team drawn at `assume_level=max` must not score as its real
     (often level-1) stats — the ranking was solved with the what-if, so the
-    timeline's total must move with it (REDESIGN-PLAN D6)."""
+    timeline's total must move with it."""
     real = _post(web_base, {"song": "m0001", "cards": _six(), "basis": "maxed"})
     maxed = _post(
         web_base,

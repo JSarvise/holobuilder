@@ -49,7 +49,7 @@ for _p in (paths.WEB_DIR, paths.REFRESH_DIR, paths.WEB_DIR / "kernel"):
 import certificate as cert_mod  # noqa: E402
 
 from hbuilder.domain.board_plan import node_effect_ids_from_master  # noqa: E402
-from hbuilder.domain.song import load_charts  # noqa: E402
+from hbuilder.domain.song import ChartLibrary, load_charts  # noqa: E402
 from hbuilder.inputs import (  # noqa: E402
     DEFAULT_BOARD_PATH,
     DEFAULT_CHARTS_PATH,
@@ -109,7 +109,9 @@ SETTINGS: dict[str, Any] = {
     "ranking": {"size": 50},
 }
 # the bases the leaf is built on (basis -> its short tag). The maxed basis keys
-# carry no basis line.
+# carry no basis line. `maxed` here is the whole catalogue at max with every bench holomem's
+# board developed (`_with_maxed_bench`), the web's "Maxed account"; in `hbweb.basis`,
+# `maxed` keeps the account's own captured bench boards.
 BASES = {
     "maxed": "",
     "account": "account_",
@@ -187,9 +189,10 @@ def _load_precompute():
 def load_context(
     uptime_model: str, flat_budget: int, song: str, difficulty: str = "EXPERT"
 ) -> tuple[Sequence[Card], ScoringConfig, RefineContext, SongChart]:
-    cards, owned, cfg, _prov = load_inputs(CARDS_PATH, OWNED_PATH)
+    # the maxed basis owns the whole catalogue: no owned.json
+    cards, _owned, cfg, _prov = load_inputs(CARDS_PATH, None)
     cards, basis = apply_collection(
-        cards, None, owned_ids=[c.id for c in owned], maxed=True, assume_level="max", assume_bloom="max"
+        cards, None, owned_ids=[], maxed=True, assume_level="max", assume_bloom="max"
     )
     if basis.bonuses is not None:
         cfg = dataclasses.replace(cfg, account=basis.bonuses)
@@ -205,8 +208,8 @@ def load_context(
     bench = (_read_json(REPO / DEFAULT_BOARD_PATH) or {}).get("characters") or None
     name_by_chr = {"chr-" + c.id.split("-")[1]: c.member for c in cards}
     difficulty = (difficulty or "EXPERT").upper()
-    library = load_charts(str(CHARTS_PATH if difficulty == "EXPERT" else CHARTS_ALL_PATH))
-    chart = library.get(song, difficulty) if library is not None else None
+    library = chart_library(CHARTS_PATH if difficulty == "EXPERT" else CHARTS_ALL_PATH)
+    chart = library.get(song, difficulty)
     if chart is None:
         raise MissingInput(f"no {difficulty} chart for {song}")
     ctx = RefineContext(
@@ -310,9 +313,8 @@ def build_maxed(args: argparse.Namespace, proxy_card_id: str | None) -> dict[str
     five, reps, dominated = build_pool([c for c in cards if not mf.is_bare(c)], TABLE_SEED[0])
     ctx = dataclasses.replace(ctx, use_plan_cache=True, plan_cache_seed=TABLE_SEED)
     ih, per = cert_mod.inputs_hash(ctx.cfg, "maxed", cert_mod.MODEL_VERSION)
-    # EXPERT reads charts.json exactly as before (its enumeration keys do not
-    # move); another difficulty digests ITS chart in charts_all.json, so an
-    # enumeration on it can never pass for the EXPERT one
+    # EXPERT reads charts.json (its enumeration keys stay put); another difficulty digests
+    # ITS chart in charts_all.json, so an enumeration on it can never pass for the EXPERT one
     cd = cert_mod.chart_digest(
         args.song, charts_path=cert_mod.charts_path_for(difficulty), difficulty=difficulty
     )
@@ -427,8 +429,7 @@ def account_reference_key(args: argparse.Namespace, bench: str = "captured") -> 
 
 
 def developed_bench(seed_ids: list[str], *, max_level: bool, resources: str) -> dict:
-    """`precompute_optimisations.developed_bench_characters` (moved there so the
-    web server shares it)."""
+    """`precompute_optimisations.developed_bench_characters`, shared with the web server."""
     spec = importlib.util.spec_from_file_location(
         "precompute_optimisations", REFRESH_DIR / "precompute_optimisations.py"
     )
@@ -483,7 +484,6 @@ def build_account(
     if bench not in BENCH_MODES:
         raise ValueError(f"bench must be one of {BENCH_MODES}, got {bench!r}")
     from hbuilder.domain.board_plan import bench_sockets_from_state, node_effect_ids_from_master  # noqa: PLC0415
-    from hbuilder.domain.song import load_charts  # noqa: PLC0415
     from hbuilder.inputs import DEFAULT_BOARD_PATH  # noqa: PLC0415
     from hbuilder.solver.parallel_refine import RefineContext  # noqa: PLC0415
 
@@ -505,10 +505,10 @@ def build_account(
     bench_captured = (_read_json(REPO / DEFAULT_BOARD_PATH) or {}).get("characters") or None
     bench_mode = bench
     difficulty = cert_mod.normalize_difficulty(getattr(args, "difficulty", None))
-    library = load_charts(
-        str(cert_mod.charts_path_for(difficulty, charts_path=CHARTS_PATH, charts_all_path=CHARTS_ALL_PATH))
+    library = chart_library(
+        cert_mod.charts_path_for(difficulty, charts_path=CHARTS_PATH, charts_all_path=CHARTS_ALL_PATH)
     )
-    chart = library.get(args.song, difficulty) if library is not None else None
+    chart = library.get(args.song, difficulty)
     if chart is None:
         raise MissingInput(f"no {difficulty} chart for {args.song}")
 
@@ -590,8 +590,23 @@ def _difficulty(difficulty: str | None) -> str:
     return cert_mod.normalize_difficulty(difficulty)
 
 
+def chart_library(path: str | Path) -> ChartLibrary:
+    """The chart library at `path`. `MissingInput` names the file and how to build it when it is
+    absent, so a search, a row's details or an event view says what is missing instead of failing
+    later on a library that is not there."""
+    library = load_charts(str(path))
+    if library is None:
+        where = Path(path)
+        raise MissingInput(
+            f"The song charts are missing: {where.name} is not in {where.parent}. They are built "
+            "from the game by the refresh: run refresh.cmd (./refresh.sh on Linux) in the "
+            "holobuilder folder, or restart the app so it downloads them."
+        )
+    return library
+
+
 def charts_path(difficulty: str = DEFAULT_DIFFICULTY) -> Path:
-    """charts.json for EXPERT (its digests unchanged), charts_all.json else."""
+    """charts.json for EXPERT (its digests stay put), charts_all.json else."""
     import certificate as cert_mod  # noqa: PLC0415
 
     return cert_mod.charts_path_for(difficulty)
@@ -693,14 +708,13 @@ def leaf_inputs(basis: str = "maxed", difficulty: str = DEFAULT_DIFFICULTY, song
 # ---------------------------------------------------------------------------
 # The bench (the holomems off the team) of the `maxed` basis = the web's "Maxed account"
 # (every card at max level and bloom, every holomem at max level with her board developed).
-# `load_context` alone gives it the account's CAPTURED boards
-# (`dumps/board.json`: a few nodes a holomem, Connect cards at level 1), which would max
-# only the six team boards. Instead every bench holomem spends her max-level points on
-# what of her board reaches a team from the bench (greens, yellows, sockets), with
-# level-2 Connect cards from the whole catalogue, placed by the domain's exact assignment
+# `load_context` alone gives it the account's CAPTURED boards (`dumps/board.json`), which
+# would max only the six team boards. Instead every bench holomem spends her max-level points
+# on what of her board reaches a team from the bench (greens, yellows, sockets), with level-2
+# Connect cards from the whole catalogue placed by the domain's exact assignment
 # (`precompute_optimisations.maxed_account_bench`), valued at a FIXED nominal team so the
-# bench never depends on the team being scored: the roster the community tool
-# holodori.best uses (v3.1.1), the same as `hbweb.basis.MAXED_ACCOUNT_NOMINAL_TEAM`.
+# bench never depends on the team scored: holodori.best's roster, the same as
+# `hbweb.basis.MAXED_ACCOUNT_NOMINAL_TEAM`.
 MAXED_NOMINAL_TEAM = (
     "card-00022-5-uniq-0063-00",
     (
@@ -884,8 +898,8 @@ def _slot_orders(rows: list[dict], built: dict, chart, log=None, known: dict | N
     """`member_order` (the slot order) and the run-score quantiles
     (`row_detail.quantile_fields`) of the first `ORDER_ROWS` rows: each row re-developed
     on the leaf that scored it (`row_detail.leaf_detail`, refined when the row
-    was), so the order and the law are the ones behind its `best`. Additive:
-    an older file simply lacks the fields; a failure leaves them out and logs.
+    was), so the order and the law are the ones behind its `best`. Additive: a
+    reader accepts rows without the fields; a failure leaves them out and logs.
     `known` (team key -> fields) is shared between calls so a team present in
     both the global ranking and the per-leader rows is developed once."""
     known = {} if known is None else known

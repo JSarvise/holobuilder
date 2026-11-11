@@ -5,8 +5,8 @@
 // board (opt-score.js / opt-event.js fill it); `det.cur` is the same team on the boards
 // as they are (/api/compare captured).
 import { byId, esc, fmt, dec, sgn, info, INK, thumb, place, NOTES } from "/opt-util.js";
-import { badge as rankBadge, score, rankOf, unitRows } from "/hb-grade.js";
-import { render as renderTimeline } from "/hb-timeline.js";
+import { badge as rankBadge, score, rankOf, unitRows, songRows, loadRanks } from "/hb-grade.js";
+import { render as renderTimeline, setPace } from "/hb-timeline.js";
 import { mount as mountFigure } from "/hb-live2d.js";
 import { boardPlanHTML, wireBoardPlan } from "/opt-boardplan.js";
 
@@ -130,14 +130,16 @@ export function unitPanel(T, det) {
 }
 
 /* ------------------------------------------------------------ the run panel */
-function lawChart(law, marks) {
+function lawChart(law, marks, picked = null) {
   const pm = law.pmf; if (!pm || !pm.mass || !pm.mass.length) return "";
   const n = pm.mass.length, lo = pm.start, hi = pm.start + n * pm.width, peak = Math.max(...pm.mass) || 1;
   const X = v => (v - lo) / (hi - lo) * 100;
-  const bars = pm.mass.map((m, k) => `<i style="left:${(k / n * 100).toFixed(3)}%;width:${(100 / n).toFixed(3)}%;height:${Math.max(1, m / peak * 100).toFixed(1)}%" data-tip="${fmt(lo + k * pm.width)} – ${fmt(lo + (k + 1) * pm.width)}|${dec(m * 100, 2)}%|of runs"></i>`).join("");
+  // with the score pace served, a bar is a button: its runs' pace is drawn in Skill uptime
+  const pick = !!law.pace;
+  const bars = pm.mass.map((m, k) => `<i${pick ? ` data-k="${k}"${k === picked ? ' class="on"' : ""}` : ""} style="left:${(k / n * 100).toFixed(3)}%;width:${(100 / n).toFixed(3)}%;height:${Math.max(1, m / peak * 100).toFixed(1)}%" data-tip="${fmt(lo + k * pm.width)} – ${fmt(lo + (k + 1) * pm.width)}|${dec(m * 100, 2)}%|of runs${pick ? (k === picked ? " · click again for every run" : " · click: their pace in Skill uptime") : ""}"></i>`).join("");
   const mk = marks.filter(([, v]) => v != null && v >= lo && v <= hi).map(([lab, v, cls]) =>
     `<span class="mk ${cls}" style="left:${X(v).toFixed(2)}%" data-tip="${lab}|${fmt(v)}"><span>${lab}</span></span>`).join("");
-  return `<div class="o-law" role="img" aria-label="Run score distribution, ${fmt(law.p1)} to ${fmt(law.p99)} from the 1st to the 99th percentile">
+  return `<div class="o-law${pick ? " pick" : ""}" role="img" aria-label="Run score distribution, ${fmt(law.p1)} to ${fmt(law.p99)} from the 1st to the 99th percentile">
       <div class="bars">${bars}${mk}</div>
       <div class="ax"><span class="num">${fmt(lo)}</span>${pm.below ? `<span>${dec(pm.below * 100, 1)}% of runs below</span>` : ""}<span class="num">${fmt(hi)}</span></div>
     </div>`;
@@ -164,7 +166,8 @@ export function runPanel(T, det) {
   let body;
   if (law) {
     const q = [["1%", law.p1], ["5%", law.p5], ["Median", law.p50], ["95%", law.p95], ["99%", law.p99]];
-    body = `${lawChart(law, [["Expected", f.value ?? exp, "e"], ["Now", now, "n"]])}
+    body = `${lawChart(law, [["Expected", f.value ?? exp, "e"], ["Now", now, "n"]], det.paceBar ?? null)}
+      ${law.pace ? `<p class="o-cap">Click a bar to see, in Skill uptime, the score pace of the runs that end there.</p>` : ""}
       <div class="o-stats o-qs">${q.map(([lab, v]) => `<div title="${lab === "Median" ? "Half the runs score less" : `${lab} of runs score less`}"><span>${lab}</span><b>${fmt(v)}</b></div>`).join("")}</div>
       <div class="o-stats o-s${pts.length + 1}">${pts.map(([lab, v]) => `<div><span>${lab}</span><b>${score(v, 7)}</b></div>`).join("")}<div title="Standard deviation of the run score"><span>Spread (sd)</span><b>±${fmt(law.sd)}</b></div></div>
       <p class="o-cap">${esc(law.premise || "")}. ${law.exact === false ? `Binned to ${fmt(law.bin_width)}-point steps over ${fmt(law.support)} outcomes.` : `Exact over ${fmt(law.support)} outcomes.`}${law.random_windows != null ? ` ${law.random_windows} Active windows roll.` : ""}</p>`;
@@ -224,15 +227,40 @@ export function timelinePanel(T, det, cardOf) {
     <div class="o-hbtl" data-tl="${esc(T.key)}" data-leader="${esc(T.leader || "")}"></div>
   </div>`;
 }
+// the score pace of one histogram bar's runs (`det.paceBar`, null = every run), drawn in the
+// timeline when the distribution came with it (`distribution.pace`)
+function paceOpts(det) {
+  const law = det.fig && det.fig.distribution, tl = det.tl && det.tl.timeline;
+  if (!law || !law.pace || !tl) return null;
+  return { pace: law.pace, pmf: law.pmf, bar: det.paceBar ?? null, grades: songRows(tl.music_id) };
+}
+let paced = null;  // the last detail whose bar was picked: Esc lets it go
 export function wireTimeline(root, det, cardOf) {
   const el = root.querySelector(".o-hbtl"); if (!el || !det.tl) return;
   const nm = id => { const c = cardOf(id); return c ? `${c.member || ""}${c.costume_name ? " · " + c.costume_name : ""}` : id; };
   const L = cardOf(el.dataset.leader) || null;
+  const pace = paceOpts(det);
   renderTimeline(el, det.tl.timeline, {
     name: nm,
     leader: L ? { name: L.member || L.id, text: L.costume_name ? `Leader · ${L.costume_name}` : "Leader" } : undefined,
+    pace,
+  });
+  if (!pace) return;
+  // the grade lines need /api/ranks: drawn again once it has answered
+  if (!pace.grades.length) loadRanks().then(() => { const o = paceOpts(det); if (o && o.grades.length) setPace(el, o); });
+  const pick = k => {
+    det.paceBar = k;
+    root.querySelectorAll(".o-law .bars > i[data-k]").forEach(b => b.classList.toggle("on", +b.dataset.k === k));
+    const o = paceOpts(det); if (o) setPace(el, o);
+    paced = k == null ? null : { root, det, pick };
+  };
+  root.querySelectorAll(".o-law .bars > i[data-k]").forEach(b => {
+    b.onclick = () => pick(det.paceBar === +b.dataset.k ? null : +b.dataset.k);
   });
 }
+if (typeof document !== "undefined") document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && paced && paced.root.isConnected) paced.pick(null);
+});
 
 /* ------------------------------------------------------------ Holomem Board plan */
 const BR = { R: ["Leader Skill", "--br-r"], B: ["Member Skill", "--br-b"], G: ["Overall Boost", "--br-g"], Y: ["Song Bonus", "--br-y"], S: ["Connect", "--ink-2"] };

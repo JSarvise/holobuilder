@@ -1,19 +1,13 @@
 """The sole file-I/O boundary for canonical data (cards.json, owned.json).
 
-No function here writes either file — every function in this module reads
-only. `domain/schema.py` owns validation rules; this module wires JSON I/O
-to those rules and to `card_from_record`.
+Read only: `domain/schema.py` owns the validation rules; this module wires JSON
+I/O to them and to `card_from_record`.
 
-Mode A vs mode B. `data/cards.json` holds **maxed** stats,
-so a default run answers "what is the best team if every card were
-maxed?" — mode A, and it stays the default. A *mode B* document is the
-same cards.json shape carrying the account's **real** per-card
-stats, plus one extra top-level `provenance` object naming where those
-numbers came from and when. `card_provenance` parses that block. A
-document with no `provenance` key is mode A — the absence is the default,
-never an error. Nothing in this repository writes a mode-B document;
-`data/cards.json` and `data/owned.json` are read-only to every code path in
-this package.
+Mode A vs mode B. `data/cards.json` holds **maxed** stats, so a default run
+answers "what is the best team if every card were maxed?" (mode A, the default).
+A *mode B* document has the same shape with the account's **real** per-card
+stats, plus a top-level `provenance` object naming where those numbers came from
+and when (`card_provenance`). No `provenance` key means mode A, never an error.
 """
 
 from __future__ import annotations
@@ -55,13 +49,10 @@ _PROVENANCE_STRING_FIELDS: tuple[str, ...] = (
 class CardProvenance:
     """Where a non-default card document's stats came from.
 
-    Deliberately not optional-field-tolerant: a document that claims to
-    carry real stats must say, in the file itself, which mode it is, what
-    basis its stats are on, when it was generated, and which two files it
-    was generated from. A half-filled provenance block is a `SchemaError`,
-    not a shrug — the whole point of the block is that nobody can mistake a
-    real-stat ranking for a maxed one, and a block that only half-says so
-    fails that job."""
+    Every field is required: a document claiming real stats must say which mode
+    it is, what basis its stats are on, when it was generated and from which two
+    files, so nobody can mistake a real-stat ranking for a maxed one. A
+    half-filled block is a `SchemaError`."""
 
     mode: str
     stats_basis: str
@@ -76,9 +67,8 @@ class CardProvenance:
 def card_provenance(doc: object) -> CardProvenance | None:
     """Parse the optional top-level `provenance` block of a cards document.
 
-    Returns `None` when the key is absent — that is mode A (maxed stats
-    from the hand-edited `data/cards.json`), the default, and it is not a
-    gap. Raises `SchemaError` when the key is present but malformed."""
+    Returns `None` when the key is absent (mode A, the default). Raises
+    `SchemaError` when the key is present but malformed."""
     if not isinstance(doc, dict) or PROVENANCE_KEY not in doc:
         return None
 
@@ -133,14 +123,10 @@ def load_cards(path: Path) -> tuple[Card, ...]:
     empty `cards` array is a valid document and returns an empty tuple, not
     a parse error. Returns cards in file order.
 
-    Says nothing about *which stat basis* the document carries — that is
-    `card_provenance_of`'s job, deliberately a second function rather than
-    a second return value here. `tests/test_exit_codes.py::
-    test_the_shared_load_and_guard_is_the_only_load_path` pins `load_cards`
-    by name as the CLI's one card-loading call site; folding
-    provenance into this signature would rename that call and silently
-    void the pin. The cost is one extra read of the same file per run,
-    which is nothing next to a solve.
+    The stat basis is `card_provenance_of`'s, a second function rather than a
+    second return value: `tests/test_exit_codes.py::
+    test_the_shared_load_and_guard_is_the_only_load_path` pins `load_cards` by
+    name as the one card-loading call site. The cost is one extra read per run.
     """
     with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
@@ -181,12 +167,10 @@ def card_provenance_of(path: Path) -> CardProvenance | None:
 
 
 def load_owned(path: Path, cards: tuple[Card, ...]) -> tuple[Card, ...]:
-    """Read owned.json, raise `SchemaError` naming any id repeated within
-    `owned.json` or absent from `cards`, and return the owned subset
-    ordered by each card's position in `cards` — never by the order ids
-    appear in `owned.json` — so two owned files differing only in id order
-    resolve to identical tuples. An empty `owned` array returns an empty
-    tuple without raising."""
+    """Read owned.json and return the owned subset in `cards` order (never the
+    file's order, so two owned files differing only in id order give identical
+    tuples). Raises `SchemaError` naming any id repeated in `owned.json` or absent
+    from `cards`."""
     with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
 
@@ -227,9 +211,8 @@ class CardCompleteness:
 
 def completeness_report(cards: tuple[Card, ...]) -> tuple[CardCompleteness, ...]:
     """One `CardCompleteness` per card whose `Card.unknown_fields()` is
-    non-empty, in `cards` order, field paths in `unknown_fields()`'s own
-    deterministic order. A card with no unknown fields is omitted entirely
-    — an explicit zero is known data, never a gap."""
+    non-empty, in `cards` order. A card with no unknown fields is omitted (an
+    explicit zero is known data, never a gap)."""
     report: list[CardCompleteness] = []
     for card in cards:
         unknown = card.unknown_fields()

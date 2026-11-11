@@ -1,146 +1,55 @@
 """Per-card collection state — level, bloom and limit break — and the stat
 formula that turns them into numbers.
 
-Behaviours this module guarantees:
+Entry points: `collection_stats` (a collection document -> each card's stats plus a
+report), `resolve_card_state`, `effective_stats` / `StatBasis.stats_at`,
+`restate_card_skills` (skills at the level the bloom bought), and the account-level terms
+(`memory_bonus_per_stat`, `member_power_up`, `derived_member_power_up_permyriad`).
 
-* `"max"` resolves against the game's real ceilings **per rarity and per limit
-  break** — `max` with `limit_break: 0` on a 5★ is **40**, not 80;
-* a partial entry inherits the rest from the default (`{"bloom": 3}` is legal);
-* out-of-range values are **clamped and REPORTED**, never silently corrected;
-* an id naming a card outside the dataset is **warned about**, not ignored;
-* and the one that matters most: with no `card_caps.json`, `"max"` resolves to
-  `None` and says so, instead of inventing a number.
-
-That last behaviour is why `CardLevelCaps` is an optional input here rather
-than a lookup this module performs for itself.
-
+Guarantees: `"max"` resolves per rarity and per limit break (a 5★ at `limit_break: 0` is
+level 40, not 80); a partial entry inherits the rest from the default (`{"bloom": 3}` is
+legal); out-of-range values are clamped and reported; an unknown card id is warned about;
+and with no `card_caps.json`, `"max"` resolves to `None` and says so instead of inventing
+a number (which is why `CardLevelCaps` is an input here).
 
 ## The stat formula
 
     stat_i = ceil(ceil(ratio_i * (level_multiplier / 1000)) * bloom_multiplier)
 
-evaluated in **IEEE-754 binary32 at every step**, in that operand order.
+evaluated in IEEE-754 binary32 at every step, in that operand order, as the client's
+`CardStatus` constructor does (scalar single-precision ops throughout; the only widening
+to double is for `Math.Ceiling`). Details and the two-ceiling rule: `effective_stats`.
 
-**Two ceilings.** The level-scaled parameter is rounded up to an integer
-BEFORE the bloom multiplier applies. A single-ceiling form is short by exactly
-1 wherever the intermediate is fractional AND `bloom_permil != 0` — see
-`effective_stats` for the evidence and for the level/bloom confound that hides
-it.
+- `ceil`, not `round`: `round` puts 32 of 50 transcribed SSR cards 1 low.
+- Do not evaluate in binary64 and snap before `ceil`: the client's f32 rounding pushes a
+  mathematically integral product up. Takane Lui "Strategic Prodigy" at level 2 (permil
+  400, `parameter_base_value` 4695) is 1878.0 exactly, which the client computes as
+  1878.0001220703125 and ceils to 1879; a snapped binary64 version is wrong on 12 of the
+  211,320 (card, level, bloom, stat) points in the master data.
+- The operand order matters on its own: only `permil * (parameter/1000)` reproduces that
+  case; the other orders give exactly 1878.0 in f32.
 
-`ceil` is not a rounding choice made here: with `round()`, 32 of the 50
-transcribed SSR cards come out exactly 1 low on their two smaller stats and
-exact on the largest. `ceil` reproduces all three exactly.
+`bloom_multiplier` comes from master `CardPotential` via `card_caps.json`, a CUMULATIVE
+array indexed by bloom (3★: `[0, 0, 50, 50, 50, 150]`, bloom 5 = 1.15). The per-level
+multiplier comes through `StatBasis` from `dumps/card_level_curve.json` (master
+`CardLevel`, whole curve). `effective_stats` takes the multiplier as an argument so a
+caller holding one level's figure cannot apply it at another, and `StatBasis.stats_at`
+returns `None` for a level the table does not define rather than the nearest one.
 
-**Single precision is read from the client** — `CardStatus::.ctor`
-(`Vision.Common.Core`, RVA `0x52acff0`), whose arithmetic is scalar single
-throughout:
+The check that matters is against the server's own `card_potential_parameter` on captured
+decks (`test_member_parameter_reproduces_the_servers_own_figure`): `build_cards_dataset.py`
+shares this arithmetic, so agreeing with its `stats_max` only catches drift between the two.
 
-    movss    xmm7, [0x75ceef0]   ; 00 00 7a 44 = 1000.0f
-    cvtsi2ss xmm6, rbx           ; CardLevel.parameter_base_value
-    divss    xmm6, xmm7          ;   -> parameter / 1000.0f, computed ONCE
-    movss    xmm0, [0x75cebd4]   ; 00 00 80 3f = 1.0f
-    cvtsi2ss xmm10, rdx
-    divss    xmm10, xmm7
-    addss    xmm10, xmm0         ;   -> 1.0f + bonus_permil / 1000.0f
-    cvtsi2ss xmm0, ebx           ; the stat's permil multiplier
-    mulss    xmm0, xmm6
-    mulss    xmm0, xmm10
-    cvtps2pd xmm0                ; the ONE widening, and it is the last step
-    call     0x759c510           ; Math.Ceiling(double)
-    cvttsd2si eax
+## What `data/cards.json` assumes
 
-`cvtsi2ss` / `divss` / `mulss` / `addss` — not one `sd` op in the chain. The
-`cvtps2pd` exists only because C#'s `Math.Ceiling` takes a `double`; reading
-that widening as evidence of double-precision arithmetic is a trap.
-
-**Do not snap before `ceil`.** Evaluating in binary64 and snapping the product
-to a few decimals (so a mathematically-integral product is not pushed up by
-representation error) is wrong: the client has no such snap, and its own f32
-rounding pushes the product up on exactly those inputs. Takane Lui "Strategic
-Prodigy" at level 2 (permil 400, `parameter_base_value` 4695) is
-0.400 x 4695 = 1878.0 exactly, which the client computes as 1878.0001220703125
-and ceils to **1879**. Over every (card, level, bloom, stat) point in the
-master data — 211,320 of them — a snapped binary64 version differs on **12**,
-all of that shape, across 3 cards, and is wrong on all 12.
-
-The operand order is load-bearing on its own: `(permil/1000) * parameter` and
-`permil * parameter / 1000` both give exactly 1878.0 in f32 and would hide the
-divergence. Only the client's `permil * (parameter/1000)` reproduces it.
-
-`test_collection.py` checks this module against `build_cards_dataset.py`'s
-output on every card rather than trusting the two to stay in step — maxed
-stats are unaffected by the f32 detail, so only a sub-max check can catch it.
-
-`bloom_multiplier` comes from master `CardPotential`, exported into
-`card_caps.json` as a CUMULATIVE `mult_permil` array indexed by bloom:
-rarity 3 is `[0, 0, 50, 50, 50, 150]`, so bloom 5 gives 1.15 — which is exactly
-the `stats_max.at.bloom_mult` the dataset builder records independently.
-
-The **per-LEVEL** multiplier arrives through `StatBasis`, from
-`dumps/card_level_curve.json`. `build_cards_dataset.py` reads the same master
-`CardLevel` table but keeps only each group's value at its MAXIMUM level,
-because maxed stats are all it needs; `tools/refresh/card_level_curve.py`
-exports the whole curve (27 groups, 1,890 (group, level) rows, levels
-1..60/70/80, multipliers 3432..15444 on the first group).
-
-`effective_stats` takes the multiplier as an argument rather than looking it
-up, so a caller holding a curve for one level cannot silently apply it at
-another. `StatBasis.stats_at` is the lookup, and it returns `None` for a level
-the table does not define rather than the nearest one — the game's curve is the
-only authority on what a level is worth.
-
-**The `stats_max` comparison against `build_cards_dataset.py` is circular.**
-That builder's chain is kept identical to this module's, so both sides
-implement the same rounding assumption and the comparison passes whatever the
-rule is. It can catch a DRIFT between the two implementations; it can never
-catch a shared wrong assumption.
-
-**The non-circular check: 29 of 32 captured decks reproduce the SERVER's own
-`card_potential_parameter` exactly** (`dumps/deck_oracle.json`; under one
-ceiling it is 15 of 32, every residual negative). The three that do not are
-stale captures, and their residuals are +5,457 / +1,246 / -833 — a different
-magnitude and sign from any rounding effect.
-`test_member_parameter_reproduces_the_servers_own_figure` pins it. Prefer that
-comparison to anything computed on this side of the wire: two pipelines that
-share a line of arithmetic prove nothing about it.
-
-
-## What `data/cards.json` assumes, and what a low bloom breaks
-
-`data/cards.json` carries the LEVEL-2 magnitude for ACTIVE, SPECIAL and
-PASSIVE alike (against master `LiveActiveSkillLevel` field 4,
-`LiveSpecialSkillLevel` field 3, `LivePassiveSkillLevel` field 4 — no card
-matches level 1 on any kind). And its `stats` are the fully-maxed ones.
-
-So the dataset describes a card at **max level and bloom >= 4**.
-
-Bloom buys those upgrades one step at a time — from master `CardPotential`,
-every row of all three rarity groups:
-
-| bloom | 3* | 4* / 5* |
-|---|---|---|
-| 1 | ACTIVE -> level 2 | ACTIVE -> level 2 |
-| 2 | all parameters +50 permil | all parameters +100 permil |
-| 3 | SPECIAL -> level 2 | SPECIAL -> level 2 |
-| 4 | PASSIVE -> level 2 | PASSIVE -> level 2 |
-| 5 | all parameters +100 permil more | CONNECT bonus -> level 2 |
-
-Two consequences this module encodes:
-
-1. **A card below bloom 4 has at least one skill kind OVERSTATED** by the
-   dataset. `CardState.overstated` names which, and `scorable` is false while
-   any remain. Bloom 1 upgrades only the ACTIVE; SPECIAL and PASSIVE need
-   blooms 3 and 4.
-2. **A 3* never reaches Connect bonus level 2.** Its bloom 5 buys stats, not the
-   connect upgrade — only 4* and 5* get that. `connect_bonus_level` is the rule,
-   and it is what `domain/board.py` needs: that module records
-   `connect_multiplier` as an INPUT because "the placed card's Bloom level is
-   not recoverable from the captured state", and a collection document makes it
-   recoverable.
-
-Bloom 0 is still represented rather than refused — it is a real account state
-and refusing to record it would misdescribe the collection — it is simply
-never `scorable`.
+`data/cards.json` carries the LEVEL-2 magnitude for ACTIVE, SPECIAL and PASSIVE alike and
+fully-maxed `stats`: it describes a card at max level and bloom >= 4. Bloom buys the skill
+levels one step at a time (master `CardPotential`, `SKILL_BLOOM_STEP`), so a card below
+bloom 4 has at least one skill kind overstated (`CardState.overstated`, `scorable` false;
+`restate_card_skills` replaces those slots). Bloom 5 raises the Connect bonus to level 2
+only on 4★/5★ (`connect_bonus_level`; `domain/board.py` takes `connect_multiplier` as an
+input). Bloom 0 is represented, never refused: it is a real account state, just never
+`scorable`.
 """
 
 from __future__ import annotations
@@ -202,8 +111,7 @@ MAX = "max"
 UNKNOWN = "unknown"
 
 
-# What each bloom step buys, from master `CardPotential` (every row of all
-# three rarity groups):
+# What each bloom step buys, from master `CardPotential`:
 #
 #   bloom | effect_type | 3*                  | 4* / 5*
 #   ------+-------------+---------------------+---------------------
@@ -213,27 +121,17 @@ UNKNOWN = "unknown"
 #     4   |      2      | PASSIVE -> level 2  | PASSIVE -> level 2
 #     5   |    4 / 5    | all params +100 more | CONNECT bonus -> level 2
 #
-# The `value` on every skill row is literally `2` — the skill LEVEL — which is
-# what ties this table to the one below.
+# The `value` on every skill row is `2`, the skill level it raises to.
 SKILL_BLOOM_STEP: dict[str, int] = {"ACTIVE": 1, "SPECIAL": 3, "PASSIVE": 4}
 
-# `data/cards.json` carries the LEVEL-2 magnitude for ACTIVE, SPECIAL and
-# PASSIVE alike — checked against master `LiveActiveSkillLevel` field 4,
-# `LiveSpecialSkillLevel` field 3 and `LivePassiveSkillLevel` field 4, every
-# card, none matching level 1.
-#
-# So `data/cards.json` describes a card at **bloom >= 4**, and a card below that
-# has at least one skill kind OVERSTATED by the dataset. Bloom >= 1 is not
-# enough: SPECIAL needs bloom 3 and PASSIVE needs bloom 4.
+# `data/cards.json` carries the level-2 magnitude for ACTIVE, SPECIAL and PASSIVE
+# alike (master `LiveActiveSkillLevel` field 4, `LiveSpecialSkillLevel` field 3,
+# `LivePassiveSkillLevel` field 4), so it describes a card at bloom >= 4.
 CARDS_JSON_SKILL_LEVEL: int = 2
 FULLY_SCORABLE_BLOOM: int = max(SKILL_BLOOM_STEP.values())
 
-# Bloom 5 upgrades the card's CONNECT bonus to level 2 — but only on 4* and 5*.
-# A 3* spends its bloom 5 on stats instead (effect_type 4, +100 permil) and its
-# connect bonus stays at level 1 forever. From the same master rows.
-# `domain/board.py` records `connect_multiplier` as an INPUT because "the placed
-# card's Bloom level is not recoverable from the captured state"; a collection
-# document makes it recoverable, and this is the rule.
+# Bloom 5 raises the CONNECT bonus to level 2 only on 4* and 5*; a 3* spends it on
+# stats (+100 permil) and keeps a level-1 connect bonus.
 CONNECT_BLOOM_STEP: int = 5
 CONNECT_UPGRADE_RARITIES: frozenset[str] = frozenset({"4", "5"})
 
@@ -241,9 +139,9 @@ CONNECT_UPGRADE_RARITIES: frozenset[str] = frozenset({"4", "5"})
 def overstated_skills(bloom: int | None) -> tuple[str, ...]:
     """Which skill kinds `data/cards.json` OVERSTATES at this bloom.
 
-    `data/cards.json` holds level-2 magnitudes for all three kinds, so any kind whose bloom step this card has not reached is being
-    scored with a magnitude it does not have. Returned in bloom-step order so
-    the message reads in the order the player unlocks them."""
+    Any kind whose bloom step this card has not reached would be scored with a
+    level-2 magnitude it does not have. Returned in bloom-step order (the order the
+    player unlocks them)."""
     if bloom is None:
         return ()
     return tuple(
@@ -254,8 +152,7 @@ def overstated_skills(bloom: int | None) -> tuple[str, ...]:
 def connect_bonus_level(bloom: int | None, rarity: str | None) -> int | None:
     """The level of this card's Connect bonus when placed on a board socket.
 
-    2 at bloom 5 on a 4*/5*, 1 otherwise, `None` if the bloom is unknown. A 3*
-    never reaches level 2 — its bloom 5 buys stats instead."""
+    2 at bloom 5 on a 4*/5*, 1 otherwise, `None` if the bloom is unknown."""
     if bloom is None:
         return None
     if bloom >= CONNECT_BLOOM_STEP and rarity in CONNECT_UPGRADE_RARITIES:
@@ -267,31 +164,23 @@ def connect_bonus_level(bloom: int | None, rarity: str | None) -> int | None:
 # The skill ladder: what a card's skills actually read below their bloom step
 # ---------------------------------------------------------------------------
 #
-# `overstated_skills` above NAMES which kinds are overstated; this section
-# replaces them. Restating only `stats` and leaving the skills at
-# `data/cards.json`'s level-2 values is visibly wrong against the game: Ina'nis
-# and Takane Lui at bloom 0 carry a 32 % `all_stats` PASSIVE the game scores at
-# 24 %, and `32/24 = 1.333` is exactly the +32.5 % by which the Passive Skill
-# power term then misses.
+# `overstated_skills` names which kinds are overstated; this section replaces them
+# with the level-1 rows (e.g. a bloom-0 Ina'nis carries a 32 % `all_stats` PASSIVE
+# the game scores at 24 %).
 #
-# ⚠ **A level is not a magnitude scale.** Over all three skill masters, 38 of
-# 170 ACTIVE ids change `duration_ms` between levels 1 and 2,
-# 2 change the activation probability, and 55 of 169 SPECIALs change duration.
-# Ina'nis' own 5★ ACTIVE is one of them — 450 permil at BOTH levels, 13 s at
-# level 1 against 14 s at level 2. So the level-1 row REPLACES the slot whole.
-# Rescaling `magnitude` would be a no-op on that card while leaving it a second
-# of uptime it does not have: right-looking and wrong.
+# A level is not a magnitude scale: 38 of 170 ACTIVE ids change `duration_ms`
+# between levels 1 and 2, 2 change the activation probability, and 55 of 169
+# SPECIALs change duration (Ina'nis' 5★ ACTIVE is 450 permil at both levels, 13 s
+# against 14 s). So the level-1 row replaces the slot whole.
 SKILL_LADDER_SCHEMA_VERSION: int = 1
 
 
 def skill_level_at_bloom(kind: str, bloom: int | None) -> int | None:
     """The level this card's `kind` skill actually HAS at `bloom`.
 
-    `None` when the bloom is unknown — and that is not 1. A card the collection
-    does not describe must keep `data/cards.json`'s value and be reported, the
-    same absent-is-not-zero contract `AccountBonuses` holds. Raises `KeyError`
-    on a kind with no bloom step (the COSTUME slot has none: `LiveLeaderSkill`
-    is one row per card with no level column at all)."""
+    `None` when the bloom is unknown (not 1: a card the collection does not describe
+    keeps `data/cards.json`'s value and is reported). Raises `KeyError` on a kind with
+    no bloom step (the COSTUME slot: `LiveLeaderSkill` has no level column)."""
     step = SKILL_BLOOM_STEP[kind]
     if bloom is None:
         return None
@@ -303,11 +192,8 @@ def skill_ladder_from_mapping(
 ) -> dict[str, dict[str, dict[int, SkillSlot]]]:
     """`dumps/skill_ladder.json` -> `{card_id: {kind: {level: SkillSlot}}}`.
 
-    `None` gives `{}`, the same first-class-absent contract
-    `card_level_curve.json` has: no export means there is nothing to restate,
-    never a restatement to zero. A `schema_version` this module does not know
-    is refused rather than read optimistically — the slot shape is exactly
-    `data/cards.json`'s and a silent shape change would be scored, not caught."""
+    `None` gives `{}`: no export means nothing to restate. An unknown `schema_version`
+    is refused, since a silent shape change would be scored, not caught."""
     if raw is None:
         return {}
     version = raw.get("schema_version")
@@ -341,11 +227,8 @@ def restate_card_skills(
     """`card` with every skill set to the level its `bloom` actually bought,
     plus one note per slot that changed or could not be changed.
 
-    Returns `card` ITSELF (identity, not a copy) when nothing moves, so a caller
-    can tell "restated" from "unchanged" without comparing field by field.
-
-    `costume_skill` is never touched: the outfit is `LiveLeaderSkill`, one row
-    per card with no level column, and bloom buys nothing on it."""
+    Returns `card` itself (identity, not a copy) when nothing moves. `costume_skill`
+    is never touched: bloom buys nothing on the outfit."""
     if bloom is None:
         return card, ()
 
@@ -378,9 +261,9 @@ class CardLevelCaps:
     """The game's own ceilings for one rarity/attribute group, read from
     `card_caps.json` (master `CardLevelLimit` + `CardPotential`).
 
-    `level_by_limit_break` is indexed by limit break 0..4 — in master data
-    20/30/40/50/60 for 3*, 30/40/50/60/70 for 4*, 40/50/60/70/80 for 5*.
-    `bloom_mult_permil` is CUMULATIVE and indexed by bloom 0..5."""
+    `level_by_limit_break` is indexed by limit break 0..4 (20/30/40/50/60 for 3*,
+    30/40/50/60/70 for 4*, 40/50/60/70/80 for 5*). `bloom_mult_permil` is CUMULATIVE
+    and indexed by bloom 0..5."""
 
     level_by_limit_break: tuple[int, ...]
     max_bloom: int
@@ -389,10 +272,8 @@ class CardLevelCaps:
 
 @dataclass(frozen=True, slots=True)
 class CardState:
-    """One card's resolved state. Every field may be `None`, and `None` means
-    "not known" rather than zero — the same distinction `domain/unknown.py`
-    draws for card fields, and for the same reason: a fabricated number that
-    looks like data is worse than an absent one."""
+    """One card's resolved state. Every field may be `None`, meaning "not known"
+    rather than zero (as in `domain/unknown.py`)."""
 
     card_id: str
     level: int | None
@@ -405,35 +286,27 @@ class CardState:
 
     @property
     def known(self) -> bool:
-        """Both numbers present. A card with a level and no bloom is NOT known:
-        the stat formula needs both, and half of it produces nothing."""
+        """Both level and bloom present: the stat formula needs both."""
         return self.level is not None and self.bloom is not None
 
     @property
     def overstated(self) -> tuple[str, ...]:
-        """The skill kinds `data/cards.json` overstates at this card's bloom.
-        See `overstated_skills` — it is not just ACTIVE, and not just bloom 0."""
+        """The skill kinds `data/cards.json` overstates at this card's bloom."""
         return overstated_skills(self.bloom)
 
     @property
     def scorable(self) -> bool:
-        """Known AND at a bloom where `data/cards.json`'s magnitudes are the
-        card's real ones — which is **bloom >= 4**, not bloom >= 1.
-
-        The dataset holds LEVEL-2 magnitudes for ACTIVE,
-        SPECIAL and PASSIVE alike, and those unlock at bloom 1, 3 and 4. A card
-        at bloom 1 has a correct ACTIVE and an overstated SPECIAL and PASSIVE.
-        `overstated` names which."""
+        """Known and at a bloom where `data/cards.json`'s magnitudes are the card's
+        real ones: bloom >= 4 (the level-2 ACTIVE, SPECIAL and PASSIVE unlock at
+        bloom 1, 3 and 4)."""
         return self.known and not self.overstated
 
 
 def level_cap_for(caps: CardLevelCaps | None, limit_break: int | None) -> int | None:
     """The level ceiling at a given limit break, or `None` with no caps file.
 
-    `limit_break=None` means "whatever the stated level requires", which is the
-    game's own top row — the LAST entry, not the first. Getting this backwards
-    is the `max` + `limit_break: 0` case the tests pin: on a 5*
-    that is 40 and not 80."""
+    `limit_break=None` means "whatever the stated level requires": the top row, the
+    LAST entry. An explicit `limit_break: 0` on a 5* caps at 40, not 80."""
     if caps is None or not caps.level_by_limit_break:
         return None
     if limit_break is None:
@@ -445,28 +318,21 @@ def level_cap_for(caps: CardLevelCaps | None, limit_break: int | None) -> int | 
 def bloom_multiplier(caps: CardLevelCaps | None, bloom: int | None) -> float | None:
     """`1 + mult_permil[bloom]/1000`, or `None` when either input is absent.
 
-    From master `CardPotential`. The array is CUMULATIVE — rarity 3 is
-    `[0, 0, 50, 50, 50, 150]`, so it is indexed, never summed; summing it would
-    give 1.30 where the game gives 1.15, and 1.15 is what `stats_max` was
-    independently built with.
-
-    Returns `None` rather than 1.0 for an absent caps file. 1.0 is a real
-    multiplier meaning "bloom contributes nothing", and it must not be
-    indistinguishable from "it is not known what bloom contributes"."""
+    From master `CardPotential`. The array is CUMULATIVE (3★: `[0, 0, 50, 50, 50,
+    150]`), so it is indexed, never summed. `None` rather than 1.0 for an absent caps
+    file: 1.0 means "bloom contributes nothing", not "unknown"."""
     if caps is None or bloom is None or not caps.bloom_mult_permil:
         return None
     if not 0 <= bloom < len(caps.bloom_mult_permil):
         return None
-    # `divss` then `addss`, in that order — the ctor builds each stat's
-    # multiplier as `1.0f + permil/1000.0f` in single precision.
+    # the client builds the multiplier as `1.0f + permil/1000.0f` in single precision
     permil = caps.bloom_mult_permil[bloom]
     return _f32(_F32_ONE + _f32(_f32(permil) / _F32_THOUSAND))
 
 
 def _f32(value: float) -> float:
-    """Round a Python float (binary64) to IEEE-754 binary32, the way an `ss`
-    SSE instruction does. Every step of the client's stat chain is a scalar
-    single op, so every step here is wrapped in this."""
+    """Round a Python float (binary64) to IEEE-754 binary32, as a scalar single SSE
+    op does: every step of the client's stat chain is one."""
     return struct.unpack("<f", struct.pack("<f", value))[0]
 
 
@@ -482,58 +348,33 @@ def effective_stats(
     """`ceil(ceil(ratio_i * (level_multiplier/1000)) * bloom_mult)` per stat, in
     (performance, technique, sense) order — or `None` if any input is missing.
 
-    Evaluated in SINGLE precision, in the client's own operand order, because
-    that is what the client does — see the module docstring.
+    Evaluated in single precision, in the client's operand order (module docstring).
 
-    ⛔ TWO ceilings, not one. The level scaling is rounded up to an integer
-    BEFORE the bloom multiplier is applied, and the product is rounded up
-    again. A single-ceiling form is short by 1 on any cell where the
-    intermediate is fractional AND `bloom_permil != 0`.
+    Two ceilings, not one: the level scaling is rounded up to an integer before the
+    bloom multiplier applies, and the product is rounded up again. A single ceiling is
+    short by 1 wherever the intermediate is fractional and `bloom_permil != 0`; against
+    the server's own `card_potential_parameter` on captured decks it reproduces under
+    half of them, two ceilings all but known-stale captures. (A dependence on level is
+    a confound: at bloom 0-1 the multiplier is 1.0 and the second ceiling is a no-op.)
+    The client's `CardStatus` constructor does one ceiling with the bloom bonus at 0;
+    the bloom bonus (`ALL_PARAMETER_UP_PERMIL_UP`, its own potential effect type) applies
+    over the resulting parameter. Rarity 5 at full bloom shares rarity 4's
+    `[0,0,100,100,100,100]` array, which the captured decks cover.
 
-    Evidence, against the wire's own `card_potential_parameter` over the 32
-    decks in `dumps/deck_oracle.json`:
-
-        one ceiling  15/32 exact   residuals -1 .. -6, every one NEGATIVE
-        two ceilings 29/32 exact   residuals only on idx 18/19/23
-
-    and those three are known stale captures — their residuals are +5,457 /
-    +1,246 / -833, a different magnitude and a different sign from any rounding
-    effect.
-
-    ⚠ An apparent correlation with LEVEL is a confound. At bloom 0 and 1
-    `bloom_permil` is 0, so `mult == 1.0` and the second ceiling is a no-op; in
-    the captured account the only high-level cards happen to be bloom 0-1. The
-    driver is BLOOM, not level. That is also why every all-level-70 deck reads
-    residual 0 under BOTH rules.
-
-    ⚠ Reconciling the `CardStatus::.ctor` disassembly, which does exactly ONE
-    ceiling: that ctor is stage one, where `bonus_permil` is 0. The bloom bonus
-    is a separate effect — `enums_card_potential_effect_type` carries
-    `ALL_PARAMETER_UP_PERMIL_UP` as its own type — applied over the parameter
-    rather than as a factor inside it. This is inferred, not read from code.
-
-    ⚠ The max-level-plus-max-bloom case is inferred by transfer, not measured:
-    there is no wire observation at rarity 5 with full bloom. The decisive
-    `bloom_permil = 100` cells come from rarity 4, which uses the identical
-    `[0,0,100,100,100,100]` array.
-
-    `None` on a missing input, never a partial answer: two of three stats is not
-    a card, and returning zeros for the third would be a fabricated number."""
+    `None` on a missing input, never a partial answer."""
     if level_multiplier is None or bloom_mult is None:
         return None
     if ratio_permil is None or len(ratio_permil) != 3:
         return None
     if any(r is None for r in ratio_permil):
         return None
-    # `divss xmm6, xmm7` — the parameter/1000 quotient is computed ONCE and
-    # reused across the three stats, exactly as the ctor does.
+    # the parameter/1000 quotient is computed once and reused across the three
+    # stats, as the client does
     per_mille = _f32(_f32(level_multiplier) / _F32_THOUSAND)
     mult = _f32(bloom_mult)
     values = tuple(
-        # `mulss` twice, then `cvtps2pd` + `Math.Ceiling`: the widening to
-        # double happens after the arithmetic, never during it. The inner
-        # ceiling is the level-scaled parameter becoming an integer before the
-        # bloom effect multiplies it — see the two-ceiling note above.
+        # two single-precision multiplies, widened to double only for the ceiling;
+        # the inner ceiling makes the level-scaled parameter an integer first
         math.ceil(_f32(_f32(math.ceil(_f32(_f32(int(r)) * per_mille))) * mult))  # type: ignore[arg-type]
         for r in ratio_permil
     )
@@ -541,9 +382,8 @@ def effective_stats(
 
 
 def _normalise(entry: object) -> dict:
-    """`"max"` / `"unknown"` / a dict / `None` -> a dict, so the resolver deals
-    with one shape. An unrecognised string reads as `unknown`, deliberately: a
-    typo must not silently inherit the default and look like a real answer."""
+    """`"max"` / `"unknown"` / a dict / `None` -> a dict. An unrecognised string reads
+    as `unknown`, so a typo does not silently inherit the default."""
     if entry is None:
         return {}
     if isinstance(entry, str):
@@ -573,9 +413,7 @@ def resolve_card_state(
     ceilings, with every clamp reported rather than applied silently.
 
     `entry` is that card's record from the collection document, `default` the
-    document's `card_default`. A key absent from `entry` falls through to
-    `default` — so `{"bloom": 3}` is a legal entry that takes its level from the
-    default, which is the shape a UI produces when only one control is touched.
+    document's `card_default`; a key absent from `entry` falls through to `default`.
     """
     warnings: list[str] = []
     resolved = _normalise(entry)
@@ -586,10 +424,8 @@ def resolve_card_state(
 
     limit_break = resolved.get("limit_break")
     if limit_break == MAX:
-        # The top limit break for this card's rarity/attribute, so a "what-if"
-        # level assumption is not silently clamped by a real account's low limit
-        # break. Mirrors how `level`/`bloom` accept "max" below. `None` when there
-        # is no card_caps.json — the same first-class unknown those two report.
+        # The top limit break for this card's rarity, so a "what-if" level is not
+        # clamped by a real account's low limit break. `None` with no card_caps.json.
         limit_break = (
             len(caps.level_by_limit_break) - 1 if caps is not None and caps.level_by_limit_break else None
         )
@@ -645,8 +481,7 @@ def resolve_card_state(
 
     behind = overstated_skills(bloom)
     if behind:
-        # Representable, and deliberately not silently scorable. See the module
-        # docstring.
+        # representable, but reported as not fully scorable
         warnings.append(
             f"{card_id}: at bloom {bloom}, data/cards.json's level-"
             f"{CARDS_JSON_SKILL_LEVEL} magnitudes OVERSTATE its "
@@ -680,29 +515,22 @@ def resolve_card_state(
 class StatBasis:
     """Everything needed to turn `(card_id, level, bloom)` into three stats.
 
-    Built from `dumps/card_level_curve.json` (`tools/refresh/card_level_curve.py`), which
-    exports master `CardLevel`'s **per-level** multiplier — 27 groups x 60-80 levels, 1,890
-    rows — plus each card's level group, potential group and stat ratios.
-
-    Checked by the exporter against `build_cards_dataset.py`'s `stats_max`: every card
-    reproduces exactly. `tests/test_collection.py` re-runs that comparison through THIS class
-    rather than trusting the script's own report — a pipeline that reports its own success
-    proves nothing.
+    Built from `dumps/card_level_curve.json` (`tools/refresh/card_level_curve.py`): master
+    `CardLevel`'s per-level multiplier (27 groups x 60-80 levels) plus each card's level
+    group, potential group and stat ratios.
     """
 
     level_mult: Mapping[str, Mapping[int, int]]
     bloom_permil: Mapping[str, tuple[int, ...]]
     cards: Mapping[str, tuple[str, str, tuple[int, ...]]]
-    # `CardLevel` field 5 by (group, level) — the Member Power-Up ladder. Empty
-    # when the curve export predates it, which `max_member_power_up_permyriad`
-    # reports as `None` rather than as a zero ceiling.
+    # `CardLevel` field 5 by (group, level): the Member Power-Up ladder. Empty when
+    # the curve export lacks it, which `max_member_power_up_permyriad` reports as `None`.
     power_up_permyriad: Mapping[str, Mapping[int, int]] = field(default_factory=dict)
 
     def level_multiplier(self, card_id: str, level: int | None) -> int | None:
         """The multiplier at `level` for this card's group, or `None`.
 
-        `None` for a level the table does not define, never the nearest one: the curve is the
-        game's own and a level outside it is a question this module cannot answer."""
+        `None` for a level the table does not define, never the nearest one."""
         if level is None:
             return None
         entry = self.cards.get(card_id)
@@ -724,13 +552,12 @@ class StatBasis:
         array = self.bloom_permil.get(entry[1])
         if not array or not 0 <= bloom < len(array):
             return None
-        # `divss` then `addss`, in single precision — the same chain as the
-        # module-level `bloom_multiplier`, and for the same reason.
+        # single precision, as the module-level `bloom_multiplier`
         return _f32(_F32_ONE + _f32(_f32(array[bloom]) / _F32_THOUSAND))
 
     def stats_at(self, card_id: str, level: int | None, bloom: int | None) -> tuple[int, int, int] | None:
         """`(performance, technique, sense)` at that level and bloom, or `None` if anything
-        needed is absent. Never a partial answer — see `effective_stats`."""
+        needed is absent."""
         entry = self.cards.get(card_id)
         if entry is None:
             return None
@@ -744,8 +571,7 @@ class StatBasis:
 def stat_basis_from_mapping(raw: Mapping) -> StatBasis:
     """`card_level_curve.json` into a `StatBasis`.
 
-    The file stores level keys as JSON strings (JSON object keys are always strings); they are
-    converted to `int` here, once, rather than at every lookup."""
+    Level keys (JSON strings) become `int` here, once."""
     if not isinstance(raw, Mapping):
         raise CollectionError(f"card_level_curve must be an object, got {type(raw).__name__}")
 
@@ -781,32 +607,24 @@ def stat_basis_from_mapping(raw: Mapping) -> StatBasis:
 
 @dataclass(frozen=True, slots=True)
 class CollectionReport:
-    """What applying a collection did, per card, so a run can SAY it rather
-    than quietly returning different numbers than it did yesterday."""
+    """What applying a collection did, per card, so a run can report it."""
 
     applied: tuple[str, ...]
     unchanged: tuple[str, ...]
     not_scorable: tuple[str, ...]
     warnings: tuple[str, ...]
-    # The resolved state per card. It rides here rather than in the stats
-    # mapping because a card can have a known level and bloom and no restatable
-    # stats, and both `restate_card_skills` (which needs the bloom) and
-    # `derived_member_power_up_permyriad` (which needs the level) still want it
-    # in that case.
+    # The resolved state per card, here rather than in the stats mapping because a
+    # card with no restatable stats still has a bloom (`restate_card_skills`) and a
+    # level (`derived_member_power_up_permyriad`).
     states: Mapping[str, CardState] = field(default_factory=dict)
 
 
 def _rarity_of(level_group: str | None) -> str | None:
     """`grp-card-level-rarity_5-03` -> `"5"`.
 
-    The card's own level group is the authority on its rarity here, rather than
-    `Card.rarity`: it is the key the master tables themselves join on, and it
-    is already carried per card by the curve export.
-
-    This is why the caps lookup below is keyed by rarity ALONE:
-    `card_caps.json` holds three attribute groups per rarity and all three carry
-    an IDENTICAL cap array (3*: 20/30/40/50/60, 4*: 30/40/50/60/70, 5*:
-    40/50/60/70/80). Attribute does not move the level cap."""
+    The level group, not `Card.rarity`, is the authority here: it is the key the master
+    tables join on. The caps lookup is keyed by rarity alone because the three attribute
+    groups of a rarity in `card_caps.json` carry identical cap arrays."""
     if not level_group:
         return None
     _, _, tail = level_group.partition("rarity_")
@@ -822,21 +640,10 @@ def collection_stats(
     """`{card_id: (performance, technique, sense)}` for every card the
     collection can restate, plus a report naming every card it could not.
 
-    **A document of `card_default: "max"` reproduces `data/cards.json`'s stats
-    exactly.** That is not a coincidence to rely on quietly — every card in
-    `data/cards.json` carries its FULLY-MAXED stats (equal to `stats_max` in
-    `cards_enriched.json`). So a ranking without a collection assumes a
-    fully-maxed collection, and `"max"` is the state that reproduces it.
-    `tests/test_collection.py` pins the equality so the wiring cannot silently
-    move that answer.
-
-    A card this cannot restate is **omitted from the result and named in the
-    report**, never given a substitute number: the caller then leaves
-    `data/cards.json`'s value in place, which is the authoritative one.
-
-    Bloom 0 is applied for STATS and flagged, because the stat formula is
-    defined there and the skill magnitudes are not — see the module docstring
-    and `CardState.scorable`.
+    A document of `card_default: "max"` reproduces `data/cards.json`'s stats exactly
+    (they are the fully-maxed ones; `tests/test_collection.py` pins it). A card this
+    cannot restate is omitted and named in the report, so the caller keeps
+    `data/cards.json`'s value. Bloom 0 is applied for stats and flagged (not scorable).
     """
     if basis is None:
         return {}, CollectionReport(
@@ -892,25 +699,20 @@ def collection_stats(
 
 
 # --------------------------------------------------------------------------
-# The two account-level terms the game shows and this project does not compute:
-# Memory Bonus and Member Power-Up. Both are ONE scalar the player can read off
-# their own screen, so both are inputs here, not derivations.
+# The two account-level terms of Overall Power: Memory Bonus and Member Power-Up.
+# Each is one scalar the player can read off their own screen.
 # --------------------------------------------------------------------------
 
-# Memory Bonus. From master `PosterCollectEffect`: 50 rows, thresholds dense
-# 1..50, `permil(t) = min(2t, t+30)` with ZERO violations across all 50.
+# Memory Bonus. Master `PosterCollectEffect`: 50 rows, thresholds 1..50,
+# `permil(t) = min(2t, t+30)` on every row.
 MEMORY_BONUS_MAX_POSTERS: int = 50
 
 
 def memory_bonus_permil(posters: int | None) -> int | None:
     """The Memory Bonus rate for a poster count, or `None` if unknown.
 
-    `min(2t, t+30)`, clamped to the table's own top threshold. The closed form
-    was checked against all 50 master rows and fits every one.
-
-    ⚠ `None` and `0` are different answers and both are legitimate: `None` is
-    "the player has not said", `0` is "the player said they have none".
-    A UI must not collapse them."""
+    `min(2t, t+30)`, clamped to the table's top threshold. `None` ("not stated") and
+    `0` ("stated none") are different answers; a UI must not collapse them."""
     if posters is None:
         return None
     count = max(0, min(int(posters), MEMORY_BONUS_MAX_POSTERS))
@@ -919,11 +721,9 @@ def memory_bonus_permil(posters: int | None) -> int | None:
     return min(2 * count, count + 30)
 
 
-# Member Power-Up. The 50 % ceiling is the game's own declared cap and is where
-# the ladder is HEADED as more cards ship. What is reachable at any moment is
-# bounded by the roster instead, and that bound moves every time a card is
-# added, so it is DERIVED by `max_member_power_up_permyriad` rather than written
-# here (a 167-card roster reaches 958 permyriad, 9.58 %).
+# Member Power-Up. 50 % is the game's declared cap; what is reachable is bounded by
+# the roster and grows with every card, so `max_member_power_up_permyriad` derives it
+# (a 167-card roster reaches 958 permyriad, 9.58 %).
 MEMBER_POWER_UP_CAP_PERMYRIAD: int = 5000  # = 50.0 %, the declared ceiling
 
 
@@ -931,18 +731,10 @@ def max_member_power_up_permyriad(basis: StatBasis | None) -> int | None:
     """The largest `P` the CURRENT roster can produce: every card owned, every
     one at its maximum level.
 
-    Derived, never typed. `P` is an account-wide sum over owned cards of a
-    (rarity, level) ladder — master `CardLevel.live_deck_power_permyriad_up`,
-    27 groups collapsing to 3 ladders with per-card maxima 4 / 5 / 8 for
-    3*/4*/5* — so the reachable maximum is a property of the card list and grows
-    with it. Hardcoding a current figure would silently under-state the control's
-    range the day a card ships.
-
-    Returns `None` with no curve export, the same first-class-absent contract
-    the rest of this module has. Never exceeds
-    `MEMBER_POWER_UP_CAP_PERMYRIAD`: the roster bound is what is reachable, the
-    declared cap is what the mechanic allows, and the smaller of the two is the
-    honest ceiling for a control."""
+    `P` is an account-wide sum over owned cards of a (rarity, level) ladder (master
+    `CardLevel.live_deck_power_permyriad_up`, per-card maxima 4 / 5 / 8 for 3*/4*/5*),
+    so the reachable maximum grows with the card list. `None` with no curve export;
+    never above `MEMBER_POWER_UP_CAP_PERMYRIAD`."""
     if basis is None or not basis.power_up_permyriad:
         return None
     total = 0
@@ -954,14 +746,10 @@ def max_member_power_up_permyriad(basis: StatBasis | None) -> int | None:
     return min(total, MEMBER_POWER_UP_CAP_PERMYRIAD)
 
 
-# The account level ladder. The `PlayerLevel` master has **50 rows**, and its
-# three columns are `level, exp, rewards` -- none of them points, so player level
-# funds no board budget. What it does fund is AVAILABILITY: 127 of the 152 node
-# groups carry a `cd-player_level-N` gate, N in {10, 15, 20, 25, 30} (per
-# `skilltree.json`: 47/26/26/11/17, and the other 25 nodes carry no `req` at all).
-# So the highest gate
-# that can ever bind is 30 -- but the ladder runs to 50 and an account past 30 must
-# still be able to say where it is, so this is the cap, not 30.
+# The account level ladder: master `PlayerLevel` has 50 rows and grants no board
+# points. Player level gates node availability instead (`cd-player_level-N`, N in
+# {10, 15, 20, 25, 30}); the highest gate is 30, but an account past 30 must still
+# be able to state its level, so the cap is 50.
 PLAYER_LEVEL_MAX: int = 50
 PLAYER_LEVEL_MIN: int = 1
 
@@ -974,24 +762,19 @@ POWER_UP_AUTO: str = "auto"
 class AccountBonuses:
     """The account-level scalars the player supplies by hand, and nothing else.
 
-    Every field is `None` until the player sets it, and `None` is NOT `0`:
-    `None` means "not stated", `0` means "stated they have none". Every
-    consumer must be able to say which, because reporting an unset slider as a
-    measured zero would present a guess as data.
+    Every field is `None` until the player sets it: `None` means "not stated", `0`
+    means "stated they have none".
 
-    `level` is the odd one out and is deliberately here anyway: it is not a
-    bonus, it grants nothing, and it never enters a score. It gates which board
-    nodes the account may take at all, which is a availability question rather
-    than a scoring one -- but it is read from the same hand-edited `player`
-    block as the other two, so it is validated in the same place."""
+    `level` is not a bonus and never enters a score: it gates which board nodes the
+    account may take. It lives here because it is read from the same hand-edited
+    `player` block."""
 
     posters: int | None = None
     power_up_permyriad: int | None = None
     level: int | None = None
-    # `player.power_up_permyriad: "auto"` -- compute it from the account's own
-    # cards every run instead of reading a number that goes stale the next time
-    # a card levels. See `derived_member_power_up_permyriad`; a hand-typed value
-    # can be wildly wrong and still look plausible.
+    # `player.power_up_permyriad: "auto"`: derive it from the account's own cards
+    # every run (`derived_member_power_up_permyriad`) instead of a typed number that
+    # goes stale when a card levels.
     power_up_permyriad_is_auto: bool = False
 
     @property
@@ -1016,26 +799,19 @@ def account_bonuses_from_mapping(document: Mapping | None) -> AccountBonuses:
 
     level = read("level")
     if level is not None and not PLAYER_LEVEL_MIN <= level <= PLAYER_LEVEL_MAX:
-        # Refused rather than clamped. A level outside the ladder is a typo, and
-        # silently pulling 500 down to 50 would unlock the whole board on a
-        # mistake -- the one direction where being wrong is invisible.
+        # Refused rather than clamped: clamping a typo like 500 to 50 would unlock
+        # the whole board on a mistake.
         raise CollectionError(f"player.level must be {PLAYER_LEVEL_MIN}..{PLAYER_LEVEL_MAX}, got {level}")
 
-    # `"auto"` is checked BEFORE `read`, which would otherwise refuse it as a
-    # non-number. Absent is deliberately NOT auto: absent has always meant
-    # "unset, do not score this term", and quietly starting to score it would
-    # move every existing answer on a document nobody edited.
+    # `"auto"` is checked before `read`, which would refuse it as a non-number.
+    # Absent is not auto: absent means "unset, do not score this term".
     raw_power_up = player.get("power_up_permyriad")
     is_auto = isinstance(raw_power_up, str) and raw_power_up.strip().lower() == POWER_UP_AUTO
     power_up = None if is_auto else read("power_up_permyriad")
     if power_up is not None and power_up > MEMBER_POWER_UP_CAP_PERMYRIAD:
-        # A range check. It only covers the order-of-magnitude class of typo:
-        # a hand-typed `951` for a true `39` would pass, because the
-        # roster-reachable maximum over a 169-card catalogue is 974 and the
-        # declared cap here is 5,000. What catches that is
-        # `derived_member_power_up_permyriad` -- the value is computable from
-        # the account's own cards, and the tool computes it and says when the
-        # file disagrees.
+        # Only catches order-of-magnitude typos (951 for a true 39 passes);
+        # `derived_member_power_up_permyriad` catches the rest by computing the
+        # value from the account's cards and reporting a disagreement.
         raise CollectionError(
             f"player.power_up_permyriad must be 0..{MEMBER_POWER_UP_CAP_PERMYRIAD} "
             f"(= {MEMBER_POWER_UP_CAP_PERMYRIAD / 100:.0f} %, the declared "
@@ -1054,35 +830,17 @@ def account_bonuses_from_mapping(document: Mapping | None) -> AccountBonuses:
 class DerivedMemberPowerUp:
     """`P` computed from the account's own cards instead of typed by hand.
 
-    Master `CardLevel.live_deck_power_permyriad_up`: an account-wide sum,
-    over every card the player OWNS, of a cumulative (rarity, level) ladder
-    whose per-card maxima are 4 / 5 / 8 for 3*/4*/5*. The server also ships it
-    directly as `CardGetParametersResponse.LiveDeckPowerPermyriadUpByCardLevelUp`.
+    Master `CardLevel.live_deck_power_permyriad_up`: an account-wide sum, over every
+    card the player owns, of a cumulative (rarity, level) ladder whose per-card maxima
+    are 4 / 5 / 8 for 3*/4*/5* (the server ships it as
+    `CardGetParametersResponse.LiveDeckPowerPermyriadUpByCardLevelUp`). The 5* ladder is
+    not linear: +1 permyriad at Lv20/40/50/60/70 and +3 at Lv80.
 
-    **Corroborated independently.** A player on the Taiwanese Bahamut board
-    (`forum.gamer.com.tw` board 84454, thread `snA=603`) measured the per-card
-    contribution BY HAND, in-game, and reported: Lv20 +0.01, Lv40 +0.02, Lv50
-    +0.03, Lv60 +0.04, Lv70 +0.05, **Lv80 +0.08** -- a +0.03 step where the
-    pattern says +0.01. The 5* ladder read from master data is `Lv20 +1, Lv40
-    +1, Lv50 +1, Lv60 +1, Lv70 +1, Lv80 +3` permyriad, i.e. exactly those
-    percentages including the irregular top rung.
-
-    Keep the irregular Lv80 rung in mind before "simplifying" this into a linear
-    step: it is worth 3 permyriad per maxed 5*, and mismodelling it moves an
-    account total by 2-3 permyriad, which propagates into every Overall Power.
-
-    `skipped` is load-bearing, not a diagnostic. An owned card with no
-    `state/collection.json` entry, under a `card_default` of `"max"`, has a
-    level that RESOLVES (it is not `None`) to the cap, and would feed the
-    ladder's top rung -- two such cards can turn a true 38 into 51.
-    **Provenance decides, not whether a number came out**: only a level the
-    player actually recorded may enter an account total.
-
-    A skipped card has not vanished, though, so this carries BOTH bounds:
-    `permyriad` credits the recorded cards only, `upper` additionally credits
-    every skipped card its ladder's top rung. That is what lets a partial
-    derivation still refute a wrong value instead of shrugging -- e.g. 951
-    sits far outside `[38, 51]`."""
+    Only a level the player recorded enters the total: an owned card with no
+    `state/collection.json` entry under `card_default: "max"` resolves to the cap, and
+    would feed the top rung. Such cards are `skipped`, and the two bounds bracket the
+    truth: `permyriad` credits the recorded cards only, `upper` also credits every skipped
+    card its ladder's top rung, so a partial derivation can still refute a wrong value."""
 
     permyriad: int
     upper: int
@@ -1097,9 +855,7 @@ class DerivedMemberPowerUp:
     def disagrees_with(self, typed: int | None) -> bool:
         """Whether a hand-typed value is outside what the cards can produce.
 
-        `None` never disagrees -- an unset field is a question the player has
-        not answered, not a wrong answer. Inside `[permyriad, upper]` this stays
-        silent: there it genuinely cannot tell."""
+        `None` (unset) never disagrees; inside `[permyriad, upper]` it cannot tell."""
         if typed is None:
             return False
         return not self.permyriad <= typed <= self.upper
@@ -1112,8 +868,7 @@ def derived_member_power_up_permyriad(
 ) -> DerivedMemberPowerUp | None:
     """`P` for this account, or `None` when the curve export cannot answer.
 
-    `None` rather than `0`: no ladder means the tool does not know, which is a
-    different claim from "this account has earned none"."""
+    `None` rather than `0`: no ladder means unknown, not "earned none"."""
     if basis is None or not basis.power_up_permyriad:
         return None
     total = 0
@@ -1125,8 +880,7 @@ def derived_member_power_up_permyriad(
         ladder = basis.power_up_permyriad.get(entry[0]) if entry else None
         state = states.get(card_id)
         level = state.level if state else None
-        # A level the player did not record is not evidence. `"max"` and
-        # `"default"` are this module's own fallbacks, not the account.
+        # `"max"` and `"default"` are this module's fallbacks, not the account
         recorded = state is not None and state.source == "manual"
         if ladder is None or level is None or not recorded:
             skipped.append(card_id)
@@ -1143,39 +897,21 @@ def derived_member_power_up_permyriad(
 def maxed_account_bonuses(basis: StatBasis | None, posters: int | None = None) -> AccountBonuses:
     """The account-level bonuses a FULLY MAXED account would carry.
 
-    The other half of the maxed basis — the cards themselves — needs no work at
-    all: `data/cards.json` already holds every card's fully-maxed stats, so a
-    maxed run is simply one that does not apply the collection.
+    The cards need no work: `data/cards.json` holds fully-maxed stats (and at bloom 5
+    every skill is at `CARDS_JSON_SKILL_LEVEL`), so a maxed run simply does not apply the
+    collection. The Holomem Board is not included: a member's best branches depend on
+    the song, the cast and the event, so the account's real board stays in place and a
+    maxed run says so.
 
-    ⚠ **Max bloom means no skill down-levelling**, and that is not a shortcut:
-    at bloom 5 every kind IS at `CARDS_JSON_SKILL_LEVEL`, so the catalogue's
-    magnitudes are exactly right, so no open question about down-levelled
-    ACTIVE/SPECIAL skills can reach this basis.
-
-    ⚠ **The Holomem Board is NOT included and must never be implied.** What a
-    maxed board even looks like is undecided: at character level 50 a Leader has
-    no choice left, but a MEMBER's best branches depend on the song, the cast
-    and whether an event bonus is in play. So the account's real board stays in
-    place and every maxed run SAYS so, rather than inventing a build and burying
-    the assumption.
-
-    `power_up_permyriad` is the ROSTER ceiling, not the account's: every card at
-    its own max level, which is what `max_member_power_up_permyriad` already
-    computes and why that function was written to grow with the card list.
-    `None` there rather than `0` when no curve is exported, as everywhere.
-
-    `posters` is how many posters the game HAS (the master's `Poster` rows): a
-    maxed account holds every one, and no more — `PosterCollectEffect` runs to
-    `MEMORY_BONUS_MAX_POSTERS` thresholds, but only the posters that exist can be
-    collected. `None` (the count is unknown) leaves the Memory Bonus unset rather
-    than assuming the table's last threshold."""
+    `power_up_permyriad` is the roster ceiling (`max_member_power_up_permyriad`).
+    `posters` is how many posters the game has (master `Poster` rows): a maxed account
+    holds every one, and `None` leaves the Memory Bonus unset."""
     return AccountBonuses(
         posters=None if posters is None else max(0, min(int(posters), MEMORY_BONUS_MAX_POSTERS)),
         power_up_permyriad=max_member_power_up_permyriad(basis),
         level=PLAYER_LEVEL_MAX,
-        # Never auto: `"auto"` derives from the ACCOUNT's cards, and this basis
-        # has no account. Leaving it set would have `apply_collection` overwrite
-        # the roster ceiling with the real account's figure.
+        # never auto: that would have `apply_collection` overwrite the roster ceiling
+        # with the real account's figure
         power_up_permyriad_is_auto=False,
     )
 
@@ -1183,23 +919,10 @@ def maxed_account_bonuses(basis: StatBasis | None, posters: int | None = None) -
 def memory_bonus(member_parameter_total: float, permil: int | None) -> int | None:
     """The Memory Bonus summand of Overall Power, or `None` if unset.
 
-    ⚠ **This is the whole-deck APPROXIMATION, and the error is measured.** The
-    exact form (`memory_bonus_exact`) rounds up per member AND per parameter —
-    15 ceilings, not one:
-
-        exact = SUM over 5 members, over {performance, technique, sense}
-                    of ceil( memberParameter_ij * R / 1000 )
-
-    That needs a per-member, per-stat decomposition of the parameter line, which
-    the ranking path does not carry. `ceil(total * R / 1000)` instead lands
-    **-7 to -8 absolute** against the exact figure on the five captured decks —
-    0.006–0.013 % of Overall Power. It is stated here
-    so nobody quotes this as exact, and so the sign is on the record: the
-    approximation is always LOW, never high.
-
-    The base is the Member Parameter line ALONE: measured at 44.097–44.300
-    permil of it over five decks, a 0.46 % spread; against MP+Passive it reads
-    41.2, against MP+Board 30.1, against Overall Power 27.8 — all refuted."""
+    The whole-deck approximation of `memory_bonus_per_stat` (one ceiling instead of
+    fifteen): always low, by about 7-8 points (0.006-0.013 % of Overall Power), for
+    callers without the per-member, per-stat split. The base is the Member Parameter
+    line alone."""
     if permil is None:
         return None
     return math.ceil(round(member_parameter_total * permil / 1000, 6))
@@ -1208,28 +931,17 @@ def memory_bonus(member_parameter_total: float, permil: int | None) -> int | Non
 def memory_bonus_per_stat(per_member_stats: Sequence[tuple[int, int, int]], permil: int | None) -> int | None:
     """The Memory Bonus summand of Overall Power, BIT-EXACT — or `None` if unset.
 
-    This is the exact form the whole-deck `memory_bonus` above only approximates.
-    The server rounds up ONCE PER member AND PER stat — fifteen ceilings for a
-    five-member deck, not one:
+    The server rounds up once per member and per stat (fifteen ceilings for five
+    members):
 
         memory = SUM over the members, over {performance, technique, sense}
                      of ceil( memberParameter_stat * R / 1000 )
 
-    `R` is `memory_bonus_permil` (`permil` here). Each `memberParameter_stat` is
-    that member's leveled+bloomed base parameter for one stat — the base card
-    potential ALONE (no board, outfit or passive), which is exactly what
-    `StatBasis.stats_at` returns and what the ranking path carries as
-    `Card.stats` (see `apply_collection`, `stats[card_id] = basis.stats_at(...)`).
-
-    Bit-exact against the server's own `power.memory`: 2989/2989 applicable
-    rows of `dumps/bonus_extract_db.jsonl`. The whole-deck
-    `ceil(total * R / 1000)` hits 24 of those — it collapses fifteen
-    fractional parts into one ceiling and so runs LOW, never high.
-
-    Integer arithmetic: `-(-stat * R // 1000)` is `ceil(stat * R / 1000)`
-    exactly for the non-negative integer stats and rate this takes — no float
-    rounding to reason about, and it agrees with the reference fit's
-    `math.ceil` on every measured row."""
+    `R` is `memory_bonus_permil` (`permil` here); each `memberParameter_stat` is the
+    member's leveled and bloomed base stat alone (no board, outfit or passive), i.e.
+    `StatBasis.stats_at` / `Card.stats`. Bit-exact against the server's own
+    `power.memory` on every captured deck. Integer arithmetic: `-(-stat * R // 1000)`
+    is the exact ceiling."""
     if permil is None:
         return None
     total = 0
@@ -1242,42 +954,22 @@ def memory_bonus_per_stat(per_member_stats: Sequence[tuple[int, int, int]], perm
 def member_power_up(per_member_bases: Sequence[float], permyriad: int | None) -> int | None:
     """The Member Power-Up summand of Overall Power, or `None` if unset.
 
-    Exact, not an approximation — the ceiling is per member slot and that is the
-    granularity a caller can actually supply:
-
         SUM over the 5 member slots of ceil( base_m * P / 10000 )
 
-    `base_m` is that member's
-    `MemberParameter + PassiveSkill + OutfitSkill + HolomemBoard`.
-    **The Memory Bonus is excluded from the base** — measured, and it is what
-    orders the two mechanics: memory applies to the parameter line, training to
-    the pre-memory subtotal. Including it is refuted at every candidate P.
-
-    ⛔ **The Outfit Skill line is part of the base.** The call site passes
-    `effective_stat_sum + board_power`, and `effective_stat_sum` already
-    carries the costume's stat effect.
-
-    Checked against the wire, `deck_oracle.json`, all 32 rows: solving each row
-    for the integer `P` it admits (`base*P/10000 <= wire < base*P/10000 + 5`)
-    gives **P = 39 on rows 0-20 and P = 41 on rows 21-31, with no exceptions**,
-    where 39 is exactly what `derived_member_power_up_permyriad` computes from
-    `state/collection.json` and the step is the account levelling between the
-    collection snapshot and the later captures. Drop the Outfit line from
-    the base and the same test is **infeasible on 12 of the 32 rows** — it
-    survives only where that row's outfit line is zero. `tests/test_collection.py
-    ::test_member_power_up_base_includes_the_outfit_skill_line` pins both halves.
-
-    That the five ceilings are PER MEMBER is inferred, not read from code: the band
-    test 0 < gain <= 5 is necessary and not sufficient, and N = 5 is the only
-    structural reading inside the admissible band [4, 6]."""
+    `base_m` is that member's `MemberParameter + PassiveSkill + OutfitSkill +
+    HolomemBoard`. The Memory Bonus is excluded (it applies to the parameter line; the
+    power-up to the pre-memory subtotal). The Outfit Skill line is included: the call
+    site passes `effective_stat_sum + board_power`, which carries the costume's stat
+    effect; without it the captured decks admit no single `P`
+    (`test_member_power_up_base_includes_the_outfit_skill_line`). Five ceilings, one per
+    member, is the only count consistent with the captured gains."""
     if permyriad is None:
         return None
     return sum(math.ceil(round(base * permyriad / 10000, 6)) for base in per_member_bases)
 
 
 def caps_by_rarity_from_mapping(raw: Mapping) -> dict[str, CardLevelCaps]:
-    """`card_caps.json` keyed by RARITY, which is all the caps actually depend
-    on — see `_rarity_of` for the measurement."""
+    """`card_caps.json` keyed by rarity, which is all the caps depend on (`_rarity_of`)."""
     out: dict[str, CardLevelCaps] = {}
     for group, caps in (raw.get("level_cap_by_limit_break") or {}).items():
         rarity = group.split("-", 1)[0].removeprefix("rarity_")

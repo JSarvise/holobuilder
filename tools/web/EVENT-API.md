@@ -1,8 +1,10 @@
 # Event Points mode — HTTP API (backend contract)
 
 Logic in `tools/web/event_mode.py`; routes in `tools/web/hbweb/event.py`. Everything uses the
-**newest open event** in `tools/recon/proxy/dumps/marathon_bonus.json` (written by every
-refresh, `Event/ListEventInfo`) unless `event=<key>` is given.
+**event chapter open now** in `tools/recon/proxy/dumps/marathon_bonus.json` (written by every
+refresh, `Event/ListEventInfo`): the one whose window holds the current time
+(`marathon.pick_chapter`; a Spotlight event lists all its chapters at once), unless
+`event=<key>` is given.
 
 Rules the numbers follow (`src/hbuilder/domain/marathon.py`):
 
@@ -21,7 +23,7 @@ Rules the numbers follow (`src/hbuilder/domain/marathon.py`):
 | GET | `/eventart/<name>.webp[?w=N]` | an event banner / logo (`dumps/event_art/`, written by `event_art.py`); 404 when absent or the name is not `[A-Za-z0-9_-]+.webp` |
 | GET | `/api/event/songs[?boosts=3&difficulty=EXPERT]` | every song ranked by `L` (team-independent). 400 on boosts outside 1..10 or unknown difficulty |
 | POST | `/api/event/run` | start the search job. 202 `{job_id, plan, opts}`; 400 on bad body; 503 if no event file |
-| GET | `/events/<job_id>` | the job's event stream (SSE, `data: {json}` frames, `: keepalive` comments) — shared with `/api/run` |
+| GET | `/events/<job_id>` | the job's event stream (SSE, `data: {json}` frames, `: keepalive` comments) — shared with `/api/search` |
 | POST | `/cancel/<job_id>` | cancel. 200 `{job_id, cancelling:true}`; the stream then emits `cancelled` + `end` |
 
 ## The card object (every card everywhere in this API)
@@ -79,7 +81,7 @@ Rules the numbers follow (`src/hbuilder/domain/marathon.py`):
 
 ```json
 {"boosts": 3, "difficulty": "EXPERT", "length_multiplier_estimated": true,
- "formula": "L = 1000 + 10*ceil((sec - 90) * 100 / 190 * (1 + up/1000)); ...",
+ "formula": "L = 1000 + 10*ceil((sec - 50) * 10/29 * (1 + up/1000)); L = 1000 when sec <= 50; ...",
  "note": "Ranked by L alone; ...",
  "songs": [{"rank": 1, "music_id": "m0131", "title": "KANADE", "singer": "Otonose Kanade",
             "notes": 867, "seconds": 166, "length_permil": 1480, "event_song": false,
@@ -199,9 +201,9 @@ Failure: `{"type":"error","message":"..."}` then `end`. Cancel: `{"type":"cancel
 
 ## Not in scope
 
-`/api/optimize-rerank` does NOT take `objective`: it re-ranks on the develop pipeline's basis
-(maxed 5★ / flat budgets), and event mode must use the account basis — mixing the two would rank by a
-bonus on the wrong cards' scores. Use `/api/event/run`.
+The Optimizer's `/api/search` does NOT take `objective`: it ranks by score. Event Points and Event
+Song Score rankings are `/api/event/run`, on the account basis (a bonus counts only on the cards the
+account owns, at their real levels).
 
 ## Cutoffs — ranking borders per region + prediction
 

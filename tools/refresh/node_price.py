@@ -1,22 +1,19 @@
 """node_price.py -- the FULL price of a Holomem Board node.
 
-A node's detail popup in the game shows THREE costs side by side (e.g. 50 / 10 / 4),
-not one item plus a point cost. `SkillTreeNode` field 1000 (`consumptions_`) is a
-REPEATED `Consumption`, and 89 of the 323 rows carry TWO entries. `tree_cost.py`
-reads only `raw[0]`, so it drops the second one and reports the "-2" Hexa items as
-unused (0/323). They are used on 89 rows.
+A node's detail popup in the game shows up to THREE costs (e.g. 50 / 10 / 4): the points
+plus `SkillTreeNode` field 1000 (`consumptions_`), a REPEATED `Consumption` that carries two
+entries on 89 of the 323 rows (the second one is the Hexa cost).
 
 Two traps this tool avoids:
   1. `master_cache.rows()` decodes every value with errors="replace", turning any
-     byte >= 0x80 into U+FFFD -- and the quantity varint sits exactly there. Read
-     the SQLCipher DB directly and keep field 1000 as bytes.
-  2. field 1000 is repeated. Iterate every entry, never `[0]`.
+     byte >= 0x80 into U+FFFD, where the quantity varint sits. The SQLCipher DB is read
+     directly and field 1000 kept as bytes.
+  2. field 1000 is repeated: every entry is read, never only `[0]`.
 
-Consumption submessage (field names as in the master dump of the community tool
-holodori.best, dumps/holodori/main_SkillTreeNode.json):
+Consumption submessage (field names as in dumps/holodori/main_SkillTreeNode.json):
     1 resourceType (3 == RESOURCE_TYPE_ITEM)   2 resourceId   3 quantity
 
-Read-only. Touches nothing under data/.
+Read-only.
 
 Usage:
     python node_price.py                # full report
@@ -155,8 +152,7 @@ def char_ids(row: dict) -> list[str]:
 def price(row: dict) -> dict[str, int]:
     """A node's FULL price as {currency_id: quantity}. Points included.
 
-    Reads EVERY entry of the repeated field 1000, which is the whole point of
-    this tool -- `tree_cost.py::node_cost` reads only the first.
+    Reads EVERY entry of the repeated field 1000.
     """
     out: dict[str, int] = {}
     pts = f(row, 9, 0) or 0
@@ -283,7 +279,7 @@ def section_node(nodes: list[dict], gid: str, names: dict[str, str]) -> None:
 
 
 def section_owner(nodes: list[dict], names: dict[str, str]) -> None:
-    print("\n=== the owner's board ===")
+    print("\n=== the account's board ===")
     path = os.path.join(DUMPS, "board_state.json")
     if not os.path.exists(path):
         print("  board_state.json absent -- skipped")

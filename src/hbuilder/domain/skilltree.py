@@ -3,40 +3,20 @@ it, and whether a chosen set is legal.
 
 `domain/board.py` scores a board that already exists. This module answers the
 question before that one: *may the player buy this set of nodes, and what does
-it cost?* It is what the board editor validates against, and what a
-node-purchase optimiser would search within.
-
-## Why an editor exists at all, given the board is captured
-
-The current board is read from the account, not typed, and the character level
-follows from the captured point balance. That records **current** state.
-
-Editing is a different job:
-
-* **Planning.** Earned points often sit unspent. Answering "where should they
-  go" means proposing a board that does not exist yet, which no capture can
-  supply.
-* **Coverage.** Characters that appear in no capture have no board at all on
-  disk.
-
-So: capture for what IS, editing for what COULD BE. This module never writes,
-and it is deliberately ignorant of where the selection came from. The
-validators that apply the three rules below to a selection, and the
-account-wide socket placement rule, live in `tests/support/board_rules.py`.
+it cost?* It is what the board planner (`board_optimizer`) searches within: the
+captured board records what IS, planning proposes what COULD BE (unspent points,
+characters with no captured board). This module never writes. The validators
+that apply the rules below to a selection, and the account-wide socket placement
+rule, live in `tests/support/board_rules.py`.
 
 ## The three rules a selection must satisfy
 
-1. **Connectivity — the expensive one.** Adjacency is the **orthogonal
-   4-neighbour grid** on the node positions: the slots form one connected
-   component, and every observed live board is connected to the root under
-   this rule. Diagonals are NOT edges — under 8-neighbour the three outer
-   sockets stop being cut vertices, which contradicts the observed boards, so
-   the rule is decidable rather than a preference.
+1. **Connectivity.** Adjacency is the **orthogonal 4-neighbour grid** on the
+   node positions. Diagonals are NOT edges: under 8-neighbour the three outer
+   sockets stop being cut vertices, which contradicts the account's boards.
 
-   The consequence is the whole point: **a node cannot be bought without its
-   path**. The stat nodes alone cost 228 points in isolation and **293
-   connected**, which moves them from character level 37 to 44. An editor that ignored connectivity would quietly price a board the game
-   will not sell.
+   So **a node cannot be bought without its path**: the stat nodes alone cost
+   228 points in isolation and **293 connected** (character level 37 vs 44).
 
 2. **Budget.** Point costs are master `SkillTreeNode` field 9, summing to
    **453** over the 154 groups. The cost does NOT vary across a group's rows,
@@ -94,10 +74,8 @@ def player_level_requirement(req: str | None) -> int | None:
 def neighbours(
     positions: Mapping[str, Sequence[int]],
 ) -> dict[str, frozenset[str]]:
-    """4-neighbour adjacency over a model's node positions.
-
-    Orthogonal only. This rule — and not 8-neighbour — reproduces the
-    observed boards, so the choice is evidence, not convention."""
+    """4-neighbour adjacency over a model's node positions (orthogonal only: the
+    rule that reproduces the account's boards)."""
     by_cell: dict[tuple[int, int], str] = {
         (int(pos[0]), int(pos[1])): node for node, pos in positions.items()
     }
@@ -163,12 +141,8 @@ def tree_from_mapping(
     costs: Mapping[str, int],
 ) -> SkillTree:
     """Build a `SkillTree` from `skilltree.json`'s node table, one model's
-    positions, and the per-node point costs read from master `SkillTreeNode`
-    field 9.
-
-    Costs come in separately because `skilltree.json` does not carry them —
-    they are master data, and joining the two here keeps the seam visible
-    rather than pretending one file holds both."""
+    positions, and the per-node point costs from master `SkillTreeNode` field 9
+    (which `skilltree.json` does not carry)."""
     nodes = {
         node_id: TreeNode(
             node_id=node_id,

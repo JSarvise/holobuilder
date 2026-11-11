@@ -3,7 +3,7 @@
 `snapshot_mtime` (when the account was last read), `chart_count` (the library
 the song tiles quote, never a hard-coded 181) and `solver_available` (whether
 the exact HiGHS plan can run, so the button is disabled before the first click
-instead of failing after it). REDESIGN-PLAN Phase A."""
+instead of failing after it)."""
 
 from __future__ import annotations
 

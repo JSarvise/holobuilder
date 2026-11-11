@@ -1,18 +1,15 @@
-"""The board-plan engine — choose the nodes to buy that maximise a team's board
-value, within the character's point budget and the tree's connectivity.
+"""The board-plan engine: choose the nodes to buy that maximise a team's board
+value, within the character's point budget and the tree's connectivity
+(`skilltree.py` supplies the rules: per-node cost, the 4-neighbour grid, the root
+the bought set must connect to, per-node level gates).
 
-This is the "optimise boards" step the frontend does per team: `skilltree.py`
-supplies the rules (per-node cost, the 4-neighbour grid, the root the bought set
-must connect to, per-node level gates); this searches within them.
-
-The problem is a **prize-collecting connected subgraph under a budget** — a node
+The problem is a **prize-collecting connected subgraph under a budget**: a node
 is only worth buying with a path back to the root, and a valuable node can sit
-behind cheap zero-value connector nodes. A pure value/cost frontier greedy would
-never buy a connector, so this bundles each step: it scores every reachable node
-by the value of *everything newly bought to reach it* over the cost of that
-path (a cost-weighted shortest path over unbought nodes), buys the best bundle,
-and repeats until nothing affordable adds value. Approximate — like the team
-solver's own beam — but connectivity- and budget-exact by construction:
+behind cheap zero-value connectors, which a plain value/cost greedy would never
+buy. So each step scores every reachable node by the value of *everything newly
+bought to reach it* over the cost of that path (a cost-weighted shortest path
+over unbought nodes), buys the best bundle, and repeats until nothing affordable
+adds value. Approximate, but connectivity- and budget-exact by construction:
 `tree.reachable(plan.selected)` always returns the whole selection.
 """
 
@@ -20,6 +17,7 @@ from __future__ import annotations
 
 import heapq
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 
 from hbuilder.domain.skilltree import ROOT_NODE, SkillTree
@@ -82,6 +80,42 @@ def _cheapest_bundles(
     return best
 
 
+def keep_preferred(
+    tree: SkillTree,
+    selected: AbstractSet[str],
+    spent: int,
+    budget: int,
+    prefer: AbstractSet[str],
+    *,
+    player_level: int | None = None,
+    node_value: Mapping[str, float] | None = None,
+) -> tuple[frozenset[str], int, tuple[frozenset[str], ...]]:
+    """`selected` grown with the `prefer` nodes (the account's own) that the unspent points
+    still pay for: each step adds the cheapest bundle made only of preferred nodes (then the
+    one worth most by `node_value`, then by id), until none fits. A plan then never leaves
+    points idle where it could keep a node the account already has, so it never proposes
+    taking one off for nothing. Returns `(selected, spent, the bundles added)`."""
+    keepable = _available(tree, player_level) & set(prefer)
+    costs = {nid: tree.nodes[nid].cost for nid in tree.nodes}
+    values = node_value or {}
+    chosen = set(selected)
+    added: list[frozenset[str]] = []
+    while True:
+        bundles = _cheapest_bundles(tree, frozenset(chosen), keepable, costs)
+        fits = [
+            (cost, -sum(values.get(n, 0.0) for n in sorted(nodes)), node, nodes)
+            for node, (cost, nodes) in sorted(bundles.items())
+            if spent + cost <= budget
+        ]
+        if not fits:
+            break
+        cost, _value, _node, nodes = min(fits, key=lambda f: f[:3])
+        chosen |= nodes
+        spent += cost
+        added.append(nodes)
+    return frozenset(chosen), spent, tuple(added)
+
+
 def optimize_board(
     tree: SkillTree,
     budget: int,
@@ -89,16 +123,22 @@ def optimize_board(
     *,
     player_level: int | None = None,
     owned: frozenset[str] = frozenset(),
+    prefer: AbstractSet[str] = frozenset(),
 ) -> BoardPlan:
     """Greedy path-bundling knapsack. Starts from the root (and any `owned`
     nodes, free), and buys the best value/cost bundle each step until the budget
-    can afford no further value-adding path."""
+    can afford no further value-adding path.
+
+    `prefer`: nodes the account already has, on a plan made from scratch. Between two
+    bundles of the same value per point the one holding more of them is bought, and the
+    points left at the end keep as many of them as they pay for (`keep_preferred`)."""
     buyable = _available(tree, player_level)
     costs = {nid: tree.nodes[nid].cost for nid in tree.nodes}
     selected: set[str] = {ROOT_NODE} | {n for n in owned if n in tree.nodes}
     spent = tree.cost_of(selected - {ROOT_NODE})
     value = sum(node_value.get(n, 0.0) for n in selected)
     steps: list[frozenset[str]] = []
+    preferred = frozenset(prefer)
 
     while True:
         bundles = _cheapest_bundles(tree, frozenset(selected), buyable, costs)
@@ -116,7 +156,11 @@ def optimize_board(
             if gained <= 0.0:
                 continue
             ratio = gained / added_cost if added_cost > 0 else float("inf")
-            if ratio > best_ratio:
+            if ratio > best_ratio or (
+                ratio == best_ratio
+                and best_node is not None
+                and len(added_nodes & preferred) > len(best_bundle[1] & preferred)
+            ):
                 best_ratio, best_node, best_bundle = ratio, node, (added_cost, added_nodes)
         if best_node is None:
             break
@@ -125,5 +169,13 @@ def optimize_board(
         spent += added_cost
         value += sum(node_value.get(n, 0.0) for n in sorted(added_nodes))
         steps.append(added_nodes)
+    if preferred:
+        kept, spent, more = keep_preferred(
+            tree, selected, spent, budget, preferred, player_level=player_level, node_value=node_value
+        )
+        for nodes in more:
+            value += sum(node_value.get(n, 0.0) for n in sorted(nodes))
+        selected = set(kept)
+        steps.extend(more)
 
     return BoardPlan(selected=frozenset(selected), spent=spent, value=value, steps=tuple(steps))

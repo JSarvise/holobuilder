@@ -158,7 +158,7 @@ def test_bloom_zero_is_recorded_but_not_scorable_and_says_why():
     state = resolve_card_state("c", {"level": 40, "bloom": 0}, UNKNOWN, FIVE_STAR)
 
     assert state.bloom == 0
-    assert state.known, "the state IS known — the owner told us it is bloom 0"
+    assert state.known, "the state IS known — the collection says it is bloom 0"
     assert not state.scorable
     assert state.overstated == ("ACTIVE", "SPECIAL", "PASSIVE")
     assert any("OVERSTATE" in w for w in state.warnings)
@@ -634,7 +634,7 @@ def test_member_parameter_reproduces_the_servers_own_figure():
 
     assert not undated, (
         "every oracle row must carry the card levels of its own capture — "
-        "regenerate it with the deck oracle (archive/research); "
+        "regenerate dumps/deck_oracle.json from fresh Live/GetDeck captures; "
         f"rows without levels: {undated[:5]}"
     )
     assert checked >= 25, f"expected the captured decks, only checked {checked}"

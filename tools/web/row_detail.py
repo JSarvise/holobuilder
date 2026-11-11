@@ -1,12 +1,11 @@
 """ONE number set per row: the figures a detail view shows for a ranked team,
 computed on the row's own basis.
 
-A ranked row is (team, board, slot order) scored by one leaf. Its detail views
-— the Unit Score panel, the Score Bonus split, the timeline, the run
-distribution — must not be recomputed by routes that each build their OWN board
-and their OWN deck power: the same team on the same song then reads 2,298,116 in
-the row, 2,269,749 in the panel and 2,119,866 in the timeline. This module is
-the one place those figures are produced, from ONE board:
+A ranked row is (team, board, slot order) scored by one leaf. Its detail views — the Unit
+Score panel, the Score Bonus split, the timeline, the run distribution — must not be
+recomputed by routes that each build their own board and deck power (the same team on the
+same song would read three different scores). This module is the one place those figures
+are produced, from ONE board:
 
 * `figures(team, chart, cfg_board)` — the song figures (estimate, ceiling,
   slot order, deck power) through `song_rank.score_team_on_chart`, the ranker's
@@ -57,7 +56,7 @@ from hbuilder.domain.team import Team  # noqa: E402
 if TYPE_CHECKING:
     from ondemand import Assumptions
 
-    from hbuilder.domain.board_plan import BoardOptimisedTeam
+    from hbuilder.domain.board_refine import BoardOptimisedTeam
     from hbuilder.domain.scoring_config import ScoringConfig
     from hbuilder.domain.song import SongChart
 
@@ -274,13 +273,22 @@ def distribution(
     deck_power: float,
     row_score: float | None = None,
     keep_law: bool = False,
+    pace: bool = False,
 ) -> dict:
     """The exact law of the run score on the row's basis. `verified` says the
     law's own expectation reproduced the row's figure exactly. `keep_law`: the whole
-    law too (`law`: every score with its chance), for `song_distribution.best_of_n`."""
+    law too (`law`: every score with its chance), for `song_distribution.best_of_n`.
+    `pace`: the score pace of the runs in each bar too (`song_distribution.score_pace`)."""
     try:
         law = run_score_distribution(
-            team.members, team.leader, chart, cfg_board, member_order, deck_power, keep_law=keep_law
+            team.members,
+            team.leader,
+            chart,
+            cfg_board,
+            member_order,
+            deck_power,
+            keep_law=keep_law,
+            pace=pace,
         )
     except ValueError as exc:
         return {"available": False, "reason": str(exc)}
@@ -323,6 +331,7 @@ def detail(
     want_timeline: bool = False,
     member_order: Sequence[str] | None = None,
     keep_law: bool = False,
+    pace: bool = False,
 ) -> dict:
     """Every figure of one row from ONE board (`cfg_board`). `chart=None` is
     the song-agnostic Unit Score row."""
@@ -347,6 +356,7 @@ def detail(
             out["deck_power"],
             row_score=out["song_est"],
             keep_law=keep_law,
+            pace=pace,
         )
     return out
 
@@ -441,6 +451,7 @@ def leaf_detail(
     as_is: bool = False,
     keep_law: bool = False,
     want_notes: bool = False,
+    pace: bool = False,
 ) -> dict:
     """`team` re-developed on a two-stage leaf (`built`: a `leaf_inputs` /
     `leaf_inputs.build_account` result) on `chart` (default `built["chart"]`) and
@@ -470,6 +481,7 @@ def leaf_detail(
             want_timeline=want_timeline,
             member_order=member_order,
             keep_law=keep_law,
+            pace=pace,
         )
     else:
         out = figures(team, chart, cfg_board)
@@ -482,6 +494,7 @@ def leaf_detail(
                 out["deck_power"],
                 row_score=out["song_est"],
                 keep_law=keep_law,
+                pace=pace,
             )
     if want_notes:
         out["notes"] = note_breakdown(team, chart, cfg_board)
@@ -534,9 +547,8 @@ def leaf_detail(
 CAPTURED_BOARD = paths.DUMPS / "board_state.json"
 INVENTORY = paths.DUMPS / "inventory.json"
 # Hologold per board node taken off (`main_Setting.skillTreeResetConsumptionGoldQuantity`;
-# the reset refunds the node's materials). Per NODE is the reading the MILP's
-# `max_resets` uses (`board_plan_solver.py`); whether the game charges per node or per
-# reset action has not been checked in game.
+# the reset refunds the node's materials), counted per node as the MILP's `max_resets` does
+# (`board_plan_solver.py`).
 RESET_HOLOGOLD = 1000
 START_NODE = "S-001"
 
@@ -780,6 +792,7 @@ def two_stage_detail(
     play: tuple[str, bool] | None = None,
     keep_law: bool = False,
     want_notes: bool = False,
+    pace: bool = False,
 ) -> dict:
     """A searched (or event, `refine=False`) row re-developed on the leaf that
     ranked it, with every figure from that one board. `refine`: the refinement level the
@@ -837,6 +850,7 @@ def two_stage_detail(
         as_is=as_is,
         keep_law=keep_law,
         want_notes=want_notes,
+        pace=pace,
     )
     if whole_plan is not None:
         out["plan_optimal"] = optimal  # False: a MILP stopped on the solver's time limit
@@ -926,13 +940,11 @@ def pool_detail(
       pool on) and, with `refine`, the best of them with its activation nodes re-chosen
       on the score summed over the WHOLE pool (`develop_refined_team`).
 
-    The best of these candidates, not a proof of the best board; every score is exact.
-    Measured on one 23-song pool (account, developed boards, top 3 rows): the refined
-    board at the one order is +0.3..+1.9 % over the search's per-song mean,
-    the unrefined candidates -4.1..-6.1 %."""
+    The best of these candidates, not a proof of the best board; every score is exact. On a
+    23-song pool (account, developed boards, top 3 rows) the refined board at the one order
+    is +0.3..+1.9 % over the search's per-song mean, the unrefined candidates -4.1..-6.1 %."""
     import leaf_inputs  # noqa: PLC0415
 
-    from hbuilder.domain.song import load_charts  # noqa: PLC0415
     from hbuilder.solver.parallel_refine import (  # noqa: PLC0415
         RefinePool,
         develop_refined_team,
@@ -944,7 +956,7 @@ def pool_detail(
     if not songs:
         raise ValueError("no pool songs")
     built = _leaf_inputs(basis, songs[0], difficulty, assumptions, play)
-    library = load_charts(str(leaf_inputs.charts_path(difficulty))).at(difficulty)  # type: ignore[union-attr]
+    library = leaf_inputs.chart_library(leaf_inputs.charts_path(difficulty)).at(difficulty)
     by_music = {c.music_id: c for c in library}
     charts = [by_music[m] for m in songs if m in by_music]
     if not charts:

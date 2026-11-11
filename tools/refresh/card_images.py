@@ -311,8 +311,9 @@ def organize(dest=None):
     """Sort the flat render output into <family>/<WxH>/ folders.
 
     The native PNGs are MOVED (they are the bulk, ~1.1 GB, and nothing else reads them); the
-    320 px webp are COPIED, because dumps/card_images/ must stay a flat webp directory -- that
-    is exactly what build_explorer.py globs, and it only ever looks at `.webp`.
+    320 px webp are COPIED, because dumps/card_images/ must stay a flat webp directory -- the
+    web server looks pictures up there by flat name (`tools/web/hbweb/static.py`,
+    `<family>_<id>.webp`).
     Re-runnable: render writes flat again, organize re-sorts."""
     from PIL import Image
 

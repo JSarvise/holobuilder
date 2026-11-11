@@ -1,5 +1,6 @@
-"""The session's write guard (tests/support/write_guard.py): the real state/ and dumps/ cannot be
-written; reading them and writing anywhere else still work."""
+"""The session's write guard (tests/support/write_guard.py): the real state/ and dumps/, and
+data/owned.json and data/cards.json, cannot be written; reading them and writing anywhere else
+still work."""
 
 from __future__ import annotations
 
@@ -40,3 +41,19 @@ def test_reading_and_tmp_path_stay_free(tmp_path):
         if folder.is_dir():
             folder.mkdir(exist_ok=True)  # an existing real folder is fine
             next(folder.iterdir(), None)
+
+
+@pytest.mark.parametrize("name", ["owned.json", "cards.json"])
+def test_the_account_and_the_catalogue_files_are_guarded_too(name, tmp_path):
+    real = paths.DATA / name
+    from support import write_guard
+
+    assert write_guard.guarded(real) and write_guard.guarded(os.path.abspath(real))
+    assert write_guard.guarded(paths.DATA / "marathon.json") is None  # the rest of data/
+    if real.is_file():  # a clean clone has no owned.json
+        before = real.read_bytes()
+        with pytest.raises(PermissionError, match="real"):
+            open(real, "ab").close()  # append mode: nothing would be written even unguarded
+        with pytest.raises(PermissionError, match="real"):
+            os.close(os.open(real, os.O_WRONLY))
+        assert real.read_bytes() == before

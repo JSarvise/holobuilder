@@ -497,7 +497,8 @@ def test_counts_chosen_per_chart_are_scores_of_real_boards_never_below_the_plain
     node counts chosen for that chart. Every such score is the exact score of a board that
     is the plain develop's with frequency nodes dropped (nothing else moved), or the plain
     score itself; the mean is the mean of those; COUNTS_BOTH is `(plain mean, that mean)`."""
-    from hbuilder.domain.board_plan import SongCast, cooldown_node_ids
+    from hbuilder.domain.board_plan import SongCast
+    from hbuilder.domain.board_refine import cooldown_node_ids
     from hbuilder.domain.song import overall_power_for, score_song_detailed
     from hbuilder.solver import parallel_refine as pr
 
@@ -604,7 +605,7 @@ def test_the_count_axes_are_the_ones_the_level_two_refinement_tries():
     """`cooldown_count_axes` is `refine_cooldown_counts`' own first step: with `drops_only`
     a member's counts are those of its states that only drop nodes, the same boards; and a
     memo changes nothing."""
-    from hbuilder.domain.board_plan import cooldown_count_axes, cooldown_node_ids
+    from hbuilder.domain.board_refine import cooldown_count_axes, cooldown_node_ids
     from hbuilder.solver import parallel_refine as pr
 
     ctx, teams = _context()

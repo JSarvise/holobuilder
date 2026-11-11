@@ -1,23 +1,19 @@
-"""Exact Full-plan board optimiser via HiGHS — a drop-in for `optimised_board`.
+"""Exact Full-plan board optimiser via HiGHS: `solve_team_board` -> `{chr: {nodes, slots}}`.
 
-`optimised_board` shells out to `tree_optimise --plan` (the beam, ~60-90s) and reads
-the `{chr: {nodes, slots}}` it dumps. This produces the SAME dict IN-PROCESS by solving
-the board as one integer program — provably optimal, sub-second.
-
-The beam is a multi-dimensional knapsack over BOTH each character's points AND the
-account's shared cube/hexa wallet, with per-branch scope (RED pays on the leader, BLUE
-on a member, GREEN on any board, YELLOW on a singer in song mode). This models all of
-that as ONE joint MILP over the six team boards:
+The board plan is a multi-dimensional knapsack over each character's points AND the
+account's shared cube/hexa wallet, with per-branch scope (RED pays on the leader, BLUE on a
+member, GREEN on any board, YELLOW on a singer in song mode), solved as ONE joint MILP over
+the team's boards and the bench:
 
 * one binary per (character, node); the root forced on, level-gated nodes excluded;
-* per-character point budget and per-character connectivity (single-commodity flow);
+* per-character point budget and per-character connectivity (`_connectivity`);
 * the shared cube/hexa wallet as 8 account-wide constraints (dropped when materials
   are infinite);
 * objective = the per-node values from `tree_optimise._branch_values`, scoped per
-  branch exactly as the beam's `_move_in_scope` does.
+  branch as `tree_optimise._move_in_scope` defines it.
 
-Sockets are placed afterwards by `socket_optimise` on the solved board, the same as the
-beam path. Server-side only; the solver library is not imported by `src/hbuilder`.
+Sockets are placed afterwards by `socket_optimise` on the solved board. Server-side only;
+the solver library is not imported by `src/hbuilder`.
 """
 
 from __future__ import annotations
@@ -28,6 +24,7 @@ import os
 import re
 import tempfile
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -36,12 +33,10 @@ import tree_optimise as to
 
 from hbuilder import paths
 
-# What every plan of one account shares, kept per process (rebuilding the Oracle, re-reading
-# the account and re-building the ~48 bench boards' MILP block on every solve costs ~15-24 %
-# end to end; kept, the plans are byte-identical):
-# `_ACCOUNT` the Oracle and the account's graphs / prices / owned nodes / wallet, `_BLOCKS`
-# each bench board's MILP block (columns + rows). Both are keyed on `_account_stamp()`
-# and emptied when it moves (a refresh).
+# What every plan of one account shares, kept per process (rebuilding it every solve costs
+# ~15-24 % end to end; the plans are byte-identical): `_ACCOUNT` the Oracle and the account's
+# graphs / prices / owned nodes / wallet, `_BLOCKS` each bench board's MILP block (columns +
+# rows). Both are keyed on `_account_stamp()` and emptied when it moves (a refresh).
 _ACCOUNT: dict = {}
 _BLOCKS: dict = {}
 # every file the Oracle, `_prices` and `balance_from_disk` read
@@ -97,7 +92,7 @@ def _account_stamp() -> tuple:
 
 def _account_inputs(oracle) -> tuple:
     """`(graphs, prices, owned, balance, wallet_ref, points)` of the account, read as the
-    plan always read them (outside the Oracle's `try`: a read failure raises, as before)."""
+    plan reads them (outside the Oracle's `try`: a read failure raises)."""
     graphs = to._graphs(oracle.skilltree)
     prices = to._prices()
     owned = to._owned_nodes()
@@ -581,7 +576,7 @@ def _best_of_candidates(
 
 
 def _place_sockets(board: dict, kw: dict) -> dict:
-    """The best Connect cards on the solved board, same as the beam path (best effort)."""
+    """The best Connect cards on the solved board (best effort)."""
     leader_id, member_ids = kw["for_team"][0], tuple(kw["for_team"][1:])
     try:
         import socket_optimise as so  # noqa: PLC0415
@@ -647,7 +642,7 @@ def solve_team_board(
 
     `max_resets`: how many currently-owned nodes the plan may take off the planned
     boards. Each costs 1,000 Hologold in game (`board_reset`); 0 means the plan
-    only adds nodes. None keeps the free rebuild this planner always made.
+    only adds nodes. None allows a free rebuild.
 
     Board options matching the community tool holodori.best:
     `branches` -- only nodes of these branches (G/B/R/Y; sockets always) are bought or
@@ -661,7 +656,7 @@ def solve_team_board(
     `reset_min_gain` -- what a reset must EARN, as a fraction of the team's score on
     the account's own boards (0.0002 = 0.02 %): each owned node the plan takes off
     costs that much in the objective, so a reset happens only when what it frees
-    buys more. A count cap alone (`max_resets`) lets through resets that gain next to nothing and blocks ones that gain a lot.
+    buys more (a count cap alone lets through resets that gain next to nothing).
 
     `act_search` -- False stops after the first MILP (Act levels priced on the
     account's own boards): no cooldown staircase, no one-board rounds. One solve
@@ -681,9 +676,8 @@ def solve_team_board(
     THREE CANDIDATES, the scorer picks. The MILP values each node by what it adds alone to a
     bare board, and inside a built board a node is worth more, by a factor that differs per
     node (a flat-stat red x1.2, an Act.Power red x1.8): close plans can come out in the
-    wrong order. So (1) the plan is solved with the whole Act search on the valuation the
-    planner used before it scored songs on the deck screen's Overall Power
-    (`tree_optimise.modelled_song_power`); then, each member board held at plan (1)'s Act
+    wrong order. So (1) the plan is solved with the whole Act search on the modelled stat
+    pool's song valuation (`tree_optimise.modelled_song_power`); then, each member board held at plan (1)'s Act
     level (cooldown count, rate sum), (2) on the bare values and (3) on values measured
     INSIDE plan (1)'s boards (`_branch_values(context=...)`). Holding the levels makes each
     of those one MILP instead of ~4 plus ~250 scorings, and on a song they score as well as
@@ -702,12 +696,6 @@ def solve_team_board(
     holds each member board at a `{chr: (cooldown count, rate sum)}`, `_levels_out` receives
     the plan's levels."""
     clock = _stages if _stages is not None else {}
-
-    def lap(stage: str, t0: float) -> float:
-        now = time.perf_counter()
-        clock[stage] = clock.get(stage, 0.0) + now - t0
-        return now
-
     if _valuation is None:
         return _best_of_candidates(
             dict(
@@ -740,15 +728,159 @@ def solve_team_board(
         raise ValueError(f"for_team is the team's leader and {to.MEMBER_COUNT} members: {for_team!r}")
     import highspy  # noqa: PLC0415 — server-side solver
 
-    if statuses is None:
-        statuses = []
-
     char_level = char_level if char_level in ("current", "max") else "current"
     resources = resources if resources in ("inventory", "infinite") else "inventory"
     if scenario == "full-collection-maxed":
         char_level = "max"
 
+    # the setup: the account, the node values, the budgets, the team and its bench
     t_stage = time.perf_counter()
+    plan = _load_plan(pool, song, scenario, uptime_model, for_team, clock, highspy)
+    if plan is None:
+        return None
+    plan.statuses = [] if statuses is None else statuses
+    plan.should_stop = should_stop
+    plan.max_resets = max_resets
+    t_stage = _lap(clock, "load", t_stage)
+    scored0 = plan.oracle.scorings
+    _value_nodes(plan, _context)
+    t_stage = _lap(clock, "values", t_stage)
+    _set_act_nodes(plan)
+    _set_budgets(plan, char_level, resources, all_invited, no_refund)
+    _set_buy_filters(plan, branches, targets, no_refund)
+    _set_team(plan, song, develop_bench)
+    _set_capped_supplies(plan, song_pool)
+    _set_reset_penalty(plan, reset_min_gain)
+    t_stage = _lap(clock, "setup", t_stage)
+
+    # the MILPs: round 0, the cooldown staircase, then one board at a time
+    tables = _initial_act_tables(plan, _levels)
+    if _levels is not None:
+        act_search = False
+    t_stage = _lap(clock, "act_tables", t_stage)
+    milp_before = plan.in_milp()
+    board = _solve_milp(plan, tables)
+    best = plan.team_score(plan.full_state(board)) if board is not None else None
+    if board is not None and act_search:
+        board, best = _staircase(plan, board, best, tables)
+    if board is not None and act_search:
+        board, best = _one_board_rounds(plan, board, best)
+    if _levels_out is not None and board is not None:
+        _levels_out.update(plan.levels(plan.full_state(board)))
+    # the staircase and the one-board rounds outside their MILPs: scorings and tables
+    t_now = time.perf_counter()
+    clock["act_search"] = clock.get("act_search", 0.0) + (t_now - t_stage) - (plan.in_milp() - milp_before)
+    t_stage = t_now
+    if board is None:
+        return None
+
+    _fill_leftovers(plan, board)
+    _lap(clock, "fill", t_stage)
+    clock["scorings"] = clock.get("scorings", 0) + plan.oracle.scorings - scored0
+
+    if include_sockets:
+        board = _place_sockets(
+            board, {"for_team": for_team, "pool": pool, "scenario": scenario, "song": song}
+        )
+    return board
+
+
+def _lap(clock: dict, stage: str, t0: float) -> float:
+    """Add the seconds since `t0` to `clock[stage]`; the time now."""
+    now = time.perf_counter()
+    clock[stage] = clock.get(stage, 0.0) + now - t0
+    return now
+
+
+class _Plan:
+    """What the steps of one `solve_team_board` call share: the account, the team, the
+    budgets, the node values and the clock."""
+
+    # set by the steps that follow, in `solve_team_board`'s order
+    statuses: list
+    should_stop: Callable[[], bool] | None
+    max_resets: int | None
+    values: dict
+    act_kind: dict
+    act_value: dict
+    points: dict
+    wallet: dict | None
+    branches: str
+    targets: dict
+    constrained: bool
+    node_ok: Callable[[str, str], bool]
+    charged_free: Callable[[str, str], bool]
+    leader_chr: str
+    member_chrs: set
+    team_chars: list
+    song_mode: bool
+    develop_bench: bool
+    bench_chars: list
+    bench_set: set
+    all_chars: list
+    act_chars: list
+    grouping_terms: dict
+    yellow_list: list
+    yellow_keys: set
+    reset_penalty: float = 0.0
+
+    def __init__(self, clock: dict, highspy, akey: tuple, held: tuple, for_team: list[str]) -> None:
+        self.clock = clock
+        self.hs = highspy
+        self.stamp = akey[4]
+        oracle, graphs, prices, owned, balance, wallet_ref, points = held
+        self.oracle = oracle
+        self.graphs: dict = graphs
+        self.prices: dict = prices
+        self.owned: dict = owned
+        self.balance = balance
+        self.account_wallet: dict = wallet_ref
+        self.account_points: dict = points
+        self.leader_id: str = for_team[0]
+        self.member_ids: tuple = tuple(for_team[1:])
+        self.singers: frozenset = frozenset(oracle._chart.singers) if oracle._chart else frozenset()
+        self.team_score = _team_scorer(oracle, self.leader_id, self.member_ids)
+
+    def in_milp(self) -> float:
+        """The seconds this call has spent building and solving MILPs."""
+        return self.clock.get("milp_build", 0.0) + self.clock.get("milp_solve", 0.0)
+
+    def full_state(self, board_: dict) -> dict:
+        """Every character's nodes: the plan's boards, every other board as owned."""
+        owned = self.owned
+        return {
+            cid: set(board_[cid]["nodes"]) if cid in board_ else set(owned.get(cid) or [to.ROOT]) | {to.ROOT}
+            for cid in self.graphs
+        }
+
+    def levels(self, state_: dict) -> dict:
+        """Each member board's Act level in `state_`: (cooldown count, rate sum)."""
+        act_kind, act_value = self.act_kind, self.act_value
+        return {
+            cid: (
+                sum(1 for n in state_[cid] if act_kind.get(n) == "Act.CD"),
+                sum(act_value[n] for n in state_[cid] if act_kind.get(n) == "Act.Prob"),
+            )
+            for cid in self.act_chars
+        }
+
+
+def _team_scorer(oracle, leader_id: str, member_ids: tuple):
+    """`{chr: nodes} -> score`: the Oracle's team score on those boards."""
+
+    def team_score(node_dict):
+        return oracle.score_team(
+            leader_id, member_ids, oracle.state_from({c: sorted(n) for c, n in node_dict.items()})
+        )
+
+    return team_score
+
+
+def _load_plan(
+    pool: int, song: str | None, scenario: str, uptime_model: str | None, for_team: list[str], clock, highspy
+) -> _Plan | None:
+    """The account's Oracle and inputs, kept per process (`_ACCOUNT`); None when the Oracle
+    cannot load (an input read failure afterwards raises)."""
     try:
         # `uptime_model`: the in-run model the search and the page score with, not
         # `config.json`'s deck-screen `steady` (see `tree_optimise.Oracle`).
@@ -764,43 +896,77 @@ def solve_team_board(
             )
     except Exception:  # noqa: BLE001
         return None
-    leader_id, member_ids = for_team[0], tuple(for_team[1:])
-
     held = _ACCOUNT.get(akey)
     if held is None:
         held = _ACCOUNT[akey] = (oracle, *_account_inputs(oracle))
-    _o, graphs, prices, owned, balance, _wr, _pt = held
-    singers = frozenset(oracle._chart.singers) if oracle._chart else frozenset()
-    t_stage = lap("load", t_stage)
-    scored0 = oracle.scorings
-    values = to._branch_values(
-        oracle, graphs, prices, leader_id, member_ids, singer_chars=singers, context=_context
+    return _Plan(clock, highspy, akey, held, for_team)
+
+
+def _value_nodes(plan: _Plan, context: dict | None) -> None:
+    """Each node's isolated value to the team (`_branch_values`), in `context` when given."""
+    plan.values = to._branch_values(
+        plan.oracle,
+        plan.graphs,
+        plan.prices,
+        plan.leader_id,
+        plan.member_ids,
+        singer_chars=plan.singers,
+        context=context,
     )
-    t_stage = lap("values", t_stage)
-    # Act.CD / Act.Prob are priced by the per-board level tables, never per node
+
+
+def _set_act_nodes(plan: _Plan) -> None:
+    """The Act.CD / Act.Prob nodes, priced by the per-board level tables, never per node."""
     act_kind = {
         n: (m.get("e") or {}).get("t")
-        for n, m in oracle.skilltree.get("nodes", {}).items()
+        for n, m in plan.oracle.skilltree.get("nodes", {}).items()
         if (m.get("e") or {}).get("t") in ("Act.CD", "Act.Prob")
     }
-    act_value = {n: int((oracle.skilltree["nodes"][n].get("e") or {}).get("v") or 0) for n in act_kind}
-    values = {n: v for n, v in values.items() if n not in act_kind}
+    plan.act_kind = act_kind
+    plan.act_value = {
+        n: int((plan.oracle.skilltree["nodes"][n].get("e") or {}).get("v") or 0) for n in act_kind
+    }
+    plan.values = {n: v for n, v in plan.values.items() if n not in act_kind}
 
+
+def _set_budgets(plan: _Plan, char_level: str, resources: str, all_invited: bool, no_refund: bool) -> None:
+    """Each character's points and the material wallet (None when infinite)."""
     # Budgets: a --respec bare rebuild. Points per character follow char_level; the
     # material wallet is the refund-inclusive balance (inventory) or unbounded (infinite).
-    wallet_ref, points = dict(_wr), dict(_pt)
+    wallet_ref, points = dict(plan.account_wallet), dict(plan.account_points)
     if char_level == "max" or all_invited:
         from hbuilder.inputs import max_level_board_points  # noqa: PLC0415
 
         top = max_level_board_points()
     if char_level == "max":
-        points = {c: top for c in points}  # the max-level grant, as cmd_plan's --at-max-level
+        points = {c: top for c in points}  # the max-level grant
     if all_invited:
-        points = {**{c: top for c in graphs}, **{c: p for c, p in points.items() if int(p) > 0}}
+        points = {**{c: top for c in plan.graphs}, **{c: p for c, p in points.items() if int(p) > 0}}
     if no_refund:
-        wallet_ref = {cur: int((balance or {}).get(cur, 0)) for cur in to.CURRENCIES}
+        wallet_ref = {cur: int((plan.balance or {}).get(cur, 0)) for cur in to.CURRENCIES}
+    plan.points = points
+    plan.wallet = (
+        None
+        if resources == "infinite"
+        else {cur: int((wallet_ref or {}).get(cur, 0)) for cur in to.CURRENCIES}
+    )
+
+
+def _set_buy_filters(plan: _Plan, branches: str, targets: dict | None, no_refund: bool) -> None:
+    """The branch filter and the targets, and what a node may be bought or kept for free."""
     branches = "".join(sorted(set(str(branches or "GBRY").upper()) & set("GBRY"))) or "GBRY"
     targets = {c: dict(v) for c, v in (targets or {}).items()}
+    plan.branches, plan.targets = branches, targets
+    plan.node_ok = _node_filter(branches, targets)
+    # `branches` is normalised SORTED ("BGRY" = all four); comparing it with "GBRY"
+    # would make every plan "constrained"
+    plan.constrained = branches != "BGRY" or bool(targets)
+    owned_sets = {c: set(v or ()) for c, v in plan.owned.items()}
+    plan.charged_free = _free_keep(no_refund, owned_sets)
+
+
+def _node_filter(branches: str, targets: dict):
+    """`(chr, node) -> bool`: may the plan BUY that node (branch filter, keep-only targets)?"""
 
     def node_ok(cid: str, node: str) -> bool:
         """May the plan BUY `node` on `cid`'s board? (branch filter, keep-only targets)"""
@@ -810,29 +976,29 @@ def solve_team_board(
             return False
         return targets.get(cid, {}).get(node) != "keep"
 
-    # `branches` is normalised SORTED ("BGRY" = all four); comparing it with "GBRY"
-    # would make every plan "constrained"
-    constrained = branches != "BGRY" or bool(targets)
-    owned_sets = {c: set(v or ()) for c, v in owned.items()}
+    return node_ok
+
+
+def _free_keep(no_refund: bool, owned_sets: dict):
+    """`(chr, node) -> bool`: is that node kept at no material cost?"""
 
     def charged_free(cid: str, node: str) -> bool:
         """Kept at no material cost: with `no_refund` an owned node is already paid
         for (the wallet then holds the inventory only, nothing refunded)."""
         return no_refund and node in owned_sets.get(cid, ())
 
-    wallet = (
-        None
-        if resources == "infinite"
-        else {cur: int((wallet_ref or {}).get(cur, 0)) for cur in to.CURRENCIES}
-    )
+    return charged_free
 
-    leader_chr = "chr-" + leader_id.split("-")[1]
-    member_chrs = {"chr-" + m.split("-")[1] for m in member_ids}
+
+def _set_team(plan: _Plan, song: str | None, develop_bench: bool) -> None:
+    """The team's boards, the bench's and the member boards with an Act level."""
+    plan.leader_chr = "chr-" + plan.leader_id.split("-")[1]
+    plan.member_chrs = {"chr-" + m.split("-")[1] for m in plan.member_ids}
     # sorted: the MILP's variable order (and so which of several optimal plans
     # HiGHS returns) must not follow the per-process string hash seed
-    team_chars = [leader_chr] + sorted(c for c in member_chrs if c != leader_chr)
-    song_mode = bool(song)
-
+    plan.team_chars = [plan.leader_chr] + sorted(c for c in plan.member_chrs if c != plan.leader_chr)
+    plan.song_mode = bool(song)
+    plan.develop_bench = develop_bench
     # Bench boards: every OTHER holomem with board points. Their GREEN is account-global
     # (it stacks onto the team score from any board), so developing it with idle points is
     # free score (about +8.3k on a typical team). RED/BLUE pay 0 off
@@ -840,477 +1006,559 @@ def solve_team_board(
     # a singer's yellow). Skipped when develop_bench is off (team-only, faster).
     bench_chars: list = []
     if develop_bench:
-        bench_chars = [c for c in graphs if c not in team_chars and int(points.get(c, 0)) > 0]
-    all_chars = team_chars + bench_chars
-    grouping_terms = (
-        _grouping_terms(oracle, leader_id, member_ids, all_chars, owned, graphs) if all_chars else {}
+        bench_chars = [c for c in plan.graphs if c not in plan.team_chars and int(plan.points.get(c, 0)) > 0]
+    plan.bench_chars = bench_chars
+    plan.bench_set = set(bench_chars)
+    plan.all_chars = plan.team_chars + bench_chars
+    plan.act_chars = sorted(c for c in plan.member_chrs if c in plan.graphs)
+
+
+def _set_capped_supplies(plan: _Plan, song_pool: list | None) -> None:
+    """The capped terms' supplies: one per grouping, and the song's (or pool's) yellow."""
+    oracle, all_chars, owned, graphs = plan.oracle, plan.all_chars, plan.owned, plan.graphs
+    plan.grouping_terms = (
+        _grouping_terms(oracle, plan.leader_id, plan.member_ids, all_chars, owned, graphs)
+        if all_chars
+        else {}
     )
     # the song's yellow, one capped variable over its singers' boards (team or bench)
     if song_pool:
         yellow_list = _pool_yellow_terms(oracle, song_pool, all_chars, graphs) if all_chars else []
     else:
         one = (
-            _yellow_terms(oracle, leader_id, member_ids, all_chars, owned, graphs)
-            if (song_mode and all_chars)
+            _yellow_terms(oracle, plan.leader_id, plan.member_ids, all_chars, owned, graphs)
+            if (plan.song_mode and all_chars)
             else None
         )
         yellow_list = [one] if one else []
-    yellow_keys = {k for term in yellow_list for k in term["amounts"]}
-    reset_penalty = 0.0
+    plan.yellow_list = yellow_list
+    plan.yellow_keys = {k for term in yellow_list for k in term["amounts"]}
+
+
+def _set_reset_penalty(plan: _Plan, reset_min_gain: float) -> None:
+    """What each reset costs in the objective: `reset_min_gain` of the account's own score."""
     if reset_min_gain and reset_min_gain > 0:
-        reset_penalty = float(reset_min_gain) * oracle.score_team(
-            leader_id,
-            member_ids,
-            oracle.state_from({c: sorted(set(owned.get(c) or ()) | {to.ROOT}) for c in graphs}),
+        oracle, owned = plan.oracle, plan.owned
+        plan.reset_penalty = float(reset_min_gain) * oracle.score_team(
+            plan.leader_id,
+            plan.member_ids,
+            oracle.state_from({c: sorted(set(owned.get(c) or ()) | {to.ROOT}) for c in plan.graphs}),
         )
-    t_stage = lap("setup", t_stage)
 
-    def _solve(context_values: dict, act_tables: dict | None = None, warm: dict | None = None) -> dict | None:
-        """One MILP over the boards: `values` scoped per branch, plus
-        `context_values[(character, node)]` for the nodes valued in context."""
-        if should_stop is not None and should_stop():
-            raise PlanStopped("the search was cancelled")
-        t_build = time.perf_counter()
-        h = highspy.Highs()
-        h.setOptionValue("output_flag", False)
-        # one thread: these MILPs gain nothing from HiGHS's pool (e.g. a plan's 8 solves:
-        # 25.5 s default, 25.6 s on one thread) and up to 16 plans
-        # run at once in the engine's workers, each with its own pool of half the cores
-        h.setOptionValue("threads", 1)
-        h.setOptionValue("time_limit", 60.0)
-        # the default 0.01 % gap is ~180 score units on a ~1.8M objective: far above
-        # TIE_BREAK, so the tie-break needs a gap below it (1e-7 = ~0.2 units). A
-        # zero gap costs 15-18 s a solve on some teams (e.g. m0198) for nothing
-        h.setOptionValue("mip_rel_gap", MIP_REL_GAP)
 
-        def qsum(terms):
-            # the same idxs / vals / constant as `e = e + t` (which copies the whole
-            # expression on each term: O(n^2)), accumulated in place
-            e = None
-            for t in terms:
-                if e is None:
-                    e = 0 + t  # the original first step: a fresh expression
-                else:
-                    e += t
-            return 0 if e is None else e
+def _qsum(terms):
+    """The sum of HiGHS expressions, accumulated in place."""
+    # the same idxs / vals / constant as `e = e + t` (which copies the whole
+    # expression on each term: O(n^2)), accumulated in place
+    e = None
+    for t in terms:
+        if e is None:
+            e = 0 + t  # the original first step: a fresh expression
+        else:
+            e += t
+    return 0 if e is None else e
 
-        # binaries added as [0, 1] columns and made integer in ONE changeColsIntegrality
-        # call before the solve (highspy's addBinary calls changeColIntegrality per
-        # column: ~33 us each)
-        _int_cols: list = []
-        _scratch_ints: dict = {}
 
-        def addBinary():
-            v = h.addVariable(0, 1)
-            _int_cols.append(v.index)
-            return v
+def _set_integer(highspy, h, idx: list) -> None:
+    """Make the columns `idx` integer in one call."""
+    # binaries are added as [0, 1] columns and made integer in ONE changeColsIntegrality
+    # call before the solve (highspy's addBinary calls changeColIntegrality per
+    # column: ~33 us each)
+    if idx:
+        h.changeColsIntegrality(
+            len(idx),
+            np.array(idx, dtype=np.int32),
+            np.full(len(idx), highspy.HighsVarType.kInteger, dtype=np.uint8),
+        )
 
-        def _apply_int(hb):
-            idx = _scratch_ints.pop(id(hb), [])
-            if idx:
-                hb.changeColsIntegrality(
-                    len(idx),
-                    np.array(idx, dtype=np.int32),
-                    np.full(len(idx), highspy.HighsVarType.kInteger, dtype=np.uint8),
-                )
 
-        x: dict = {}
-        per_char_nodes: dict = {}
-        bench_set = set(bench_chars)
+def _solve_milp(plan: _Plan, act_tables: dict | None = None, warm: dict | None = None) -> dict | None:
+    """One MILP over the boards: `values` scoped per branch, the capped terms and each
+    member board's Act level from `act_tables`; the plan, or None when not solved."""
+    if plan.should_stop is not None and plan.should_stop():
+        raise PlanStopped("the search was cancelled")
+    t_build = time.perf_counter()
+    h = _new_highs(plan.hs)
+    int_cols: list = []
+    x: dict = {}
+    per_char_nodes: dict = {}
+    _add_board_blocks(plan, h, x, per_char_nodes, int_cols)
+    _add_reset_budget(plan, h, x, per_char_nodes)
+    _add_wallet(plan, h, x, per_char_nodes)
+    capped_terms = _capped_supply_terms(plan, h, x)
+    capped_terms.extend(_act_level_terms(plan, h, x, per_char_nodes, act_tables, int_cols))
+    _set_objective(plan, h, x, per_char_nodes, capped_terms)
+    _set_integer(plan.hs, h, int_cols)
+    if warm:
+        _warm_start(plan, h, x, warm)
+    t_run = _lap(plan.clock, "milp_build", t_build)
+    return _run_milp(plan, h, x, per_char_nodes, t_run)
 
-        def _board_into(hb, cid, g, nodes_out):
-            """One board's columns and rows (its binaries, root, frozen branches, point
-            budget and connectivity), built into `hb` -- a scratch model whose block
-            is then copied into the plan's model below."""
-            h = hb
-            x = {}
 
-            def addBinary():
-                v = hb.addVariable(0, 1)
-                _scratch_ints.setdefault(id(hb), []).append(v.index)
-                return v
+def _new_highs(highspy):
+    """An empty HiGHS model with the plan's solver options."""
+    h = highspy.Highs()
+    h.setOptionValue("output_flag", False)
+    # one thread: these MILPs gain nothing from HiGHS's pool (e.g. a plan's 8 solves:
+    # 25.5 s default, 25.6 s on one thread) and up to 16 plans
+    # run at once in the engine's workers, each with its own pool of half the cores
+    h.setOptionValue("threads", 1)
+    h.setOptionValue("time_limit", 60.0)
+    # the default 0.01 % gap is ~180 score units on a ~1.8M objective: far above
+    # TIE_BREAK, so the tie-break needs a gap below it (1e-7 = ~0.2 units). A
+    # zero gap costs 15-18 s a solve on some teams (e.g. m0198) for nothing
+    h.setOptionValue("mip_rel_gap", MIP_REL_GAP)
+    return h
 
-            # A bench board only ever buys GREEN (account-global; red/blue pay 0 there) and,
-            # in SONG mode, a bench SINGER's YELLOW. Restrict it to those branches + the
-            # structural/socket spine, so the joint MILP over ~54 boards stays small (a few
-            # dozen relevant nodes per bench board, not all ~150). Pruning in BOTH modes is
-            # what keeps the song plan fast — an unpruned bench is ~40 boards × 150 nodes.
-            if cid in bench_set:
-                keep_branches = ("G", "S", "Y") if song_mode else ("G", "S")
-                nodes = [n for n in g if n[0] in keep_branches]
-            else:
-                nodes = list(g.keys())
-            if to.ROOT not in nodes:  # green frame must keep the root to connect
-                nodes.append(to.ROOT)
-            # a pruned bench board must still be able to KEEP what it owns: its reds and
-            # blues pay nothing for this team, but taking them off is a reset (1,000
-            # Hologold, the node lost for every other team) that only the tie-break /
-            # `reset_min_gain` may decide -- and a reset budget or a frozen branch would
-            # be infeasible without them
-            nodes.extend(n for n in (owned.get(cid) or ()) if n in g and n not in nodes)
-            if constrained:
-                # buy targets are candidates on any board of the team
-                nodes.extend(n for n in targets.get(cid, {}) if n in g and n not in nodes)
-            nodes_out.extend(nodes)
-            for n in nodes:
-                x[(cid, n)] = addBinary()
-            root = to.ROOT
-            h.addConstr(x[(cid, root)] == 1)
-            if constrained:
-                have = set(owned.get(cid) or ())
-                for n in nodes:
-                    if n == root or n[0] not in "GBRY":
-                        continue
-                    if n[0] not in branches:
-                        # a frozen branch: exactly as owned
-                        h.addConstr(x[(cid, n)] == (1 if n in have else 0))
-                    elif targets.get(cid, {}).get(n) == "keep" and n not in have:
-                        h.addConstr(x[(cid, n)] == 0)
-            # per-character point budget (root free)
-            budget = int(points.get(cid, 0))
-            h.addConstr(
-                qsum(prices.get(n, {}).get("points", 0) * x[(cid, n)] for n in nodes if n != root) <= budget
-            )
-            # per-character connectivity over the edges among the KEPT nodes (a pruned
-            # bench board keeps only its green frame): `_connectivity`'s bridge precedences
-            # and minimal vertex separators -- no flow variables
-            unreachable, precedences, separators = _connectivity(g, nodes)
-            for n in unreachable:
+
+def _add_board_blocks(plan: _Plan, h, x: dict, per_char_nodes: dict, int_cols: list) -> None:
+    """Every board's block (columns + rows), appended to `h` in one addCols / addRows each;
+    its binaries into `x[(chr, node)]` and `per_char_nodes[chr]`."""
+    # each board's block is built by `_board_rows` into a scratch model, read back and
+    # appended in one addCols / addRows; a BENCH board's block is the same in every solve
+    # of every plan of this account, so it is kept per process (`_BLOCKS`). Same columns,
+    # rows and order as building in place: the LP and the solution are byte-identical
+    # (checked on 30 MILPs and 56 full plans)
+    highs_var = plan.hs.highs_var
+    graphs = plan.graphs
+    for cid in plan.all_chars:
+        g = graphs.get(cid)
+        if not g:
+            continue
+        nodes_b, xloc, cl, cu, integ, rl, ru, st, ix, va = _board_block(plan, cid, g)
+        per_char_nodes[cid] = list(nodes_b)
+        base = h.getNumCol()
+        nc = len(cl)
+        h.addCols(
+            nc,
+            np.zeros(nc),
+            cl,
+            cu,
+            0,
+            np.zeros(nc + 1, dtype=np.int32),
+            np.empty(0, dtype=np.int32),
+            np.empty(0),
+        )
+        ints = np.nonzero(integ)[0]
+        int_cols.extend((ints + base).tolist())
+        for n, li in xloc.items():
+            x[(cid, n)] = highs_var(base + li, h)
+        nr = len(rl)
+        h.addRows(nr, rl, ru, len(va), st[:nr], ix + base, va)
+
+
+def _board_block(plan: _Plan, cid: str, g: dict) -> tuple:
+    """One board's block, built (`_build_board_block`) or, for a bench board, kept in `_BLOCKS`."""
+    if cid not in plan.bench_set:
+        return _build_board_block(plan, cid, g)
+    bkey = (
+        cid,
+        plan.song_mode,
+        True,
+        int(plan.points.get(cid, 0)),
+        plan.constrained,
+        plan.branches,
+        tuple(sorted(plan.targets.get(cid, {}).items())),
+        tuple(plan.owned.get(cid) or ()),
+        plan.stamp,
+    )
+    blk = _BLOCKS.get(bkey)
+    if blk is None:
+        blk = _BLOCKS[bkey] = _build_board_block(plan, cid, g)
+    return blk
+
+
+def _build_board_block(plan: _Plan, cid: str, g: dict) -> tuple:
+    """One board's block read back from a scratch model: its nodes, each node's column and
+    the columns' and rows' arrays."""
+    hs = plan.hs
+    sh = hs.Highs()
+    sh.setOptionValue("output_flag", False)
+    nodes_b = _board_nodes(plan, cid, g)
+    ints: list = []
+    xs = _board_rows(plan, sh, cid, g, nodes_b, ints)
+    _set_integer(hs, sh, ints)
+    lp = sh.getLp()
+    m = lp.a_matrix_
+    assert "Rowwise" in str(m.format_), m.format_
+    return (
+        list(nodes_b),
+        {k[1]: v.index for k, v in xs.items()},
+        np.array(lp.col_lower_),
+        np.array(lp.col_upper_),
+        np.array([int(t) for t in lp.integrality_], dtype=np.uint8),
+        np.array(lp.row_lower_),
+        np.array(lp.row_upper_),
+        np.array(m.start_, dtype=np.int32),
+        np.array(m.index_, dtype=np.int32),
+        np.array(m.value_),
+    )
+
+
+def _locked_nodes(plan: _Plan) -> frozenset:
+    """The nodes whose `cd-player_level-N` unlock is above the account's player level
+    (`state/collection.json`'s `player.level`); none when the level is unknown or the
+    scenario is a maxed one (every holomem, and so the player, at the top)."""
+    oracle = plan.oracle
+    if getattr(oracle, "scenario", "account") != "account":
+        return frozenset()
+    level = ((oracle.collection or {}).get("player") or {}).get("level")
+    if not isinstance(level, int):
+        return frozenset()
+    from hbuilder.domain.skilltree import player_level_requirement  # noqa: PLC0415
+
+    return frozenset(
+        node
+        for node, raw in (oracle.skilltree.get("nodes") or {}).items()
+        if (player_level_requirement((raw or {}).get("req")) or 0) > level
+    )
+
+
+def _board_nodes(plan: _Plan, cid: str, g: dict) -> list:
+    """The nodes a board's block has a binary for."""
+    # A bench board only ever buys GREEN (account-global; red/blue pay 0 there) and,
+    # in SONG mode, a bench SINGER's YELLOW. Restrict it to those branches + the
+    # structural/socket spine, so the joint MILP over ~54 boards stays small (a few
+    # dozen relevant nodes per bench board, not all ~150). Pruning in BOTH modes is
+    # what keeps the song plan fast — an unpruned bench is ~40 boards × 150 nodes.
+    if cid in plan.bench_set:
+        keep_branches = ("G", "S", "Y") if plan.song_mode else ("G", "S")
+        nodes = [n for n in g if n[0] in keep_branches]
+    else:
+        nodes = list(g.keys())
+    # a node the account's player level has not unlocked cannot be bought (one it owns stays
+    # below: it is kept, not bought); the path beyond it goes with it (`_connectivity`)
+    locked = _locked_nodes(plan)
+    nodes = [n for n in nodes if n not in locked]
+    if to.ROOT not in nodes:  # green frame must keep the root to connect
+        nodes.append(to.ROOT)
+    # a pruned bench board must still be able to KEEP what it owns: its reds and
+    # blues pay nothing for this team, but taking them off is a reset (1,000
+    # Hologold, the node lost for every other team) that only the tie-break /
+    # `reset_min_gain` may decide -- and a reset budget or a frozen branch would
+    # be infeasible without them
+    nodes.extend(n for n in (plan.owned.get(cid) or ()) if n in g and n not in nodes)
+    if plan.constrained:
+        # buy targets are candidates on any board of the team
+        nodes.extend(n for n in plan.targets.get(cid, {}) if n in g and n not in nodes)
+    return nodes
+
+
+def _board_rows(plan: _Plan, h, cid: str, g: dict, nodes: list, ints: list) -> dict:
+    """One board's binaries and rows (root, frozen branches, point budget, connectivity),
+    built into the scratch model `h`; the binaries' indices appended to `ints`."""
+    x = {}
+    for n in nodes:
+        v = h.addVariable(0, 1)
+        ints.append(v.index)
+        x[(cid, n)] = v
+    root = to.ROOT
+    h.addConstr(x[(cid, root)] == 1)
+    if plan.constrained:
+        have = set(plan.owned.get(cid) or ())
+        branches, targets = plan.branches, plan.targets
+        for n in nodes:
+            if n == root or n[0] not in "GBRY":
+                continue
+            if n[0] not in branches:
+                # a frozen branch: exactly as owned
+                h.addConstr(x[(cid, n)] == (1 if n in have else 0))
+            elif targets.get(cid, {}).get(n) == "keep" and n not in have:
                 h.addConstr(x[(cid, n)] == 0)
-            for w, u in precedences:
-                h.addConstr(x[(cid, w)] - x[(cid, u)] <= 0)
-            for v, sep in separators:
-                h.addConstr(x[(cid, v)] - qsum(x[(cid, t)] for t in sep) <= 0)
+    # per-character point budget (root free)
+    budget = int(plan.points.get(cid, 0))
+    prices = plan.prices
+    h.addConstr(_qsum(prices.get(n, {}).get("points", 0) * x[(cid, n)] for n in nodes if n != root) <= budget)
+    # per-character connectivity over the edges among the KEPT nodes (a pruned
+    # bench board keeps only its green frame): `_connectivity`'s bridge precedences
+    # and minimal vertex separators -- no flow variables
+    unreachable, precedences, separators = _connectivity(g, nodes)
+    for n in unreachable:
+        h.addConstr(x[(cid, n)] == 0)
+    for w, u in precedences:
+        h.addConstr(x[(cid, w)] - x[(cid, u)] <= 0)
+    for v, sep in separators:
+        h.addConstr(x[(cid, v)] - _qsum(x[(cid, t)] for t in sep) <= 0)
+    return x
 
-            return x
 
-        # each board's block (columns + rows) is built by `_board_into` into a scratch
-        # model, read back and appended in one addCols / addRows; a BENCH board's block is
-        # the same in every solve of every plan of this account, so it is kept per process
-        # (`_BLOCKS`). Same columns, rows and order as building in place: the LP and the
-        # solution are byte-identical (checked on 30 MILPs and 56 full plans)
-        for cid in all_chars:
-            g = graphs.get(cid)
-            if not g:
-                continue
-            bkey = (
-                cid,
-                song_mode,
-                cid in bench_set,
-                int(points.get(cid, 0)),
-                constrained,
-                branches,
-                tuple(sorted(targets.get(cid, {}).items())),
-                tuple(owned.get(cid) or ()),
-                akey[4],
-            )
-            blk = _BLOCKS.get(bkey) if cid in bench_set else None
-            if blk is None:
-                sh = highspy.Highs()
-                sh.setOptionValue("output_flag", False)
-                nodes_b: list = []
-                xs = _board_into(sh, cid, g, nodes_b)
-                _apply_int(sh)
-                lp = sh.getLp()
-                m = lp.a_matrix_
-                assert "Rowwise" in str(m.format_), m.format_
-                blk = (
-                    list(nodes_b),
-                    {k[1]: v.index for k, v in xs.items()},
-                    np.array(lp.col_lower_),
-                    np.array(lp.col_upper_),
-                    np.array([int(t) for t in lp.integrality_], dtype=np.uint8),
-                    np.array(lp.row_lower_),
-                    np.array(lp.row_upper_),
-                    np.array(m.start_, dtype=np.int32),
-                    np.array(m.index_, dtype=np.int32),
-                    np.array(m.value_),
-                )
-                if cid in bench_set:
-                    _BLOCKS[bkey] = blk
-            nodes_b, xloc, cl, cu, integ, rl, ru, st, ix, va = blk
-            per_char_nodes[cid] = list(nodes_b)
-            base = h.getNumCol()
-            nc = len(cl)
-            h.addCols(
-                nc,
-                np.zeros(nc),
-                cl,
-                cu,
-                0,
-                np.zeros(nc + 1, dtype=np.int32),
-                np.empty(0, dtype=np.int32),
-                np.empty(0),
-            )
-            ints = np.nonzero(integ)[0]
-            _int_cols.extend((ints + base).tolist())
-            for n, li in xloc.items():
-                x[(cid, n)] = highspy.highs_var(base + li, h)
-            nr = len(rl)
-            h.addRows(nr, rl, ru, len(va), st[:nr], ix + base, va)
-
-        # reset budget: a node owned now and left out of the plan is one reset
-        if max_resets is not None:
-            dropped = [
-                1 - x[(cid, n)]
-                for cid in per_char_nodes
-                for n in (owned.get(cid) or ())
-                if n != to.ROOT and (cid, n) in x
-            ]
-            if dropped:
-                h.addConstr(qsum(dropped) <= int(max_resets))
-
-        # shared cube/hexa wallet: one account-wide constraint per currency. With
-        # `no_refund` the wallet is the inventory alone, so only a NEW buy draws on it:
-        # an owned node kept costs nothing again (it was charged every owned node,
-        # which made a no-refund plan look unaffordable for keeping its own board)
-        if wallet is not None:
-            for cur in to.CURRENCIES:
-                h.addConstr(
-                    qsum(
-                        prices.get(n, {}).get(cur, 0) * x[(cid, n)]
-                        for cid in per_char_nodes
-                        for n in per_char_nodes[cid]
-                        if prices.get(n, {}).get(cur, 0) and not charged_free(cid, n)
-                    )
-                    <= wallet[cur]
-                )
-
-        # GENERATION GREENS (G-008/011/021): what a grouping's members receive is the
-        # sum over every board of that grouping -- team or bench -- capped at
-        # GROUPING_ALL_CAP, so they are one capped variable per grouping, worth the
-        # grouping's measured slope, not a value per node (a 3rd ID chain is worth 0)
-        capped_terms = []
-        for gterm in grouping_terms.values():
-            supply = [(a, x[key]) for key, a in gterm["amounts"].items() if key in x]
-            if not supply:
-                continue
-            c = h.addVariable(0, GROUPING_ALL_CAP)
-            h.addConstr(c - qsum(a * xv for a, xv in supply) <= 0)
-            capped_terms.append(gterm["slope"] * c)
-        # the song's YELLOW the same way: the singers' boards add up, the game counts
-        # SONG_YELLOW_CAP permil of it (a 4th GAMERS board's 40 permil is worth 0)
-        # (a Highlight pool: one such term per pool song, `_pool_yellow_terms`)
-        for yterm in yellow_list:
-            supply = [(a, x[key]) for key, a in yterm["amounts"].items() if key in x]
-            if supply:
-                c = h.addVariable(0, SONG_YELLOW_CAP)
-                h.addConstr(c - qsum(a * xv for a, xv in supply) <= 0)
-                capped_terms.append(yterm["slope"] * c)
-
-        # ACTIVE UPTIME (Act.CD / Act.Prob): a card's score depends on its board's
-        # cooldown COUNT and activation-rate SUM only, and not monotonically (a
-        # shorter cooldown can add overlap), so each member board chooses ONE level
-        # (k, p) from its exactly-scored table (`_act_tables`), tied to the nodes
-        # bought -- points, cubes and paths traded against every other node exactly.
-        for cid, table in (act_tables or {}).items():
-            if cid not in per_char_nodes:
-                continue
-            cd_x = [x[(cid, n)] for n in per_char_nodes[cid] if act_kind.get(n) == "Act.CD"]
-            pr_x = [(act_value[n], x[(cid, n)]) for n in per_char_nodes[cid] if act_kind.get(n) == "Act.Prob"]
-            z = {lv: addBinary() for lv in table}
-            h.addConstr(qsum(z.values()) == 1)
-            h.addConstr(qsum(cd_x) - qsum(lv[0] * zv for lv, zv in z.items()) == 0)
-            h.addConstr(qsum(v * xv for v, xv in pr_x) - qsum(lv[1] * zv for lv, zv in z.items()) == 0)
-            ref = min(table.values())
-            capped_terms.append(qsum((table[lv] - ref) * zv for lv, zv in z.items()))
-
-        # objective: scoped per-node value across the six boards
-        # a target (buy, or keep when owned) outweighs any score a node can add, so
-        # it is taken whenever the points / wallet / connectivity allow it
-        bonus = {
-            (c, n): TARGET_BONUS
-            for c, nodes in targets.items()
-            for n, mode in nodes.items()
-            if mode == "buy" or n in set(owned.get(c) or ())
-        }
-        # TIE-BREAK: keep what is owned, buy nothing that adds nothing. Without it a
-        # zero-value node is a free coin-flip: owned nodes that score 0 on this song
-        # could be reset while freeing nothing the plan needs, yet each reset costs
-        # 1,000 Hologold and the node's value on every other song.
-        owned_set = {(c, n) for c, ns in owned.items() for n in ns}
-        keep_bonus = TIE_BREAK + reset_penalty
-        # setObjective, not maximize(): highspy's maximize() SOLVES, and the run()
-        # below would then solve the whole MILP a second time
-        h.setObjective(
-            qsum(
-                (
-                    (
-                        0.0
-                        if (cid, n) in yellow_keys
-                        else _scope_value(
-                            n,
-                            cid,
-                            values,
-                            leader_chr=leader_chr,
-                            member_chrs=member_chrs,
-                            song=song_mode,
-                            singers=singers,
-                        )
-                    )
-                    + context_values.get((cid, n), 0.0)
-                    + bonus.get((cid, n), 0.0)
-                    + (keep_bonus if (cid, n) in owned_set else -TIE_BREAK)
-                )
-                * x[(cid, n)]
-                for cid in per_char_nodes
-                for n in per_char_nodes[cid]
-                if n != to.ROOT
-            )
-            + qsum(capped_terms),
-            highspy.ObjSense.kMaximize,
-        )
-        if _int_cols:
-            h.changeColsIntegrality(
-                len(_int_cols),
-                np.array(_int_cols, dtype=np.int32),
-                np.full(len(_int_cols), highspy.HighsVarType.kInteger, dtype=np.uint8),
-            )
-        if warm:
-            # the bench as the previous plan left it: a later solve only re-trades the
-            # team's boards around one Act level, and the ~50 bench boards' flow
-            # variables are most of its time (e.g. m0198: 8 s -> 1.3 s a solve)
-            # -- except a bench red or blue it holds, free to come OFF: worth nothing to
-            # the team, it is the bench's material reserve, and frozen it can leave a
-            # member's Act level unfundable while a bench board sits on a whole blue
-            # branch (the plan then resets team nodes instead and scores lower)
-            for (cid, n), var in x.items():
-                if cid in bench_set:
-                    v = 1.0 if n in (warm.get(cid) or {}).get("nodes", ()) else 0.0
-                    h.changeColBounds(var.index, 0.0 if (v and n[0] in "RB") else v, v)
-            # the previous plan as a starting incumbent: most solves here differ from
-            # the last one by one board's Act level (HiGHS drops it if infeasible)
-            idx = [x[key].index for key in x]
-            val = [1.0 if key[1] in (warm.get(key[0]) or {}).get("nodes", ()) else 0.0 for key in x]
-            h.setSolution(len(idx), np.array(idx, dtype=np.int32), np.array(val, dtype=np.float64))
-        t_run = lap("milp_build", t_build)
-        h.run()
-        lap("milp_solve", t_run)
-        clock.setdefault("solves", []).append(round(time.perf_counter() - t_run, 3))
-        clock["milps"] = clock.get("milps", 0) + 1
-        statuses.append(h.getModelStatus().name)
-        if "kOptimal" not in h.getModelStatus().name and "kTimeLimit" not in h.getModelStatus().name:
-            return None
-        sol = h.getSolution().col_value
-        board = {
-            cid: {
-                "nodes": sorted(n for n in per_char_nodes[cid] if sol[x[(cid, n)].index] > 0.5),
-                "slots": {},
-            }
+def _add_reset_budget(plan: _Plan, h, x: dict, per_char_nodes: dict) -> None:
+    """At most `max_resets` owned nodes left out of the plan."""
+    # reset budget: a node owned now and left out of the plan is one reset
+    if plan.max_resets is not None:
+        owned = plan.owned
+        dropped = [
+            1 - x[(cid, n)]
             for cid in per_char_nodes
-        }
-        return board
+            for n in (owned.get(cid) or ())
+            if n != to.ROOT and (cid, n) in x
+        ]
+        if dropped:
+            h.addConstr(_qsum(dropped) <= int(plan.max_resets))
 
-    def in_milp() -> float:
-        return clock.get("milp_build", 0.0) + clock.get("milp_solve", 0.0)
 
-    def team_score(node_dict):
-        return oracle.score_team(
-            leader_id, member_ids, oracle.state_from({c: sorted(n) for c, n in node_dict.items()})
-        )
-
-    # ACTIVE UPTIME, block-coordinate: each member board's level table is scored
-    # with the other boards as the current plan leaves them, the MILP re-solved on
-    # those tables, until no board changes level (the cards interact through the
-    # per-instant max). Replaces the per-node context pass, which priced each Act
-    # node alone, on top of its isolated value (counted twice), and could not see
-    # that a level is reached by several nodes together.
-    def full_state(board_):
-        return {
-            cid: set(board_[cid]["nodes"]) if cid in board_ else set(owned.get(cid) or [to.ROOT]) | {to.ROOT}
-            for cid in graphs
-        }
-
-    def levels(state_):
-        return {
-            cid: (
-                sum(1 for n in state_[cid] if act_kind.get(n) == "Act.CD"),
-                sum(act_value[n] for n in state_[cid] if act_kind.get(n) == "Act.Prob"),
+def _add_wallet(plan: _Plan, h, x: dict, per_char_nodes: dict) -> None:
+    """The shared cube/hexa wallet: one account-wide row per currency (none when infinite)."""
+    # With `no_refund` the wallet is the inventory alone, so only a NEW buy draws on it:
+    # an owned node kept costs nothing again
+    wallet = plan.wallet
+    if wallet is not None:
+        prices, charged_free = plan.prices, plan.charged_free
+        for cur in to.CURRENCIES:
+            h.addConstr(
+                _qsum(
+                    prices.get(n, {}).get(cur, 0) * x[(cid, n)]
+                    for cid in per_char_nodes
+                    for n in per_char_nodes[cid]
+                    if prices.get(n, {}).get(cur, 0) and not charged_free(cid, n)
+                )
+                <= wallet[cur]
             )
-            for cid in act_chars
-        }
 
-    act_chars = sorted(c for c in member_chrs if c in graphs)
-    # round 0: every board free, tables on the account's own boards
-    if _levels is not None:
+
+def _capped_supply_terms(plan: _Plan, h, x: dict) -> list:
+    """One capped variable per grouping and per song yellow; their objective terms."""
+    # GENERATION GREENS (G-008/011/021): what a grouping's members receive is the
+    # sum over every board of that grouping -- team or bench -- capped at
+    # GROUPING_ALL_CAP, so they are one capped variable per grouping, worth the
+    # grouping's measured slope, not a value per node (a 3rd ID chain is worth 0)
+    capped_terms = []
+    for gterm in plan.grouping_terms.values():
+        supply = [(a, x[key]) for key, a in gterm["amounts"].items() if key in x]
+        if not supply:
+            continue
+        c = h.addVariable(0, GROUPING_ALL_CAP)
+        h.addConstr(c - _qsum(a * xv for a, xv in supply) <= 0)
+        capped_terms.append(gterm["slope"] * c)
+    # the song's YELLOW the same way: the singers' boards add up, the game counts
+    # SONG_YELLOW_CAP permil of it (a 4th GAMERS board's 40 permil is worth 0)
+    # (a Highlight pool: one such term per pool song, `_pool_yellow_terms`)
+    for yterm in plan.yellow_list:
+        supply = [(a, x[key]) for key, a in yterm["amounts"].items() if key in x]
+        if supply:
+            c = h.addVariable(0, SONG_YELLOW_CAP)
+            h.addConstr(c - _qsum(a * xv for a, xv in supply) <= 0)
+            capped_terms.append(yterm["slope"] * c)
+    return capped_terms
+
+
+def _act_level_terms(
+    plan: _Plan, h, x: dict, per_char_nodes: dict, act_tables: dict | None, int_cols: list
+) -> list:
+    """Each member board's ONE Act level, tied to its nodes; the levels' objective terms."""
+    # ACTIVE UPTIME (Act.CD / Act.Prob): a card's score depends on its board's
+    # cooldown COUNT and activation-rate SUM only, and not monotonically (a
+    # shorter cooldown can add overlap), so each member board chooses ONE level
+    # (k, p) from its exactly-scored table (`_act_tables`), tied to the nodes
+    # bought -- points, cubes and paths traded against every other node exactly.
+    act_kind, act_value = plan.act_kind, plan.act_value
+
+    def addBinary():
+        v = h.addVariable(0, 1)
+        int_cols.append(v.index)
+        return v
+
+    terms = []
+    for cid, table in (act_tables or {}).items():
+        if cid not in per_char_nodes:
+            continue
+        cd_x = [x[(cid, n)] for n in per_char_nodes[cid] if act_kind.get(n) == "Act.CD"]
+        pr_x = [(act_value[n], x[(cid, n)]) for n in per_char_nodes[cid] if act_kind.get(n) == "Act.Prob"]
+        z = {lv: addBinary() for lv in table}
+        h.addConstr(_qsum(z.values()) == 1)
+        h.addConstr(_qsum(cd_x) - _qsum(lv[0] * zv for lv, zv in z.items()) == 0)
+        h.addConstr(_qsum(v * xv for v, xv in pr_x) - _qsum(lv[1] * zv for lv, zv in z.items()) == 0)
+        ref = min(table.values())
+        terms.append(_qsum((table[lv] - ref) * zv for lv, zv in z.items()))
+    return terms
+
+
+def _set_objective(plan: _Plan, h, x: dict, per_char_nodes: dict, capped_terms: list) -> None:
+    """Maximise the scoped per-node values, the targets, the tie-break and the capped terms."""
+    # a target (buy, or keep when owned) outweighs any score a node can add, so
+    # it is taken whenever the points / wallet / connectivity allow it
+    owned = plan.owned
+    bonus = {
+        (c, n): TARGET_BONUS
+        for c, nodes in plan.targets.items()
+        for n, mode in nodes.items()
+        if mode == "buy" or n in set(owned.get(c) or ())
+    }
+    # TIE-BREAK: keep what is owned, buy nothing that adds nothing. Without it a
+    # zero-value node is a free coin-flip: owned nodes that score 0 on this song
+    # could be reset while freeing nothing the plan needs, yet each reset costs
+    # 1,000 Hologold and the node's value on every other song.
+    owned_set = {(c, n) for c, ns in owned.items() for n in ns}
+    keep_bonus = TIE_BREAK + plan.reset_penalty
+    yellow_keys, values = plan.yellow_keys, plan.values
+    leader_chr, member_chrs, song_mode, singers = (
+        plan.leader_chr,
+        plan.member_chrs,
+        plan.song_mode,
+        plan.singers,
+    )
+    # setObjective, not maximize(): highspy's maximize() SOLVES, and the run()
+    # would then solve the whole MILP a second time
+    h.setObjective(
+        _qsum(
+            (
+                (
+                    0.0
+                    if (cid, n) in yellow_keys
+                    else _scope_value(
+                        n,
+                        cid,
+                        values,
+                        leader_chr=leader_chr,
+                        member_chrs=member_chrs,
+                        song=song_mode,
+                        singers=singers,
+                    )
+                )
+                + bonus.get((cid, n), 0.0)
+                + (keep_bonus if (cid, n) in owned_set else -TIE_BREAK)
+            )
+            * x[(cid, n)]
+            for cid in per_char_nodes
+            for n in per_char_nodes[cid]
+            if n != to.ROOT
+        )
+        + _qsum(capped_terms),
+        plan.hs.ObjSense.kMaximize,
+    )
+
+
+def _warm_start(plan: _Plan, h, x: dict, warm: dict) -> None:
+    """Hold the bench as the previous plan left it and start from that plan."""
+    # the bench as the previous plan left it: a later solve only re-trades the
+    # team's boards around one Act level, and the ~50 bench boards' flow
+    # variables are most of its time (e.g. m0198: 8 s -> 1.3 s a solve)
+    # -- except a bench red or blue it holds, free to come OFF: worth nothing to
+    # the team, it is the bench's material reserve, and frozen it can leave a
+    # member's Act level unfundable while a bench board sits on a whole blue
+    # branch (the plan then resets team nodes instead and scores lower)
+    bench_set = plan.bench_set
+    for (cid, n), var in x.items():
+        if cid in bench_set:
+            v = 1.0 if n in (warm.get(cid) or {}).get("nodes", ()) else 0.0
+            h.changeColBounds(var.index, 0.0 if (v and n[0] in "RB") else v, v)
+    # the previous plan as a starting incumbent: most solves here differ from
+    # the last one by one board's Act level (HiGHS drops it if infeasible)
+    idx = [x[key].index for key in x]
+    val = [1.0 if key[1] in (warm.get(key[0]) or {}).get("nodes", ()) else 0.0 for key in x]
+    h.setSolution(len(idx), np.array(idx, dtype=np.int32), np.array(val, dtype=np.float64))
+
+
+def _run_milp(plan: _Plan, h, x: dict, per_char_nodes: dict, t_run: float) -> dict | None:
+    """Solve the built model; its boards, or None unless optimal or stopped on the time limit."""
+    clock = plan.clock
+    h.run()
+    _lap(clock, "milp_solve", t_run)
+    clock.setdefault("solves", []).append(round(time.perf_counter() - t_run, 3))
+    clock["milps"] = clock.get("milps", 0) + 1
+    plan.statuses.append(h.getModelStatus().name)
+    if "kOptimal" not in h.getModelStatus().name and "kTimeLimit" not in h.getModelStatus().name:
+        return None
+    sol = h.getSolution().col_value
+    board = {
+        cid: {
+            "nodes": sorted(n for n in per_char_nodes[cid] if sol[x[(cid, n)].index] > 0.5),
+            "slots": {},
+        }
+        for cid in per_char_nodes
+    }
+    return board
+
+
+# ACTIVE UPTIME, block-coordinate: each member board's level table is scored
+# with the other boards as the current plan leaves them, the MILP re-solved on
+# those tables, until no board changes level (the cards interact through the
+# per-instant max). Replaces the per-node context pass, which priced each Act
+# node alone, on top of its isolated value (counted twice), and could not see
+# that a level is reached by several nodes together.
+def _initial_act_tables(plan: _Plan, held_levels: dict | None) -> dict:
+    """Round 0's level tables: every board free, scored on the account's own boards; with
+    `held_levels`, each member board held at its given level (one entry, no scoring)."""
+    if held_levels is not None:
         # each member board held at the given (cooldown count, rate sum): one level, a
         # constant in the objective, so no table to score
-        tables = {c: {lv: 0.0} for c, lv in _levels.items() if c in act_chars}
-        act_search = False
-    else:
-        tables = _act_tables(
-            team_score,
-            {c: set(owned.get(c) or [to.ROOT]) | {to.ROOT} for c in graphs},
-            act_chars,
-            graphs,
-            act_kind,
-            act_value,
-        )
-    t_stage = lap("act_tables", t_stage)
-    milp_before = in_milp()
-    board = _solve({}, tables)
-    best = team_score(full_state(board)) if board is not None else None
+        return {c: {lv: 0.0} for c, lv in held_levels.items() if c in plan.act_chars}
+    return _act_tables(
+        plan.team_score,
+        {c: set(plan.owned.get(c) or [to.ROOT]) | {to.ROOT} for c in plan.graphs},
+        plan.act_chars,
+        plan.graphs,
+        plan.act_kind,
+        plan.act_value,
+    )
+
+
+def _staircase(plan: _Plan, board: dict, best: float, tables: dict) -> tuple[dict, float]:
+    """The best joint cooldown counts on the round-0 plan, pinned and re-solved; the best plan."""
     # THE STAIRCASE, exhaustively: every joint cooldown count of the member boards
     # (4^5 = 1,024 on a full team) scored exactly on the round-0 plan, rate sums as
     # planned; the best ACT_JOINT_TOP vectors are then pinned in the MILP (each board
     # free on its rate sum only) so points and cubes are re-traded around them.
     # Unlike trying subsets of a few frontier nodes on the points LEFT OVER, this sees
     # every count, paths and point trades included.
-    if board is not None and act_search:
-        state0 = full_state(board)
-        now0 = levels(state0)
-        ranked = []
-        cds_of = {c: sorted(n for n in graphs[c] if act_kind.get(n) == "Act.CD") for c in act_chars}
-        # each board's ACT_JOINT_KEEP best counts on its own (round-0 table, others
-        # as planned): 3^5 = 243 joint vectors instead of 4^5
-        options = []
-        for c in act_chars:
-            tb = tables.get(c) or {}
-            by_k = {}
-            for (k, s), v in tb.items():
-                if s == now0[c][1]:
-                    by_k[k] = v
-            ks = sorted(by_k, key=lambda k: -by_k[k])[:ACT_JOINT_KEEP] or [now0[c][0]]
-            options.append(sorted(set(ks) | {now0[c][0]}))
-        for kvec in itertools.product(*options):
-            trial = dict(state0)
-            for c, k in zip(act_chars, kvec):
-                trial[c] = (state0[c] - set(cds_of[c])) | set(cds_of[c][:k])
-            ranked.append((team_score(trial), kvec))
-        ranked.sort(reverse=True)
-        for _v, kvec in ranked[:ACT_JOINT_TOP]:
-            if all(now0[c][0] == k for c, k in zip(act_chars, kvec)):
-                continue  # the plan already has it
-            pinned = {
-                c: {lv: v for lv, v in tables[c].items() if lv[0] == k}
-                for c, k in zip(act_chars, kvec)
-                if c in tables
-            }
-            if any(not tb for tb in pinned.values()):
-                continue
-            solved_ = _solve({}, pinned, warm=board)
-            if solved_ is None:
-                continue
-            value = team_score(full_state(solved_))
-            if value > best:
-                board, best = solved_, value
-    # then one board at a time (Gauss-Seidel): freeing them all at once on tables
-    # measured in the old context oscillates (e.g. m0342: one board flipped 3 -> 0
-    # cooldown nodes, -26k), because the cards share the per-instant max
-    # A board whose step does not pay is set aside and the NEXT best board tried, on the
-    # same tables (the plan did not move), rather than ending the loop, so one board
-    # the tables over-rate cannot stop every other one
+    act_chars, act_kind, team_score = plan.act_chars, plan.act_kind, plan.team_score
+    state0 = plan.full_state(board)
+    now0 = plan.levels(state0)
+    ranked = []
+    cds_of = {c: sorted(n for n in plan.graphs[c] if act_kind.get(n) == "Act.CD") for c in act_chars}
+    # each board's ACT_JOINT_KEEP best counts on its own (round-0 table, others
+    # as planned): 3^5 = 243 joint vectors instead of 4^5
+    options = []
+    for c in act_chars:
+        tb = tables.get(c) or {}
+        by_k = {}
+        for (k, s), v in tb.items():
+            if s == now0[c][1]:
+                by_k[k] = v
+        ks = sorted(by_k, key=lambda k: -by_k[k])[:ACT_JOINT_KEEP] or [now0[c][0]]
+        options.append(sorted(set(ks) | {now0[c][0]}))
+    for kvec in itertools.product(*options):
+        trial = dict(state0)
+        for c, k in zip(act_chars, kvec):
+            trial[c] = (state0[c] - set(cds_of[c])) | set(cds_of[c][:k])
+        ranked.append((team_score(trial), kvec))
+    ranked.sort(reverse=True)
+    for _v, kvec in ranked[:ACT_JOINT_TOP]:
+        if all(now0[c][0] == k for c, k in zip(act_chars, kvec)):
+            continue  # the plan already has it
+        pinned = {
+            c: {lv: v for lv, v in tables[c].items() if lv[0] == k}
+            for c, k in zip(act_chars, kvec)
+            if c in tables
+        }
+        if any(not tb for tb in pinned.values()):
+            continue
+        solved_ = _solve_milp(plan, pinned, warm=board)
+        if solved_ is None:
+            continue
+        value = team_score(plan.full_state(solved_))
+        if value > best:
+            board, best = solved_, value
+    return board, best
+
+
+def _one_board_rounds(plan: _Plan, board: dict, best: float) -> tuple[dict, float]:
+    """One member board at a time freed on tables measured in the current plan, while a
+    step pays (Gauss-Seidel); the best plan."""
+    # Freeing them all at once on tables measured in the previous plan oscillates (e.g.
+    # m0342: one board flipped 3 -> 0 cooldown nodes, -26k), because the cards share the
+    # per-instant max. A board whose step does not pay is set aside and the next best one
+    # tried on the same tables, so one board the tables over-rate cannot stop every other one
+    act_chars, team_score = plan.act_chars, plan.team_score
     tabu: set = set()
     tables = None
     improved = attempts = 0
-    while (
-        board is not None and act_search and improved < ACT_ROUNDS and attempts < ACT_ROUNDS + len(act_chars)
-    ):
+    while improved < ACT_ROUNDS and attempts < ACT_ROUNDS + len(act_chars):
         attempts += 1
         if tables is None:
-            state_ = full_state(board)
-            now = levels(state_)
-            tables = _act_tables(team_score, state_, act_chars, graphs, act_kind, act_value)
+            state_ = plan.full_state(board)
+            now = plan.levels(state_)
+            tables = _act_tables(team_score, state_, act_chars, plan.graphs, plan.act_kind, plan.act_value)
             all_gains = {c: max(tb.values()) - tb[now[c]] for c, tb in tables.items() if now[c] in tb}
         gains = {c: g for c, g in all_gains.items() if c not in tabu}
         if not gains:
@@ -1323,8 +1571,8 @@ def solve_team_board(
             for c, tb in tables.items()
             if c == free or now[c] in tb
         }
-        solved_ = _solve({}, step, warm=board)
-        value = None if solved_ is None else team_score(full_state(solved_))
+        solved_ = _solve_milp(plan, step, warm=board)
+        value = None if solved_ is None else team_score(plan.full_state(solved_))
         if value is None or value <= best:
             tabu.add(free)
             continue
@@ -1332,51 +1580,27 @@ def solve_team_board(
         improved += 1
         tabu.clear()
         tables = None
-    if _levels_out is not None and board is not None:
-        _levels_out.update(levels(full_state(board)))
-    # the staircase and the one-board rounds outside their MILPs: scorings and tables
-    t_now = time.perf_counter()
-    clock["act_search"] = clock.get("act_search", 0.0) + (t_now - t_stage) - (in_milp() - milp_before)
-    t_stage = t_now
-    if board is None:
-        return None
+    return board, best
 
-    # THE IN-CONTEXT FILL, as on the beam path (`tree_optimise.fill_boards`).
-    # `_branch_values` leaves out, on purpose, the nodes whose value is not
-    # additive — the ACTIVE-uptime family (Act.CD / Act.Prob: B-013, B-020, B-031, ...)
-    # and the per-character generation greens (G-008/011/021) — because an isolated
-    # marginal misprices them; the beam then buys them with the LEFTOVER points,
-    # each re-scored on the board being built. Without this pass the MILP never buys
-    # any of them: every member board stops at the same points whatever its budget,
-    # and the plan scores several % below a greedy plan. Same call, same order as
-    # `cmd_plan`.
-    spent_points = {
-        cid: sum(prices.get(n, {}).get("points", 0) for n in board[cid]["nodes"] if n != to.ROOT)
-        for cid in board
-    }
-    # team-only unless the bench is developed too (`develop_bench`)
-    left_points = {
-        cid: int(points.get(cid, 0)) - spent_points.get(cid, 0)
-        for cid in points
-        if develop_bench or cid in team_chars
-    }
-    if wallet is None:
-        left_wallet = {cur: 10**12 for cur in to.CURRENCIES}
-    else:
-        left_wallet = {
-            cur: wallet[cur]
-            - sum(
-                prices.get(n, {}).get(cur, 0)
-                for cid in board
-                for n in board[cid]["nodes"]
-                if not charged_free(cid, n)
-            )
-            for cur in to.CURRENCIES
-        }
+
+def _fill_leftovers(plan: _Plan, board: dict) -> None:
+    """The in-context fill (`tree_optimise.fill_boards`) on the leftover points and
+    materials, written into `board`."""
+    # `_branch_values` leaves out the nodes whose value is not additive (the ACTIVE-uptime
+    # family Act.CD / Act.Prob, and the generation greens G-008/011/021), since an isolated
+    # marginal misprices them; they are bought here with the LEFTOVER points, each re-scored
+    # on the board being built. Without this pass the plan scores several % below a greedy one.
+    graphs, prices, oracle = plan.graphs, plan.prices, plan.oracle
+    left_points, left_wallet = _leftover_budgets(plan, board)
     state = {cid: set(board.get(cid, {}).get("nodes") or [to.ROOT]) for cid in graphs}
     scope = to._payable_sockets(
-        oracle.skilltree, leader_chr, list(member_chrs), song_mode=song_mode, singer_chars=singers
+        oracle.skilltree,
+        plan.leader_chr,
+        list(plan.member_chrs),
+        song_mode=plan.song_mode,
+        singer_chars=plan.singers,
     )
+    node_ok = plan.node_ok if plan.constrained else None
     # The contextual nodes FIRST, on the leftover points: `fill_boards` runs its
     # additive phase before its contextual one, and with the MILP having already
     # bought every additive node worth its points, the additive phase would spend the
@@ -1391,17 +1615,17 @@ def solve_team_board(
         left_wallet,
         left_points,
         {},
-        leader_chr,
-        list(member_chrs),
-        song_mode=song_mode,
-        singer_chars=singers,
+        plan.leader_chr,
+        list(plan.member_chrs),
+        song_mode=plan.song_mode,
+        singer_chars=plan.singers,
         interactive_nodes=to._interactive_node_ids(oracle.skilltree),
-        score_fn=team_score,
+        score_fn=plan.team_score,
         socket_scope=scope,
-        node_ok=node_ok if constrained else None,
+        node_ok=node_ok,
     )
     # the capped yellow is the MILP's: a per-node value here would re-buy past the cap
-    fill_values = {n: v for n, v in values.items() if n not in {k[1] for k in yellow_keys}}
+    fill_values = {n: v for n, v in plan.values.items() if n not in {k[1] for k in plan.yellow_keys}}
     filled, _w, _p, _n = to.fill_boards(
         graphs,
         prices,
@@ -1409,43 +1633,41 @@ def solve_team_board(
         left_wallet,
         left_points,
         fill_values,
-        leader_chr,
-        list(member_chrs),
-        song_mode=song_mode,
-        singer_chars=singers,
+        plan.leader_chr,
+        list(plan.member_chrs),
+        song_mode=plan.song_mode,
+        singer_chars=plan.singers,
         socket_scope=scope,
-        node_ok=node_ok if constrained else None,
+        node_ok=node_ok,
     )
     for cid, nodes in filled.items():
         if cid in board or set(nodes) != {to.ROOT}:
             board.setdefault(cid, {"nodes": [], "slots": {}})["nodes"] = sorted(nodes)
-    lap("fill", t_stage)
-    clock["scorings"] = clock.get("scorings", 0) + oracle.scorings - scored0
 
-    # sockets: place the best Connect cards on the solved board, same as the beam path
-    if not include_sockets:
-        return board
-    try:
-        import socket_optimise as so  # noqa: PLC0415
 
-        tmp = Path(tempfile.gettempdir()) / f"hbsolve_sock_{leader_id}.json"
-        tmp.write_text(json.dumps(board), encoding="utf-8")
-        try:
-            res = so.optimise(
-                pool=pool,
-                board_state_path=tmp,
-                scenario=scenario,
-                song=song,
-                leader_id=leader_id,
-                member_ids=member_ids,
+def _leftover_budgets(plan: _Plan, board: dict) -> tuple[dict, dict]:
+    """`(points, wallet)` the solved plan leaves (team boards only unless `develop_bench`)."""
+    prices, wallet, charged_free = plan.prices, plan.wallet, plan.charged_free
+    spent_points = {
+        cid: sum(prices.get(n, {}).get("points", 0) for n in board[cid]["nodes"] if n != to.ROOT)
+        for cid in board
+    }
+    left_points = {
+        cid: int(plan.points.get(cid, 0)) - spent_points.get(cid, 0)
+        for cid in plan.points
+        if plan.develop_bench or cid in plan.team_chars
+    }
+    if wallet is None:
+        left_wallet = {cur: 10**12 for cur in to.CURRENCIES}
+    else:
+        left_wallet = {
+            cur: wallet[cur]
+            - sum(
+                prices.get(n, {}).get(cur, 0)
+                for cid in board
+                for n in board[cid]["nodes"]
+                if not charged_free(cid, n)
             )
-            for p in res.get("placements", []):
-                cid = p.get("chr")
-                if cid in board:
-                    board[cid]["slots"][p["socket"]] = p["card"]
-        finally:
-            tmp.unlink(missing_ok=True)
-    except Exception:  # noqa: BLE001 — sockets are a best-effort add-on
-        pass
-
-    return board
+            for cur in to.CURRENCIES
+        }
+    return left_points, left_wallet

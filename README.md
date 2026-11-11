@@ -24,6 +24,25 @@ Find the best teams for every song, plan your Holomem Boards and follow the even
 | <img src="docs/boardplan.webp" alt=""><br>**Board planner**<br>Which Holomem Board nodes to unlock next. | <img src="docs/holoboard.webp" alt=""><br>**Holomem Boards**<br>Every board and its points at a glance. |
 | <img src="docs/event.webp" alt=""><br>**Event tracker**<br>Live borders, forecasts and the top 100. | <img src="docs/gacha.webp" alt=""><br>**Gacha tracker**<br>Your pulls compared with the official rates. |
 
+Also: **Compare** (two teams side by side, skill by skill), **Park** (today's Free Chats and hidden
+collectables), **Collection** and **Inventory** (everything your account holds).
+
+## How it works
+
+A refresh reads the game's own data: the master tables (cards, skills, Holomem Boards, events)
+and every song chart from your install and the game's servers, and your account (each card's
+level, bloom and SP training, the board nodes you bought, your items). Nothing is typed in by
+hand: card stats use the game's own 32-bit formulas, and a team's Unit Score matches the deck
+screen line by line.
+
+The optimizer scores a team on a song note by note: the team's Overall Power is shared among the
+notes, and each note is multiplied by the skills live at that instant. Active skills fire at
+random, so it reports the expected score, the maximum and the whole distribution. The search
+chooses a leader and five members among your cards (a quick screen proposes, the exact scorer
+decides), plans each holomem's board as an integer program, and ranks the teams by expected
+score. The hot loops also exist as small C kernels that give bit-identical results. The whole
+model, formula by formula: [How a team is scored](docs/score-model.md).
+
 ## Two ways to use it
 
 | | The app | From source |
@@ -69,15 +88,24 @@ us. See [Privacy](docs/privacy.md).
 - [Run it from source](docs/run-locally.md), [the game's build constants](docs/dev/game-keys.md),
   [your own server](docs/self-hosting.md)
 - [Using holobuilder](docs/guide.md) and the [options glossary](docs/options.md)
+- [How a team is scored](docs/score-model.md): the score model, formula by formula, with the code behind each
 - [Troubleshooting](docs/troubleshooting.md) · [Privacy](docs/privacy.md)
 - [Contributing](CONTRIBUTING.md) · [Architecture](ARCHITECTURE.md) · [Security](SECURITY.md)
 
 ## Source layout
 
-The optimizer is in `src/hbuilder`, the local web app in `tools/web`, the scripts that read the
-game and your account in `tools/recon`, the launchers in `tools/local`, and the desktop app with
-its installer and server in `tools/app`. Run the tests with `.venv\Scripts\python -m pytest`;
-the ones that need game data are skipped until a refresh has built it.
+| Folder | What it is |
+|---|---|
+| `src/hbuilder` | the model and the searches: cards, skill gates, scoring, Holomem Boards (standard library only) |
+| `tools/web` | the local web app: the server package `hbweb/`, the search engines, the C kernels, the pages in `static/` |
+| `tools/refresh` | the refresh: reads the game and your account into `tools/recon/proxy/dumps/` |
+| `tools/local` | what `setup`, `refresh` and `start` run |
+| `tools/app` | the Windows desktop app: launcher, installer, updates, its server |
+| `tests` | the tests (more sit beside the code as `test_*.py`) |
+
+How the pieces fit: [ARCHITECTURE.md](ARCHITECTURE.md). Run the tests with
+`.venv\Scripts\python -m pytest` (`.venv/bin/python` on Linux); the ones that need game data are
+skipped until a refresh has built it.
 
 ## License
 

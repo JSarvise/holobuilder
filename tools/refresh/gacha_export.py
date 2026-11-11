@@ -59,8 +59,8 @@ gacha_view = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gacha_view)
 
 RAR = ("5★", "4★", "3★")
-# The same three hues the tab uses, and for the same reason -- see the header of
-# tools/web/static/gacha.js for the validator run that chose them.
+# The same three hues the Gacha page uses (`--r5` / `--r4` / `--r3` in
+# tools/web/static/pulls.css), so the export reads like the page.
 COL = {"5★": "#d07e00", "4★": "#8840c6", "3★": "#0098ff"}
 DORI = "#ff5c8a"
 
@@ -694,7 +694,7 @@ def render_html(view: dict, art_dir: Path, thumbs: dict[str, bytes]) -> str:
         f"last sync {esc(stamp(view.get('last_sync')))} · "
         f"{num(len(banners))} banners · self-contained (no network)</p>",
     ]
-    # The tab's twin (see gacha.js): if the ONE hand-maintained file did not parse, every
+    # As on the Gacha page (pulls-app.js): if the ONE hand-maintained file did not parse, every
     # alias silently stopped working and the export must say so, not just show fewer banners.
     if view.get("aliases_error"):
         body.append(

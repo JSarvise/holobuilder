@@ -93,9 +93,9 @@ _NOT_SOLVER_OPTS = ("candidates", "judge")
 
 
 def first_opts(opts: dict) -> dict:
-    """Plan options for the planner's first candidate alone: today's plan, with the Act
-    levels `refine_rows` re-plans the shown rows around. A plan of its own (its own key);
-    no judge picks it, so it is the same whatever leaf scores it."""
+    """Plan options for the planner's first candidate alone, with the Act levels
+    `refine_rows` re-plans the shown rows around. A plan of its own (its own key); no judge
+    picks it, so it is the same whatever leaf scores it."""
     return {**{k: v for k, v in opts.items() if k != "judge"}, "candidates": FIRST}
 
 
@@ -611,9 +611,13 @@ def _dispatch_tasks(pool, pending, cancel=None, more=None):
                 pending += more(task, out)
             yield task, out
         return
+    from hbuilder.solver.parallel_refine import WorkerDied, worker_pids  # noqa: PLC0415
+
     generation = pool.new_generation()
     done: queue.Queue = queue.Queue()
     in_flight = 0
+    # a worker that dies takes its task's answer with it: watched, or the wait has no end
+    pids = worker_pids(workers)
     limit = max(1, int(getattr(workers, "_processes", 0) or len(pending) or 1))
     while pending or in_flight:
         while pending and in_flight < limit:
@@ -643,6 +647,11 @@ def _dispatch_tasks(pool, pending, cancel=None, more=None):
                 got = done.get(timeout=0.5)
                 break
             except queue.Empty:
+                if worker_pids(workers) != pids:
+                    pool.stop_through(generation)
+                    raise WorkerDied(
+                        "a worker process ended while it planned boards for this search: run it again"
+                    ) from None
                 continue
         in_flight -= 1
         if isinstance(got, BaseException):

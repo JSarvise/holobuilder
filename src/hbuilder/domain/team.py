@@ -40,12 +40,9 @@ class Team:
         if len(self.members) != MEMBER_COUNT:
             raise TeamError(f"Team requires exactly {MEMBER_COUNT} members, got {len(self.members)}")
 
-        # Check 2: the same card may not be listed twice AS A MEMBER.
-        # `getattr` guards against a non-Card element that has no `.id`, so
-        # Check 4 below still gets a chance to report the more specific
-        # "not a Card" failure for that case. The LEADER is deliberately not
-        # checked here: it is a separate slot and may name a card that is
-        # also a member.
+        # Check 2: the same card may not be listed twice AS A MEMBER (the leader
+        # is a separate slot and may also be a member). `getattr` lets Check 4
+        # report a non-Card element.
         seen_ids: set[object] = set()
         for card in self.members:
             card_id = getattr(card, "id", None)
@@ -54,9 +51,8 @@ class Team:
                 raise TeamError(f"duplicate card id in team: {card_id!r}")
             seen_ids.add(key)
 
-        # Check 3: a holomem may not repeat among the members. Distinct
-        # card ids are not sufficient, because two skins of one character are
-        # two different cards with the same `member`.
+        # Check 3: a holomem may not repeat among the members (two skins of one
+        # character are different cards with the same `member`).
         seen_members: set[str] = set()
         for card in self.members:
             holomem = getattr(card, "member", None)

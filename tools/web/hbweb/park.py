@@ -176,8 +176,9 @@ def join_park(export: Mapping[str, Any], state: Mapping[str, Any]) -> dict:
     from the candidate pool `mapping_to_spot` holds, so a miss should not happen
     -- this path is the guard that makes it loud if that assumption ever breaks.
 
-    ⚠ Three of the fixed chests (`-008/-018/-014`, in a01-house/-restaurant/
-    -theater; 70 chests in all since Soda Pop Lagoon) have NO map asset and no `areas` entry, so they cannot be placed.
+    ⚠ Three of the fixed chests (`-008/-018/-014`, in a01-house/-restaurant/-theater; 70
+    chests in all since Soda Pop Lagoon) have NO map asset and no `areas` entry, so they
+    cannot be placed.
     They are skipped explicitly and counted in `unplaceable_treasures` rather
     than falling out of the join unnoticed."""
     export_areas = export.get("areas") or {}

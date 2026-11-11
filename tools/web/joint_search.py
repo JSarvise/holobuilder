@@ -1,32 +1,26 @@
 """ONE search over (leader, five members) — the leader chosen inside the search.
 
-`two_stage.search_song` finds the best team of a song with a member search under
-a bare proxy, a triage of every leader on ~500 sets and a full search for up to
-12 leaders: e.g. 179k exact evaluations, 50 s, on a 114-card account. The
-community tool holodori.best answers the same question with ~3,700: it picks a
-leader FOR each member set with a cheap proxy and evaluates only that pair.
+A member search under a bare proxy plus a triage of every leader (`two_stage.search_song`)
+needs ~179k exact evaluations (50 s) for one song on a 114-card account; the community tool
+holodori.best answers the same question with ~3,700 by picking a leader FOR each member set
+with a cheap proxy and evaluating only that pair. This does the same with two LEARNED models
+and no hand-written proxy, so a new card or song needs nothing:
 
-This does the same with two LEARNED models and no hand-written proxy, so a new
-card or song needs nothing:
-
-* the SET screen (`kernel/surrogate.py`, unchanged) learns `log V(S)`, the value
-  of a member set S under its best leader found so far, and ranks every legal
-  set in C;
+* the SET screen (`kernel/surrogate.py`) learns `log V(S)`, the value of a member set S
+  under its best leader found so far, and ranks every legal set in C;
 * the LEADER model learns, per leader L, `log score(L, S) = theta_S + a_L +
-  b_L * fires(gate_L, S) + c_L * holds(L, S)` (theta_S a per-set effect, so only
-  the leaders' RELATIVE order is learned). On m0342 this form alone picks the
-  true best leader of 82 % of sets,
-  losing 0.24 % at p90 when wrong; its error is too large to rank TEAMS, which
-  is why it only chooses which leaders a set is exact-scored with.
+  b_L * fires(gate_L, S) + c_L * holds(L, S)` (theta_S a per-set effect, so only the
+  leaders' RELATIVE order is learned). On m0342 it picks the true best leader of 82 % of
+  sets, losing 0.24 % at p90 when wrong: too coarse to rank TEAMS, so it only chooses
+  which leaders a set is exact-scored with.
 
-Rounds: the screen proposes `step` unseen sets; each is exact-scored under its
-`k` best leaders by the model (plus the `always_k` best of the `always` leaders,
-the song's singers, by the same model);
-both models refit on every exact score. Stops when the best `stable_top` TEAMS
-have not changed for `stable_rounds` rounds. A POLISH then exact-scores the best
-`polish` sets under EVERY leader, so the reported top sets carry their true best
-leader, and `neighbours` (one-card swaps of the best teams, under the same
-leader) hedge against what the screen cannot see.
+Rounds: the screen proposes `step` unseen sets; each is exact-scored under its `k` best
+leaders by the model (plus the `always_k` best of the `always` leaders, the song's singers);
+both models refit on every exact score. Stops when the best `stable_top` TEAMS have not
+changed for `stable_rounds` rounds. A POLISH then exact-scores the best `polish` sets under
+EVERY leader, so the reported top sets carry their true best leader, and `neighbours`
+(one-card swaps of the best teams, under the same leader) hedge against what the screen
+cannot see.
 
 Every score returned is the exact leaf's; the models only choose what to score.
 No certificate: "best found", with how much was scored in `stats`.
@@ -506,14 +500,12 @@ def search(
     t0 = time.perf_counter()
     best_sets = list(dict.fromkeys(s for _v, _li, s in top(10 * polish)))[:polish]
     polish_seconds = take([(li, s) for s in best_sets for li in range(len(leaders)) if ok(li, s)])
-    # GATE REPAIR: a gated leader (an outfit that needs 2+ Gen 3, 3+ Pure ...) is worth
-    # little on a set that misses its gate, so the model learns it as weak and never
-    # tries it where it would win, and no one-card swap reaches it (the gate needs two
-    # cards at once). Each of the best sets is also scored under every leader whose
-    # gate it misses, with its weakest members (the screen's card weights) swapped for
-    # the strongest cards that satisfy the gate. Without this a gated leader can lead only
-    # a handful of scored teams, all well below what she reaches once her gate is met --
-    # which can be the true #1
+    # GATE REPAIR: a gated leader (an outfit that needs 2+ Gen 3, 3+ Pure ...) is worth little
+    # on a set that misses its gate, so the model learns it as weak and never tries it where
+    # it would win, and no one-card swap reaches it (the gate needs two cards at once). Each
+    # of the best sets is also scored under every leader whose gate it misses, its weakest
+    # members (the screen's card weights) swapped for the strongest cards that satisfy the
+    # gate: a gated leader's best team, once her gate is met, can be the true #1
     weight = [float(screen._card[i]) for i in range(len(cards))]  # zeros before any fit
     repaired_sets: set = set()
     repaired_best: dict = {}
@@ -521,8 +513,7 @@ def search(
     def repair_gates(sets) -> float:
         # one repair per (set, leader); then, for the leaders whose repair came within
         # REPAIR_MARGIN of the best team, every choice of WHICH members make way on the
-        # best three sets (the screen's weights picked the wrong one for Noel: Anya out,
-        # Koyori kept, 3,849,225 -- one swap from her 3,926,903)
+        # best three sets (the screen's weights can pick the wrong one, one swap short)
         pairs, fresh = [], [s for s in sets if s not in repaired_sets]
         for s in fresh:
             repaired_sets.add(s)

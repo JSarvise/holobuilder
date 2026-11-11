@@ -1,13 +1,8 @@
 """The Holomem Board.
 
-On one fully decomposed deck the board is worth **37,472 of 135,736 Overall
-Power (27.6 %)** and **18.9 of 164.9 Score Bonus points (11.5 %)**.
-
-
-## What the board is
-
-Each of the 54 holomem has her own board of **152 node groups** in five
-branches. A node group is unlocked or not; unlocking it turns on its effect.
+Each of the 54 holomem has her own board of 154 node groups in five branches; unlocking a
+node group turns on its effect. On a typical deck the board is a large share of Overall
+Power (about 28 %) and a smaller one of the Score Bonus (about 11 %).
 
 | branch | scope | read from | tiles |
 |---|---|---|---|
@@ -15,104 +10,47 @@ branches. A node group is unlocked or not; unlocking it turns on its effect.
 | **B** | applies **always**, to **that holomem's own card**, while she is a member | `-skill_tree_effect_target-skill_tree_character-always` | 31 |
 | **G** | applies **always**, to **every** card | `-skill_tree_effect_target-all-always` (179 of 182 rows) | 182 rows |
 | **G** (3 groups) | applies **always**, to cards of **that holomem's own grouping** | `all_parameter_up_for_character_grouping-...-skill_tree_effect_target-character_grouping-grp-<group>-always` | `G-008`, `G-011`, `G-021` |
-| **Y** | per-**song** score bonus and Holowork rewards | `live_score_bonus_add_permil_up_by_music_...` | 43 |
+| **Y** | per-**song** score bonus and Holowork rewards | `live_score_bonus_add_permil_up_by_music_...` | 31 |
 | **S** | the 4 Connect slots you place a card on | — | 4 |
 
-Effect ids are self-describing and are parsed, not tabulated:
+Effect ids are self-describing and are parsed, not tabulated (`parse_effect_id`):
 
     skill_tree_effect-<family>-<value>-skill_tree_effect_target-<target>-<condition>
 
-A `<family>` ending `_permil_up` carries a per-mille **rate**; otherwise the
-value is **flat stat points**. Both shapes occur on the same branch.
+A `<family>` ending `_permil_up` carries a per-mille rate; otherwise the value is flat stat
+points. Both shapes occur on the same branch, and the two units must not be mixed.
+`SkillTreeNode` has no per-node level (multi-row groups are per-song Y variants or the
+54-row grouping greens).
 
-
-## Green is BOTH a constant and a discriminator
-
-Read out of `SkillTreeNode` (323 rows over 152 group ids), the green branch
-holds two kinds of node:
-
-* **179 of 182 G rows** target `all-always` — every card, always, no
-  condition. Values are tiny and flat: `all_parameter_up-5`,
-  `performance_up-5/10`, `technique_up-5/10`, `sense_up-5/10`, plus reward
-  bonuses that never touch score. These are a genuine **constant**: they add
-  the same number to every candidate team of five, so they cancel out of a
-  ranking.
-* **3 G node groups — `G-008`, `G-011`, `G-021` — are `character_grouping`
-  scoped and are per-team DISCRIMINATORS.** Each carries **54 rows, one per
-  character**, and each row's target is that character's own grouping
-  (`grp-myth`, `grp-gen_0`, `grp-holox`, `grp-advent`, `grp-promise`,
-  `grp-regloss`, `grp-gamers`, `grp-indonesia-gen_N`, ...). The family is
-  `all_parameter_up_for_character_grouping`, so it adds flat all-stats to
-  exactly those cards in the team that share the unlocking holomem's grouping,
-  and the value depends on the group's size:
-
-      G-008: 50 / 75 / 100      G-011: 150 / 225 / 300      G-021: 100 / 150 / 200
-
-  which is where *"+450 all stats to her generation"* comes from
-  (`50+150+100 = 300`, `75+225+150 = 450`, `100+300+200 = 600` at full unlock,
-  by group size) and why the branch ceilings differ per character.
-
-This module models both: a `"account"`-scope effect reaches every member, a
-`"grouping"`-scope effect reaches only members whose `Card.generations`
-contains the effect's grouping. The grouping half is a discriminator by
-construction, so it changes rankings as soon as one of the three is unlocked.
-
+Green holds two kinds of node. 179 of its 182 rows target every card (`"account"` scope):
+a constant across teams. `G-008`, `G-011` and `G-021` have one row per character targeting
+that character's own grouping (`"grouping"` scope), so they reach only the team members of
+the unlocking holomem's generation and do change rankings. Their value depends on the
+group's size (G-008 50/75/100, G-011 150/225/300, G-021 100/150/200: "+450 all stats to her
+generation" is the middle column), and a card receives at most `GROUPING_ALL_CAP`.
 
 ## Connect nodes
 
-A card placed on a Connect (S) node multiplies the value of every unlocked
-tile inside that card's own fixed shape, anchored at that node:
+A card placed on a Connect (S) node multiplies every unlocked tile inside that card's own
+fixed shape, anchored at that node, whatever the tile's unit (Calliope 5★ at 140 % turns
+"+50 to All" into +120 and "Score Support 10 %" into 24 %):
 
     boosted = base * (1 + connect_permil / 1000)
 
-Checked against the game screen: Calliope 5★ at 140 % turned "+50 to All" into
-+120, "Sense +100" into +240 and "Score Support 10 %" into 24 % — x2.4 on all
-three, so **the multiplier applies to the number whatever its unit** and no
-per-family special case is needed.
+Every Connect effect has two levels (base and Bloom 5, level 2 = level 1 + 500 permil in
+master `SkillTreeConnectEffect`), and the captured board state records the placed card but
+not its bloom, so `BoardNode.connect_multiplier` is an input to this module.
 
+## Scope limits
 
-## Units: flat points versus per-mille
+* The Y branch's per-song terms come from the song's own cast (`song_score_bonus_for`);
+  only the song-independent `"all"` bucket enters `score_bonus_rate`.
+* A leader's BLUE nodes do not count unless she is also a member: blue applies "in the
+  unit", and the leader slot is not a member slot.
 
-Two facts matter when reading board values:
-
-1. **`SkillTreeNode` has no per-node level.** 137 of 152 group ids have
-   exactly one row; the 12 multi-row groups are all `Y` (a per-song variant,
-   `-solo` vs `-solo-fuwamoko`, not a level) and the 3 remaining are the
-   54-row `character_grouping` groups above. **No R node has a second level
-   anywhere in the master data.**
-2. **Flat stat points and per-mille rates are different units.** Ina's 27 R
-   nodes sum to *flat* `All 470, Sense 350, Tech 200, Perf 200` and to
-   *per-mille* `All 60, Sense 30, Tech 30, Act.Power 240`. Adding the two and
-   dividing by 10 gives `53.0 / 38.0 / 23.0 / 20.0 / 24.0` %, which looks
-   "nearly double" the observed +28.73 pp only because it prints a flat stat
-   point as a tenth of a percent.
-
-With the units separated and the Connect boosts applied, the numbers land on
-the acceptance test. See `tests/test_board.py`, which pins them.
-
-
-## What this module does NOT claim
-
-* **The Y branch's per-song terms are computable but not ranked
-  song-agnostically.** `song_score_bonus_by_holomem` +
-  `song_score_bonus_for(singers, scope=...)` give the per-song aggregation
-  from the song's own cast. Only the song-*independent* `"all"` bucket is
-  offered to `scoring.py` as `ScoreUpBonusRatioBySkillTree`; whether a
-  song-AGNOSTIC ranking should use the per-song ones is left to the caller.
-* **Whether a leader's BLUE nodes count when she is not also one of the five
-  members is not known.** Blue is defined as "in the unit", and the leader
-  slot is not a member slot, so the default implemented is *no*.
-* **The Connect placement's Bloom level is not in the captured state.**
-  Every Connect effect has two levels (base and Bloom 5); `board_state.json`
-  records the placed card id and not its bloom. `BoardNode.connect_multiplier`
-  is therefore an input to this module, not something it derives, and the
-  acceptance test supplies the *base* level — which is what reproduces the
-  observation: 23,318.22 against the observed 23,272 (+0.20 %), where Bloom 5
-  on both of Ina's slots gives 27,068.22 (+16.31 %). Both level-2 values come
-  from master `SkillTreeConnectEffect`, where **level 2 is exactly level 1 +
-  500 permil on all 20 effects** — `center_area-001-rare_5` 1400→1900
-  (×2.4→×2.9) and `general_purpose_area-001-rare_5` 550→1050 (×1.55→×2.05).
-  Reproduce with `tests/test_board.py::test_bloom_5_connect_overshoots_the_acceptance_number`.
+The product reads the board through `BoardModel`'s memoised readers; the plain reference
+walk they are tested against is `tests/support/board_reference.py` (`resolve`). Every
+memoised path keeps that walk's float accumulation order, so the two are bit-identical.
 """
 
 from __future__ import annotations
@@ -143,10 +81,8 @@ __all__ = [
 
 
 class BoardError(Exception):
-    """A board record that cannot be interpreted. Raised rather than guessed:
-    a board effect this module does not recognise is silently worth zero
-    otherwise, and a silently-zero term is indistinguishable from a correct
-    zero."""
+    """A board record that cannot be interpreted. Raised rather than guessed: a
+    silently-zero term is indistinguishable from a correct zero."""
 
 
 STAT_NAMES: tuple[str, ...] = ("performance", "technique", "sense")
@@ -158,18 +94,14 @@ STAT_NAMES: tuple[str, ...] = ("performance", "technique", "sense")
 # "grouping" — always, but only members sharing the unlocking holomem's
 #              grouping. The discriminating half of the green branch.
 
-# The type-19 (`all` scope) per-song score-bonus ceiling, from the client
-# constant `0x75cec38` = `0000c842` — 100 permil, displayed as 10.0 %.
-# Per-recipient, never account-wide.
+# The type-19 (`all` scope) per-song score-bonus ceiling, a client constant:
+# 100 permil, displayed as 10.0 %. Per song and cast, never account-wide.
 SONG_ALL_CAP_PERMIL: int = 100
 
-# The type-20 ceiling: the grouping greens (`all_parameter_up_for_character_
-# grouping`, G-008/011/021) a card RECEIVES, summed over every source board whose
-# grouping it is in, never add more than 900 to each stat. Read from
-# `main_SkillTreeEffectValueLimit` (the only other limit row) and the client's
-# grouping-dialog presenter, which sums per receiver. Whether the server enforces it is
-# not known (no observed board has reached it). Applied to the Connect-scaled
-# sum, on the reading that the limit is on the effect value.
+# The type-20 ceiling (`main_SkillTreeEffectValueLimit`): the grouping greens
+# (G-008/011/021) a card RECEIVES, summed over every source board whose grouping it
+# is in, add at most 900 to each stat, as the client's grouping dialog sums them per
+# receiver. Applied to the Connect-scaled sum (the limit is on the effect value).
 GROUPING_ALL_CAP: int = 900
 
 # The bucket key the capped grouping sum is collected under before it is spread
@@ -197,10 +129,8 @@ def _is_grouping_all(effect: BoardEffect) -> bool:
 
 # The families this module knows how to route, and where each one goes.
 # `("stat", <stat or "all">)`  — flat stat points.
-# `("rate", <stat or "all">)`  — per-mille of that stat's BASE value. The
-#   outfit's own stat rate applies to Member Parameter exactly (12,160 / 81,009
-#   = 15.011 % against a stated 15 %), and the board's percentages are read the
-#   same way — an inference from that one measurement.
+# `("rate", <stat or "all">)`  — per-mille of that stat's BASE value (Member
+#   Parameter), as the outfit's own stat rate applies.
 _STAT_FAMILIES: dict[str, tuple[str, str]] = {
     "all_parameter_up": ("stat", "all"),
     "performance_up": ("stat", "performance"),
@@ -220,17 +150,15 @@ _COOLDOWN_SHORTEN = "live_active_skill_cool_time_shorten_permil_up"
 _SONG_SCORE_BONUS = "live_score_bonus_add_permil_up_by_music_skill_tree_character_and_music_singer_type"
 
 # Reward/economy families. Parsed so an unknown family still raises, but they
-# reach neither power nor score and are dropped on the floor deliberately.
+# reach neither power nor score.
 _IGNORED_FAMILY_PREFIXES = (
     "work_reward_",
     "live_reward_",
     "mini_game_reward_",
-    # LIFE + leader-active-addition/level: no RANKING term, so score 0, not
-    # RAISE. Raising would hurt the planner: a life node sits on a side branch
-    # whose path SHARES the red corridor's prefix (R-001, R-002…), and the beam
-    # marks a whole failed path unroutable, which would poison those shared nodes
-    # so every later red buy is skipped (measured: raising buys no red at all,
-    # -8.8 %; scoring 0 buys the full leader red, +4.9 %).
+    # LIFE + leader-active-addition/level: no ranking term, so worth 0 rather than
+    # an error. Raising would hurt the planner: a life node's path shares the red
+    # corridor's prefix (R-001, R-002...), and the beam marks a whole failed path
+    # unroutable, so every later red buy would be skipped.
     "life_up",
     "live_deck_leader_active_skill",
 )
@@ -244,11 +172,9 @@ _GROUPING_RE = re.compile(r"^character_grouping-(?P<grouping>.+?)-(?P<condition>
 
 # A `character_grouping` effect names its group as the game's TOKEN (`grp-myth`),
 # but `Card.generations` carries the DISPLAY name the catalogue ships (`Myth`,
-# `holoX`, `3期生`). Without this map a gen-scoped green (G-008/G-011/G-021) never
-# matches a real card and scores 0, which makes the whole family look inert.
-# Cards built with the token directly (the
-# board tests) still match on the first leg, so the check accepts EITHER form.
-# Source: `import_to_cards.GENERATION_BY_GROUP`.
+# `holoX`, `3期生`); without this map a gen-scoped green never matches a real card.
+# `_reaches` accepts either form (the board tests build cards with the token).
+# Same mapping as `import_to_cards.GENERATION_BY_GROUP`.
 _GENERATION_BY_GROUPING = {
     "grp-gen_0": "0期生",
     "grp-gen_1": "1期生",
@@ -284,44 +210,25 @@ class BoardEffect:
     scope: str
     grouping: str | None = None
     song_scope: str | None = None
-    # A `skill_tree_effect_passive_trigger` the deck preview does not fire —
-    # e.g. R-002's `music_skill_tree_character` (only on that holomem's own
-    # song). Carried, never silently dropped, and excluded from the
-    # song-agnostic terms.
+    # A `skill_tree_effect_passive_trigger` the deck preview does not fire, e.g.
+    # R-002's `music_skill_tree_character` (only on that holomem's own song).
+    # Excluded from the song-agnostic terms; song-aware callers apply it.
     conditional: bool = False
 
     def scaled(self, multiplier: float) -> BoardEffect:
-        """This effect with a Connect multiplier applied. The multiplier
-        applies to the number whatever its unit, so this is one line and not
-        a per-family table.
+        """This effect with a Connect multiplier applied, whatever its unit.
 
-        **And the product is CEILED** —
-        `SkillTreeUtility::GetEffectValueWithConnectEffectsInternal` @`0x6811970`:
+        The client ceils the product, only when a connect effect exists (hence the
+        `multiplier == 1.0` early return), in doubles
+        (`SkillTreeUtility::GetEffectValueWithConnectEffectsInternal`):
 
             value = Ceiling( (1 + connectPermil/1000) x base )
 
-        with the `Ceiling` firing **only when a connect effect exists**, which is
-        why the `multiplier == 1.0` early return above is the guard rather than
-        any test on the value. The constants are DOUBLES (`0x75ae280` =
-        1000.0, `0x75abdf0` = 1.0), not float32.
+        e.g. an `all`-stat node of 50 at x1.55 carries 78, not 77.5.
 
-        Example: five of Ina'nis' `all`-stat nodes at x1.55 on a base of 50
-        give `77.5` unceiled where the game carries `78`. On one measured deck
-        that is +37.5 on the leader half and +145.5 on the member half, and it
-        takes the model from -0.8 % to -0.003 % there.
-
-        ⚠ **Applied to `stat` only, and that is a deliberate limit.** The game
-        ceils *the value*, and for `stat` the unit is whole stat points, so the
-        reading is unambiguous. For the permil-valued kinds (`rate`,
-        `skill_effect_up`, `song_score_bonus`) the same `Ceiling` would round to
-        a whole permil — plausible, but not known: no observed rate or permil
-        node carries a connect multiplier other than 1.0, so no observation can
-        separate it. Ceiling them on a guess would move numbers
-        that currently reproduce the game (`R-002` reads 24.0 % in game and
-        `10.0 x 2.4` is already integral; `R-049` reads 6.2 % and `4.0 x 1.55 =
-        6.2` is not, and ceiling it to 7 would BREAK a confirmed reading).
-        That last one is the measurement that decides it: **do not extend this
-        to permil kinds.**"""
+        Applied to `stat` only: the game shows `R-049` (4.0 % at x1.55) as 6.2 %, so
+        a permil-valued kind is not ceiled to a whole permil. Do not extend this to
+        the permil kinds."""
         if multiplier == 1.0:
             return self
         value = self.value * multiplier
@@ -344,9 +251,7 @@ class BoardNode:
     """One unlocked node group, with its Connect multiplier already resolved.
 
     `connect_multiplier` is `1 + connect_permil/1000` for the Connect shape
-    covering this node, or `1.0`. It is an INPUT: the placed card's Bloom
-    level is not recoverable from the captured state (see the module
-    docstring), so this module does not derive it."""
+    covering this node, or `1.0`: an input (module docstring)."""
 
     node_id: str
     effects: tuple[BoardEffect, ...]
@@ -359,10 +264,8 @@ class BoardNode:
 
 @dataclass(frozen=True, slots=True)
 class CharacterBoard:
-    """One holomem's unlocked nodes. `holomem` is the `Card.member` name, so a
-    board joins to a card the same way `cfg.board_score_bonus` already does —
-    by holomem, never by card id, because the board is a property of the
-    character and not of a skin."""
+    """One holomem's unlocked nodes. `holomem` is the `Card.member` name: the board
+    belongs to the character and reaches every card of hers, never one card id."""
 
     holomem: str
     nodes: tuple[BoardNode, ...] = ()
@@ -382,26 +285,19 @@ def _FIRST(pair: tuple) -> object:
 class BoardDigest:
     """Everything `BoardModel` derives from ONE `CharacterBoard`, walked once.
 
-    A `BoardModel` is rebuilt per candidate team (`board_model_from_plan`), but
-    only the team's own five or six boards differ between two teams: the other
-    ~50 are the account's bench, the same frozen `CharacterBoard` objects every
-    time. Re-walking all of them on the enumeration leaf — five times in
-    `__post_init__`, once more per member in `_terms`, each visit paying
-    `BoardEffect.scaled` — costs ~2/3 of the whole leaf. A digest holds the
-    per-board half of those walks, so a caller that keeps boards alive
+    A `BoardModel` is rebuilt per candidate team (`board_model_from_plan`), but only the
+    team's own five or six boards differ between two teams: the other ~50 are the
+    account's bench, the same frozen `CharacterBoard` objects. Re-walking them all would
+    cost about 2/3 of the enumeration leaf, so a caller that keeps boards alive
     (`PlanCache`) keeps their digests too and the model only stitches them.
 
-    **Nothing here is summed across boards, and that is the correctness rule.**
-    Float addition is not associative: `BoardModel` accumulates its buckets in
-    `characters -> nodes -> effects` order, so a digest stores the ordered
-    ADDENDS of its own board and the model replays them in board order — the
-    same additions in the same sequence, not per-board subtotals. The only sums
-    taken here are the ones the model already took per board (`song_scopes`,
-    `uptime`).
+    Nothing here is summed across boards: float addition is not associative, so a digest
+    stores the ordered ADDENDS of its own board and the model replays them in
+    `characters -> nodes -> effects` order. The only sums taken here are per-board ones
+    the model takes anyway (`song_scopes`, `uptime`).
 
-    Not a dataclass and not hashable by content: identity is the point, it is a
-    memo attached to one board object (`board`), which the model checks with
-    `is` before trusting a digest it was handed."""
+    Identity is the point: a memo attached to one board object (`board`), which the
+    model checks with `is` before trusting a digest it was handed."""
 
     __slots__ = (
         "board",
@@ -431,8 +327,8 @@ class BoardDigest:
         stat_effects: list[BoardEffect] = []
         rate = cooldown = 0.0
         # `(node_id, kind, scope)` of the first uptime effect at a scope other
-        # than "member". Carried, not raised: the message names the holomem the
-        # MODEL keys this board by, and the model raises it (`__post_init__`).
+        # than "member". The model raises it (`__post_init__`), naming the holomem
+        # it keys this board by.
         uptime_error: tuple[str, str, str] | None = None
         for node in board.nodes:
             for raw_effect in node.effects:
@@ -494,10 +390,9 @@ class BoardDigest:
         )
         self._stat_ops: dict[tuple, tuple[tuple, tuple, tuple]] = {}
         # The same memo reached by the card OBJECT: `(id(card), leader_here) ->
-        # (card, holomem, result)`, the card kept alive in the entry so a
-        # recycled `id()` cannot serve another card's answer. A search asks
-        # with the same card objects millions of times, and hashing the
-        # content key above is most of what a lookup costs.
+        # (card, holomem, result)`, the card kept alive in the entry so a recycled
+        # `id()` cannot serve another card's answer. Hashing the content key is
+        # most of what a lookup costs, and a search asks millions of times.
         self._stat_ops_by_card: dict[tuple[int, bool], tuple] = {}
 
     def stat_ops(
@@ -566,20 +461,15 @@ class BoardBase:
     per-card stat terms added up ONCE, so a model that differs from the bench
     in five or six boards answers `_terms` from those boards alone.
 
-    `digests` is the bench in ITS order; a model may use this base only when
-    its own `characters` start with exactly these names in exactly this order
-    (boards replaced in place, new characters appended — what
-    `_board_model_from_cache` builds), which `BoardModel.__post_init__` checks
-    rather than assumes.
+    `digests` is the bench in its order; a model may use this base only when its own
+    `characters` start with exactly these names in this order (boards replaced in place,
+    new characters appended), which `BoardModel.__post_init__` checks.
 
-    **Why subtracting a replaced board is exact.** Only the FLAT bucket is
-    pre-summed, and only when every flat value is a whole number
-    (`flat_exact`): integers far below 2**53 add and subtract exactly, so
-    `bench total - replaced boards + this team's boards` is the same integer —
-    the same bits — as adding the model's boards up one by one. The RATE
-    bucket is never pre-summed: it is kept as the ordered list of boards that
-    contribute to it, and the model replays that list with its own boards
-    merged in at their positions."""
+    Subtracting a replaced board is exact: only the FLAT bucket is pre-summed, and only
+    when every flat value is a whole number (`flat_exact`), so `bench total - replaced
+    boards + this team's boards` is the same integer as adding the boards one by one.
+    The RATE bucket is never pre-summed: the model replays the ordered list of
+    contributing boards with its own merged in at their positions."""
 
     __slots__ = ("digests", "names", "index", "flat_exact", "_terms")
 
@@ -618,32 +508,26 @@ class BoardBase:
 
 @dataclass(frozen=True, slots=True)
 class BoardModel:
-    """Every captured character board. Absent characters contribute nothing,
-    which is the correct reading: a board with no unlocked node is worth zero,
-    and this module never invents one."""
+    """Every captured character board. An absent character contributes nothing."""
 
     characters: Mapping[str, CharacterBoard] = field(default_factory=dict)
     # `chr-NNNNN` -> holomem name. The board is name-keyed (`card.member` is a
     # name), but `charts.json` singers are chr-ids, so the per-song methods use
-    # this to translate. Empty by default: an all-name caller (every existing
-    # fixture) is unchanged, and an unknown id passes through untranslated.
+    # this to translate; an unknown id passes through untranslated.
     name_by_chr: Mapping[str, str] = field(default_factory=dict)
     # Derived in `__post_init__`, never passed in — see `leader_scoped_holomem`.
     _leader_scoped: frozenset[str] = field(default=frozenset(), repr=False)
-    # Memo for `leader_invariant_power_bonus`, filled on demand and never read
-    # by `__eq__`/`__repr__`: it is a cache of a pure function of
-    # `(self, card)`, so two models that compare equal must not stop doing so
-    # because one has been used and the other has not.
     # Derived in `__post_init__` too — `score_bonus_rate` is a model constant.
     _score_bonus_rate: float = field(default=0.0, repr=False)
+    # Memo of a pure function of `(self, card)`, never compared, so two equal models
+    # stay equal whether or not one has been used.
     _terms_cache: dict[tuple[str | None, str, str, frozenset[str]], tuple[dict, dict]] = field(
         default_factory=dict, compare=False, repr=False
     )
-    # Every non-conditional `skill_effect_up` effect, in `resolve`'s own
-    # characters -> nodes -> effects walk order, as `(holomem, effect)`. Order
-    # is load-bearing: float addition is not associative, so summing a subset
-    # of these in index order is what keeps `skill_effect_up_for` bit-identical
-    # to `resolve`.
+    # Every non-conditional `skill_effect_up` effect, in characters -> nodes ->
+    # effects walk order, as `(holomem, effect)`. Order is load-bearing: float
+    # addition is not associative, so summing a subset in index order keeps
+    # `skill_effect_up_for` bit-identical to the reference walk.
     _skill_effect_up_terms: tuple[tuple[str, BoardEffect], ...] = field(default=(), repr=False)
     # `(leader_holomem, card key) -> the indices of the terms above that reach
     # that one card`. Per CARD, so the memo survives the solver swapping one
@@ -651,35 +535,29 @@ class BoardModel:
     _skill_effect_up_cache: dict[tuple[str | None, str, str, frozenset[str]], frozenset[int]] = field(
         default_factory=dict, compare=False, repr=False
     )
-    # The same two shapes for the CONDITIONAL half — the terms `resolve` and
-    # `_skill_effect_up_terms` both drop, and which a song-aware caller can
-    # evaluate because it knows the cast. Kept apart from the unconditional
-    # terms so a caller with no cast cannot accidentally pick them up.
+    # The CONDITIONAL (singer-triggered) skill-effect-up terms, kept apart so a
+    # caller with no cast cannot pick them up; a song-aware caller evaluates them.
     _conditional_skill_effect_up_terms: tuple[tuple[str, BoardEffect], ...] = field(default=(), repr=False)
     # The same, for the singer-conditional STAT/RATE effects (R-044/062/063:
-    # "when [character] is included as a singer, grants +stat% to all"). `resolve`
-    # and `_terms` both drop these (`if effect.conditional: continue`); a song-aware
-    # caller applies them via `conditional_stat_power_for` when the holomem sings.
+    # "when [character] is included as a singer, grants +stat% to all"). `_terms`
+    # drops these; a song-aware caller applies them via `conditional_stat_power_for`.
     _conditional_stat_terms: tuple[tuple[str, BoardEffect], ...] = field(default=(), repr=False)
     # holomem -> {song_scope: rate}, the Y branch kept per character. The pooled
     # `_score_bonus_rate` above is exact only for `all`.
     _song_score_bonus_by_holomem: Mapping[str, Mapping[str, float]] = field(default_factory=dict, repr=False)
     # holomem -> (activation_rate_up, cooldown_shorten), summed over that
-    # character's own board. A model CONSTANT per character, not a per-team
-    # quantity -- see `uptime_for` for the measurement that makes it one.
+    # character's own board: a constant per character (`uptime_for`).
     _uptime: Mapping[str, tuple[float, float]] = field(default_factory=dict, repr=False)
     # holomem -> that board's `BoardDigest`. A caller that keeps boards alive
     # across models (`PlanCache`) passes the digests it kept; `__post_init__`
-    # builds whichever are missing or belong to another board object. A cache
-    # of a pure function of each board, so never part of `__eq__`.
+    # builds whichever are missing or belong to another board object.
     _digests: Mapping[str, BoardDigest] = field(default_factory=dict, compare=False, repr=False)
     # Derived: every board's `BoardDigest.flat_exact` holds — see `_terms`.
     _flat_exact: bool = field(default=False, compare=False, repr=False)
     # The bench this model was assembled over, if the caller has one
     # (`PlanCache.bench_base`). `__post_init__` keeps it only when this model's
-    # boards really are that bench with some replaced in place and some
-    # appended, and when flat sums are exact on both sides; otherwise it is
-    # reset to `None` and `_terms` walks every board. A cache, never compared.
+    # boards are that bench with some replaced in place and some appended, and
+    # flat sums are exact on both sides; otherwise `_terms` walks every board.
     _base: BoardBase | None = field(default=None, compare=False, repr=False)
     # Derived: holomem -> position in `characters`, for every board that is
     # NOT the base's own digest at that position.
@@ -690,20 +568,15 @@ class BoardModel:
     _cooldown_source: BoardModel | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
-        # Both derived here rather than at every construction site so no caller
-        # can forget them: `board_from_mapping`, the recon tools and the tests
-        # all build `BoardModel` directly.
+        # Derived here rather than at every construction site so no caller can
+        # forget them (`board_from_mapping`, the recon tools and the tests all
+        # build `BoardModel` directly).
         #
-        # Every derivation below reads the per-board `BoardDigest`s and replays
-        # them in `characters` order — the same `characters -> nodes -> effects`
-        # sequence the walks they replace made, so every accumulated float is
-        # the same additions in the same order. A digest handed in by the
-        # caller is used only if it is THIS board's (`is`); otherwise it is
-        # built here, so a caller that passes none gets the same answer.
-        #
-        # ONE pass. Most boards are `inert` — nothing but plain stat effects —
-        # and are only filed; the rest append to each derivation in the order
-        # they are met, which is the order seven separate passes would meet them in.
+        # One pass over the per-board `BoardDigest`s in `characters` order, so every
+        # accumulated float is the same additions in the same order as a plain
+        # `characters -> nodes -> effects` walk. A digest handed in is used only if
+        # it is this board's (`is`). Most boards are `inert` (plain stat effects
+        # only) and are only filed.
         given = self._digests
         digests: dict[str, BoardDigest] = {}
         flat_exact = True
@@ -720,27 +593,20 @@ class BoardModel:
         special: dict[str, int] = {}
         leader_scoped: list[str] = []
         song: dict[str, float] = {}
-        # The `skill_effect_up` family that `resolve` routes and `_terms`
-        # deliberately drops. Conditional effects are kept SEPARATE rather than
-        # dropped or flagged: `resolve` excludes them (a trigger the
-        # song-agnostic ranking cannot evaluate is carried nowhere), a caller
-        # that knows the song's cast can evaluate them, and one that does not
-        # must get exactly the song-agnostic answer.
+        # The `skill_effect_up` family, which `_terms` leaves out. Conditional
+        # effects are kept separate: a caller that knows the song's cast evaluates
+        # them, one that does not gets exactly the song-agnostic answer.
         skill_effect_up_terms: list[tuple[str, BoardEffect]] = []
         conditional_terms: list[tuple[str, BoardEffect]] = []
-        # The singer-conditional STAT/RATE terms, kept separate the same way:
-        # `_terms`/`resolve` drop every conditional stat, so a song-aware
-        # caller re-applies them per song when the holomem is a singer.
+        # The singer-conditional STAT/RATE terms, kept separate the same way.
         conditional_stat_terms: list[tuple[str, BoardEffect]] = []
-        # `song_score_bonus` kept PER HOLOMEM as well as pooled, mirroring
-        # `BoardContribution`. The pooled `all` bucket is exact for a
-        # whole-roster song and over-counts `solo` and `group` badly; this is
-        # what `song_score_bonus_for` needs to get those two right.
+        # `song_score_bonus` kept per holomem as well as pooled: the pooled `all`
+        # bucket is exact for a whole-roster song and over-counts `solo` and
+        # `group`, which `song_score_bonus_for` needs per singer.
         song_by_holomem: dict[str, dict[str, float]] = {}
-        # The two ACTIVE-uptime families, summed per character. Constants per
-        # holomem -- see `uptime_for`. The scope guard is here, at
-        # construction, so a model that cannot be summarised this way never
-        # gets built.
+        # The two ACTIVE-uptime families, summed per character (`uptime_for`). The
+        # scope guard is here, so a model that cannot be summarised this way is
+        # never built.
         uptime: dict[str, tuple[float, float]] = {}
         pos = 0
         for holomem, board in self.characters.items():
@@ -813,18 +679,14 @@ class BoardModel:
     def fingerprint(self) -> str:
         """A content digest of every unlocked node, for `config_hash`.
 
-        The board is part of the scoring model — it is 29.4-48.7 % of Overall
-        Power in the game's own `Live/GetDeck` numbers — so a throughput
-        measurement taken against one board does not describe a run against
-        another. `config.json`'s merged document does not contain the board, so
-        without this digest `bench/throughput.json` could not tell the two apart.
+        The board is part of the scoring model (a large share of Overall Power) and
+        the merged `config.json` does not contain it, so a result recorded against
+        one board must not be confused with another.
 
-        Order-sensitive on purpose. `resolve` accumulates its buckets in
-        `characters -> nodes -> effects` iteration order and float addition is
-        not associative, so two models holding the same nodes in a different
-        order can produce different last bits and are correctly different
-        models to a benchmark. Every routed field is included rather than the
-        raw effect id, because it is the ROUTING that scoring reads — a change
+        Order-sensitive on purpose: buckets accumulate in `characters -> nodes ->
+        effects` order and float addition is not associative, so the same nodes in
+        another order can differ in the last bits. Every routed field is included
+        rather than the raw effect id, because scoring reads the routing: a change
         in `parse_effect_id` that re-routes an unchanged id must show up here.
         """
         payload = [
@@ -857,29 +719,18 @@ class BoardModel:
 
     @property
     def leader_scoped_holomem(self) -> frozenset[str]:
-        """The holomem whose board holds at least one `scope == "leader"`
-        effect — i.e. the only ones for whom `resolve(model, leader, members)`
-        can differ from `resolve(model, None, members)`.
+        """The holomem whose board holds at least one `scope == "leader"` effect:
+        the only leaders under whom the board's terms can differ from no leader.
 
-        **This is a provable invariance, not a tolerance.** `leader` reaches
-        `resolve` through exactly one reader, `_recipients`, which consults it
-        in exactly one branch (`effect.scope == "leader"`) and discriminates on
-        exactly one attribute (`leader.member != holomem`). For a leader whose
-        own holomem appears nowhere in this set, every effect in the model takes
-        the identical branch in the identical order as it does with
-        `leader=None`, so the accumulated floats are bit-identical — the same
-        additions in the same sequence, not two sums that happen to agree.
+        An exact invariance, not a tolerance: the leader is read in exactly one
+        branch (`effect.scope == "leader"`, `_recipients` / `_reaches_one`) and only
+        through `leader.member`, so for any other leader every effect takes the same
+        branch in the same order and the floats are bit-identical.
+        `score_card_set` uses this to hoist the board term out of its per-leader loop.
 
-        `score_card_set` uses this to hoist the board term out of its per-leader
-        loop. Without it, `resolve` walks every captured effect once per
-        ARRANGEMENT — on one real account 211 effects, 88 % of a board-loaded
-        exact run (a 6.2x slowdown) — while most pool leaders have no red node
-        and would re-derive a number that cannot change.
-
-        Over-inclusion here is safe (it only costs a `resolve` call);
-        under-inclusion is a wrong score. `scaled()` preserves `scope`, and
-        `parse_effect_id` hardcodes `scope="account"` for both the `ignored` and
-        `song_score_bonus` kinds, so reading raw effect scopes cannot miss one.
+        Over-inclusion is safe (it only costs a walk); under-inclusion is a wrong
+        score. `scaled()` preserves `scope`, and `parse_effect_id` sets
+        `scope="account"` for the `ignored` and `song_score_bonus` kinds.
         """
         return self._leader_scoped
 
@@ -887,54 +738,35 @@ class BoardModel:
         """This card's `(flat, rate)` stat buckets, memoised per
         `(leader_holomem, card)`.
 
-        `leader_holomem` is `leader.member`, or `None` for no leader. It is the
-        ONLY thing about the leader this walk can read — `_recipients` compares
-        `leader.member != holomem` and consults nothing else — so two leaders
-        sharing a holomem share these buckets exactly, and so does every leader
-        outside `leader_scoped_holomem` with the `None` case.
+        `leader_holomem` is `leader.member`, or `None` for no leader: the only thing
+        about the leader the walk reads, so two leaders sharing a holomem share these
+        buckets exactly.
 
-        **Every branch below mirrors `resolve`'s own, in `resolve`'s own order,
-        and that is a correctness requirement rather than a stylistic one.** A
-        bucket is built by repeated `bucket[stat] = bucket.get(stat, 0.0) +
-        value`, so these buckets equal `resolve`'s only if the additions happen
-        in the same sequence. They do: the walk is the same nested
-        `characters -> nodes -> effects` iteration, and every test it applies is
-        a predicate on ONE card, so filtering per card visits that card's
-        contributing effects in exactly the order the five-member walk does.
+        The walk mirrors the reference walk's (`tests/support/board_reference.py`)
+        branches in its order: a bucket is built by repeated addition, so it equals
+        the reference only if the additions happen in the same sequence. They do:
+        the iteration is the same `characters -> nodes -> effects`, and every test
+        is a predicate on one card. `tests/test_board_landing.py` checks the two
+        across the leader/member/grouping/account cross product.
 
-        `resolve` remains the reference implementation and is still what
-        `_score_team`'s acceptance numbers were measured through;
-        `tests/test_board_landing.py` checks this walk against it across the
-        leader/member/grouping/account cross product rather than trusting the
-        two to have stayed in step: two derivations and one comparison, not one
-        derivation that reports itself.
-
-        Keyed by `(leader_holomem, id, member, generations)` and not by id
-        alone: `member` and `generations` are the only two card attributes the
-        walk reads, and keying on the id alone would serve one card's buckets
-        for a different card carrying the same id — silently, and as a
-        plausible number."""
+        Keyed by `(leader_holomem, id, member, generations)`, not by id alone:
+        `member` and `generations` are the card attributes the walk reads, and two
+        cards can carry the same id."""
         key = (leader_holomem, card.id, card.member, frozenset(card.generations))
         cached = self._terms_cache.get(key)
         if cached is not None:
             return cached
 
-        # The walk itself lives in `BoardDigest.stat_ops`, one board at a
-        # time and memoised there per card, so a bench board's answer survives
-        # from one team's model to the next. Replayed here in `characters`
-        # order: the same additions, in the same sequence, as one nested walk.
+        # The walk itself lives in `BoardDigest.stat_ops`, one board at a time and
+        # memoised there per card, so a bench board's answer survives from one
+        # team's model to the next; replayed here in `characters` order.
         #
-        # **The one regrouping, and why it is not a rounding risk.** When every
-        # flat value in the model is a whole number (`_flat_exact`; true on real
-        # accounts, where a card collects ~580 flat addends against ~20 rate
-        # ones) each board's flat addends are added up per
-        # stat FIRST and the subtotal is added here. Every addend, every
-        # subtotal and every partial sum is then an integer far below 2**53, so
-        # every one of those additions is EXACT and the total is the true
-        # integer sum in either grouping — the same bits, by arithmetic and not
-        # by luck. A model with one fractional flat value takes the addend-by-
-        # addend path instead; the rate bucket (0.01, 0.03 … — not exact in
-        # binary) always does.
+        # The one regrouping: when every flat value is a whole number (`_flat_exact`,
+        # true on real accounts, where a card collects ~580 flat addends) each board's
+        # flat addends are summed per stat first. Every partial sum is then an integer
+        # far below 2**53, so every addition is exact and the total has the same bits
+        # in either grouping. Otherwise, and always for the rate bucket (0.01, 0.03...
+        # are not exact in binary), the addends are replayed one by one.
         card_key = key[1:]
         if self._base is not None:
             flat, rate = self._terms_over_base(card, card_key, leader_holomem)
@@ -965,13 +797,10 @@ class BoardModel:
         return (flat, rate)
 
     def _terms_over_base(self, card: Card, card_key: tuple, leader_holomem: str | None) -> tuple[dict, dict]:
-        """`_terms`' walk, taken as the base's totals corrected by the boards
-        this model does not share with it — see `BoardBase` for why that is
-        the same number. Only reached when `__post_init__` kept `_base`.
-
-        The leader's own board is corrected too even when it IS the base's:
-        the base was summed with no leader, and under her that one board also
-        pays its leader-scope effects."""
+        """`_terms`' walk, taken as the base's totals corrected by the boards this
+        model does not share with it (`BoardBase` explains why that is the same
+        number). The leader's own board is corrected too even when it is the base's:
+        the base was summed with no leader."""
         base = self._base
         digests = self._digests
         base_digests = base.digests  # type: ignore[union-attr]
@@ -1014,66 +843,41 @@ class BoardModel:
         return (flat, rate)
 
     def power_bonus_for(self, members: tuple[Card, ...], leader_holomem: str | None) -> float:
-        """`resolve(self, leader, members).power_bonus(members)`, without the walk.
+        """The board's Overall Power for these members: per card and stat, flat plus
+        `ceil(rate * stat)`.
 
-        Bit-identical to it, and the accumulation loop below is copied from
-        `BoardContribution.power_bonus` line for line for that reason: `total`
-        is one running float, so `flat` and `rate * base` must be added in the
-        same interleaved (members x STAT_NAMES) order or the last bits move.
-        Summing per card and adding the subtotals would NOT be the same number.
-
-        Why this exists: `resolve` walks every effect on every captured board —
-        211 of them on one real account — and redoing that once per ARRANGEMENT
-        is 88 % of a board-loaded run on a 91-card pool. The buckets it rebuilds
-        are a pure function of the model, one card and the leader's holomem, so
-        they are computed once per combination of those three and reused."""
+        Bit-identical to the reference walk's `BoardContribution.power_bonus`: `total`
+        is one running float, so flat and rate terms are added in the same
+        interleaved (members x STAT_NAMES) order; per-card subtotals would not be the
+        same number. The buckets are memoised per (card, leader holomem) (`_terms`)."""
         total = 0.0
         for card in members:
             flat, rate = self._terms(card, leader_holomem)
             for stat in STAT_NAMES:
                 total += flat.get(stat, 0.0)
-                # CEILED per (card, stat) over the SUMMED rate -- see
-                # `BoardContribution.power_bonus`, which this is the twin of.
+                # ceiled per (card, stat) over the summed rate
                 total += math.ceil(rate.get(stat, 0.0) * card.stat(stat))
         return total
 
     def score_bonus_rate(self) -> float:
-        """`resolve(self, leader, members).score_bonus_rate()` — a model
-        constant, so it is derived once in `__post_init__` and returned here.
+        """The pooled `all`-scope song score bonus, capped: a model constant (it
+        depends on neither the leader nor the members), derived in `__post_init__`.
 
-        `resolve` reaches `song_score_bonus` by a `continue` placed BEFORE
-        `_recipients` is consulted, so this term depends on neither the leader
-        nor the members: nothing that varies across a search can move it.
-
-        ⚠ **This is NOT the board's whole score contribution, and treating it as
-        such is a large error.** On a 34-character capture this reads 4.8
-        permil, and both contributing nodes belong to characters who need not
-        be on the team — it is an account constant that no team choice can
-        move. The team-dependent half is `skill_effect_up_for` below."""
+        Not the board's whole score contribution: the team-dependent half is
+        `skill_effect_up_for`, and per-song bonuses are `song_score_bonus_for`."""
         return self._score_bonus_rate
 
     def uptime_for(self, holomem: str) -> tuple[float, float]:
         """`(activation_rate_up, cooldown_shorten)` for one character, as
         fractions. `(0.0, 0.0)` for a character with no board or no B branch.
 
-        They belong to the ACTIVE UPTIME, not to any score pool —
-        `cooldown_effective = cooldown / (1 + reduction)`, which DIVIDES, and
-        the rate raises the activation probability. On a real team they can be
-        large (0.674 and 0.120).
+        They belong to the ACTIVE uptime, not to a score pool: `cooldown_effective =
+        cooldown / (1 + reduction)`, and the rate raises the activation probability.
 
-        **Why one number per character and not per (card, role).** Over all
-        323 master `SkillTreeNode` rows — the whole game, not one account —
-        every node carrying either family is branch **B**, scope
-        **member**, non-conditional: 10 `activation_rate_up`, 3
-        `cooldown_shorten`, and none at leader, account or grouping scope.
-        `_reaches` resolves member scope to exactly `card.member == holomem`,
-        so the value depends on neither the team nor the leader. That is why
-        this is a dict built once in `__post_init__` rather than the memoised
-        per-arrangement walk `skill_effect_up_for` needs.
-
-        `__post_init__` REFUSES to build a model that breaks the property, so
-        a future node at another scope is a loud failure rather than a term
-        quietly paid to the wrong cards."""
+        One number per character, not per (card, role): in the master `SkillTreeNode`
+        every node of either family is branch B, scope `member`, non-conditional, so
+        the value depends on neither the team nor the leader. `__post_init__` refuses
+        a model that breaks this, so a future node at another scope fails loudly."""
         return self._uptime.get(holomem, (0.0, 0.0))
 
     def with_cooldowns(self, cooldowns: Mapping[str, float]) -> BoardModel:
@@ -1081,7 +885,7 @@ class BoardModel:
         `cooldown_shorten`, a fraction) replaced: `{holomem: cooldown_shorten}`. Everything
         else, derived terms and caches included, is shared, so the copy scores what this
         board would score with those cooldowns. Built for screening activation-frequency
-        choices without re-assembling a board (`board_plan.refine_cooldown_counts`)."""
+        choices without re-assembling a board (`board_refine.refine_cooldown_counts`)."""
         new = copy.copy(self)
         uptime = dict(self._uptime)
         for holomem, shorten in cooldowns.items():
@@ -1098,23 +902,16 @@ class BoardModel:
         return self._cooldown_source if self._cooldown_source is not None else self
 
     def skill_effect_up_for(self, members: tuple[Card, ...], leader_holomem: str | None) -> float:
-        """`resolve(self, leader, members).skill_effect_up`, memoised per card.
+        """The board's `SkillEffectUpPermilUp` for this team, memoised per card.
 
-        The board's `SkillEffectUpPermilUp` — it sits INSIDE
-        `CalcScoreUpRatio`'s `(1 + SkillEffectUpPermilUp/1000 + B)` factor,
-        multiplying the ACTIVE pool. It is **one team-wide addend, not one per
-        recipient**: an effect that reaches anybody is counted exactly once,
-        which is `resolve`'s own rule and the reason this cannot be a per-card
-        sum. Paying it per recipient would multiply the term by five.
+        It sits inside `CalcScoreUpRatio`'s `(1 + SkillEffectUpPermilUp/1000 + B)`
+        factor, multiplying the ACTIVE pool, and is one team-wide addend: an effect
+        that reaches anybody counts exactly once, not once per recipient.
 
-        It is large: Ina'nis' leader-scope node alone is 173 permil, against a
-        `score_bonus_rate` of 4.8.
-
-        The memo is per `(leader_holomem, card)` rather than per team because
-        that is what survives the solver swapping one member. Each entry is the
-        set of term INDICES that card receives; a team's value is the sum over
-        the union, taken in index order so float addition happens in exactly
-        `resolve`'s sequence and the two stay bit-identical."""
+        The memo is per `(leader_holomem, card)` so it survives the solver swapping
+        one member. Each entry is the set of term indices that card receives; the
+        team's value sums the union in index order, bit-identical to the reference
+        walk."""
         if not self._skill_effect_up_terms:
             return 0.0
         reached: set[int] = set()
@@ -1141,10 +938,8 @@ class BoardModel:
         return total
 
     def _holomem_names(self, singers: Iterable[str]) -> list[str]:
-        """Map the game's chr-ids (what `charts.json` singers are) to the holomem
-        NAMES this board is keyed by. Anything already a name -- or an unknown id
-        -- passes through, so a name-keyed caller is unchanged and a bad id simply
-        misses rather than being invented into a match."""
+        """Map the game's chr-ids (`charts.json` singers) to the holomem names this
+        board is keyed by. A name or an unknown id passes through (and simply misses)."""
         return [self.name_by_chr.get(singer, singer) for singer in singers]
 
     def conditional_skill_effect_up_for(
@@ -1155,34 +950,19 @@ class BoardModel:
     ) -> float:
         """The singer-conditional half of `skill_effect_up`, for ONE song.
 
-        Same term, same slot inside `CalcScoreUpRatio`'s parenthesis, same
-        count-once-for-the-team rule as `skill_effect_up_for` — and **one extra
-        condition**: the node's own holomem must be among the song's credited
-        singers.
+        Same term, same slot and same count-once rule as `skill_effect_up_for`, with
+        one extra condition: the node's own holomem must be among the song's credited
+        singers (Aki's `R-002`, "When Aki Rosenthal is included as a singer, Grants
+        Score Support Effect of 10.0 % to All", adds nothing on a songless deck screen
+        and pays on a song Aki sings). The effect's ordinary `scope` must still reach
+        the team: Aki's node is leader-scoped, so under another leader it pays nothing
+        even on her song.
 
-        Measured by a controlled triple with everything else held fixed. Aki's `R-002`
-        (*"When Aki Rosenthal is included as a singer, Grants Score Support
-        Effect of 10.0 % to All"*) moved the deck screen's bonus line by
-        **exactly zero** permil on a songless screen, and read **41 permil** on
-        SHALLYS (EXPERT), where Aki is the credited Singer. Both halves of the
-        conditional, isolated against a zero background.
+        Every known node of this kind names its own board's holomem, so "the node's
+        owner sings" and "the character named in the effect id sings" coincide; this
+        implements the first, the only one the parsed effect id can express.
 
-        Being a singer is a SECOND condition, not a replacement for the first:
-        the effect's ordinary `scope` still has to reach the team, which is why
-        this runs the same `_reaches_one` test. Aki's node is leader-scoped, so
-        under a different leader it pays nothing even on Aki's own song.
-
-        ⚠ **An inference the data cannot separate:** that the trigger names
-        the node's OWN holomem. `R-002` sits on Aki's board and names Aki, so
-        *"this node's owner sings"* and *"a character named in the effect id
-        sings"* coincide on every known node. This implements
-        the first — the simpler reading, and the only one the parsed effect id
-        can express. A node whose conditional named someone else would separate
-        them; none is known to exist. If one appears, this is the function to
-        revisit.
-
-        Returns `0.0` for an empty cast, which is what makes every song-agnostic
-        caller's answer unchanged."""
+        `0.0` for an empty cast, so every song-agnostic caller is unchanged."""
         if not self._conditional_skill_effect_up_terms:
             return 0.0
         cast = set(self._holomem_names(singers))
@@ -1192,9 +972,7 @@ class BoardModel:
         for holomem, effect in self._conditional_skill_effect_up_terms:
             if holomem not in cast:
                 continue
-            # Counted ONCE for the team, exactly as the unconditional half is:
-            # `SkillEffectUpPermilUp` is a single addend in the game's
-            # parenthesis, so `any` and not a per-card sum.
+            # counted once for the team, as the unconditional half is
             if any(_reaches_one(effect, holomem, leader_holomem, card) for card in members):
                 total += effect.value
         return total
@@ -1209,20 +987,16 @@ class BoardModel:
         Power the R-044/062/063 family ("when [character] is included as a singer,
         grants +stat% to all") adds when its holomem is in the song's cast.
 
-        Same power arithmetic as `power_bonus_for` (flat added, rate ceiled per
-        (card, stat) over the summed rate), same reach rule (`_reaches_one`), and
-        the SAME extra condition as `conditional_skill_effect_up_for`: the node's
-        own holomem must be a credited singer. Unlike the skill term this is PER
-        CARD (a stat effect reaches each recipient), not one team-wide addend.
+        Same power arithmetic and reach rule as `power_bonus_for`, and the same extra
+        condition as `conditional_skill_effect_up_for` (the node's own holomem sings).
+        Unlike the skill term this is per card, not one team-wide addend.
 
-        It is the INCREMENT over `power_bonus_for`: the game sums the conditional
-        rate with the card's unconditional board rate on the same stat and ceils
-        once, so a card's conditional power is
-        `ceil((unconditional + conditional) * stat) - ceil(unconditional * stat)`.
-        Ceiling the conditional rate on its own over-counts by up to 1 per
-        (card, stat) (12,026 against the deck screen's 12,013 on a five-card team).
-        `power_bonus_for(members) + conditional_stat_power_for(members, ...)` is
-        therefore the song's Holomem Board power line exactly.
+        It is the increment over `power_bonus_for`: the game sums the conditional rate
+        with the card's unconditional board rate on the same stat and ceils once, so
+        a card's conditional power is `ceil((unconditional + conditional) * stat) -
+        ceil(unconditional * stat)` (ceiling it alone over-counts by up to 1 per card
+        and stat). `power_bonus_for + conditional_stat_power_for` is the song's
+        Holomem Board power line.
 
         `0.0` for an empty cast, so every song-agnostic caller is unchanged."""
         if not self._conditional_stat_terms:
@@ -1255,20 +1029,12 @@ class BoardModel:
         return total
 
     def song_score_bonus_for(self, singers: Iterable[str], *, scope: str) -> float:
-        """`ScoreUpBonusRatioBySkillTree` for ONE song — the `BoardModel` twin of
-        `BoardContribution.song_score_bonus_for`, so a memoised caller does not
-        have to run a full `resolve` walk to get it.
+        """`ScoreUpBonusRatioBySkillTree` for one song.
 
-        See that method for the derivation
-        (`SkillTreeEffectTargetMusicDialogPresenter::CalculateCurrentEffectValue`
-        @`0x67f3670`): the contributing set comes from the SONG, and each
-        singer's released effects are filtered by `musicSingerType_` — 3 whole,
-        2 unit, 1 solo.
-
-        Clamped to `SONG_ALL_CAP_PERMIL` per song and per this cast, never
-        account-wide. Pooling across every character can make a 120-permil
-        figure look like a live cap violation when the real solo number is
-        **40**."""
+        As the client's `SkillTreeEffectTargetMusicDialogPresenter` computes it: the
+        contributing set is the song's singers, and each singer's released effects
+        are filtered by the song's singer type (`scope`: whole, unit or solo).
+        Capped at `SONG_ALL_CAP_PERMIL` per song and cast, never account-wide."""
         total = sum(
             self._song_score_bonus_by_holomem.get(holomem, {}).get(scope, 0.0)
             for holomem in set(self._holomem_names(singers))
@@ -1286,10 +1052,9 @@ class BoardModel:
 
 
 # `(effect_id, branch) -> BoardEffect`, filled by `parse_effect_id` on success.
-# `BoardEffect` is frozen, so one instance may be shared by every board that
-# unlocks the node; uncached, the parse (regex + routing) is 15 % of a develop,
-# because every `board_from_mapping` re-parses the whole bench.
-# Failures are NOT cached: an unparseable id raises every time.
+# `BoardEffect` is frozen, so one instance is shared by every board that unlocks
+# the node; uncached, the parse is 15 % of a develop, because every
+# `board_from_mapping` re-parses the whole bench. Failures are not cached.
 _PARSE_CACHE: dict[tuple[str, str], BoardEffect] = {}
 
 
@@ -1297,12 +1062,7 @@ def parse_effect_id(effect_id: str, *, branch: str) -> BoardEffect:
     """One `skill_tree_effect-...` id into a routed `BoardEffect`.
 
     Raises `BoardError` on anything unrecognised rather than returning a
-    zero-valued effect. "Verify artefacts, not counters": a board term that is
-    silently zero looks exactly like a board term that is correctly zero.
-
-    Memoised per `(effect_id, branch)` in `_PARSE_CACHE` — a pure function of
-    its arguments returning an immutable value, so the cached instance IS the
-    answer, not a copy of it."""
+    zero-valued effect. Memoised per `(effect_id, branch)` in `_PARSE_CACHE`."""
     if not isinstance(effect_id, str):
         return _parse_effect_id_uncached(effect_id, branch=branch)
     key = (effect_id, branch)
@@ -1418,11 +1178,9 @@ def _reaches(effect: BoardEffect, holomem: str, card: Card) -> bool:
     """Whether one MEMBER card is a recipient of one effect, for the three
     scopes that do not consult the leader.
 
-    `_recipients` is written in terms of this rather than repeating the three
-    predicates, so `BoardModel._invariant_terms` — which must filter per card —
-    and the five-member walk cannot drift apart. `"leader"` is deliberately not
-    handled here: it is the one scope that depends on something other than the
-    recipient card, and it stays visible in `_recipients` where the leader is."""
+    `_recipients`, `_reaches_one` and `BoardDigest.stat_ops` all use this, so the
+    per-card and five-member walks cannot drift apart. `"leader"` is handled by
+    the callers, where the leader is."""
     if effect.scope == "member":
         return card.member == holomem
     if effect.scope == "grouping":
@@ -1442,11 +1200,9 @@ def _recipients(
 ) -> tuple[Card, ...]:
     """Which of the five member cards this effect actually reaches.
 
-    The leader is never a recipient of *stats*: it contributes its outfit
-    skill and nothing else, which is why `Team` has no `all_cards()`. That
-    the R branch reaches exactly five cards is not an
-    assumption of convenience — it is what reproduces +28.73 pp; reaching six
-    overshoots it by 20 %."""
+    The leader is never a recipient of stats: it contributes its outfit skill and
+    nothing else. The R branch reaching exactly the five members reproduces the
+    game's figures; reaching six overshoots them by 20 %."""
     if effect.scope == "leader":
         if leader is None or leader.member != holomem:
             return ()
@@ -1459,11 +1215,9 @@ def _recipients(
 def _reaches_one(effect: BoardEffect, holomem: str, leader_holomem: str | None, card: Card) -> bool:
     """`card in _recipients(effect, holomem, leader, members)`, for one card.
 
-    Written as the per-card decomposition of `_recipients` and kept immediately
-    beside it so the two cannot drift: every branch here mirrors one branch
-    there. `leader.member` is the only thing `_recipients` reads off the leader,
-    so taking the holomem rather than the card is the exact dependency — which
-    is what makes `skill_effect_up_for`'s memo sound."""
+    Every branch mirrors one in `_recipients`. `leader.member` is the only thing
+    read off the leader, so taking the holomem is the exact dependency, which
+    makes `skill_effect_up_for`'s memo sound."""
     if effect.scope == "leader":
         return leader_holomem is not None and leader_holomem == holomem
     if effect.scope == "account":
@@ -1489,18 +1243,13 @@ _BOARD_SCHEMA = """
 def load_board(path: str | Path) -> BoardModel | None:
     """A `BoardModel` from a board file, or `None` if the file is absent.
 
-    `None` for an absent file is deliberate, and is the same contract
-    `load_scoring_config` has: no board data is a first-class, expected state.
-    `data/` ships none, because a board is captured ACCOUNT state. An absent
-    board makes `scoring._board_bonus` the identity, which is exactly right.
+    No board data is an expected state (`data/` ships none: a board is account
+    state), and an absent board makes `scoring._board_bonus` the identity.
 
-    Keyed by **holomem**, not by card id, because the board is a property of
-    the character and reaches every skin of her. `effects` holds the game's
-    own effect ids verbatim so the file stays checkable against
-    `SkillTreeNode` by eye, and `connect_multiplier` is `1 + permil/1000` for
-    whatever Connect shape covers the node — an INPUT, because the placed
-    card's Bloom level is not recoverable from the captured state (see the
-    module docstring)."""
+    Keyed by holomem, not card id. `effects` holds the game's own effect ids
+    verbatim, so the file stays checkable against `SkillTreeNode` by eye;
+    `connect_multiplier` is `1 + permil/1000` for the Connect shape covering the
+    node (an input, module docstring)."""
     file_path = Path(path)
     if not file_path.exists():
         return None
@@ -1512,9 +1261,8 @@ def load_board(path: str | Path) -> BoardModel | None:
 
 
 def board_from_mapping(raw: object, *, source: str = "<mapping>") -> BoardModel:
-    """The parsing half of `load_board`, split out so a caller holding an
-    already-decoded mapping (a recon tool, a test) need not write a file
-    first."""
+    """The parsing half of `load_board`, for a caller holding an already-decoded
+    mapping."""
     if not isinstance(raw, dict):
         raise BoardError(f"{source}: board file must be an object{_BOARD_SCHEMA}")
     characters_raw = raw.get("characters")

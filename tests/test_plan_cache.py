@@ -20,10 +20,10 @@ from hbuilder.domain.board_plan import (
     PLAN_ROLE_MEMBER,
     PlanCache,
     cached_team_plan,
-    optimize_and_rerank,
     optimize_team_boards,
     plan_key,
 )
+from hbuilder.domain.board_refine import optimize_and_rerank
 from hbuilder.domain.card import Stats
 from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, TreeNode
 from hbuilder.domain.team import Team

@@ -1,5 +1,5 @@
-"""The joint search's leader model (`joint_search.LeaderModel`) is the same function as the
-plain-loop model it replaced, bit for bit.
+"""The joint search's leader model (`joint_search.LeaderModel`) is the same function as a
+plain-loop reference model, bit for bit.
 
 The model chooses which leaders a set is scored under, so it steers the whole search: a fit
 that differs in the last bit can flip a near-tie, score other teams and serve another
@@ -28,7 +28,7 @@ from two_stage import _fires  # noqa: E402
 
 
 class ReferenceLeaderModel:
-    """The plain-loop model (the code `joint_search.LeaderModel` replaced), kept verbatim."""
+    """The same model written as plain loops, the reference `joint_search.LeaderModel` matches."""
 
     def __init__(self, cards, leaders, gate_of) -> None:
         self.cards = list(cards)

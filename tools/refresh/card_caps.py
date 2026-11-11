@@ -100,8 +100,9 @@ def main():
         "potential_by_rarity": potential(),
     }
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    with open(OUT, "w", encoding="utf-8") as fh:
-        json.dump(caps, fh, ensure_ascii=False, indent=1, sort_keys=True)
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    atomic_io.write_text(OUT, json.dumps(caps, ensure_ascii=False, indent=1, sort_keys=True), "utf-8")
 
     lv, pot = caps["level_cap_by_limit_break"], caps["potential_by_rarity"]
     print(f"{OUT}")

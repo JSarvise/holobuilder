@@ -1,31 +1,33 @@
-"""The exact per-song leaf, across processes — same numbers, fewer seconds.
+"""The exact per-song leaf, across processes: same numbers, fewer seconds.
 
 `evaluate` scores one team the way the web ranks it: the team's boards are
-developed for the chart (`optimize_and_rerank`, with the singer bench when the
-song is sung by a member) and the team is scored on it (`score_song_detailed`
-with the joint slot-order walk); the result is the MEAN over the given charts,
-so one pool serves the one-song and the across-songs searches alike.
-`RefinePool` runs that over many teams: `spawn` context, an initializer that
-carries the `RefineContext` (cards, config, charts, board dumps, budget rule)
-once per worker, small tasks dispatched dynamically, results returned in the
-order of the input (`batch_score`, `batch_score_per_chart`).
+developed for the chart (`optimize_and_rerank`, or the plan cache) and the team
+is scored on it (`score_song_detailed`); the result is the MEAN over the given
+charts, so one pool serves the one-song and the across-songs searches alike.
+`RefinePool` runs that over many teams: `spawn` context, the `RefineContext`
+(cards, config, charts, board dumps, budget rule) loaded once per worker, results
+in input order (`batch_score`, `batch_score_per_chart`). `SharedPool` lets several
+contexts share one set of workers.
 
-## Why the answer cannot depend on the pool
-
-Workers compute; the parent decides. Each score is the same develop + score on
-the same inputs in the same interpreter, so it is the same float. With one
-worker, or when the pool cannot be stood up, the batch is scored serially IN
-THIS PROCESS with the same functions — computed here instead of there, never
-approximated.
+The answer cannot depend on the pool: each score is the same develop and score on
+the same inputs in the same interpreter, so it is the same float. With one worker,
+or when the pool cannot start, the batch is scored serially in this process with
+the same functions.
 """
 
 from __future__ import annotations
 
+import atexit
 import dataclasses
 import multiprocessing
 import os
 import pickle
+import re
+import shutil
+import sys
 import tempfile
+import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from multiprocessing.reduction import ForkingPickler
@@ -34,24 +36,26 @@ from typing import TYPE_CHECKING, Any
 from hbuilder.domain.board_optimizer import BoardPlan
 from hbuilder.domain.board_plan import (
     UNIT_SCORE_K,
-    BoardOptimisedTeam,
     PlanCache,
     SocketPlacement,
     SongCast,
     TeamBoardPlan,
     board_model_from_plan,
     cached_team_plan,
+    forget_plan_cache,
+    model_for_character,
+    singer_bench_characters,
+    skill_tree_from_dumps,
+    song_cast,
+)
+from hbuilder.domain.board_refine import (
+    BoardOptimisedTeam,
     cooldown_count_axes,
     cooldown_node_ids,
     develop_and_refine,
     develop_refined_team,
-    forget_plan_cache,
-    model_for_character,
     optimize_and_rerank,
     plan_with_counts,
-    singer_bench_characters,
-    skill_tree_from_dumps,
-    song_cast,
 )
 from hbuilder.domain.card import Card
 from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown
@@ -107,14 +111,12 @@ class RefineContext:
     flat_budget: int | None  # None -> per-character `granted`
     granted: Mapping[str, int]  # chr-id -> real earned points
     # PLAN CACHE. `False` (default): every evaluation develops its own board
-    # through `optimize_and_rerank`. `True`: each process holds
-    # ONE `PlanCache` (built lazily by `new_plan_cache` from `plan_cache_seed`,
-    # a reference team as ids, `PlanCache.from_team`) and the leaf is
-    # `cached_team_plan` + `board_model_from_plan(plan_cache=...)` + the chart
-    # score — the objective as a pure function of the roster, ~3× cheaper.
-    # The seed is REQUIRED with `use_plan_cache` so the nominal context is the
-    # caller's choice and the same in every worker, never "whichever team this
-    # process happened to see first".
+    # through `optimize_and_rerank`. `True`: each process holds ONE `PlanCache`
+    # (`new_plan_cache` from `plan_cache_seed`, a reference team as ids) and the leaf
+    # is `cached_team_plan` + `board_model_from_plan(plan_cache=...)` + the chart
+    # score: the objective as a pure function of the roster, ~3x cheaper. The seed
+    # is required so the nominal context is the same in every worker, never the
+    # first team a process happened to see.
     use_plan_cache: bool = False
     plan_cache_seed: tuple[str, tuple[str, ...]] | None = None
     # A planned search (boards re-planned, not as they are): each song's SINGERS'
@@ -122,50 +124,47 @@ class RefineContext:
     # the materials re-plan plans them. Needs the plan cache; off for boards as they are.
     plan_singer_bench: bool = False
     # MANY charts, the board REBUILT PER SONG. `False` (default): several charts
-    # share ONE board developed with `sings=False` — the plain across objective.
-    # `True`: each chart is scored on the board developed for ITS singer
-    # context (the leader sings it or not: at most two boards per team), so the
-    # mean is exactly the mean of the team's single-song scores — the honest
-    # "in general" figure for a player who re-specs the board per song.
+    # share ONE board developed with `sings=False`, the plain across objective.
+    # `True`: each chart is scored on the team's boards developed for ITS singer
+    # context: the "in general" figure for a player who re-specs the board per song.
+    # With several charts the context is the team's OWN singers of the chart: a singer
+    # off the team keeps the board the bench gives her, where a single-song search plans
+    # her board for the song too (`plan_singer_bench`). So the mean is not the mean of the
+    # team's single-song scores: with the account's boards planned from scratch it is ~4.8 %
+    # below it, nearly the same for every team (24 served teams x 231 charts: Spearman
+    # 0.984, the same #1 and top 5); on the maxed basis, whose bench boards are complete,
+    # 0.01 %. Planning every chart's whole cast would cost ~6-8x the evaluation for the
+    # same ranking. A board state (`board_state`, e.g. a re-plan within the account's
+    # materials) keeps the same nodes on every chart.
     board_per_chart: bool = False
-    # ACTIVATION REFINEMENT. `True`: after the develop, the team's
-    # activation-frequency / -probability nodes are chosen jointly on the score
-    # being computed (`board_plan.develop_and_refine` ->
-    # `refine_activation_nodes`): what a shorter cooldown is worth is a matter
-    # of where the windows then fall, which no per-node value captures
-    # (+0.2..3.1 % on six songs). ~10-100x the cost of a plain evaluation, so it is
-    # meant for re-scoring a short list, not for a search. `2`: that, then every
-    # combination of the members' activation-frequency node COUNTS
-    # (`board_plan.refine_cooldown_counts`, ~1,000 scorings): for a few finalists.
+    # ACTIVATION REFINEMENT. `True`: after the develop, the team's activation
+    # nodes are chosen jointly on the score being computed
+    # (`board_refine.refine_activation_nodes`). ~10-100x the cost of a plain
+    # evaluation: for re-scoring a short list, not for a search. `2`: that, then
+    # every combination of the members' frequency node COUNTS
+    # (`board_refine.refine_cooldown_counts`, ~1,000 scorings): for a few finalists.
     refine_activation: bool | int = False
-    # BOARDS AS THEY ARE (the "Optimize boards" switch off).
-    # `None` (default): each team's boards are PLANNED (the develop). A
-    # `{chr: {"nodes": [...], "slots": {...}}}` state: every team character's
-    # board is taken from it as it stands (`board_from_state`), nothing is
-    # planned and `refine_activation` has nothing to choose.
+    # BOARDS AS THEY ARE (the "Optimize boards" switch off). `None` (default):
+    # each team's boards are PLANNED. A `{chr: {"nodes": [...], "slots": {...}}}`
+    # state: every team character's board is taken from it as it stands
+    # (`board_from_state`) and nothing is planned.
     board_state: Mapping | None = None
     # `True`: `board_state` is the ACCOUNT's (`board_state.json`), so its `slots`
-    # are the real socketed cards and are taken as they stand. `False`: the
-    # sockets are assigned by the develop's matching over the state's nodes (a
-    # planned state whose `slots: {}` means "not decided"). Re-assigning on the
-    # account's state puts the "as they are" Overall Power off the server by up
-    # to 3,450.
+    # are the real socketed cards, taken as they stand (re-assigning them would put
+    # the "as they are" Overall Power off the server). `False`: the develop's
+    # matching assigns the sockets over the state's nodes (`slots: {}`).
     board_state_slots: bool = False
     # BENCH SOCKETS: `True` puts every off-team board's root socket in the
     # develop's Connect matching (`board_plan._bench_socket_rows`), so each card is used
-    # once account-wide and the bench's sockets are chosen for the team. ~48 extra rows a
-    # team: meant for the short lists (the within-wallet re-plan, the row detail).
+    # once account-wide. ~48 extra rows a team: for short lists (the within-wallet
+    # re-plan, the row detail).
     socket_bench: bool = False
-    # THE BENCH'S SOCKETS AS THEY ARE: `{chr: {unlocked socket: card or
-    # None}}` from the account (`board_state.json`). Without `socket_bench` the cards
-    # held on off-team boards are kept out of the team's matching (they keep lifting
-    # their own board, already in `bench_characters`, and must not be counted
-    # twice); with it every unlocked bench socket joins the matching, so the empty ones
-    # can be filled too (`board_plan.board_model_from_plan`).
+    # THE BENCH'S SOCKETS AS THEY ARE: `{chr: {unlocked socket: card or None}}` from
+    # `board_state.json` (`board_plan.board_model_from_plan`'s `bench_sockets`).
     bench_sockets: Mapping | None = None
-    # A folder the plan caches of this context's worker processes share (`PlanStore`):
-    # set by `RefinePool` when it runs on worker processes, so a board plan is solved once
-    # per pool instead of once per worker. None: every cache solves its own (one process).
+    # A folder the plan caches of this context's worker processes share (`PlanStore`),
+    # set by `RefinePool` on worker processes, so a board plan is solved once per pool
+    # instead of once per worker. None: every cache solves its own.
     plan_store: str | None = None
 
 
@@ -209,16 +208,25 @@ class PlanStore:
                     pass
 
 
+def player_level(cfg: ScoringConfig) -> int | None:
+    """The account's player level (`cfg.account`), which gates the board nodes a plan may buy
+    (most carry a `cd-player_level-N` unlock); None, when unknown, gates nothing. The maxed
+    basis carries the top level."""
+    level = getattr(cfg.account, "level", None)
+    return level if isinstance(level, int) else None
+
+
 def new_plan_cache(ctx: RefineContext, by_id: Mapping[str, Card]) -> PlanCache:
     """The one `PlanCache` a process uses under `ctx.use_plan_cache`, on the context's
-    shared `plan_store` when it has one."""
+    shared `plan_store` when it has one. Its plans buy only nodes the account's player
+    level unlocks (`player_level`)."""
     if ctx.plan_cache_seed is None:
         raise ValueError(
             "RefineContext.use_plan_cache needs plan_cache_seed (a reference team as (leader id, member ids))"
         )
     leader_id, member_ids = ctx.plan_cache_seed
     seed = Team(leader=by_id[leader_id], members=tuple(by_id[m] for m in member_ids))
-    cache = PlanCache.from_team(seed, ctx.cfg)
+    cache = PlanCache.from_team(seed, ctx.cfg, player_level=player_level(ctx.cfg))
     if ctx.plan_store:
         cache.store = PlanStore(ctx.plan_store)
     return cache
@@ -226,7 +234,7 @@ def new_plan_cache(ctx: RefineContext, by_id: Mapping[str, Card]) -> PlanCache:
 
 # ---------------------------------------------------------------------------
 # Worker side. Module globals set once by the initializer (spawn gives every
-# worker a fresh interpreter, exactly as parallel_songs.py relies on).
+# worker a fresh interpreter).
 # ---------------------------------------------------------------------------
 _CTX: RefineContext | None = None
 _BY_ID: dict[str, Card] = {}
@@ -402,37 +410,24 @@ def evaluate(
     plan_cache: PlanCache | None = None,
     per_chart: bool = False,
 ) -> Any:
-    """ONE exact evaluation — develop the team, score it on the context's
-    charts, return the mean. Shared by the worker task and the in-process
-    fallback so both compute the identical float.
+    """ONE exact evaluation: develop the team, score it on the context's charts,
+    return the mean. Shared by the worker task and the in-process fallback, so both
+    compute the identical float.
 
-    `plan_cache`: with a cache the board comes from the FIXED
-    per-(character, role, budget, singer context) plans (`cached_team_plan`)
-    assembled through `board_model_from_plan(plan_cache=...)`, and the
-    deck-screen re-score `optimize_and_rerank` also computes (its ranking
-    number, unused here) is skipped. Without one (default) the path is
-    `optimize_and_rerank` per team, unchanged.
+    `plan_cache`: the board comes from the fixed per-(character, role, budget,
+    singer context) plans (`cached_team_plan`) assembled through
+    `board_model_from_plan(plan_cache=...)`; without one, `optimize_and_rerank`.
 
-    SINGER CONTEXT (`sings`). The board plan is a function of
-    (character, role, budget, singer context): a leader's conditional reds
-    (R-002/044/062/063) and her solo/group yellow song bonus only fire on a song
-    she is credited on, so a plan for such a song must value them and a plan for
-    any other song must not (`board_plan.power_node_values`). This function
-    develops the board ONCE and reuses it for every chart in `ctx.charts`, so the
-    flag is only well defined when there is exactly ONE chart — song mode. For
-    the sampled ACROSS mean (`len(ctx.charts) > 1`) there is no single cast: the
-    leader sings some of the sampled charts and not others, and one board has to
-    serve all of them. `sings=False` is used there deliberately — the
-    song-agnostic plan, which is what the across objective means (each chart's
-    own scorer still applies the conditional terms when the cast matches). A
-    per-chart develop is the separate, ~len(charts)× more expensive
-    `ctx.board_per_chart` objective. `ctx.charts == ()` (developed deck-screen Unit Score)
-    is song-agnostic by definition, also False.
+    Singer context: conditional reds and solo/group yellows pay only on a song the
+    holomem sings, so with ONE chart the board is planned for its cast. With several
+    charts one board serves them all and is planned song-agnostic (`sings=False`;
+    each chart's scorer still applies the conditional terms when the cast matches),
+    unless `ctx.board_per_chart` develops one board per singer context. No charts
+    (the developed deck-screen Unit Score) is song-agnostic too.
 
     `per_chart=True` returns each chart's score, in chart order, instead of their
     mean (the mean is their sum, added in that order, over their count: the same
-    float). Used to choose the In general search's chart sample
-    (`tools/web/ondemand.py`); not for the developed deck-screen score (no charts)."""
+    float). Not for the developed deck-screen score (no charts)."""
     # `team_ids` may carry a third element: indices into `ctx.charts`, the charts
     # THIS evaluation is scored on. One pool holding the whole library can then
     # answer for one song, a sample or all of them without a context per song
@@ -451,9 +446,10 @@ def evaluate(
     # a served number
     count_screen = len(selection) > 1 and selection[1] == "screen"
     # "lens": the plain develop's score with the best single-member frequency count drop
-    # (`lens_value`), the search's count-aware value; "screen_both": `(plain, count screen)`.
+    # (`lens_value`), the search's count-aware value; "lens_both": `(plain, lens)`;
+    # "screen_both": `(plain, count screen)`.
     # One chart only; orders, never served numbers
-    lens = len(selection) > 1 and selection[1] in ("lens", "screen_both")
+    lens = len(selection) > 1 and selection[1] in ("lens", "lens_both", "screen_both")
     # COUNTS: the plain develop of each singer context, and each chart scored with the
     # members' frequency node counts chosen for it and verified on their own board
     # (`ChartCounts`): a served number, the mean over the charts as always. COUNTS_BOTH:
@@ -607,6 +603,7 @@ def evaluate(
             name_by_chr=ctx.name_by_chr,
             sings=sings,
             bench_sockets=ctx.bench_sockets,
+            player_level=player_level(ctx.cfg),
         )[0].board
 
     def expectation_and_ceiling(chart, cfg) -> tuple[float, float]:
@@ -619,8 +616,9 @@ def evaluate(
         return e, (score_team_ceiling(team, chart, cfg, s[0].member_order) if s else 0.0)
 
     if ctx.board_per_chart and charts:
-        # One board per singer context, each chart scored on its own: the same
-        # floats, added in chart order, as one single-chart evaluation per chart.
+        # One board per singer context, each chart scored on its own, added in chart order.
+        # With one chart these are the floats of a single-chart evaluation; with several,
+        # the context is the team's own singers (`key` below), not the whole cast.
         configs: dict[tuple[frozenset, str], ScoringConfig] = {}
         total = 0.0
         scores: list[float] = []
@@ -630,9 +628,8 @@ def evaluate(
 
         # One chart (a song search): its WHOLE cast, so an off-team singer's yellows are
         # valued and her yellow-socket card held (`board_plan.bench_node_values`,
-        # `held_bench_cards`; with only the team's singers an off-team singer's
-        # yellow socket would be stripped, e.g. -2.29 % on m0131). Several charts keep the team-only key: one board per cast would
-        # develop a board per chart. The cast carries the song's scope (`SongCast`):
+        # `held_bench_cards`). Several charts keep the team-only key: one board per cast
+        # would develop a board per chart. The cast carries the song's scope (`SongCast`):
         # the scorer pays only that scope's yellows, so it is part of the key.
         def key(c):
             singers = frozenset(c.singers) if len(charts) == 1 else team_chrs & frozenset(c.singers)
@@ -681,6 +678,8 @@ def evaluate(
                 plain, best = lens_value(team, chart, cfg_c, power_of(cfg_c))
                 if selection[1] == "lens":
                     return best
+                if selection[1] == "lens_both":
+                    return plain, best
                 return plain, count_screen_value(team, chart, cfg_c, plain, power_of(cfg_c))
             chooser = choosers.get((sings, sings.scope))
             if chooser is not None:
@@ -726,6 +725,8 @@ def evaluate(
         plain, best = lens_value(team, charts[0], cfg_x, power_of(cfg_x))
         if selection[1] == "lens":
             return best
+        if selection[1] == "lens_both":
+            return plain, best
         return plain, count_screen_value(team, charts[0], cfg_x, plain, power_of(cfg_x))
     total = 0.0
     scores = []
@@ -882,6 +883,7 @@ def develop_team(
         name_by_chr=ctx.name_by_chr,
         plan_cache=plan_cache,
         bench_sockets=ctx.bench_sockets,
+        player_level=player_level(ctx.cfg),
     )
     if refine == COUNTS and chart is not None:
         # the frequency node counts chosen on this chart, as `evaluate` chooses them
@@ -1042,8 +1044,8 @@ def count_screen_value(
 def refine_level(refine: bool | int | None) -> int:
     """A refinement flag as its level: 0 none, 1 the activation nodes move by move
     (`refine_activation_nodes`), 2 that and every combination of the members'
-    activation-frequency node counts (`refine_cooldown_counts`). `True` is 1, as it
-    always meant; a row's `refined` field carries the level its value was served at."""
+    activation-frequency node counts (`refine_cooldown_counts`). `True` is 1; a row's
+    `refined` field carries the level its value was served at."""
     if refine is None or refine is False:
         return 0
     if refine is True:
@@ -1055,7 +1057,7 @@ def refine_level(refine: bool | int | None) -> int:
 
 
 # `(cfg, cfg with board=None)` for the last config seen: the board-off copy is
-# the same for every team of a run, and building it was ~9 us of each leaf.
+# the same for every team of a run, and building it costs ~9 us per leaf.
 _BOARD_OFF: tuple = ()
 
 
@@ -1145,6 +1147,7 @@ def _planned_board(
             name_by_chr=ctx.name_by_chr,
             sings=sings,
             bench_sockets=ctx.bench_sockets,
+            player_level=player_level(ctx.cfg),
         )[0]
         return developed.plan, developed.board, assemble
     plan = cached_team_plan(
@@ -1192,7 +1195,7 @@ class ChartCounts:
     score measured on a real board and never below the plain develop's.
 
     A member's counts are the ones its board reaches by dropping frequency nodes that
-    nothing hangs from (`board_plan.cooldown_count_axes`); a dropped node's points stay
+    nothing hangs from (`board_refine.cooldown_count_axes`); a dropped node's points stay
     unspent."""
 
     def __init__(
@@ -1310,12 +1313,11 @@ class ChartCounts:
 
 
 def _chunksize(count: int, workers: int) -> int:
-    """How many teams one worker takes per dispatch. One at a time was right
-    when a leaf cost milliseconds; at ~0.5 ms the queue round-trip per team is
-    a large share of the work (batching gives x3.5 with 16 workers on a
-    72k-team batch). Small batches stay at 1 so a short, expensive batch is
-    still spread over every worker; a score is a pure function of its team, so
-    how the batch is cut cannot change a result."""
+    """How many teams one worker takes per dispatch. At ~0.5 ms a leaf, the queue
+    round-trip per team is a large share of the work (batching gives x3.5 with 16
+    workers on a 72k-team batch). Small batches stay at 1 so a short, expensive batch
+    is still spread over every worker; a score is a pure function of its team, so how
+    the batch is cut cannot change a result."""
     return max(1, min(64, count // (max(1, workers) * 8)))
 
 
@@ -1350,6 +1352,198 @@ def _ctx_task_per_chart(item):
 # ---------------------------------------------------------------------------
 # Parent side.
 # ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- temp files
+# A pool's temp files (the pickled context its workers read, the shared plan store) carry the
+# pid of the process that made them. `RefinePool.close` removes them; exit removes those of a
+# pool never closed (atexit); and a process that died before either leaves them to the next
+# process's sweep (`sweep_stale_temp`), which removes every one whose process is gone. Each
+# context file holds the account's cards (~6 MB): left behind, they pile up by the gigabyte.
+_TEMP_NAME = re.compile(r"^(hbctx|hbplans)-(\d+)-")
+# names from before the pid was in them (`hbctx_*`, `hbplans_*`): no process can still need one
+# this old
+LEGACY_TEMP_AGE_S = 2 * 86400
+_OWNED_TEMP: set[str] = set()
+_TEMP_LOCK = threading.Lock()
+_SWEEP_STARTED = False
+
+
+def _temp_prefix(kind: str) -> str:
+    return f"{kind}-{os.getpid()}-"
+
+
+def _remove_path(path: str) -> bool:
+    """Remove a temp file or folder; False when it is still there (a worker holding it)."""
+    if os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return False
+    return not os.path.exists(path)
+
+
+def _own_temp(path: str) -> str:
+    with _TEMP_LOCK:
+        _OWNED_TEMP.add(path)
+    return path
+
+
+def _drop_temp(path: str) -> None:
+    """Remove one of this process's temp files; one that cannot go yet is left to exit."""
+    if _remove_path(path):
+        with _TEMP_LOCK:
+            _OWNED_TEMP.discard(path)
+
+
+@atexit.register
+def _remove_owned_temp() -> None:
+    with _TEMP_LOCK:
+        owned = list(_OWNED_TEMP)
+        _OWNED_TEMP.clear()
+    for path in owned:
+        _remove_path(path)
+
+
+def _new_context_file(ctx: object) -> str:
+    """`ctx` pickled ONCE to a temp file the workers read (an initializer argument would be
+    pickled per worker). Also starts the sweep of earlier processes' leftovers."""
+    sweep_stale_temp_once()
+    with tempfile.NamedTemporaryFile(
+        "wb", prefix=_temp_prefix("hbctx"), suffix=".pickle", delete=False
+    ) as fh:
+        _own_temp(fh.name)
+        fh.write(ForkingPickler.dumps(ctx))
+    return fh.name
+
+
+def _new_store_dir() -> str:
+    """A fresh folder for a context's shared plan store."""
+    return _own_temp(tempfile.mkdtemp(prefix=_temp_prefix("hbplans")))
+
+
+def pid_alive(pid: int) -> bool:
+    """Whether a process with this pid is running (an exited one is not)."""
+    if pid == os.getpid():
+        return True
+    if sys.platform == "win32":
+        import ctypes  # noqa: PLC0415
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED: it exists, not ours
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)  # signal 0 on POSIX: only asks whether the process exists
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def sweep_stale_temp(folder: str | None = None, *, now: float | None = None) -> list[str]:
+    """Remove the pool temp files in `folder` (default: the system temp folder) that no
+    running process owns: a name whose pid no process holds, or a name from before the pid
+    was in it once older than LEGACY_TEMP_AGE_S. Answers the paths removed."""
+    folder = folder or tempfile.gettempdir()
+    now = time.time() if now is None else now
+    alive: dict[int, bool] = {}
+    removed: list[str] = []
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return removed
+    for name in names:
+        path = os.path.join(folder, name)
+        match = _TEMP_NAME.match(name)
+        if match:
+            pid = int(match.group(2))
+            if pid not in alive:
+                alive[pid] = pid_alive(pid)
+            stale = not alive[pid]
+        elif name.startswith(("hbctx_", "hbplans_")):
+            try:
+                stale = now - os.path.getmtime(path) > LEGACY_TEMP_AGE_S
+            except OSError:
+                continue
+        else:
+            continue
+        if stale and _remove_path(path):
+            removed.append(path)
+    return removed
+
+
+def sweep_stale_temp_once() -> None:
+    """`sweep_stale_temp` in a background thread, once per process (the server's start, or
+    the first pool)."""
+    global _SWEEP_STARTED
+    with _TEMP_LOCK:
+        if _SWEEP_STARTED:
+            return
+        _SWEEP_STARTED = True
+    threading.Thread(target=sweep_stale_temp, name="temp-sweep", daemon=True).start()
+
+
+# ----------------------------------------------------------------- waiting on the workers
+class WorkerDied(RuntimeError):
+    """A worker process ended while its tasks were out: their answers will never come."""
+
+
+# how often a wait on the workers looks whether one of them has ended (seconds)
+WORKER_WATCH_S = 1.0
+
+
+def worker_pids(pool: Any) -> frozenset[int]:
+    """The pids of a multiprocessing pool's worker processes. The pool replaces a worker that
+    ends, and none ends on its own here (no `maxtasksperchild`): a pid that leaves this set
+    is a worker that died (killed, out of memory, a crash in native code)."""
+    procs = getattr(pool, "_pool", None)
+    if not isinstance(procs, list):  # not a multiprocessing pool (a thread pool, a test's)
+        return frozenset()
+    return frozenset(p.pid for p in list(procs))
+
+
+def _run_chunk(job: tuple[Callable, list]) -> list:
+    """In a worker: one chunk of a batch, `task` on each of its items, as the pool's own
+    chunking (`mapstar`) runs one."""
+    task, items = job
+    return [task(item) for item in items]
+
+
+def _gather(pool: Any, task: Callable, tasks: list, chunksize: int, out: list) -> None:
+    """Fill `out[index]` from `task` on each of `tasks`, in the pool, as the answers arrive.
+
+    The batch goes out in chunks of `chunksize` cut here: the pool's own chunking answers
+    through a generator, which cannot wait with a timeout. Raises `WorkerDied` when a worker
+    ends meanwhile: its chunk's answer never comes, and a plain iteration would wait for it
+    forever. A task that raised raises here too."""
+    pids = worker_pids(pool)
+    size = max(1, chunksize)
+    chunks = [(task, tasks[at : at + size]) for at in range(0, len(tasks), size)]
+    answers = pool.imap_unordered(_run_chunk, chunks, chunksize=1)
+    while True:
+        try:
+            done = answers.next(timeout=WORKER_WATCH_S)
+        except StopIteration:
+            return
+        except multiprocessing.TimeoutError:
+            if worker_pids(pool) != pids:
+                raise WorkerDied("a worker process ended while it held tasks of this batch") from None
+            continue
+        for index, value in done:
+            out[index] = value
+
+
 class SharedPool:
     """ONE set of worker processes for several contexts (`RefinePool(shared=...)`): each
     pool built on it pickles its own context to a file, and a worker loads a context the
@@ -1446,6 +1640,8 @@ class RefinePool:
             workers = shared.workers
         self.workers = default_workers() if workers is None else max(1, workers)
         self.on_fallback = on_fallback
+        # what went wrong with the workers since the last `take_warnings` (a search reports it)
+        self.warnings: list[str] = []
         self._pool: Pool | None = None
         self._by_id = {c.id: c for c in ctx.cards}
         self._trees: dict = {}
@@ -1516,7 +1712,7 @@ class RefinePool:
         the workers (a plan cache of the context is only used through the workers)."""
         if isinstance(self.ctx, RefineContext) and self.ctx.use_plan_cache and self._store_dir is None:
             try:
-                self._store_dir = tempfile.mkdtemp(prefix="hbplans_")
+                self._store_dir = _new_store_dir()
             except OSError:
                 return
             self.ctx = dataclasses.replace(self.ctx, plan_store=self._store_dir)
@@ -1527,11 +1723,7 @@ class RefinePool:
             if workers is not None:
                 self._with_store()
                 try:
-                    with tempfile.NamedTemporaryFile(
-                        "wb", prefix="hbctx_", suffix=".pickle", delete=False
-                    ) as fh:
-                        fh.write(ForkingPickler.dumps(self.ctx))
-                        self._ctx_file = fh.name
+                    self._ctx_file = _new_context_file(self.ctx)
                     slot = self.shared.acquire()
                     if slot is not None:
                         self._token, self._pool = (self._ctx_file, slot), workers
@@ -1546,13 +1738,10 @@ class RefinePool:
                 context = multiprocessing.get_context("spawn")
                 self._stop = context.RawValue("q", 0)
                 # the context (~6 MB with a difficulty's charts) pickled ONCE, to a file each
-                # worker reads: handed over as an argument, it is pickled again for every
-                # worker and each start waits for that worker to boot and read it (16 workers:
-                # ~6.7 s before the pool exists, against ~0.3 s); the same pickler, the same
-                # objects
-                with tempfile.NamedTemporaryFile("wb", prefix="hbctx_", suffix=".pickle", delete=False) as fh:
-                    fh.write(ForkingPickler.dumps(self.ctx))
-                    self._ctx_file = fh.name
+                # worker reads: as an initializer argument it would be pickled per worker and
+                # each start would wait for that worker to read it (16 workers: ~6.7 s before
+                # the pool exists, against ~0.3 s)
+                self._ctx_file = _new_context_file(self.ctx)
                 self._pool = context.Pool(
                     processes=self.workers, initializer=_init_worker, initargs=(self._ctx_file, self._stop)
                 )
@@ -1584,15 +1773,10 @@ class RefinePool:
             finally:
                 self._pool = None
         if self._ctx_file is not None:
-            try:
-                os.unlink(self._ctx_file)
-            except OSError:
-                pass  # a worker still holding it open: the temp folder's to clear
+            _drop_temp(self._ctx_file)  # one a worker still holds goes at exit
             self._ctx_file = None
         if self._store_dir is not None:
-            import shutil  # noqa: PLC0415
-
-            shutil.rmtree(self._store_dir, ignore_errors=True)
+            _drop_temp(self._store_dir)
             self._store_dir = None
 
     def _serial(self, items: list[tuple[str, tuple[str, ...]]]) -> list[float]:
@@ -1659,6 +1843,34 @@ class RefinePool:
             ]
         )
 
+    def _warn(self, line: str) -> None:
+        """Report a worker failure: kept for the search's answer (`take_warnings`), and to
+        `on_fallback` or the console."""
+        self.warnings.append(line)
+        if self.on_fallback:
+            self.on_fallback(line)
+        else:
+            print(f"  ! {line}", file=sys.stderr, flush=True)
+
+    def take_warnings(self) -> list[str]:
+        """The worker failures since the last call (each once)."""
+        taken, self.warnings = self.warnings, []
+        return taken
+
+    def _gather_or_warn(self, task: Callable, tasks: list, out: list) -> None:
+        """`_gather` into `out`. A worker that died or a task that raised leaves the items
+        without an answer None, for the caller to score in this process, and is reported. The
+        pool is kept for the next batch: it has replaced a dead worker already, and a task's
+        own error is the task's (the in-process run raises it again)."""
+        try:
+            _gather(self._pool, task, tasks, _chunksize(len(tasks), self.workers), out)
+        except Exception as exc:  # noqa: BLE001 — reported; the batch finishes in this process
+            missing = sum(v is None for v in out)
+            self._warn(
+                f"the search's worker processes failed mid-batch ({type(exc).__name__}: {exc}); "
+                f"{missing} of {len(out)} teams of this batch were scored in a single process"
+            )
+
     def _run(self, items: list) -> list[Any]:
         """`evaluate` on each item (`_task`'s shape), in the workers; in order."""
         if not items:
@@ -1667,19 +1879,7 @@ class RefinePool:
             return self._serial(items)
         out: list[float | None] = [None] * len(items)
         task, tasks = self._items(items, _task, _ctx_task)
-        try:
-            for index, score in self._pool.imap_unordered(
-                task, tasks, chunksize=_chunksize(len(items), self.workers)
-            ):
-                out[index] = score
-        except Exception as exc:  # noqa: BLE001 — a dead worker is not an answer
-            if self.on_fallback:
-                self.on_fallback(
-                    f"refine pool failed mid-batch ({type(exc).__name__}: {exc}); "
-                    f"finishing this batch in a single process"
-                )
-            self.close()
-            return self._serial(items)
+        self._gather_or_warn(task, tasks, out)
         if any(v is None for v in out):
             missing = [items[i] for i, v in enumerate(out) if v is None]
             fill = iter(self._serial(missing))
@@ -1693,37 +1893,21 @@ class RefinePool:
         items = [(t.leader.id, tuple(m.id for m in t.members)) for t in teams]
         if not items:
             return []
+        out: list = [None] * len(items)
         if self._pool is not None:
-            out: list = [None] * len(items)
             task, tasks = self._items(items, _task_per_chart, _ctx_task_per_chart)
-            try:
-                for index, scores in self._pool.imap_unordered(
-                    task, tasks, chunksize=_chunksize(len(items), self.workers)
-                ):
-                    out[index] = scores
-                if all(v is not None for v in out):
-                    return [[float(s) for s in v] for v in out]
-            except Exception as exc:  # noqa: BLE001 — a dead worker is not an answer
-                if self.on_fallback:
-                    self.on_fallback(
-                        f"refine pool failed mid-batch ({type(exc).__name__}: {exc}); "
-                        f"finishing this batch in a single process"
-                    )
-                self.close()
-        if self.ctx.use_plan_cache and self._plan_cache is None:
+            self._gather_or_warn(task, tasks, out)
+        missing = [k for k, v in enumerate(out) if v is None]
+        if missing and self.ctx.use_plan_cache and self._plan_cache is None:
             self._plan_cache = new_plan_cache(self.ctx, self._by_id)
-        return [
-            [
-                float(s)
-                for s in evaluate(
-                    self.ctx,
-                    self._by_id,
-                    self._tree_for,
-                    self._budget_for,
-                    t,
-                    plan_cache=self._plan_cache,
-                    per_chart=True,
-                )
-            ]
-            for t in items
-        ]
+        for k in missing:
+            out[k] = evaluate(
+                self.ctx,
+                self._by_id,
+                self._tree_for,
+                self._budget_for,
+                items[k],
+                plan_cache=self._plan_cache,
+                per_chart=True,
+            )
+        return [[float(s) for s in v] for v in out]

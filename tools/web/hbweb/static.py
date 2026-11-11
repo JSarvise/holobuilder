@@ -1,4 +1,4 @@
-"""Pages and assets: the redesign's pages (`/<name>` -> `static/<name>.html`), their
+"""Pages and assets: the pages (`/<name>` -> `static/<name>.html`), their
 ES modules and stylesheets, and every image, figure and font they draw.
 
 Each asset route is guarded twice: a strict name pattern (no `..`, no separators, no `.`
@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
 from hbuilder import paths
-from hbweb import config
+from hbweb import config, session
 
 sys.path.insert(0, str(paths.APP_DIR))
 import content_store as _content_store  # noqa: E402
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 CONTENT = _content_store.ContentStore()
 LIVE2D_CORE_URL = "https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"
 
-PAGE_RE = re.compile(r"/[a-z][a-z-]{0,40}")  # a redesign page: /<name> -> static/<name>.html
+PAGE_RE = re.compile(r"/[a-z][a-z-]{0,40}")  # a page: /<name> -> static/<name>.html
 _ART_NAME_RE = re.compile(r"^card-[0-9A-Za-z_-]+\.webp$")
 # A music id is `m` + digits in every chart on disk; this allowlist is also the
 # path-traversal guard for the jacket route (no dots, no slashes).
@@ -188,7 +188,10 @@ def serve_static(h: Handler, name: str) -> None:
         ".css": "text/css; charset=utf-8",
         ".woff2": "font/woff2",
     }.get(path.suffix, "application/octet-stream")
-    h.reply(200, path.read_bytes(), ctype)
+    body = path.read_bytes()
+    if path.suffix == ".html":
+        body = session.inject(body)  # the key that lets the page change anything (session.py)
+    h.reply(200, body, ctype)
 
 
 def is_module_path(path: str) -> bool:
@@ -199,7 +202,7 @@ def is_module_path(path: str) -> bool:
 
 
 def is_page(path: str) -> bool:
-    """A redesign page (`static/<name>.html`): lowercase letters and dashes only, one
+    """A page (`static/<name>.html`): lowercase letters and dashes only, one
     level, so a new page needs no server change. The router checks it last, so no API
     route can be shadowed."""
     return bool(PAGE_RE.fullmatch(path)) and (config.STATIC_DIR / f"{path[1:]}.html").is_file()

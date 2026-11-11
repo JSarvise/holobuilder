@@ -274,11 +274,12 @@ def classify(chart):
         49 raw channel-1 cells and the header's NORMAL_NOTE_COUNT of 44.
       * a flick is a note carrying channel-5 attribute 1. On a slide end that makes it the
         header's LONG_FLICK_END rather than LONG_END.
-      * channel 3 type 5 is an invisible control point and scores nothing.
+      * channel 3 type 5 is an invisible control point and scores nothing (the client still
+        weighs it in the perfect-sum divisor: `hidden_points`).
       * LONG_CONTINUE notes are not written down at all: a hold scores one on every half beat of
         the SONG's grid that falls strictly inside it -- absolute, not measured from the hold's
-        own start. On a 708-chart corpus the absolute grid reproduces
-        LONG_CONTINUE_NOTE_COUNT on 655, a start-relative grid on only 574."""
+        own start. On a 708-chart corpus, with `#mmm02` read from its own measure on, the grid
+        reproduces LONG_START_NOTE_COUNT on 708 and LONG_CONTINUE_NOTE_COUNT on 697."""
     slide_at = {(n.beat, n.lane) for n in chart.notes if n.chan == LONG}
     out = []
     for n in chart.notes:

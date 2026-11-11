@@ -18,27 +18,14 @@ from hbuilder.domain.schema import (
 )
 from hbuilder.domain.unknown import UNKNOWN, is_known
 
-# `condition` is an UNKNOWN-routed slot field like the others — a null
-# condition on disk taints the card exactly like a null
-# duration/interval/magnitude does, rather than meaning "ungated".
-#
-# `target` follows `condition`, so an untranscribed target reports as
-# `skills.PASSIVE.target` — the same three-state contract.
-#
-# `override` and `rider` come last, so an untranscribed second-effect
-# payload taints the card (and therefore the team-level `>=` marker via
-# `team_taint()`) rather than silently collapsing into "there is no second
-# effect". Only `override` additionally forces the individual skill's own
-# contribution to `data_missing` — it is in `scoring.py`'s
-# `_REQUIRED_KNOWN_FIELDS`, which is the only list that drives a
-# per-skill `data_missing` state. `rider` is deliberately NOT in that
-# list: a rider does not feed the slot's principal contribution, so an
-# unknown rider cannot make that contribution wrong either way; the
-# card-level taint above is what still surfaces the `>=` marker
-# correctly. Do not "fix" this by adding `rider` to
-# `_REQUIRED_KNOWN_FIELDS` — that would force every card with an
-# unknown-but-being-transcribed rider into a fully-zeroed principal
-# contribution for no scoring-correctness reason.
+# The slot fields that may hold UNKNOWN, in report order. A null `condition` or
+# `target` taints the card like a null duration/magnitude (it never means
+# "ungated" / "team-wide"), and so does an untranscribed `override` or `rider`
+# (and with it the team-level `>=` marker via `team_taint()`).
+# Only `override` also zeroes the skill's own contribution (`scoring.py`'s
+# `_REQUIRED_KNOWN_FIELDS`): a rider does not feed the slot's principal
+# contribution, so an unknown rider cannot make it wrong, and listing `rider`
+# there would zero every such card's principal for nothing.
 _UNKNOWN_CAPABLE_SLOT_FIELDS: tuple[str, ...] = (
     "duration",
     "interval",
@@ -66,13 +53,9 @@ class GateCondition:
     kind: str  # "type" | "generation" | "run_state"
     target: str
     count: int
-    # The comparison direction, meaningful only for a `run_state` gate:
-    # "gte" (LIFE/COMBO at or ABOVE the threshold, the game's *_GTE triggers)
-    # or "lte" (LIFE at or BELOW it — the LIFE_LTE=11 comeback/desperation
-    # triggers, thresholds 500/700/950). Defaults to "gte", so a record that
-    # omits it reads as an at-or-above gate. `type`/`generation` are
-    # set-membership counts and are always "gte"; the schema forbids an
-    # operator on them.
+    # The comparison direction, meaningful only for a `run_state` gate: "gte"
+    # (at or ABOVE the threshold, the game's *_GTE triggers) or "lte" (LIFE at or
+    # BELOW it, the LIFE_LTE=11 triggers). `type`/`generation` gates are always "gte".
     operator: str = "gte"
 
 
@@ -80,13 +63,10 @@ class GateCondition:
 class SlotOverride:
     """A slot's base magnitude plus a gated override of that same magnitude — e.g.
     matsuri "Sweet Cheeky Stage" ACTIVE: "Score UP 35%. ... With 2+ Pure ->
-    Score UP 70%." When the override's own gate fires, `magnitude`
-    REPLACES the slot's base `magnitude` (`scoring._effective_magnitude`);
-    the two are never summed. The override carries no `family`/
-    `effect_type` of its own: by definition it overrides the principal's
-    magnitude, and a second copy of the family could only ever disagree
-    with the first (see `tests/test_schema.py::
-    test_a_slots_override_carries_no_family_or_effect_type_of_its_own`)."""
+    Score UP 70%." When the override's own gate fires, the scorers read
+    `max(override magnitude, base magnitude)` (`scoring._effective_magnitude`):
+    the game holds both and takes the larger, so the two are never summed. It carries no `family`/`effect_type` of its own
+    (`schema.OVERRIDE_KINDS`)."""
 
     magnitude: float
     condition: GateCondition
@@ -99,12 +79,9 @@ class SlotRider:
     `life_recovery`. Represented, but not scored, except for the outfit
     riders in `SCORED_COSTUME_RIDER_FAMILIES`.
 
-    `condition`/`target` follow the identical three-state contract the
-    slot's own `condition`/`target` carry — `None` is structurally
-    ungated/team-wide, `UNKNOWN` taints, a populated value resolves to a
-    `GateCondition`/`EffectTarget` — via the same
-    `_condition_from_record`/`_target_from_record` converters, never a
-    second copy of either."""
+    `condition`/`target` follow the slot's own three-state contract: `None` is
+    ungated/team-wide, `UNKNOWN` taints, a populated value is a
+    `GateCondition`/`EffectTarget`."""
 
     family: str
     effect_type: str
@@ -115,14 +92,10 @@ class SlotRider:
 
 @dataclass(frozen=True, slots=True)
 class EffectTarget:
-    """The effect-target clause — "who receives this effect" —
-    structurally independent of `GateCondition` ("what unlocks this
-    effect"). `value` rather than `target`, because `GateCondition.target`
-    already maps to `GatePredicate.value` at the predicate layer, and
-    `target.target` is unreadable. `value`/`count` are `None` for a "self"
-    or "all" kind (structurally absent on disk — see
-    `schema.NOT_APPLICABLE_TARGET_FIELDS_BY_TARGET_KIND`), populated for
-    "type"/"generation"."""
+    """The effect-target clause, "who receives this effect", independent of
+    `GateCondition` ("what unlocks it"). `value` (not `target`, as
+    `GateCondition.target` maps to `GatePredicate.value`) and `count` are `None`
+    for a "self" or "all" kind, populated for "type"/"generation"."""
 
     kind: str  # one of schema.TARGET_KINDS
     value: str | None
@@ -144,27 +117,21 @@ class SkillSlot:
     rider: object = None  # SlotRider | None | Unknown
 
 
-# The rider families a leader OUTFIT scores as a second effect. 11 of the
-# outfits in `data/cards.json` carry a
-# `score_support` rider (effect_type `score`, magnitude 25, target all, gated
-# on 2+ of a type — e.g. Mori Calliope "Radiant Summer Heatwave"). It is
-# always-on and team-wide like any costume effect, so it is scored exactly as
-# a PRINCIPAL costume `score_support` is — via a synthesized COSTUME slot
-# (`scored_costume_rider_slot`) that carries the rider's own condition/target
-# and is resolved against the five members like the outfit itself
-# (`gates.resolve_leader_costume_skills`). Any other rider family on a costume
-# stays represented and unscored.
+# The rider families a leader OUTFIT scores as a second effect. Some outfits carry
+# a `score_support` rider (e.g. Mori Calliope "Radiant Summer Heatwave": 25, target
+# all, gated on 2+ of a type). Always-on and team-wide like any costume effect, it
+# is scored as a PRINCIPAL costume `score_support` is, via a synthesized COSTUME
+# slot (`scored_costume_rider_slot`) resolved against the five members
+# (`gates.resolve_leader_costume_skills`). Other rider families stay unscored.
 SCORED_COSTUME_RIDER_FAMILIES: tuple[str, ...] = ("score_support",)
 
 
 def scored_costume_rider_slot(costume: SkillSlot) -> SkillSlot | None:
-    """The synthesized COSTUME `SkillSlot` for a costume slot's scored rider,
-    or `None` when the costume carries no rider of a
-    `SCORED_COSTUME_RIDER_FAMILIES` family (absent, `UNKNOWN`, or another
-    family). The slot's `condition`/`target` are the RIDER'S own — three-state
-    exactly as the rider carries them — and it has no override and no rider of
-    its own; `duration`/`interval`/`probability_tier` are copied from the host
-    (structurally not-applicable to a COSTUME slot either way)."""
+    """The synthesized COSTUME `SkillSlot` for a costume slot's scored rider, or
+    `None` when the costume carries no rider of a `SCORED_COSTUME_RIDER_FAMILIES`
+    family. Its `condition`/`target` are the rider's own; it has no override or
+    rider; `duration`/`interval`/`probability_tier` are copied from the host (not
+    applicable to a COSTUME slot either way)."""
     rider = costume.rider
     if not isinstance(rider, SlotRider) or rider.family not in SCORED_COSTUME_RIDER_FAMILIES:
         return None
@@ -211,9 +178,8 @@ class Card:
         `SKILL_SLOT_KINDS` order, then `costume_skill`; within a slot, the
         field order of `_UNKNOWN_CAPABLE_SLOT_FIELDS`).
 
-        A field named in `NOT_APPLICABLE_FIELDS_BY_SLOT_KIND[slot.kind]` for
-        its slot's kind is never reported — it structurally does not exist
-        for that slot kind, so it is not a data gap.
+        A field not applicable to the slot's kind
+        (`NOT_APPLICABLE_FIELDS_BY_SLOT_KIND`) is never reported.
         """
         fields: list[str] = []
         for slot_kind, slot in zip(SKILL_SLOT_KINDS, self.skills):
@@ -241,11 +207,9 @@ def _unknown_slot_fields(slot: SkillSlot, prefix: str) -> list[str]:
 
 
 def _condition_from_record(record: dict | None) -> object:
-    """The three-state condition contract: JSON `null` -> `UNKNOWN` (the
-    transcriber has not recorded whether this skill is gated, so it taints
-    via `Card.unknown_fields()`); `{"kind": "ungated"}` -> `None`
-    (structurally ungated — an affirmative marker typed by the transcriber,
-    no predicate to build); any other populated dict -> a `GateCondition`."""
+    """The three-state condition contract: JSON `null` -> `UNKNOWN` (taints via
+    `Card.unknown_fields()`); `{"kind": "ungated"}` -> `None`; any other dict ->
+    a `GateCondition`."""
     if record is None:
         return UNKNOWN
     if record.get("kind") == UNGATED_CONDITION_KIND:
@@ -254,20 +218,14 @@ def _condition_from_record(record: dict | None) -> object:
         kind=record["kind"],
         target=record["target"],
         count=record["count"],
-        # Often absent, and structurally forbidden by the schema on
-        # type/generation gates, so the "gte" default is the only value those
-        # ever take. Only a run_state gate may carry it.
+        # only a run_state gate may carry it (the schema forbids it elsewhere)
         operator=record.get("operator", "gte"),
     )
 
 
 def _target_from_record(record: dict | None) -> object:
-    """The three-state target contract, the same shape
-    `_condition_from_record` uses: JSON `null` -> `UNKNOWN` (the
-    transcriber has not recorded who this effect reaches, so it taints via
-    `Card.unknown_fields()`); `{"kind": "all"}` -> `None` (structurally
-    team-wide — an affirmative marker typed by the transcriber, no subset
-    to select); any other populated dict -> an `EffectTarget`."""
+    """The three-state target contract: JSON `null` -> `UNKNOWN`;
+    `{"kind": "all"}` -> `None` (team-wide); any other dict -> an `EffectTarget`."""
     if record is None:
         return UNKNOWN
     if record.get("kind") == TEAM_WIDE_TARGET_KIND:
@@ -280,16 +238,9 @@ def _target_from_record(record: dict | None) -> object:
 
 
 def _override_from_record(record: dict | None) -> object:
-    """Mirrors `_condition_from_record`'s three-state contract:
-    JSON `null` -> `UNKNOWN` (the transcriber has
-    not recorded whether this slot carries an override at all, so it
-    taints via `Card.unknown_fields()`); `{"kind": "none"}` -> `None`
-    (structurally "no override" — an affirmative marker typed by the
-    transcriber, no second payload); any other populated dict -> a
-    `SlotOverride`, whose nested `condition` goes through
-    `_condition_from_record` — validation already guarantees a populated
-    override's condition is a real, gated `GateCondition`, never `None`/
-    `UNKNOWN`."""
+    """The three-state override contract: JSON `null` -> `UNKNOWN`;
+    `{"kind": "none"}` -> `None`; any other dict -> a `SlotOverride` (validation
+    guarantees its condition is a real, gated `GateCondition`)."""
     if record is None:
         return UNKNOWN
     if record.get("kind") == SECOND_EFFECT_ABSENT_KIND:
@@ -301,12 +252,8 @@ def _override_from_record(record: dict | None) -> object:
 
 
 def _rider_from_record(record: dict | None) -> object:
-    """Mirrors `_condition_from_record`'s three-state contract:
-    JSON `null` -> `UNKNOWN`; `{"kind": "none"}`
-    -> `None`; any other populated dict -> a `SlotRider`, whose nested
-    `condition`/`target` go through the
-    `_condition_from_record`/`_target_from_record` three-state
-    converters."""
+    """The three-state rider contract: JSON `null` -> `UNKNOWN`;
+    `{"kind": "none"}` -> `None`; any other dict -> a `SlotRider`."""
     if record is None:
         return UNKNOWN
     if record.get("kind") == SECOND_EFFECT_ABSENT_KIND:
@@ -323,10 +270,8 @@ def _rider_from_record(record: dict | None) -> object:
 def skill_slot_from_record(record: dict | None, kind: str) -> SkillSlot | None:
     """Build a `SkillSlot` from an already-validated skill-slot record.
 
-    `record` may be `None` (JSON `null`) meaning the card has no skill in
-    this slot at all — that is distinct from a populated slot whose
-    `duration`/`interval`/`probability_tier`/`magnitude` are individually
-    `null`, which become the `UNKNOWN` sentinel.
+    `record` may be `None` (JSON `null`): the card has no skill in this slot,
+    unlike a populated slot whose individual fields are `null` (`UNKNOWN`).
     """
     if record is None:
         return None

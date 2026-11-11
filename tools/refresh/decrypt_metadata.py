@@ -305,7 +305,9 @@ def main():
     mg = struct.unpack_from("<I", dec, 0)[0]
     ver = struct.unpack_from("<I", dec, 4)[0]
     corrupt = len(re.findall(rb"k__Backing(..)eld", dec)) - dec.count(b"k__BackingField")
-    print(f"key={key.hex()}")
+    # the key itself is not printed: output pasted into an issue would publish it (--keyout
+    # writes it to a file)
+    print(f"key: {len(key)} bytes")
     print(f"matches KNOWN_KEY: {key == KNOWN_KEY}")
     print(f"magic={hex(mg)} ({'OK' if mg == MAGIC else 'BAD'}) version={ver}")
     print(f"exact k__BackingField={dec.count(b'k__BackingField')} corrupt={corrupt}")

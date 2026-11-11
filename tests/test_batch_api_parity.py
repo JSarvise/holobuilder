@@ -617,8 +617,7 @@ def test_contribution_ordering_is_unchanged_by_the_batch_refactor():
     assert [(c.card_id, c.slot_kind, c.source) for c in breakdown.contributions] == [
         (i.card_id, i.slot_kind, i.source) for i in instances
     ], (
-        "SCOR-09: contribution ordering must still exactly match "
-        "the reference skill-instance order after the D-16/D-17 batch "
-        "refactor -- the batched path shares gate resolution and EVs, but "
-        "must never reorder the attribution the owner reads"
+        "contribution ordering must exactly match the reference "
+        "skill-instance order: the batched path shares gate resolution and "
+        "EVs, but must never reorder the attribution the user reads"
     )

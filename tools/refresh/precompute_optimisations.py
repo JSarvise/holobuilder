@@ -41,13 +41,9 @@ def _annotate_plan_budget(doc: dict, *, char_level: str = "current") -> None:
     against, so the board header reads '<board cost> / <points at this level>',
     e.g. '248/361'.
 
-    Without this the header would show the CURRENT board's spend against the REAL
-    level budget (`spent_on_owned / granted`), which CONTRADICTS a max-level plan: a
-    level-50 holomem has 361 board points, not the ~80 its real level grants, so a
-    plan correctly costed at 361 would read as an impossible '84 to buy / 36 / 83 pt'. At
-    max the budget is the level-50 grant (361); at current it is the real earned
-    points. `point_cost` is the developed board's own point total, the honest
-    numerator (not the current board's spend)."""
+    At max the budget is the level-50 grant (361), at current the real earned points;
+    `point_cost` is the developed board's own point total, not the current board's spend
+    (which against a max-level plan would read as an impossible figure)."""
     prices = to._prices()
     max_points = None
     if char_level == "max":
@@ -169,19 +165,13 @@ def connect_cards_for(
 # ---------------------------------------------------------------------------
 # "maxed-account" scenario, matching the community tool holodori.best's.
 #
-# holodori.best's "fully maxed account" is: every card Lv80 / bloom max, EVERY
-# holomem at max level with its board developed, memory posters = every poster
-# the game has shipped, member power-up at the roster ceiling. A max-level holomem
-# holds the points its levels grant (`hbuilder.inputs.max_level_board_points`), fewer
-# than the whole tree costs, so no account owns a complete board. The `maxed` basis
-# (`apply_collection(maxed=True, assume_level="max", assume_bloom="max")`) already
-# gives the cards and — via `maxed_account_bonuses` — the power-up ceiling; what it
-# does NOT give is (a) a bench of developed boards (it reuses the account's
-# `board.json`) and (b) the poster count of the MASTER
-# rather than the 50-row cap of `PosterCollectEffect`. The two helpers below supply
-# exactly those two things; nothing else changes, so the scenario is the maxed
-# basis + this bench + these bonuses. Kept recon-side (a function library, like
-# the rest of this module).
+# A "fully maxed account": every card Lv80 / bloom max, EVERY holomem at max level with its
+# board developed (the points its levels grant, `hbuilder.inputs.max_level_board_points`, fewer
+# than the whole tree costs), memory posters = every poster the game has shipped, member
+# power-up at the roster ceiling. The `maxed` basis (`apply_collection(maxed=True, ...)` and
+# `maxed_account_bonuses`) gives the cards and the power-up ceiling; the helpers below add
+# (a) a bench of developed boards and (b) the master's poster count rather than the 50-row cap
+# of `PosterCollectEffect`.
 # ---------------------------------------------------------------------------
 MAXED_ACCOUNT_SCENARIO = "maxed-account"
 _POSTER_MASTER = paths.HOLODORI / "main_Poster.json"

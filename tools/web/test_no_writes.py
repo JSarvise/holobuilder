@@ -77,10 +77,8 @@ READ_SINKS = frozenset(
         # `hbweb.config.read_json` and `leaf_inputs._read_json` — a JSON file
         # or `None` when absent. Named here deliberately rather than by
         # widening the rule: each reaches only `is_file` and `read_text`, both
-        # already on this list. The only reason they had to be added at all is
-        # that this is an allowlist, and a read helper nobody thought about is
-        # rejected by default. That is the design working, not friction to be
-        # removed.
+        # already on this list; an allowlist rejects by default a read helper
+        # nobody reviewed.
         "read_json",
         "_read_json",
     }
@@ -96,6 +94,8 @@ WRITE_SINK_NAME = "COLLECTION_PATH"
 WRITE_SINK_MODULE = "config"
 WRITE_SINK_HOME = WEB_ROOT / "hbweb" / "config.py"
 WRITE_SINK_WRITER = WEB_ROOT / "hbweb" / "collection.py"
+# Path methods that name a file beside the sink, in its folder (an atomic write's temp file)
+SIBLING_OF = frozenset({"with_name", "with_suffix"})
 
 # Check 4's mutator set, deliberately NARROWER than `MUTATORS`. Bare `write`
 # and `replace` are excluded because in this package they are
@@ -358,9 +358,20 @@ def _rooted_at_write_sink(node: ast.AST) -> bool:
     or at `config.COLLECTION_PATH` -- and at nothing else, so
     `other.COLLECTION_PATH` or `config.OTHER_PATH` are still offenders."""
     chain: list[str] = []
-    while isinstance(node, ast.Attribute):
-        chain.append(node.attr)
-        node = node.value
+    while True:
+        if isinstance(node, ast.Attribute):
+            chain.append(node.attr)
+            node = node.value
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in SIBLING_OF
+        ):
+            # `COLLECTION_PATH.with_name(...)`: a temp file beside the sink, which an atomic
+            # write stages the new content in before `os.replace` swaps it in
+            node = node.func.value
+        else:
+            break
     if not isinstance(node, ast.Name):
         return False
     if node.id == WRITE_SINK_NAME:

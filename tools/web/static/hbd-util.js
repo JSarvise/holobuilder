@@ -1,7 +1,7 @@
 // Holomem Board page: shared helpers and the board's fixed vocabulary.
 // Formatting and lookups only; every figure on the page is a server field
-// (/api/board, /api/board-doc, /api/boardplan, /api/board-plan-fast, /api/resources).
-export const byId = id => document.getElementById(id);  // not `$`: test_id_contract checks `$("…")` against index.html
+// (/api/board, /api/board-doc, /api/collection, /api/songs, /api/resources).
+export const byId = id => document.getElementById(id);
 const QUOTE = String.fromCharCode(34);   // spelled out: a quote inside a regex trips test_js_syntax
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", [QUOTE]: "&quot;" };
 const ESC_RE = new RegExp("[&<>" + QUOTE + "]", "g");

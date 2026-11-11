@@ -2,8 +2,8 @@
 #
 # The game keeps every master file it has downloaded under
 #   <LocalLow>/QualiArts, Inc_/hololive-Dreams/EB0A191797624DD3A48FA681D3061212/  (paths.MASTER_CACHE)
-# named  <MD5(TableName).upper()>_<MD5(?)>  -- 240 of the 248 tables listed by rpc.api.Master/Get
-# are present. The file IS the SQLCipher database (no extra wrapper), so it opens with the same
+# named  <MD5(TableName).upper()>_<MD5(?)>  -- most of the tables rpc.api.Master/Get lists (379
+# in dumps/master_index.json) are present; the rest the client has not downloaded yet. The file IS the SQLCipher database (no extra wrapper), so it opens with the same
 # per-file seed as a CDN-downloaded copy: PRAGMA key = "x'<seed hex>'" (see master_db.py).
 #
 # So no download and no live capture are needed to read a new table -- only its seed, which is

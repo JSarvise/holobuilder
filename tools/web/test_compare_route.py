@@ -156,3 +156,62 @@ def test_certificate_fields_present(web_base):
     a = doc["teams"][0]["score"]
     assert a["song_off"] <= a["song_est"] <= a["song_max"]
     assert doc["diff"]["sentence"]
+
+
+# -- the account's own nodes ------------------------------------------------------------------
+# a team of the account's own cards (the golden's Compare): every card owned
+_ACCOUNT_A = [
+    "card-00006-4-cmmn-0000-00",
+    "card-00031-5-uniq-0025-00",
+    "card-03001-5-uniq-0033-00",
+    "card-03002-5-uniq-0034-00",
+    "card-03007-5-uniq-0039-00",
+    "card-03008-5-uniq-0095-00",
+]
+_ACCOUNT_B = [
+    "card-00006-4-cmmn-0000-00",
+    "card-00023-5-uniq-0019-00",
+    "card-00031-5-uniq-0025-00",
+    "card-00034-5-uniq-0027-00",
+    "card-03001-5-uniq-0033-00",
+    "card-03002-5-uniq-0034-00",
+]
+
+
+def test_account_develop_never_sells_a_node_the_points_left_could_keep(web_base):
+    """On the account's real points, a row's board plan proposes taking an owned node off
+    (`sell`) only when the points its plan leaves cannot keep it: the plan from scratch
+    keeps the account's own nodes where it costs nothing (`optimize_board`'s `prefer`). The
+    one other reason is the activation refinement's: an activation node the team scores
+    more without (`develop_refined_team` keeps it only where that scores no lower)."""
+    from hbweb import config
+
+    from hbuilder.domain.board_optimizer import keep_preferred
+    from hbuilder.domain.board_plan import model_for_character, skill_tree_from_dumps
+    from hbuilder.domain.board_refine import activation_node_ids
+    from hbuilder.domain.skilltree import ROOT_NODE
+
+    status, doc = _compare(web_base, [_ACCOUNT_A, _ACCOUNT_B], song="m0342", basis="account", board="develop")
+    _skip_if_dumps_missing(status, doc)
+    if status == 400:
+        pytest.skip(f"the account lacks a card of the test teams: {doc.get('error')}")
+    assert status == 200, doc
+    skilltree = config.read_json(config.SKILLTREE_PATH)
+    node_master = config.read_json(config.NODE_MASTER_PATH)
+    activation = activation_node_ids(skilltree)
+    checked = 0
+    for team in doc["teams"]:
+        for row in (team.get("board_plan_summary"), team.get("board_plan_summary_develop")):
+            if not row or row.get("budget_kind") != "real":
+                continue
+            for c in row["per_character"]:
+                model = model_for_character(skilltree, c["chr"])
+                if model is None:
+                    continue
+                tree = skill_tree_from_dumps(skilltree, node_master, model)
+                owned = set(c["keep"]) | {n for n in c["sell"] if n not in activation}
+                planned = set(c["buy"]) | set(c["keep"]) | {ROOT_NODE}
+                _sel, _spent, more = keep_preferred(tree, planned, c["points_used"], c["points_max"], owned)
+                assert more == (), (c["chr"], c["sell"], c["points_used"], c["points_max"])
+                checked += 1
+    assert checked

@@ -388,8 +388,9 @@ def main():
             for (gid, kind), info in sorted(found.items())
         ],
     }
-    with open(OUT, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=1, ensure_ascii=False)
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    atomic_io.write_text(OUT, json.dumps(payload, indent=1, ensure_ascii=False), "utf-8")
     print(f"\nwritten to {OUT}")
     if COLLISIONS:
         print(

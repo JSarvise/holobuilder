@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from hbuilder.errors import MissingInput
 from hbweb import basis, config, songs
 
 if TYPE_CHECKING:
@@ -27,10 +28,14 @@ class Job:
     events: queue.Queue[dict[str, Any]] = field(default_factory=queue.Queue)
     cancel: threading.Event = field(default_factory=threading.Event)
     done: bool = False
+    streamed: bool = False  # a page opened `GET /events/<id>`
 
 
 JOBS: dict[str, Job] = {}
 JOBS_LOCK = threading.Lock()
+# A job whose stream no page opens within this time (the page closed right after starting it)
+# is cancelled, and leaves the registry once it has ended: nothing would ever read it.
+STREAM_GRACE_S = 120.0
 
 # The stages an event job announces in its `plan` event (and `POST /api/event/run` answers).
 EVENT_STAGES = (
@@ -55,7 +60,26 @@ def launch(runner: Callable[[Job, Mapping], None], opts: Mapping, name: str) -> 
     with JOBS_LOCK:
         JOBS[job.job_id] = job
     threading.Thread(target=runner, args=(job, opts), name=f"{name}-{job.job_id[:8]}", daemon=True).start()
+    threading.Thread(target=_unclaimed, args=(job,), name=f"unclaimed-{job.job_id[:8]}", daemon=True).start()
     return job
+
+
+def _unclaimed(job: Job, poll_s: float = 1.0) -> None:
+    """Cancel `job` when no page opened its stream within STREAM_GRACE_S, then drop it from
+    the registry once it has ended."""
+    deadline = time.monotonic() + STREAM_GRACE_S
+    while time.monotonic() < deadline:
+        if job.streamed:
+            return
+        time.sleep(poll_s)
+    if job.streamed:
+        return
+    job.cancel.set()
+    while not job.done:
+        time.sleep(poll_s)
+    with JOBS_LOCK:
+        if not job.streamed:
+            JOBS.pop(job.job_id, None)
 
 
 def run_search_job(job: Job, opts: Mapping, *, engine_for: Callable[[str, str], Any] | None = None) -> None:
@@ -84,6 +108,8 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for: Callable[[str, str], 
         )
         basis_name, difficulty = opts["basis"], opts["difficulty"]
         assumptions = opts.get("assumptions")
+        if engine_for is None:
+            require_search_inputs(basis_name, bool(getattr(assumptions, "materials", False)))
         # the engine keeps the account loaded between searches and reloads it when a
         # refresh moved its inputs (`ondemand.account_key`): `build` is instant when warm
         emit({"type": "stage", "stage": "build", "state": "active"})
@@ -114,19 +140,25 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for: Callable[[str, str], 
         emit({"type": "stage", "stage": "search", "state": "active"})
         # this request's plan options: one engine serves every option of the re-plan
         own = {"assumptions": assumptions} if assumptions is not None and engine_for is None else {}
-        payload = eng.search(
-            opts["song"],
-            opts["filters"],
-            emit=emit,
-            cancel=job.cancel,
-            top=opts.get("top") or ondemand.RANKING,
-            **own,
-        )
+        try:
+            payload = eng.search(
+                opts["song"],
+                opts["filters"],
+                emit=emit,
+                cancel=job.cancel,
+                top=opts.get("top") or ondemand.RANKING,
+                **own,
+            )
+        finally:
+            if engine_for is None:
+                eng.release()  # `ondemand.engine` took it for this search
         emit({"type": "result", "payload": payload, "elapsed_ms": round((time.monotonic() - t0) * 1000)})
     except ondemand.Cancelled:
         emit({"type": "cancelled", "elapsed_ms": round((time.monotonic() - t0) * 1000)})
     except KeyError as exc:
         emit({"type": "error", "message": str(exc.args[0] if exc.args else exc)})
+    except MissingInput as exc:  # its message names the file and what to run
+        emit({"type": "error", "message": str(exc)})
     except Exception as exc:  # noqa: BLE001 — every failure is an event, never a dead stream
         import traceback  # noqa: PLC0415
 
@@ -156,6 +188,21 @@ def _event_song_info(opts: Mapping) -> dict:
     return song_info
 
 
+def require_search_inputs(basis_name: str, materials: bool) -> None:
+    """`MissingInput` naming every file this search needs that is not on disk, and what builds
+    them: one clear message before the search starts, instead of a failure deep inside it."""
+    missing = config.missing_search_inputs(
+        account=basis_name not in ("maxed", basis.MAXED_ACCOUNT_BASIS), materials=materials
+    )
+    if missing:
+        names = ", ".join(str(p) for p in missing)
+        raise MissingInput(
+            f"This search needs data that is not on this PC: {names}. The refresh builds it from "
+            "the game and your account: run refresh.cmd (./refresh.sh on Linux) in the holobuilder "
+            "folder, or restart the app."
+        )
+
+
 def run_event_job(job: Job, opts: Mapping, *, runner: Callable[..., Any] | None = None) -> None:
     """The job behind `POST /api/event/run`. Events: `plan` -> `stage` / `progress`
     (per stage) -> `result{payload}` -> `end`; or `cancelled` / `error` then `end`.
@@ -167,6 +214,12 @@ def run_event_job(job: Job, opts: Mapping, *, runner: Callable[..., Any] | None 
     t0 = time.monotonic()
     try:
         emit({"type": "plan", "stages": [dict(s) for s in EVENT_STAGES], "opts": dict(opts)})
+        if runner is None:
+            plan = (opts.get("assumptions") or {}) if isinstance(opts.get("assumptions"), dict) else {}
+            require_search_inputs(
+                str(opts.get("basis") or "account"),
+                plan.get("boards") == "plan" and not plan.get("infinite"),
+            )
         _raw, event, _keys = event_mode.load_event_bundle(config.EVENT_BONUS_PATH, opts.get("event"))
         collection = (config.read_json(config.COLLECTION_PATH) or {}).get("cards") or {}
         song_info = _event_song_info(opts)
@@ -183,6 +236,8 @@ def run_event_job(job: Job, opts: Mapping, *, runner: Callable[..., Any] | None 
         emit({"type": "result", "payload": payload, "elapsed_ms": round((time.monotonic() - t0) * 1000)})
     except event_mode.EventCancelled:
         emit({"type": "cancelled", "elapsed_ms": round((time.monotonic() - t0) * 1000)})
+    except MissingInput as exc:  # its message names the file and what to run
+        emit({"type": "error", "message": str(exc)})
     except Exception as exc:  # noqa: BLE001 — every failure is an event, never a dead stream
         import traceback  # noqa: PLC0415
 
@@ -211,6 +266,7 @@ def serve_events(h: Handler, job_id: str) -> None:
     if job is None:
         h.reply(404, b"unknown job", "text/plain; charset=utf-8")
         return
+    job.streamed = True
     h.send_response(200)
     h.send_header("Content-Type", "text/event-stream")
     h.send_header("Cache-Control", "no-store")

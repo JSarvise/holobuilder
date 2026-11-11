@@ -2,15 +2,15 @@
 
 Emits `dumps/board_export.json` -- one object per character with every board node
 (branch, effect, position, own cost, unlock path + path cost, state) and the four
-sockets (current card placement + the Connect effect it grants). `--gain` adds the
-score oracle's marginal per buyable node (a per-node pool re-score, slower).
+sockets (current card placement + the Connect effect it grants). Each node's `gain` is
+kept in the shape and left null: the export carries the board as it is.
 
 Uses the game's 4-neighbour graph (`tree_optimise.adjacency`), so costs and unlock
 paths are real; a hex-distance graph would add edges the game lacks and under-cost paths.
 
 Usage:
 
-    python tools/refresh/board_export.py [--gain]
+    python tools/refresh/board_export.py [--scenario S] [--embed-icons]
 """
 
 from __future__ import annotations
@@ -182,8 +182,8 @@ def build(
         "branches": skilltree.get("branches", {}),
         "gain_included": gain,
         "notes": (
-            "Numbers use the fixed 4-neighbour graph (adjacency corrected "
-            "2026-08-09). `gain` is the marginal pool re-score of buying that node "
+            "Numbers use the board's 4-neighbour graph (the game's own "
+            "adjacency). `gain` is the marginal pool re-score of buying that node "
             "now, on pooled characters only (off-pool B/R read 0 under the fixed "
             "pool); null where not computed."
         ),

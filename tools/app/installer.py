@@ -11,6 +11,9 @@ version.json + the zip it names, sha256-checked), so the exe stays small and nev
 
 Installs per user, no administrator: %LOCALAPPDATA%\\Programs\\holobuilder\\{runtime,app}, a
 Desktop and a Start-menu shortcut, an entry in Windows' Apps list, a copy of itself for updates.
+It installs only into a new or empty folder, or over an install of its own, and marks the folder
+as its install (MARKER). Uninstalling removes only what an install put there (INSTALLED), and the
+folder itself only when the install created it and nothing else is left in it.
 An update keeps this PC's data: app/state (Settings, the account's derived files),
 app/tools/recon/proxy/dumps (the synced data and the art cache), app/data/owned.json, app/data/gacha.
 
@@ -48,6 +51,11 @@ DEFAULT_DIR = Path(os.path.expandvars(r"%LOCALAPPDATA%\Programs")) / APP
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\holobuilder"
 PRESERVE = ["app/state", "app/tools/recon/proxy/dumps", "app/data/owned.json", "app/data/gacha"]
 SETUP_NAME = "holobuilder-setup.exe"
+# The marker says a folder is an install of this app (an uninstall touches no other folder) and
+# whether the install created that folder (only then may an uninstall remove it, once empty).
+MARKER = ".holobuilder-install.json"
+# what an install puts in its folder: the only things an uninstall removes
+INSTALLED = ("app", "runtime", SETUP_NAME, MARKER)
 WEBVIEW2_KEYS = [
     r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
     r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
@@ -77,8 +85,9 @@ SERVER_URL = _server_url()
 # This installer's own version (the GitHub release line installer-X.Y.Z). The signed
 # version.json names the oldest installer still fit to install (`setup_min`, build_app.py):
 # an older exe someone kept says so and points at the new one instead of installing with a
-# flow the server no longer serves. Updates from the app never hit this: the app runs the
-# installer.py of its own (current) version.
+# flow the server no longer serves. An update is run by the copy next to app/, which the app
+# brings up to the release's own installer just before handing over and every run replaces
+# (setup_exe.py), so `setup_min` is checked on a fresh install only.
 SETUP_VERSION = "1.0.0"
 RELEASES_URL = "https://github.com/JSarvise/holobuilder/releases/latest"
 
@@ -256,6 +265,11 @@ def get(url: str, token: str, route: str, timeout: int = 30):
     return urllib.request.urlopen(req, timeout=timeout)  # noqa: S310 -- our own https host
 
 
+def fetch_bytes(url: str, token: str, route: str, timeout: int = 120) -> bytes:
+    with get(url, token, route, timeout) as r:
+        return r.read()
+
+
 def installed_version(d: Path) -> str | None:
     try:
         return (d / "app" / "tools" / "app" / "VERSION").read_text("utf8").strip()
@@ -302,6 +316,54 @@ def ensure_webview2() -> None:
 
 def ps_quote(s: str) -> str:
     return "'" + s.replace("'", "''") + "'"
+
+
+def is_install(d: Path) -> bool:
+    """`d` holds an install of this app: its marker, or (an install made before the marker
+    existed) the app's launcher where an install puts it."""
+    return (d / MARKER).is_file() or (d / "app" / "tools" / "app" / "launcher.py").is_file()
+
+
+def install_target_problem(d: Path) -> str | None:
+    """Why `d` cannot take an install, or None. A folder that already holds other things and is
+    not an install of this app belongs to someone else: an install would move its `app` and
+    `runtime` aside, and the uninstall would then treat the folder as its own."""
+    if d.is_dir() and any(d.iterdir()) and not is_install(d):
+        return f"{d} is not empty and holds no holobuilder install: choose an empty or a new folder"
+    return None
+
+
+def created_dir(d: Path) -> bool:
+    """Whether the install created `d` (an install made before the marker: yes, the folder
+    carries the installer's own name)."""
+    try:
+        return bool(json.loads((d / MARKER).read_text("utf8")).get("created_dir", True))
+    except (OSError, ValueError):
+        return True
+
+
+def write_marker(d: Path, created: bool) -> None:
+    """Mark `d` as this app's install; a reinstall keeps the first install's `created_dir`."""
+    if (d / MARKER).is_file():
+        created = created_dir(d)
+    (d / MARKER).write_text(json.dumps({"app": APP, "created_dir": created}, indent=1), "utf8")
+
+
+def removal_command(exe: Path, folder: Path | None) -> list[str]:
+    """What deletes the installer exe once this process has exited (a running program cannot
+    delete itself), then `folder` only if it is empty. Each path reaches PowerShell as a
+    single-quoted literal, nothing recurses, and no shell parses the command line."""
+    script = (
+        f"Start-Sleep -Seconds 5; Remove-Item -LiteralPath {ps_quote(str(exe))} -Force "
+        "-ErrorAction SilentlyContinue"
+    )
+    if folder is not None:
+        f = ps_quote(str(folder))
+        script += (
+            f"; if (-not (Get-ChildItem -LiteralPath {f} -Force -ErrorAction SilentlyContinue)) "
+            f"{{ Remove-Item -LiteralPath {f} -ErrorAction SilentlyContinue }}"
+        )
+    return ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
 
 
 def make_shortcut(lnk: Path, target: Path, args: str, workdir: Path, icon: Path) -> None:
@@ -483,6 +545,9 @@ class Api:
         try:
             if self.mode == "update" and not (d / "app" / "tools" / "app" / "launcher.py").is_file():
                 raise RuntimeError(f"no holobuilder installed in {d}: nothing to update")
+            problem = install_target_problem(d)
+            if problem:
+                raise RuntimeError(problem)
             if self.pid:
                 self._emit(step="wait", state="run")
                 wait_pid(self.pid)
@@ -549,7 +614,9 @@ class Api:
                     shutil.move(str(src), str(dst))
                 self._emit(step="keep", state="done")
             self._emit(step="switch", state="run")
+            created = not d.exists()
             d.mkdir(parents=True, exist_ok=True)
+            write_marker(d, created)
             old = work / "old"
             old.mkdir()
             for part in ("app", "runtime"):
@@ -562,11 +629,21 @@ class Api:
             api = state / "server_api.json"
             if not api.exists():
                 api.write_text(json.dumps({"url": url, "token": token}, indent=1), "utf8")
-            if FROZEN:  # a copy of this exe, for updates and removal
-                me = Path(sys.executable)
-                if me.resolve() != (d / SETUP_NAME).resolve():
-                    shutil.copy2(me, d / SETUP_NAME)
-            self._emit(step="switch", state="done")
+            # the installer the next update runs: this release's own (setup_exe.py)
+            import setup_exe  # noqa: PLC0415
+
+            setup_exe.remove_aside(d)
+            kept = ""
+            try:
+                setup_exe.bring_current(
+                    d,
+                    meta,
+                    lambda route: fetch_bytes(url, token, route),
+                    running=Path(sys.executable) if FROZEN else None,
+                )
+            except Exception as exc:  # noqa: BLE001 -- the app is in place; the next update retries
+                kept = f"the previous installer copy was kept ({exc})"
+            self._emit(step="switch", state="done", **({"detail": kept} if kept else {}))
 
             self._emit(step="shortcuts", state="run")
             icon = d / "app" / "tools" / "app" / "ui" / "app.ico"
@@ -605,6 +682,8 @@ class Api:
     def _uninstall(self) -> None:
         d = Path(self.dir)
         try:
+            if not is_install(d):
+                raise RuntimeError(f"{d} holds no holobuilder install: nothing was removed")
             self._emit(step="remove", state="run")
             # the app, its engine and workers all run d\runtime\python*.exe: close them first,
             # or Windows keeps their files and the folder cannot go
@@ -625,13 +704,19 @@ class Api:
             for folder in shortcut_dirs():
                 (folder / "holobuilder.lnk").unlink(missing_ok=True)
             unregister()
+            created = created_dir(d)
+            # only what an install put here (INSTALLED); anything else in the folder stays
             for part in ("app", "runtime"):
                 shutil.rmtree(d / part, ignore_errors=True)
+            (d / MARKER).unlink(missing_ok=True)
+            import setup_exe  # noqa: PLC0415
+
+            setup_exe.remove_aside(d)
+            shutil.rmtree(d.parent / f".{APP}-setup", ignore_errors=True)  # the runs' download folder
             self._emit(step="remove", state="done")
-            # this exe cannot delete itself while it runs: cmd removes the folder after we exit
+            # this exe last, after it exits; then the folder, if the install made it and it is empty
             subprocess.Popen(
-                f'cmd /c ping -n 6 127.0.0.1 >nul & rmdir /s /q "{d}"',
-                shell=True,
+                removal_command(d / SETUP_NAME, d if created else None),
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             self._emit(step="removed")

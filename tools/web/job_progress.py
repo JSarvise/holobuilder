@@ -1,7 +1,7 @@
-"""`eta_s` and `best_so_far` on a search job's progress events (critique
-A-data §1 P1-5: "progress you can trust"). `/api/run` and `/api/event/run`
-wrap their `emit` in a `JobProgress`, which passes every event through and
-adds, to each `progress` event:
+"""`eta_s` and `best_so_far` on a search job's progress events, so the page
+shows progress it can trust. The jobs behind `/api/search` and `/api/event/run`
+(`hbweb/jobs.py`) wrap their `emit` in a `JobProgress`, which passes every
+event through and adds, to each `progress` event:
 
     elapsed_s     seconds since the job started
     stage_s       seconds since this stage's first event

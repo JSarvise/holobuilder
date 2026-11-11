@@ -12,7 +12,7 @@
 #                                  printed as a loss report -- never silently.
 #
 # Identity, stats, durations, cooldowns, probability tiers, magnitudes and gates are all
-# verified against an independent 50-card hand transcription (crossvalidate_ssr.py).
+# verified against an independent 50-card hand transcription.
 #
 # Four shapes the schema represents rather than drops:
 #   1. base + conditional magnitude in one slot -- SkillSlot.override:
@@ -24,17 +24,10 @@
 #   4. effect target_max ("... to 2 Cute")     -- SkillSlot.target, the `(kind, value,
 #      count)` clause every family carries.
 #
-# `all` is never a fallback for a PASSIVE target. Across the 167
-# real cards, zero PASSIVE targets resolve to `all` (38 self, 65 type-max-2, 32 type-max-3,
-# 32 generation-max-2) -- so an importer that defaulted an unparsed/missing PASSIVE target to
-# `all` would fabricate the one value the data never exhibits, silently inflating a subset
-# effect into a team-wide one. `_slot` below asserts this rather than assuming it.
-#
-# On ACTIVE and SPECIAL, ALL 167 cards carry no target clause at all -- `all` there is this
-# importer's encoding of that absence (a genuine team-wide default), never something read
-# from the source. This is exactly why the PASSIVE prohibition above is PASSIVE-scoped,
-# not global: on PASSIVE the game states a target and `all` would contradict it; on
-# ACTIVE/SPECIAL the game states nothing and `all` fills a genuine void.
+# `all` is never a fallback for a PASSIVE target: no real card's PASSIVE resolves to `all`
+# (they are self, type-max-2/3 or generation-max-2), so defaulting a missing one to `all` would
+# inflate a subset effect into a team-wide one. `_slot` asserts it. ACTIVE and SPECIAL carry no
+# target clause at all, and `all` there encodes that absence (a genuine team-wide default).
 #
 # Usage: python import_to_cards.py [--diff]
 import argparse
@@ -245,14 +238,10 @@ def _slot(kind, sk, loss, card_id):
             # slot's own `magnitude`, the slot's own gate stays `condition`, and the gated
             # value becomes an explicit override, never collapsed into the principal.
             #
-            # `magnitude_permil` can be None for a "valueless" effect form
-            # (`judgement_enhance-0`, `life_recovery-400` -- see `_rider_payload`'s docstring).
-            # An override requires `cond_effect["effect"] == principal["effect"]`, and neither
-            # valueless family is ever observed as a PRINCIPAL effect in the 167 cards, which is
-            # what makes `magnitude_permil is None` believed-unreachable here. Mirror
-            # `_rider_payload`'s fallback to `float(cond_effect["value"])` so a data refresh that ever
-            # attaches a valueless effect as its own principal degrades gracefully instead of
-            # raising a bare `TypeError` deep in arithmetic.
+            # `magnitude_permil` is None for a "valueless" effect form (`judgement_enhance-0`,
+            # `life_recovery-400`; see `_rider_payload`), which no card has as a PRINCIPAL
+            # effect. The same fallback as `_rider_payload` keeps a future one from raising
+            # a bare `TypeError`.
             override = {
                 "kind": "override",
                 "magnitude": (
@@ -441,9 +430,9 @@ def _write_merge_diff(draft_doc):
 
 def main():
     # Windows' default cp1252 console encoding raises on this file's own
-    # non-ASCII characters (the ★ rarity glyph) -- reconfigure stdout the
-    # same way cli.py's own main() already does, rather than let this
-    # tool's loss report crash on Windows.
+    # non-ASCII characters (the ★ rarity glyph) -- reconfigure stdout to
+    # UTF-8, as the other refresh tools do, rather than let this tool's
+    # loss report crash on Windows.
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Map dumps/cards_enriched.json onto the domain's cards.json schema. "

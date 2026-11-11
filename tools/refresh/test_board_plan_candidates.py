@@ -1,5 +1,5 @@
-"""The board planner's three candidate plans: the modelled valuation (the plan as it was before
-the planner scored songs on the Overall Power) with the whole Act search, then the bare-board
+"""The board planner's three candidate plans: the modelled valuation (songs scored on the
+modelled stat pool, not the Overall Power) with the whole Act search, then the bare-board
 values and the values measured inside that first plan, each with the member boards held at the
 first plan's Act levels; the scorer picks, and a tie keeps the earliest."""
 
@@ -61,7 +61,7 @@ def test_the_scorer_picks_and_both_others_start_from_the_modelled_plan(monkeypat
     board = bps._best_of_candidates(dict(KW))
     assert board["chr-1"]["nodes"] == ["in_board"]
     assert [s[0] for s in seen] == ["modelled", "bare", "in_board"]
-    assert seen[0][1] is True and seen[1][1] is False  # only (1) on the old valuation
+    assert seen[0][1] is True and seen[1][1] is False  # only (1) on the modelled valuation
     assert seen[0][3] is None  # (1) runs the whole Act search
     assert seen[1][3] == LEVELS and seen[2][3] == LEVELS  # (2), (3) at (1)'s Act levels
     assert seen[2][2] == {"chr-1": ["modelled"]}  # (3) valued inside (1)

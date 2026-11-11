@@ -584,8 +584,37 @@ function wireCutoffs() {
 setInterval(() => { if (!document.hidden) loadCutoffs(); }, 60_000);
 
 /* ------------------------------------------------------------------ 4. reference */
+// How a team's Event Bonus adds up, from this event's own rows: every member adds each bonus it
+// matches (holomem, event card, bloom) and the five members' bonuses add up; the leader adds
+// nothing (`marathon.py`: rows summed per card, summed over the members)
+function renderRuleSummary(live) {
+  const one = xs => { const u = [...new Set(xs.filter(v => v != null))]; return u.length === 1 ? u[0] : null; };
+  const hm = live.holomems || [], cards = live.cards || [], table = live.rarity_bloom || {};
+  const hmP = one(hm.map(m => m.permil)), cardP = one(cards.map(c => c.permil));
+  const parts = [];
+  if (hm.length) parts.push(`${hmP != null ? pct(hmP) : "its bonus"} for each member who is one of the ${hm.length} holomems below (any card of hers)`);
+  if (cards.length) parts.push(`${cardP != null ? pct(cardP) : "its bonus"} more when that member is one of the event cards`);
+  if (Object.keys(table).length) parts.push("its Bloom Bonus, by its rarity and bloom");
+  if (!parts.length) { $("#evrule").textContent = ""; return; }
+  // the example: the event card of highest rarity, at that rarity's best bloom
+  const hmIds = new Set(hm.map(m => m.character_id));
+  const top = [...cards].sort((a, b) => (+b.rarity || 0) - (+a.rarity || 0))[0];
+  let example = "";
+  if (top) {
+    const row = table[String(top.rarity)] || {};
+    const bloom = Math.max(0, ...Object.keys(row).map(Number));
+    const chr = "chr-" + top.id.split("-")[1];
+    const terms = [hmIds.has(chr) ? hmP : null, top.permil, bloom ? row[bloom] : null].filter(v => v != null);
+    if (terms.length > 1) example = ` For example, an event ${top.rarity}★ card${bloom ? ` at Bloom ${bloom}` : ""}: ${terms.map(pct).join(" ")} = <b class="eb">${pct(terms.reduce((s, v) => s + v, 0))}</b>.`;
+  }
+  $("#evrule").innerHTML = `Each of your five members adds every bonus it matches, and the five add up into the team's Event Bonus (the leader adds nothing): ${parts.join("; ")}.${example}`;
+  $("#evcardnote").textContent = cards.length
+    ? `Each card's figure is its whole bonus: ${cardP != null ? pct(cardP) : "its card bonus"} as an event card, plus its holomem Bonus${Object.keys(table).length ? ", plus its Bloom Bonus at your bloom (when you own it)" : ""}.`
+    : "";
+}
 function renderRules(ev) {
   const live = ev.live || {};
+  renderRuleSummary(live);
   $("#mems").innerHTML = (live.holomems || []).map(m => `<span class="ev-mem"><i style="--gc:${genOf(m.character_id).c}"></i>${esc(m.name)} <b class="eb">${pct(m.permil)}</b></span>`).join("")
     || `<p class="ev-empty">No holomem bonus in this event.</p>`;
   renderBloom(live.rarity_bloom || {});

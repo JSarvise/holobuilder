@@ -35,9 +35,10 @@ def test_the_refresh_fetches_events_and_rebuilds_the_bonus_tables():
     import argparse
 
     import refresh_all as ra
+    import refresh_steps
 
     args = argparse.Namespace(account="main", merge_collection=False, python=None)
-    cmd, _env, _cwd = ra.cmd_account(args)
+    cmd, _env, _cwd = refresh_steps.cmd_account(args)
     assert "--refresh-events" in cmd
     assert any(step.name == "event_bonus" for step in ra.STEPS)
 

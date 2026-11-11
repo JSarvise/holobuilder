@@ -52,3 +52,15 @@ def test_a_refused_replace_is_retried_and_the_old_file_survives_a_failure(tmp_pa
     # the target is the last good file, and no temp file is left beside it
     assert target.read_text("utf8") == "new"
     assert [p.name for p in tmp_path.iterdir()] == ["inventory.json"]
+
+
+def test_a_private_file_is_readable_by_its_owner_only(tmp_path):
+    # the account credential and the game's keys (state/): mode 600 on Linux and macOS, set on
+    # the temp file before the secret is written, so no moment exists where others may read it
+    path = tmp_path / "account_credential.json"
+    atomic_io.write_text(path, '{"credential_b64": "x"}', "utf8", private=True)
+    assert path.read_text("utf8") == '{"credential_b64": "x"}'
+    atomic_io.write_bytes(tmp_path / "k.bin", b"\x01", private=True)
+    if os.name == "posix":
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert (tmp_path / "k.bin").stat().st_mode & 0o777 == 0o600

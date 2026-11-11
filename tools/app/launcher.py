@@ -646,12 +646,37 @@ class Api:
         """Installed by holobuilder-setup.exe (it leaves a copy of itself next to app/)."""
         return (REPO.parent / "holobuilder-setup.exe").is_file()
 
+    def current_setup(self) -> str:
+        """Bring holobuilder-setup.exe (next to app/) up to the release's own installer before it
+        runs an update: otherwise it stays the first install's copy, and no fix to the update
+        path ever reaches this PC (setup_exe.py). Answers what happened; a failure keeps it."""
+        import setup_exe  # noqa: PLC0415
+        import signing  # noqa: PLC0415
+
+        s = app_settings.load()
+        base = s["server_url"].rstrip("/")
+        headers = {"Authorization": f"Bearer {s['server_token']}", **content_store.version_header()}
+
+        def fetch(route: str) -> bytes:
+            req = urllib.request.Request(base + "/" + route, headers=headers)
+            with urllib.request.urlopen(req, timeout=120) as r:  # noqa: S310 -- our own host
+                return r.read()
+
+        try:
+            meta = json.loads(fetch("app/version.json"))
+            signing.verify(signing.canonical(meta), meta.get("sig", ""))
+            setup_exe.remove_aside(REPO.parent)
+            return setup_exe.bring_current(REPO.parent, meta, fetch)
+        except Exception as exc:  # noqa: BLE001 -- the copy in place still updates
+            return f"kept ({type(exc).__name__}: {exc})"
+
     def update_now(self) -> dict:
         """Hand over to the installer in update mode: it waits for this process to end, swaps
         the code (keeping this PC's data) and reopens the app."""
         setup = REPO.parent / "holobuilder-setup.exe"
         if not setup.is_file():
             return {"ok": False, "error": "this copy was not installed by holobuilder-setup.exe"}
+        installer = self.current_setup()
         subprocess.Popen(
             [str(setup), "--update", "--pid", str(os.getpid()), "--dir", str(REPO.parent)],
             cwd=str(REPO.parent),
@@ -661,7 +686,7 @@ class Api:
         self.stop()
         if self._window is not None:
             self._window.destroy()
-        return {"ok": True}
+        return {"ok": True, "installer": installer}
 
     def open_app(self) -> None:
         if self.url and self._window is not None:

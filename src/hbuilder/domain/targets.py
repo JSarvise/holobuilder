@@ -1,14 +1,7 @@
-"""Effect-target resolution — a sibling of gate resolution
-(`domain/gates.py`), not a variant of it. Target resolution depends only on
-the assembled 6-card set, exactly like `TeamAggregates` — it is therefore
-leader-invariant, the same property the batch API and the solver hot loop
-depend on.
-
-`resolve_target_card_ids` is the one place a `card.EffectTarget` clause
-becomes a concrete `frozenset[str]` of card ids. Both scoring drivers
-(`scoring._score_team` and `scoring.score_card_set`) call this once per
-`pool == "stat"` skill instance, never resolving a target themselves.
-"""
+"""Effect-target resolution, the sibling of gate resolution (`domain/gates.py`): turns a
+`card.EffectTarget` into the concrete set of card ids an effect reaches. It depends only
+on the assembled card set, so it is leader-invariant. Both scoring drivers call
+`resolve_target_card_ids` for every targeted skill and never resolve a target themselves."""
 
 from __future__ import annotations
 
@@ -27,44 +20,27 @@ def resolve_target_card_ids(
     under_supply: str,
     rank_values: Mapping[str, float] | None = None,
 ) -> frozenset[str]:
-    """Resolve `target` against the assembled 6-card `cards` set.
+    """Resolve `target` against the assembled card set `cards`.
 
-    - `target is None` (the structurally team-wide marker) -> every id in
-      `cards`.
-    - `target.kind == "self"` -> `frozenset({self_card_id})` — always the
-      source card, never resolved against `cards` at all.
-    - `target.kind == "type"` / `"generation"` -> the qualifying cards
-      (matching `card.type` / `target.value in card.generations`) are
-      ranked and `model.select(...)` picks `target.count` of them.
+    - `None` (team-wide) -> every id in `cards`.
+    - `kind == "self"` -> `{self_card_id}`.
+    - `kind == "type"` / `"generation"` -> the qualifying cards (matching `card.type` /
+      `target.value in card.generations`), ranked, and `model.select` picks `target.count`.
 
-    Ranking value: `rank_values[card id]` when given (a Score Support passes each
-    member's ACTIVE magnitude, `scoring.active_magnitude_by_card`: it raises no stat,
-    and the game pays the qualifiers whose ACTIVE is the strongest); otherwise the
-    card's BASE value of the stat(s) the effect raises —
-    `stat_names`, summed. A single-stat buff ranks its matchers by that one
-    stat; an all-stats effect (and a score effect, whose callers pass all
-    three names) ranks by total parameter. Checked against 690 server
-    `Live/GetDeck` rows (the deck-screen Overall Power as the target), this
-    rule is bit-exact on 690 of 690; ranking every effect by TOTAL parameter
-    is exact on only 510 of 690, and on the other 180 the server visibly paid
-    a different member. Eleven other rules were scored on the same rows and
-    none passes 81 %: total ascending, slot order either way, emitter first
-    or excluded, total plus board power, the displayed per-card total, level,
-    rarity, bloom.
+    Ranking value: `rank_values[card id]` when given (a Score Support passes each member's
+    ACTIVE magnitude, `scoring.active_magnitude_by_card`: it raises no stat, and the game pays
+    the qualifiers with the strongest ACTIVE); otherwise the card's base value of the stat(s)
+    the effect raises (`stat_names`, summed), so an all-stats or score effect ranks by total
+    parameter. Against 690 server `Live/GetDeck` rows (deck-screen Overall Power) this rule
+    is exact on 690; ranking every effect by total parameter is exact on 510, and eleven
+    other rules (total ascending, slot order either way, emitter first or excluded, total
+    plus board power, the displayed per-card total, level, rarity, bloom) stay under 81 %.
 
-    Under-supply (fewer qualifying cards than `target.count`): the
-    configured `under_supply` rule decides, never a hardcoded choice —
-    `"apply_to_available"` returns every qualifying card,
-    `"do_not_apply"` returns an empty frozenset.
+    Under-supply (fewer qualifiers than `target.count`) follows `under_supply`:
+    `"apply_to_available"` returns every qualifier, `"do_not_apply"` none.
 
-    `target` must never be the `UNKNOWN` sentinel: `scoring.py` is
-    responsible for routing an untranscribed target to `data_missing`
-    before resolution is ever attempted (via `_REQUIRED_KNOWN_FIELDS`).
-    Reaching this function with anything other than `None` or an
-    `EffectTarget` raises `ValueError` naming the card, because fabricating
-    a plausible resolution for an unrecorded target would be strictly
-    worse than raising.
-    """
+    Raises `ValueError` for any `target` other than `None` or an `EffectTarget`: scoring
+    routes an `UNKNOWN` target to `data_missing` first (`_REQUIRED_KNOWN_FIELDS`)."""
     if target is None:
         return frozenset(card.id for card in cards)
 
@@ -89,9 +65,8 @@ def resolve_target_card_ids(
             f"resolve_target_card_ids: unrecognised target kind {target.kind!r} for card {self_card_id!r}"
         )
 
-    # Rank by the base value of the stat(s) the effect raises; see the docstring for why
-    # this rule and not total parameter. Ties keep deck slot order: `candidates` is built in `cards` order and
-    # `TopNByBuffedStat.select` is a stable sort.
+    # Rank by the base value of the stat(s) raised (see the docstring). Ties keep deck slot
+    # order: `candidates` follows `cards` and `TopNByBuffedStat.select` is a stable sort.
     candidates = [
         (
             card.id,
@@ -105,8 +80,7 @@ def resolve_target_card_ids(
     if len(candidates) < target.count:  # type: ignore[operator]
         if under_supply == "do_not_apply":
             return frozenset()
-        # "apply_to_available": the effect applies to every qualifying
-        # card, since fewer qualify than the target's own count.
+        # "apply_to_available": every qualifier receives it.
         return frozenset(card_id for card_id, _stat_value in candidates)
 
     selected = model.select(candidates, target.count)  # type: ignore[arg-type]

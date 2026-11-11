@@ -195,16 +195,16 @@ def _names():
     domain's own table, so a card's mask never goes stale."""
     global _domain
     if _domain is None:
-        from hbuilder.domain import board_plan as bp
+        from hbuilder.domain import board
 
-        generations = sorted(set(bp._GENERATION_BY_GROUPING.values()))
+        generations = sorted(set(board._GENERATION_BY_GROUPING.values()))
         if len(generations) > 64:
             raise RuntimeError("more than 64 generations; the mask does not fit")
         _domain = (
-            tuple(bp.STAT_NAMES),
+            tuple(board.STAT_NAMES),
             {g: i for i, g in enumerate(generations)},
-            bp._GROUPING_RE,
-            bp._GENERATION_BY_GROUPING,
+            board._GROUPING_RE,
+            board._GENERATION_BY_GROUPING,
         )
     return _domain
 

@@ -5,9 +5,26 @@ from __future__ import annotations
 import contextlib
 import socket
 import threading
+import urllib.request
 from collections.abc import Iterator
 
 import pytest
+
+
+class _SessionKey(urllib.request.BaseHandler):
+    """The tests' requests to the in-process server stand for its own pages' requests: every
+    non-GET one to 127.0.0.1 carries the session key a page would (hbweb/session.py). The
+    tests of that guard itself send their requests by hand (`test_local_security.py`)."""
+
+    def http_request(self, req: urllib.request.Request) -> urllib.request.Request:
+        if req.get_method() not in ("GET", "HEAD") and req.host.split(":")[0] == "127.0.0.1":
+            from hbweb import session  # noqa: PLC0415
+
+            req.add_unredirected_header(session.HEADER, session.TOKEN)
+        return req
+
+
+urllib.request.install_opener(urllib.request.build_opener(_SessionKey()))
 
 
 def _free_port() -> int:

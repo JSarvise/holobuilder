@@ -8,6 +8,9 @@
   serves the pages' modules by extension first and the pages themselves last.
 * **Searches are jobs** (`jobs.py`): the Optimizer and the Event page start one and read
   its progress off `GET /events/<id>`.
+* **Only its own pages** (`session.py`): every request must name this server in `Host`, and
+  every POST must come from one of its own pages (their `Origin`, and the session key each
+  page carries), so another page open in the same browser cannot change anything.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from hbweb import (
     jobs,
     park,
     search,
+    session,
     songs,
     static,
 )
@@ -197,11 +201,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reply_error(exc)
 
     # -- routes ---------------------------------------------------------------
+    def _refused(self, method: str) -> bool:
+        """Answer 403 to a request that is not this server's own (`session.refusal`)."""
+        why = session.refusal(self, method)
+        if why is None:
+            return False
+        # the body is read (up to 1 MB) before the answer: a socket closed with unread data is
+        # reset on Windows, and the reset can reach the client before the 403 does
+        length = int(self.headers.get("Content-Length") or 0)
+        if 0 < length <= 1 << 20:
+            self.rfile.read(length)
+        self.close_connection = True
+        self.reply_json(403, {"error": why})
+        return True
+
     def do_GET(self) -> None:  # noqa: N802
-        self._answer_or_error(self._get)
+        if not self._refused("GET"):
+            self._answer_or_error(self._get)
 
     def do_POST(self) -> None:  # noqa: N802
-        self._answer_or_error(self._post)
+        if not self._refused("POST"):
+            self._answer_or_error(self._post)
 
     def _get(self) -> None:
         path = self.path.split("?", 1)[0]
@@ -227,7 +247,7 @@ class ThreadingServer(http.server.ThreadingHTTPServer):
     # preference: `SO_REUSEADDR` means **a second process may HIJACK a port
     # another process is already listening on**. Both bind, both print
     # "serving on ...", and requests go to whichever the stack picks --
-    # in practice the older one, which has none of the new routes. With it
+    # in practice the one started first, possibly a stale build. With it
     # False, a second launch FAILS on bind and says so.
     # On POSIX it only means "reuse a socket in TIME_WAIT" (a second listener
     # still fails), so a restart is not refused for a minute after a stop.
@@ -353,6 +373,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"art: {art_note}", file=sys.stderr)
     print(f"serving on http://{BIND_HOST}:{args.port}/", file=sys.stderr)
+    # the search pools' temp files an earlier server left (one killed, or closed mid-search)
+    from hbuilder.solver import parallel_refine  # noqa: PLC0415
+
+    parallel_refine.sweep_stale_temp_once()
     _start_cutoffs_poller()
     try:
         server.serve_forever()

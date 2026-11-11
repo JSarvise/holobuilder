@@ -13,6 +13,7 @@ sys.path.insert(0, str(REPO / "tools" / "refresh"))
 import account_snapshot as A  # noqa: E402
 import pytest  # noqa: E402
 import refresh_all as R  # noqa: E402
+import refresh_steps as RS  # noqa: E402
 
 from hbuilder import paths  # noqa: E402
 from hbuilder.errors import MissingInput  # noqa: E402
@@ -21,19 +22,19 @@ from hbuilder.errors import MissingInput  # noqa: E402
 def test_account_only_runs_the_account_steps_without_the_event_call():
     assert set(R.ACCOUNT_STEPS) <= set(R.STEP_NAMES)
     ns = argparse.Namespace(python="py", account="main", merge_collection=True, account_only=True)
-    cmd, _, _ = R.cmd_account(ns)
+    cmd, _, _ = RS.cmd_account(ns)
     assert "--refresh-events" not in cmd and "--merge-collection" in cmd
     ns.account_only = False
-    assert "--refresh-events" in R.cmd_account(ns)[0]  # the publisher's refresh keeps it
+    assert "--refresh-events" in RS.cmd_account(ns)[0]  # the publisher's refresh keeps it
 
 
 def test_the_app_refresh_reads_its_own_event_rank_and_only_its_own_region():
     assert "event_cutoffs" in R.ACCOUNT_STEPS
     ns = argparse.Namespace(python="py", account_only=True)
-    cmd = R.cmd_event_cutoffs(ns)[0]
+    cmd = RS.cmd_event_cutoffs(ns)[0]
     assert cmd[-4:] == ["--self", "--songs", "--region", "own"]
     ns.account_only = False
-    assert "--region" not in R.cmd_event_cutoffs(ns)[0]  # the publisher reads every region
+    assert "--region" not in RS.cmd_event_cutoffs(ns)[0]  # the publisher reads every region
 
 
 def test_no_game_means_no_install_lookup(monkeypatch):

@@ -1,26 +1,17 @@
 # Export the PER-LEVEL CardLevel stat multiplier curve, and each card's level/potential group.
 #
-# Why this exists: `build_cards_dataset.py` reads the same table but keeps only each group's
-# value at its MAXIMUM level (`_cardlevel_maxmult`), because maxed stats were all it needed.
-# `src/hbuilder/domain/collection.py` computes
+# `src/hbuilder/domain/collection.py` computes a card's stats at an ARBITRARY level,
 #
 #     stat_i = ceil(ratio_i * (level_multiplier / 1000) * bloom_multiplier)
 #
-# in IEEE-754 binary32 at every step, as `CardStatus::.ctor` does
-# (`Vision.Common.Core`, RVA 0x52acff0): the whole chain is `cvtsi2ss`/`divss`/`mulss`/`addss`
-# and the single `cvtps2pd` only widens the result for `Math.Ceiling(double)`. See that
-# module's docstring for the disassembly and for the 12 (card, level, bloom, stat) points
-# where a binary64 evaluation gives a different integer.
-#
-# at an ARBITRARY level, so it needs the whole curve. Without it a card's level cannot move a
-# score, and a collection editor's level control would be decorative.
+# in IEEE-754 binary32 at every step, as the client's `CardStatus::.ctor` does (see that
+# module's docstring), so it needs the whole curve; `build_cards_dataset.py` keeps only each
+# group's value at its maximum level (`_cardlevel_maxmult`).
 #
 # Reads the master SQLCipher DBs directly via `master_cache.open_table` + `master_db
-# .decode_record` -- the same path `build_cards_dataset.py` uses -- NOT `master_cache.rows()`,
-# which corrupts any byte >= 0x80 in a binary field.
+# .decode_record`, NOT `master_cache.rows()`, which corrupts any byte >= 0x80 in a binary field.
 #
-# No network. Writes tools/recon/proxy/dumps/card_level_curve.json and nothing else; it never
-# touches data/cards.json or data/owned.json.
+# No network. Writes tools/recon/proxy/dumps/card_level_curve.json and nothing else.
 #
 # Usage: python tools/refresh/card_level_curve.py
 import json
@@ -101,15 +92,11 @@ def bloom_permil(idx):
     effect_type 4. The cumulative array is the running sum by step, which is what reproduces
     `card_caps.json`'s `mult_permil` and the `stats_max.at.bloom_mult` values on disk.
 
-    **The array MUST run to the group's max bloom, not to its last stat step**, and the two are
-    different for two of the three rarities. In the real table rarity 3 carries
-    effect_type 4 at upgrade_count 2 AND 5, but rarities 4 and 5 carry it only at 2 -- their
-    blooms 3, 4 and 5 grant other effect types and no stat permil at all. Truncating at the last
-    stat step would give rarity 4/5 an array of length 3, and a 5* at bloom 5 would then index
-    off the end and read as "unknown bloom multiplier" rather than as 1.10.
-    So `max_bloom` is taken over EVERY effect type and the stat array is padded by repeating its
-    last value -- which is what the game does: a bloom that grants no stat effect leaves the
-    stat multiplier where it was.
+    **The array runs to the group's max bloom, not to its last stat step**: rarity 3 carries
+    effect_type 4 at upgrade_count 2 AND 5, rarities 4 and 5 only at 2 (their blooms 3-5 grant
+    other effect types). So `max_bloom` is taken over EVERY effect type and the stat array is
+    padded with its last value, as in the game: a bloom with no stat effect leaves the
+    multiplier where it was.
     """
     db = open_table("CardPotential", idx)
     steps = {}
@@ -139,11 +126,9 @@ def bloom_permil(idx):
 def verify(curve, groups, blooms, enriched_path):
     """Reproduce every card's `stats_max` from the exported curve, EXACTLY.
 
-    This is the check the curve exists to make possible. `stats_max` was computed independently
-    by `build_cards_dataset.py` straight from the master tables; this recomputes it from the
-    exported JSON through the same formula `domain/collection.py` uses. Two derivations, one
-    comparison -- an off-by-one in the level index, a summed-instead-of-indexed bloom array, or
-    a transposed stat triple all fail here on real cards instead of passing quietly.
+    `stats_max` comes from `build_cards_dataset.py` straight off the master tables; this
+    recomputes it from the exported JSON through `domain/collection.py`'s formula, so an
+    off-by-one level index, a mis-summed bloom array or a transposed stat triple fails here.
     """
     if not os.path.exists(enriched_path):
         return None
@@ -233,7 +218,7 @@ def main():
 
     doc = {
         "_source": "master CardLevel + Card + CardPotential, via master_cache.py (no network)",
-        "_formula": "stat_i = ceil(ratio_i * (level_mult[group][level]/1000) * (1 + bloom_permil[group][bloom]/1000)), evaluated in IEEE-754 binary32 at every step and in this operand order -- ATTESTED from CardStatus::.ctor, Vision.Common.Core RVA 0x52acff0",
+        "_formula": "stat_i = ceil(ratio_i * (level_mult[group][level]/1000) * (1 + bloom_permil[group][bloom]/1000)), evaluated in IEEE-754 binary32 at every step and in this operand order, as the game's CardStatus constructor computes it (Vision.Common.Core, RVA 0x52acff0)",
         "level_mult": {gid: {str(k): v for k, v in sorted(lv.items())} for gid, lv in sorted(curve.items())},
         "power_up_permyriad": {
             gid: {str(k): v for k, v in sorted(lv.items())} for gid, lv in sorted(powerup.items())
@@ -242,8 +227,9 @@ def main():
         "cards": {k: groups[k] for k in sorted(groups)},
     }
     os.makedirs(DUMPS, exist_ok=True)
-    with open(OUT, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, ensure_ascii=False, indent=1, sort_keys=True)
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    atomic_io.write_text(OUT, json.dumps(doc, ensure_ascii=False, indent=1, sort_keys=True), "utf-8")
     print(f"wrote {OUT}")
     return 0
 

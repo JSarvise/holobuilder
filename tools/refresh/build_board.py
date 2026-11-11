@@ -35,110 +35,61 @@ This script is the join between the two.
 
 So the rule is: prefer the row whose field `3` contains this character;
 otherwise the row with no field `3`. A group where neither exists is reported
-as unresolved and NOT emitted — a silently-dropped node is exactly the failure
-`board.BoardError` exists to prevent.
+as unresolved and NOT emitted (a silently dropped node is what `board.BoardError`
+exists to prevent).
 
 ### Join 3 — geometry is exact, the LEVEL depends on bloom
 
 `skilltree.json["models"]` gives every node's `[x, y]` on that character's tree
 model (4 models, 152 nodes each). `["extents"]` gives each Connect shape as
-`(dx, dy)` offsets from the socket. So the covered set is exact arithmetic:
+`(dx, dy)` offsets from the socket, so the covered set is exact arithmetic:
 
     covered = {(sx + dx, sy + dy) for dx, dy in extents[area]}
 
-Sanity check: `center_area-005` is `[(-1,2), (0,1), (0,2), (0,3), (1,2)]` and
-`S-001` sits at `(0,0)` on every model — which lands exactly on `G-001..G-005`,
-the green starter cluster. The geometry reproduces the tree.
+(`center_area-005` from `S-001` at `(0,0)` lands exactly on `G-001..G-005`.)
 
-Every Connect effect has `levels: [{v: 1500}, {v: 2000}]`, and which level a
-placement is at depends on the placed card's bloom. Master `CardPotential` is
-the join:
+Every Connect effect has `levels: [{v: 1500}, {v: 2000}]` (level 2 = level 1 + 500
+permil on all 20 effects), and the level follows the placed card's bloom through master
+`CardPotential`:
 
     rarity_3  bloom 5 -> effect_type 4, value 100   (all params +100 permil)
     rarity_4  bloom 5 -> effect_type 5, value 2     (CONNECT bonus -> LEVEL 2)
     rarity_5  bloom 5 -> effect_type 5, value 2     (CONNECT bonus -> LEVEL 2)
 
-The rule is implemented as
-`hbuilder.domain.collection.connect_bonus_level(bloom, rarity)`. Two further
-facts from the dumps:
+(`hbuilder.domain.collection.connect_bonus_level(bloom, rarity)`). No 3★ has a Connect
+effect at all. `board_state.json` records the placed card, not its bloom, so the bloom
+comes from the collection.
 
-* **Level 2 is exactly level 1 + 500 permil, on all 20 effects** in
-  `master_SkillTreeConnectEffect` — a lookup, not a curve.
-* **No 3★ has a Connect effect at all.** `skilltree.json["card_connect"]` holds
-  only rare_4 and rare_5 cards, and `master_SkillTreeConnectEffect` likewise has
-  no `rare_3` row. That is stronger than "a 3★ stays at level 1": a 3★ has no
-  Connect bonus to level.
-
-`board_state.json` records the placed card id and not its bloom, so the bloom
-has to come from the collection.
-
-⚠ **`card_default: "max"` does not license a Connect level for a real account.**
-That default is fine for STATS but not for Connect: socket cards below bloom 5
-put at level 2 overshoot the account's real board (see `tests/test_board.py::
-test_bloom_5_connect_overshoots_the_acceptance_number`).
-
-### `--connect-level`: three settings, and two different questions
-
-A maxed account is a perfectly legitimate thing to ask about — it is just a
-*different question* from "what can I field today", and the two must never be
-confused inside one artefact. So the level is resolved per socket and the
-document records what each answer rested on:
+### `--connect-level`
 
 | setting | what it does | `basis` |
 |---|---|---|
-| **`1`** (default) | base level on every socket — reproduces the +28.73 pp acceptance number | `actual`, all sockets `forced` |
-| `2` | Bloom-5 level everywhere; the sensitivity knob | `actual`, all `forced` |
-| `auto` | derives per socket from `--collection`'s per-card bloom via `CardPotential`'s rule | see below |
+| **`1`** (default) | base level on every socket | `actual`, all sockets `forced` |
+| `2` | Bloom-5 level everywhere | `actual`, all `forced` |
+| `auto` | per socket, from `--collection`'s per-card bloom | see below |
 
 Under `auto` each socket is tagged, and the tag decides the document:
 
-* `collection` — a bloom the user typed. **Account truth.**
-* `maxed-default` — inherited from `card_default: "max"`. **Taints the whole
-  document as `basis: "upper-bound"` and raises a loud problem.** Not
-  suppressed, not silently folded in.
-* `assumed-base` — nothing said. `None` is "not told us", never "level 1", but
-  a number must be written, so the base is used and the tag says so. Note that
-  `"max"` with no `card_caps.json` lands *here*, not on `maxed-default`: `"max"`
-  is a word until something says what the maximum is, so the failure is toward
-  the shipped reading rather than toward the upper bound.
+* `collection` — a bloom from the collection: the account.
+* `maxed-default` — inherited from `card_default: "max"`: taints the whole document as
+  `basis: "upper-bound"` and raises a problem (socket cards below bloom 5 at level 2
+  overshoot the real board).
+* `assumed-base` — nothing said (`None` is "not told", never "level 1"), so the base is
+  written and tagged. `"max"` with no `card_caps.json` lands here too.
 
-`auto` is **opt-in** because a collection with no per-card entries under
-`card_default: "max"` makes `auto` yield an upper bound on every filled socket,
-not the account. It is the truthful setting once the socket cards' blooms are
-recorded.
-
-Two sockets never overlap, and the geometry proves it — over
-`skilltree.json.extents` and all four models:
-
-    max 4-neighbour reach of any Connect shape   3 cells  (center_area-005)
-    socket pairwise distance, every model        7  (and 14 on the diagonals)
-    3 + 3 = 6 < 7
-
-and an exhaustive sweep of every shape-pair on every socket-pair on every model
-finds **zero** overlapping cells. So the stacking rule is not an open question,
-it is a state the board cannot be in.
-The addition is kept as the arithmetic (it is the identity when only one shape
-covers a node) and the report line stays, so that if a future board layout ever
-does put two shapes on one node the assumption is still visible rather than
-silent.
+Two sockets never overlap on any model: the farthest 4-neighbour reach of a Connect
+shape is 3 cells and sockets sit 7 apart. Coverage is still summed per node, and the
+report line stays, so an overlap on a future layout would be visible.
 
 ## Two further socket rules, from the game
 
-* **A card placed in a socket may ALSO be in the team, including as Leader.**
-  Socket placement does not consume the card for deck purposes, so the board
-  and the team solver do not couple through it. That is what lets the board be
-  optimised *after* a team is chosen rather than jointly with it.
-* **A card may occupy only ONE socket, across the whole account** — not merely
-  one per character. With 4 sockets on each of 54 boards, socket assignment is
-  therefore a **global matching problem**, not a per-character choice. This
-  converter does not check it: `board_state.json` records placements as they
-  are.
+* A card in a socket may ALSO be in the team, including as Leader, so the board can be
+  optimised after a team is chosen.
+* A card may occupy only ONE socket across the whole account: socket assignment is a
+  global matching problem. This converter does not check it: `board_state.json` records
+  placements as they are.
 
-## What this writes
-
-`dumps/board.json`, gitignored like everything under `dumps/`. It never writes
-`data/cards.json` or `data/owned.json`, and never writes anything under
-`data/` at all.
+Writes `dumps/board.json` only.
 """
 
 from __future__ import annotations
@@ -149,9 +100,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-# Import the domain module so the converter validates its own output with the
-# very parser the solver will use. A converter that emits a file `load_board`
-# rejects is worse than no converter: it fails at solve time, not build time.
+# The domain parser validates the converter's output, so a file `load_board` would reject
+# fails at build time, not at solve time.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
 from hbuilder.domain.board import BoardError, board_from_mapping  # noqa: E402
@@ -163,20 +113,16 @@ from hbuilder.domain.collection import (  # noqa: E402
 )
 from hbuilder.errors import MissingInput  # noqa: E402
 
-# How a resolved Connect level was arrived at, worst (least trustworthy) last.
-# The document records this per socket because the difference between them is
-# the difference between the user's account and a hypothetical one, and those
-# two must never be confused in the same artefact.
+# How a resolved Connect level was arrived at, least trustworthy last. Recorded per socket:
+# it separates the account from a hypothetical one.
 BASIS_MANUAL = "collection"  # a bloom the user typed -- account truth
 BASIS_MAXED = "maxed-default"  # inherited from card_default: "max" -- upper bound
 BASIS_ASSUMED = "assumed-base"  # nothing said; level 1, the shipped reading
 BASIS_FORCED = "forced"  # --connect-level 1|2 given explicitly
 
 _SOCKET_PREFIX = "S-"
-# The master cache's own field-bag key inside a `SkillTreeNode` row: the
-# numbered protobuf fields live under it, the row id next to it. Named rather
-# than inlined so a fixture can build a row in the real shape without
-# re-typing the key (`tests/test_board_landing.py`).
+# The master cache's field-bag key inside a `SkillTreeNode` row (the numbered protobuf
+# fields live under it); named so a fixture can build a row in the real shape.
 ROW_DATA_KEY = "data"
 
 
@@ -190,10 +136,8 @@ def _effect_rows_by_group(node_master: list[dict]) -> dict[str, list[dict]]:
     for row in node_master:
         group = row.get("group_id")
         data = row.get(ROW_DATA_KEY) or {}
-        # Field 1 is the group id and is the authority; `group_id` is the
-        # cache's own convenience copy. They agree on every row —
-        # assert rather than trust, since a divergence would silently move an
-        # effect onto the wrong node.
+        # Field 1 is the group id; `group_id` is the cache's copy. Checked, since a
+        # divergence would move an effect onto the wrong node.
         field_1 = (data.get("1") or [None])[0]
         if field_1 is not None and field_1 != group:
             raise MissingInput(f"SkillTreeNode row disagrees with itself: {group} vs {field_1}")
@@ -234,13 +178,9 @@ class ConnectLevels:
     `effect_type 5` = Connect level 2; a 3★ gets stats instead and has no
     Connect effect at all).
 
-    ⚠ **AUTO can produce either of two different quantities**, and the caller
-    has to know which. A bloom the user typed is account truth. A bloom
-    inherited from `card_default: "max"` is a hypothetical maxed account, and
-    for Connect it overshoots any socket card that is below bloom 5. `"max"` is
-    fine for STATS but carries no such licence here. So a maxed-default
-    resolution is recorded as `maxed-default` and taints the whole document as
-    an UPPER BOUND rather than being folded in silently."""
+    ⚠ A bloom inherited from `card_default: "max"` describes a hypothetical maxed account
+    and overshoots any socket card below bloom 5, so it is recorded as `maxed-default`
+    and taints the whole document as an UPPER BOUND."""
 
     def __init__(
         self,
@@ -565,7 +505,9 @@ def main(argv: list[str] | None = None) -> int:
                 "correctly, but check the name join): " + ", ".join(orphans)
             )
 
-    Path(args.out).write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    atomic_io.write_text(Path(args.out), json.dumps(document, ensure_ascii=False, indent=2) + "\n", "utf-8")
 
     print("PER CHARACTER")
     for line in report:

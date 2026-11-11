@@ -1,5 +1,5 @@
 // Optimizer page: small shared helpers. No number is computed here; formatting only.
-export const byId = id => document.getElementById(id);  // not `$`: test_id_contract checks `byId("…")` against index.html only
+export const byId = id => document.getElementById(id);
 const QUOTE = String.fromCharCode(34);   // spelled out: a quote inside a regex trips test_js_syntax
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", [QUOTE]: "&quot;" };
 const ESC_RE = new RegExp("[&<>" + QUOTE + "]", "g");
@@ -59,7 +59,7 @@ export const NOTES = {
   unitscore: "No song chosen and no average: the team is ranked by its <b>Unit Score</b>.",
   max: "<b>Max</b> is the score if every Active Skill fires every time it can.",
   now: "<b>Now</b> is the same team with your Holomem Boards exactly as they are on your account. On the Every song view it is the average over every chart.",
-  cached: "This team comes from the <b>cached search</b> (rebuilt by every Refresh). Its score is on that search's basis; press Find best team to search live.",
+  cached: "These teams come from the search you ran with <b>Find best team</b>, on its options. Change an option and press it again to search anew.",
   unit: "Laid out like the game's own <b>Unit Score Details</b>, on the row's own Holomem Boards and slot order: the detail rebuilds exactly the board the row was scored on. Overall Power lines are exact against the game.",
   bonus: "The deck screen's five <b>Score Bonus</b> lines, in the row's slot order. Their total and the Unit Score above are the deck screen's figures. The ranking model pools the bonus differently (combined rate + board rate); that pooled figure is in the next note and is not the deck screen's.",
   model_bonus: "The <b>ranking model's pooled Score Bonus</b>: what the search's Unit Score term uses. It is not a line of the deck screen.",

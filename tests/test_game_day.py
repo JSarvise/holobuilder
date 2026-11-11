@@ -36,7 +36,7 @@ def test_no_code_writes_the_reset_hour_by_hand():
     """The day's start is the master's Setting.resetTimingHour (this module): no other code or
     message may carry an hour of its own (the refresh said 04:00, the Park page 05:00)."""
     repo = Path(__file__).resolve().parents[1]
-    skip = ("proxyenv", "__pycache__", "node_modules", "/dumps/", "/build/")
+    skip = ("__pycache__", "node_modules", "/dumps/", "/build/")
     hits = []
     for top in ("src", "tools"):
         for p in (repo / top).rglob("*"):

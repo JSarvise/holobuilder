@@ -20,10 +20,9 @@ from hbuilder.domain.schema import SchemaError
 
 # --- Master constants (Setting table) ----------------------------------------
 #
-# Each is a single value read from the account's own `Master/Get` Setting row and the
-# Marathon*RewardUpStaminaEffect tables. Field numbers are the proto tags in
-# tools/recon/proxy/dumps/holodori/master_setting.gen.proto. Recorded as literals with their
-# provenance so a master update that changes them is a visible diff, not a silent drift.
+# Values from the master `Setting` row and the Marathon*RewardUpStaminaEffect tables
+# (field numbers: the proto tags of `master_setting.gen.proto` in the dumps). Literals,
+# so a master update that changes them is a visible diff, not a silent drift.
 
 # Setting 1118 / 1121 / 1301.
 LIVE_STAMINA_MAX: int = 10
@@ -51,8 +50,7 @@ MUSIC_CHANNEL = "music"
 
 
 def _chr_id(card: Card) -> str:
-    """The holomem id a card belongs to, e.g. 'chr-00001' from 'card-00001-3-nrml-0000-00'.
-    Mirrors the derivation the CLI already uses (`'chr-' + card.id.split('-')[1]`)."""
+    """The holomem id a card belongs to, e.g. 'chr-00001' from 'card-00001-3-nrml-0000-00'."""
     parts = card.id.split("-")
     return f"chr-{parts[1]}" if len(parts) > 1 else card.id
 
@@ -107,9 +105,9 @@ class MarathonBonusRow:
 
 @dataclass(frozen=True, slots=True)
 class MarathonEvent:
-    """One event's bonus data, grouped by channel. Hand-maintained per-event data (the game
-    does not ship it in master; it arrives on the wire per event), loaded from data/marathon.json
-    — never written by an automated path, same provenance discipline as config.json."""
+    """One event's bonus data, grouped by channel. Per-event data (the game sends it on
+    the wire, not in master), loaded from data/marathon.json and never written by an
+    automated path."""
 
     name: str
     rows_by_channel: Mapping[str, tuple[MarathonBonusRow, ...]]
@@ -127,11 +125,11 @@ def live_stamina_score(stamina: int) -> int:
 
 # --- The three event objectives -----------------------------------------------
 #
-# What the game does, term by term (from the client code): the live score is computed in-live with the
-# Song Bonus (yellow) and the leader-sings reds INSIDE each note's product; the event bonus is
-# never applied in-live — the server applies it afterwards. Event Pt rows SUM across the
-# members (deck screen `Enumerable.Sum` @0x6571a74), Event Song Score rows take the MAX card
-# (`Enumerable.Max` @0x658f441). The leader slot adds nothing.
+# What the game does (client code): the live score carries the Song Bonus (yellow) and the
+# leader-sings reds INSIDE each note's product; the event bonus is applied afterwards by the
+# server. Event Pt rows SUM across the members (deck screen `Enumerable.Sum` @0x6571a74),
+# Event Song Score rows take the MAX card (`Enumerable.Max` @0x658f441). The leader slot adds
+# nothing.
 
 
 def _card_permil(
@@ -152,10 +150,9 @@ def _ceil_div(num: int, den: int) -> int:
     return -(-num // den)
 
 
-# The room's MULTI SCORE divisor by event kind (inferred from exact multi Live results):
-# a Spotlight (relay) event 75000, a Point Rally (normal) event 60000. The player count of the
-# normal-event room it was inferred from is not known, so "15000 x the players" is not ruled
-# out: a 5-player normal-event Live would settle it.
+# The room's MULTI SCORE divisor by event kind, fitted to multi Live results: a Spotlight
+# (relay) event 75000, a Point Rally (normal) event 60000. The normal value may instead be
+# "15000 x the players in the room": the results it is fitted to do not tell them apart.
 MULTI_DIVISOR = {"relay": 75_000, "normal": 60_000}
 
 
@@ -201,7 +198,9 @@ def event_points(
     so the caller supplies it. `multi_score`: the room's MULTI SCORE for a multi Live
     (`event_points_base`). Exact on observed solo and multi Live/Finish results."""
     if base is None:
-        base = event_points_base(int(score), int(bonus_permil), multi_score, divisor)  # type: ignore[arg-type]
+        if score is None or bonus_permil is None:
+            raise ValueError("event_points needs either `base` or both `score` and `bonus_permil`")
+        base = event_points_base(int(score), int(bonus_permil), multi_score, divisor)
     provide = live_stamina_score(boosts)
     return _ceil_div(base * provide * int(length_permil) * (2 if holopass else 1), 1000)
 
@@ -216,7 +215,7 @@ OBJECTIVES = ("score", "event_points", "event_song")
 
 
 def card_bonus_table(
-    cards: Iterable[Card], event: MarathonEvent, *, blooms: Mapping[str, int], music_id: str | None
+    cards: Iterable[Card], event: MarathonEvent, *, blooms: Mapping[str, int | None], music_id: str | None
 ) -> tuple[tuple[int, int], ...]:
     """Per card, `(live permil, song permil)`: the two numbers a team's `E` (sum over the
     members) and `P` (max over the members) are made of. A search needs them per card,

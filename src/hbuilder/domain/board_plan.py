@@ -2,42 +2,37 @@
 `SkillTree`, and value each node in Unit-Score terms for one character in one
 team, so `board_optimizer.optimize_board` can choose the board to develop.
 
-Two halves, both pure (callers pass the already-decoded dumps, so `src/` holds
-no dump paths):
+Both halves are pure (callers pass the decoded dumps, so `src/` holds no dump paths).
+They live in `board_node_values` and are re-exported here:
 
-* `skill_tree_from_dumps` joins the three sources `tree_from_mapping` needs —
-  `skilltree.json`'s node table, one model's positions, and the point costs from
-  master `SkillTreeNode` field 9 (they sum to 453).
-* `power_node_values` values every node the way the optimiser needs, a
-  linearisation around the team's board-off score across all four channels:
-  the stat/power channel (`dUS/dPower x Delta power`, reach set by branch — R ->
-  all members while leading, B -> its own card, G -> every card); the additive
-  `song_score_bonus` rate; and the three ACTIVE-pool channels, which ride on the
-  team's bare active pool (`ScoreBreakdown.active_pool / (1 + support)`) —
-  `skill_effect_up` multiplies the whole pool, `activation_rate` / `cooldown`
-  raise one member's occupancy (its ~1/5 share). Character-grouping greens are
-  valued from skilltree's EXACT per-character `chr` override (value + which
-  grouping), reaching the team members in that grouping — which also makes the
-  per-character row exact, since every other node's effect is character-constant.
-  Still a linearisation (marginal values around the board-off score).
+* `skill_tree_from_dumps` joins `skilltree.json`'s node table, one model's positions
+  and the point costs from master `SkillTreeNode` field 9 (they sum to 453).
+* `power_node_values` values every node as a linearisation around the team's
+  board-off score, over four channels: stat/power (`dUS/dPower x Delta power`; R
+  reaches all members while leading, B its own card, G every card), the additive
+  `song_score_bonus` rate, and the ACTIVE pool (`skill_effect_up` scales the team's
+  bare pool, `activation_rate` / `cooldown` one member's ~1/5 share of it).
+  Character-grouping greens take skilltree's exact per-character `chr` override
+  (value and grouping), reaching the team members in that grouping.
+
+The plan cache (`PlanCache`, `cached_team_plan`) fixes one plan per (character, role,
+budget, singer context); `board_model_from_plan` assembles plans into a `BoardModel`
+and solves the team-wide Connect matching, so every reported score is a re-score of
+the real board, never the linearised sum. Re-ranking and the activation-node refinement
+built on these plans are in `board_refine`.
 """
 
 from __future__ import annotations
 
-import itertools
-import math
 import os
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
 from hbuilder.domain.board import (
-    _GENERATION_BY_GROUPING,
-    _GROUPING_RE,
     SONG_ALL_CAP_PERMIL,
-    STAT_NAMES,
     BoardBase,
     BoardDigest,
     BoardModel,
@@ -46,7 +41,40 @@ from hbuilder.domain.board import (
     board_from_mapping,
     parse_effect_id,
 )
-from hbuilder.domain.board_optimizer import BoardPlan, _available, _cheapest_bundles, optimize_board
+
+# Node values and per-team plans live in `board_node_values`; re-exported so `board_plan.X`
+# keeps working for every importer.
+from hbuilder.domain.board_node_values import GROUPING_GREEN_NODES as GROUPING_GREEN_NODES
+from hbuilder.domain.board_node_values import GROUPING_ROOM_KEY as GROUPING_ROOM_KEY
+from hbuilder.domain.board_node_values import GROUPING_SUPPLY_KEY as GROUPING_SUPPLY_KEY
+from hbuilder.domain.board_node_values import NO_GROUPING as NO_GROUPING
+from hbuilder.domain.board_node_values import NO_GROUPING_VALUE as NO_GROUPING_VALUE
+from hbuilder.domain.board_node_values import NodeRecipe as NodeRecipe
+from hbuilder.domain.board_node_values import TeamBoardPlan as TeamBoardPlan
+from hbuilder.domain.board_node_values import _apply_grouping_room as _apply_grouping_room
+from hbuilder.domain.board_node_values import _chain_is_surplus as _chain_is_surplus
+from hbuilder.domain.board_node_values import _chr_of as _chr_of
+from hbuilder.domain.board_node_values import _connect_multipliers as _connect_multipliers
+from hbuilder.domain.board_node_values import _grouping_cap as _grouping_cap
+from hbuilder.domain.board_node_values import _grouping_chain as _grouping_chain
+from hbuilder.domain.board_node_values import _grouping_node_value as _grouping_node_value
+from hbuilder.domain.board_node_values import _grouping_supply as _grouping_supply
+from hbuilder.domain.board_node_values import bench_node_values as bench_node_values
+from hbuilder.domain.board_node_values import bench_yellow_pays as bench_yellow_pays
+from hbuilder.domain.board_node_values import compile_node_recipes as compile_node_recipes
+from hbuilder.domain.board_node_values import grouping_room as grouping_room
+from hbuilder.domain.board_node_values import grouping_supply as grouping_supply
+from hbuilder.domain.board_node_values import model_for_character as model_for_character
+from hbuilder.domain.board_node_values import node_costs_from_master as node_costs_from_master
+from hbuilder.domain.board_node_values import node_effect_ids_from_master as node_effect_ids_from_master
+from hbuilder.domain.board_node_values import node_values_from_recipes as node_values_from_recipes
+from hbuilder.domain.board_node_values import optimize_team_boards as optimize_team_boards
+from hbuilder.domain.board_node_values import power_node_values as power_node_values
+from hbuilder.domain.board_node_values import singer_weight_for as singer_weight_for
+from hbuilder.domain.board_node_values import skill_tree_from_dumps as skill_tree_from_dumps
+from hbuilder.domain.board_node_values import song_scope_of as song_scope_of
+from hbuilder.domain.board_node_values import yellow_scope as yellow_scope
+from hbuilder.domain.board_optimizer import BoardPlan, optimize_board
 from hbuilder.domain.card import Card
 from hbuilder.domain.scoring import (
     UNIT_SCORE_K,
@@ -54,587 +82,20 @@ from hbuilder.domain.scoring import (
     score_with_breakdown,
 )
 from hbuilder.domain.scoring_config import ScoringConfig
-from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, tree_from_mapping
+from hbuilder.domain.skilltree import ROOT_NODE, SkillTree
 from hbuilder.domain.team import Team
 
 if TYPE_CHECKING:
     from hbuilder.domain.song import SongChart
 
 
-def node_costs_from_master(master_rows: Sequence[Mapping]) -> dict[str, int]:
-    """`group_id -> point cost` from master `SkillTreeNode` field 9."""
-    costs: dict[str, int] = {}
-    for row in master_rows:
-        f9 = row.get("data", {}).get("9")
-        if f9:
-            costs[row["group_id"]] = int(f9[0])
-    return costs
-
-
-def node_effect_ids_from_master(master_rows: Sequence[Mapping]) -> dict[str, list[str]]:
-    """`group_id -> [effect id string]` from master `SkillTreeNode` field 6."""
-    out: dict[str, list[str]] = {}
-    for row in master_rows:
-        f6 = row.get("data", {}).get("6")
-        if f6:
-            out.setdefault(row["group_id"], [])
-            for eff in f6:
-                if isinstance(eff, str):
-                    out[row["group_id"]].append(eff)
-    return out
-
-
-def skill_tree_from_dumps(
-    skilltree_json: Mapping, master_rows: Sequence[Mapping], model_id: str
-) -> SkillTree:
-    """Assemble a `SkillTree` for one geometry model."""
-    positions = skilltree_json["models"][model_id]
-    costs = node_costs_from_master(master_rows)
-    return tree_from_mapping(skilltree_json["nodes"], positions, costs)
-
-
-def model_for_character(skilltree_json: Mapping, holomem_chr: str) -> str | None:
-    """The geometry model this character's board uses."""
-    for m in skilltree_json.get("members", []):
-        if m.get("chr") == holomem_chr:
-            return m.get("model")
-    return None
-
-
-def _grouping_node_value(override: Mapping, member_cards, d_us_per_power: float) -> float:
-    """A character-grouping green (G-008/011/021), valued from skilltree's EXACT
-    per-character override: it grants +v to every stat of the team members in
-    THIS character's own grouping (`chr[chr_id]` carries both the value and which
-    grouping). Reaches only members whose generation matches."""
-    match = _GROUPING_RE.match(override.get("tgt", ""))
-    if not match:
-        return 0.0
-    generation = _GENERATION_BY_GROUPING.get(match.group("grouping"))
-    if generation is None:
-        return 0.0
-    reached = sum(1 for c in member_cards if generation in c.generations)
-    return float(override.get("v", 0)) * len(STAT_NAMES) * reached * d_us_per_power
-
-
-# The generation greens (G-008/011/021), whose sum a card receives is capped at
-# `board.GROUPING_ALL_CAP` over every source board.
-GROUPING_GREEN_NODES = frozenset({"G-008", "G-011", "G-021"})
-# The skilltree side key the leaf's planner reads: `{chr: room}`, the share of that
-# character's generation chain still under the cap given the OTHER boards the
-# leaf scores with (`grouping_room`). Valuation only -- nothing that scores reads it.
-GROUPING_ROOM_KEY = "_grouping_room"
-# and `{grouping: {chr: amount}}`: what the leaf's off-team boards supply
-GROUPING_SUPPLY_KEY = "_grouping_supply"
-# plan-key suffix of a plan that buys no generation green (`PlanCache.plan_for`)
-NO_GROUPING = "no-grouping"
-# what a generation green is worth in that variant: a hair below nothing, so a path
-# through one loses to an equal path around it (a 0 left the tie to set order, which
-# differs per process: the pool and the serial path planned different boards)
-NO_GROUPING_VALUE = -1e-6
-
-
-def grouping_room(
-    skilltree: Mapping, bench_characters: Mapping | None, name_by_chr: Mapping[str, str]
-) -> dict[str, dict[str, float]]:
-    """`{chr: {node: share in [0, 1]}}`: how much of each character's G-008/011/021 chain
-    still counts, the cap less what the OTHER boards of her grouping already supply
-    (`bench_characters`, the boards the leaf scores the off-team holomems with: the
-    account's own, or the developed bench under unlimited cubes, where every chain
-    is bought and the cap is full). Team-invariant, so the per-character plan cache
-    stays valid: the planner values a chain at its room instead of at full. What the
-    TEAMMATES' chains take is `cached_team_plan`'s surplus pass; the score itself is
-    exact (`board._close_grouping`)."""
-    from .board import GROUPING_ALL_CAP  # noqa: PLC0415
-
-    nodes = skilltree.get("nodes", {})
-    # (chr, grouping) -> that character's whole chain INTO that grouping, and which
-    # of her nodes feed it (a character's nodes can feed different groupings)
-    chain: dict[tuple[str, str], float] = {}
-    feeds: dict[tuple[str, str], list[str]] = {}
-    for nid in sorted(GROUPING_GREEN_NODES):
-        for cid, row in ((nodes.get(nid) or {}).get("chr") or {}).items():
-            key = (cid, row.get("tgt", ""))
-            chain[key] = chain.get(key, 0.0) + float(row.get("v") or 0)
-            feeds.setdefault(key, []).append(nid)
-    supply = grouping_supply(skilltree, bench_characters, name_by_chr)
-    room: dict[str, dict[str, float]] = {}
-    for (cid, tgt), total in chain.items():
-        if total <= 0:
-            continue
-        others = sum(v for c, v in (supply.get(tgt) or {}).items() if c != cid)
-        share = max(0.0, min(1.0, (GROUPING_ALL_CAP - others) / total))
-        for nid in feeds[(cid, tgt)]:
-            room.setdefault(cid, {})[nid] = share
-    return room
-
-
-def grouping_supply(
-    skilltree: Mapping, bench_characters: Mapping | None, name_by_chr: Mapping[str, str]
-) -> dict[str, dict[str, float]]:
-    """`{grouping: {chr: amount}}`: the generation greens each board of
-    `bench_characters` gives its grouping, Connect-scaled as the scorer reads them."""
-    nodes = skilltree.get("nodes", {})
-    chr_by_name = {v: k for k, v in (name_by_chr or {}).items()}
-    supply: dict[str, dict[str, float]] = {}  # grouping -> {chr: owned amount}
-    for name, rows in (bench_characters or {}).items():
-        cid = chr_by_name.get(name)
-        if cid is None:
-            continue
-        for row in rows or ():
-            nid = row.get("node") if isinstance(row, Mapping) else None
-            if nid in GROUPING_GREEN_NODES:
-                over = ((nodes.get(nid) or {}).get("chr") or {}).get(cid)
-                if over:
-                    per = supply.setdefault(over.get("tgt", ""), {})
-                    per[cid] = per.get(cid, 0.0) + float(over.get("v") or 0) * float(
-                        row.get("connect_multiplier") or 1.0
-                    )
-    return supply
-
-
-def _apply_grouping_room(values: dict[str, float], skilltree: Mapping | None, own_chr: str) -> None:
-    room = ((skilltree or {}).get(GROUPING_ROOM_KEY) or {}).get(own_chr)
-    if not room:
-        return
-    for nid, share in room.items():
-        if nid in values:
-            values[nid] *= share
-
-
-def _connect_multipliers(
-    skilltree: Mapping, model_id: str, node_values: Mapping[str, float]
-) -> dict[str, float]:
-    """Per-node connect multiplier from OPTIMAL socketing. Each of the board's 4
-    sockets sits at the base of a branch; a card placed there multiplies every
-    unlocked node in that card's fixed shape (anchored at the socket) by
-    `1 + v/1000` (bloom 5 = the higher of the two connect levels). Shapes never
-    collide (0 of 6,936 shape pairs), so each socket is independent: it takes the
-    card-shape that maximises the VALUE of the nodes it covers -- so the yellow
-    socket, whose branch is not developed here, is simply never worth a card."""
-    positions = skilltree.get("models", {}).get(model_id, {})
-    if not positions:
-        return {}
-    extents = skilltree.get("extents", {})
-    connect = skilltree.get("connect", {})
-    card_connect = skilltree.get("card_connect", {})
-    pos_to_node = {tuple(p): n for n, p in positions.items()}
-    sockets = [n for n in positions if n.startswith("S")]
-    # every distinct (shape, boost) a socketable card can provide, at max bloom.
-    shapes: set = set()
-    for _card, eff_id in card_connect.items():
-        eff = connect.get(eff_id)
-        if eff and eff.get("area") in extents:
-            shapes.add((tuple(map(tuple, extents[eff["area"]])), eff["levels"][-1]["v"]))
-    mult: dict[str, float] = {}
-    for socket in sockets:
-        sx, sy = positions[socket]
-        best_gain, best = 0.0, None
-        for offsets, boost in shapes:
-            gain = 0.0
-            for dx, dy in offsets:
-                node = pos_to_node.get((sx + dx, sy + dy))
-                if node:
-                    gain += node_values.get(node, 0.0) * boost / 1000.0
-            if gain > best_gain:
-                best_gain, best = gain, (offsets, boost)
-        if best:
-            offsets, boost = best
-            for dx, dy in offsets:
-                node = pos_to_node.get((sx + dx, sy + dy))
-                if node:
-                    mult[node] = max(mult.get(node, 1.0), 1.0 + boost / 1000.0)
-    return mult
-
-
-# One node's PRE-PARSED valuation input: `(node_id, chr override or None,
-# parsed effects)`. Compiling is a pure function of (node_effect_ids, the
-# skilltree node table, own character) — the parse and the override lookup were
-# most of `power_node_values`, and they do not depend on the team — so a plan
-# cache keeps one compiled table per character and re-runs only
-# the arithmetic per team. `power_node_values` compiles on the fly, so both
-# paths share ONE arithmetic (`node_values_from_recipes`) and cannot drift.
-NodeRecipe = tuple[str, Mapping | None, tuple]
-
-
-def compile_node_recipes(
-    node_effect_ids: Mapping[str, list[str]],
-    skilltree_nodes: Mapping | None,
-    own_chr: str,
-) -> tuple[NodeRecipe, ...]:
-    """`(node_id, override, effects)` per node, in `node_effect_ids` order. A
-    truthy chr override (a character-grouping green) carries no parsed effects
-    — it is valued whole by `_grouping_node_value`; every other node carries
-    the effects that parse (an id this channel cannot route is skipped, never
-    guessed)."""
-    out: list[NodeRecipe] = []
-    for node_id, effect_ids in node_effect_ids.items():
-        branch = node_id[:1]
-        # A character-grouping node's exact effect is per-character; take it from
-        # skilltree's chr override (the master rows are every grouping's variant).
-        # Only a grouping green's override names a grouping (`tgt`): Fuwawa's 12 solo
-        # yellows carry a chr override too (the same effect as the master rows), and
-        # read as a grouping they would be worth 0 to her plan and sockets.
-        override = (
-            skilltree_nodes.get(node_id, {}).get("chr", {}).get(own_chr)
-            if skilltree_nodes is not None
-            else None
-        )
-        if override and "tgt" in override:
-            out.append((node_id, override, ()))
-            continue
-        effs = []
-        for eff_id in effect_ids:
-            try:
-                eff = parse_effect_id(eff_id, branch=branch)
-            except Exception:
-                continue  # an effect shape this channel does not value
-            if eff is None:
-                continue
-            effs.append(eff)
-        out.append((node_id, None, tuple(effs)))
-    return tuple(out)
-
-
-def node_values_from_recipes(
-    recipes: Sequence[NodeRecipe],
-    *,
-    is_leader: bool,
-    own_card: Card | None,
-    member_cards: Sequence[Card],
-    bonus_permil: float,
-    overall_power: float,
-    k_constant: float,
-    active_pool_rate: float = 0.0,
-    singer_weight: float = 0.0,
-    song_scope: str = "",
-) -> dict[str, float]:
-    """The arithmetic half of `power_node_values` (connect OFF) over compiled
-    recipes, in recipe order. Bit-identical to `power_node_values`' own loop:
-    the same accumulation order per effect, the same `max` over variants."""
-    d_us_per_power = (1.0 + bonus_permil / 1000.0) * k_constant
-    d_us_per_bonus = overall_power * k_constant  # per unit of score-bonus rate
-    # per unit of the SONG's score rate (a yellow): it multiplies every note
-    # (`song.py`, `* (1.0 + board_score_rate)`), i.e. the whole Unit Score
-    # P * K * (1 + b), not a summand of the deck screen's Score Bonus. Priced at
-    # `d_us_per_bonus` a singer's own yellows would be worth (1 + b) ~ 1.9x too
-    # little, so a singing LEADER's board would buy reds instead of her solo yellows
-    # and her yellow socket (e.g. Nene leading on m0020: 2,349,358 instead of
-    # 2,540,989 re-planned exactly).
-    d_us_per_song = overall_power * d_us_per_power
-    # (no per-PERMIL constant: every non-stat `BoardEffect.value` is already a
-    #  fraction — see the yellow branch below.)
-    member_cards = tuple(member_cards)
-    own_in_members = own_card is not None and own_card in member_cards
-    values: dict[str, float] = {}
-    for node_id, override, effs in recipes:
-        if override:
-            values[node_id] = _grouping_node_value(override, member_cards, d_us_per_power)
-            continue
-        # master carries one row PER character/grouping variant of the node; only
-        # one applies to a given board, so take the MAX over variants, not a sum.
-        best = 0.0
-        for eff in effs:
-            # Which cards this node's effect reaches.
-            if eff.scope == "leader":
-                reached = member_cards if is_leader else ()
-            elif eff.scope == "member":
-                # Blues reach the card that SCORES: only a member card, never a
-                # leader-only card (the leader slot adds no Member Parameter).
-                reached = (own_card,) if own_in_members else ()  # type: ignore[assignment]
-            elif eff.scope == "grouping":
-                continue  # needs the team's grouping composition — a follow-up
-            else:  # "all"/general and account-wide
-                reached = member_cards
-            row = 0.0
-            if eff.kind in ("stat", "rate"):
-                stats = STAT_NAMES if eff.stat == "all" else (eff.stat,)
-                if eff.kind == "rate":
-                    for card in reached:
-                        for stat in stats:
-                            row += math.ceil(eff.value * card.stat(stat)) * d_us_per_power
-                else:
-                    # the same addend `len(reached) * len(stats)` times, in the
-                    # same order — one product, repeated addition, same float.
-                    add = eff.value * d_us_per_power
-                    for _ in range(len(reached) * len(stats)):
-                        row += add
-            elif eff.kind == "song_score_bonus" and reached:
-                # Y: `solo`/`group` count only when this holomem sings a song of
-                # that scope; `all` is the pooled bucket every score counts.
-                #
-                # ⚠ a per-unit constant, NOT a per-permil one.
-                # `BoardEffect.value` is a FRACTION for every non-stat kind —
-                # `board.py` states the rule as "so no caller divides by 1000
-                # twice" — and a per-permil constant would divide it a second
-                # time, making yellow nodes worth ~1/1000 of their real value.
-                # The two siblings on this same rate axis (`skill_effect_up`
-                # below, `activation_rate_up`) use the per-unit constant too.
-                # `song_scope` (the song's `singer_type`, `SongCast.scope`): the
-                # scorer pays ONE scope per song, so a singer's yellows of the other
-                # scope are worth 0 (e.g. Kiara's solo yellows on the group song
-                # m0198); "" (not known) keeps both.
-                # The pooled `all` yellows pay only when the song's scope is not
-                # solo/group: a cast's own scope SUPERSEDES that bucket
-                # (`song.py`, `song_score_bonus_for`), so on a solo or group song
-                # they are worth 0 (otherwise the leaf buys them as leftovers).
-                if eff.song_scope in ("solo", "group"):
-                    scope_weight = singer_weight if song_scope in ("", eff.song_scope) else 0.0
-                else:
-                    scope_weight = 0.0 if song_scope in ("solo", "group") else 1.0
-                row += eff.value * d_us_per_song * scope_weight
-            elif eff.kind == "skill_effect_up" and reached:
-                # One team-wide addend that multiplies the whole ACTIVE pool.
-                row += active_pool_rate * eff.value * d_us_per_bonus
-            elif eff.kind in ("activation_rate_up", "cooldown_shorten"):
-                # Raises one member's active occupancy -> about its share of the
-                # pool, and only if that member actually fields an active in it
-                # (a pure outfit-leader's own active is not in the pool).
-                if own_in_members and member_cards:
-                    row += (active_pool_rate / len(member_cards)) * eff.value * d_us_per_bonus
-            # A `music_skill_tree_character` trigger fires only when this
-            # holomem sings the song: worth `singer_weight` of its full value.
-            if eff.conditional:
-                row *= singer_weight
-            best = max(best, row)
-        values[node_id] = best
-    return values
-
-
-def power_node_values(
-    node_effect_ids: Mapping[str, list[str]],
-    *,
-    is_leader: bool,
-    own_card: Card | None,
-    member_cards: Sequence[Card],
-    bonus_permil: float,
-    overall_power: float,
-    k_constant: float,
-    active_pool_rate: float = 0.0,
-    skilltree: Mapping | None = None,
-    model_id: str = "",
-    own_chr: str = "",
-    singer_weight: float = 0.0,
-    song_scope: str = "",
-) -> dict[str, float]:
-    """Delta Unit Score of buying each node, over all four board channels.
-
-    `Unit Score = Power * (1 + bonus/1000) * K`, so a power add is worth
-    `(1 + bonus/1000) * K` per point, a permil of score-rate `Power * K / 1000`,
-    and a whole unit of score-BONUS rate `Power * K`. The reach of a node is set
-    by its branch: R (leader) reaches all members but only when this character
-    leads; B reaches its own card — and only when that card is one of the
-    MEMBERS (the leader slot contributes no Member Parameter, `team.py`; a
-    leader-only holomem's blues reach nobody); G reaches
-    every member.
-
-    `singer_weight` is the SINGER CONTEXT of the plan (the board plan is a
-    fixed function of (character, role, budget, singer context)). Every `BoardEffect.conditional` node — R-002 and
-    R-044/062/063, the `music_skill_tree_character` passive trigger that fires
-    only when this holomem sings the song (`board.py` `parse_effect_id`,
-    `conditional_stat_power_for`) — is valued TIMES `singer_weight`: 0.0
-    (the default) is the song-agnostic plan where they never fire, 1.0 is the
-    plan for a song this holomem sings as leader. The yellow `song_score_bonus`
-    nodes follow the same rule by song scope: `solo` / `group` nodes count only
-    through `song_score_bonus_for(singers, scope=singer_type)` when this
-    holomem is IN the song's cast and the song is of that type, so they carry
-    `singer_weight`; an `all`-scope node is the pooled bucket every song-agnostic
-    score (`_board_bonus`) already counts — "pooling is exact for a whole-roster
-    song" — so it keeps weight 1.0.
-
-    The three ACTIVE-pool channels ride on `active_pool_rate` (the team's ACTIVE
-    Score-UP pool, `ScoreBreakdown.active_pool`): `skill_effect_up` multiplies
-    the whole pool (`pool * V`), while `activation_rate_up` / `cooldown_shorten`
-    raise one member's occupancy, worth about that member's share `pool /
-    MEMBER_COUNT * V`. A leader that fields no active (a pure outfit-leader) owns
-    no share, so its own-card active channels are valued at zero."""
-    recipes = compile_node_recipes(node_effect_ids, skilltree["nodes"] if skilltree else None, own_chr)
-    values = node_values_from_recipes(
-        recipes,
-        is_leader=is_leader,
-        own_card=own_card,
-        member_cards=member_cards,
-        bonus_permil=bonus_permil,
-        overall_power=overall_power,
-        k_constant=k_constant,
-        active_pool_rate=active_pool_rate,
-        singer_weight=singer_weight,
-        song_scope=song_scope,
-    )
-    _apply_grouping_room(values, skilltree, own_chr)
-    # CONNECT: a socketed card multiplies the nodes in its shape; the socket
-    # assignment maximises the value it lifts. Doubles a maxed board's worth.
-    if skilltree and model_id:
-        for node_id, m in _connect_multipliers(skilltree, model_id, values).items():
-            if node_id in values:
-                values[node_id] *= m
-    return values
-
-
-def bench_node_values(
-    node_effect_ids: Mapping[str, list[str]],
-    *,
-    member_cards: Sequence[Card],
-    bonus_permil: float,
-    overall_power: float,
-    k_constant: float,
-    skilltree: Mapping | None = None,
-    model_id: str = "",
-    own_chr: str = "",
-    cast: AbstractSet[str] | None = None,
-) -> dict[str, float]:
-    """`power_node_values` for a character who is NOT on the team (role
-    `bench`): its account-global GREENs reach the
-    team — its reds need it to lead, its blues need its card to be a member —
-    so those are worth 0. Its song YELLOWS reach the song's score whoever is on
-    the team (`bench_yellow_pays`): with `cast` (the song's singers; empty for a
-    song with no cast) they keep their value (valued 0, the bench singer's
-    yellow socket would lose its card: -2.29 % on every top-16 m0131 team);
-    `cast` None keeps the greens only.
-    `member_cards` are the cards the greens reach (the team, or the nominal
-    roster a plan cache values at). Connect multipliers are then applied to the
-    kept values, so a socket is placed for what a bench board really lifts."""
-    values = power_node_values(
-        node_effect_ids,
-        is_leader=False,
-        own_card=None,
-        member_cards=member_cards,
-        bonus_permil=bonus_permil,
-        overall_power=overall_power,
-        k_constant=k_constant,
-        active_pool_rate=0.0,
-        skilltree={"nodes": skilltree["nodes"]} if skilltree else None,
-        model_id="",
-        own_chr=own_chr,
-        singer_weight=0.0 if cast is None else 1.0,
-        song_scope=song_scope_of(cast),
-    )
-    values = {
-        n: (
-            v
-            if n.startswith("G")
-            or (skilltree and bench_yellow_pays(yellow_scope(skilltree, n, own_chr), own_chr, cast))
-            else 0.0
-        )
-        for n, v in values.items()
-    }
-    _apply_grouping_room(values, skilltree, own_chr)
-    if skilltree and model_id:
-        for node_id, m in _connect_multipliers(skilltree, model_id, values).items():
-            if node_id in values:
-                values[node_id] *= m
-    return values
-
-
-@dataclass(frozen=True, slots=True)
-class TeamBoardPlan:
-    """The board development chosen across a whole team and the Unit-Score gain
-    it realises. Each character's board is a SEPARATE point pool funded by that
-    character's own level, so the team plan is the sum of six
-    independent per-character plans — the leader valued while leading (its red
-    board reaches all members), each member valued on its own card."""
-
-    total_gain: float
-    per_character: Mapping[str, BoardPlan]
-    # `card id -> plan_key(...)` when the plans came from a `PlanCache`
-    # (`cached_team_plan`); empty for a per-team plan. Lets
-    # `board_model_from_plan(plan_cache=...)` find each character's ASSEMBLED
-    # pieces (`PlanCache.assembled_for`) without re-deriving the key.
-    plan_keys: Mapping[str, tuple] = field(default_factory=dict)
-
-
-def optimize_team_boards(
-    leader: Card,
-    members: Sequence[Card],
-    *,
-    tree_for: Callable[[Card], SkillTree | None],
-    budget_for: Callable[[Card], int],
-    node_effect_ids: Mapping[str, list[str]],
-    overall_power: float,
-    bonus_permil: float,
-    k_constant: float,
-    active_pool_rate: float = 0.0,
-    skilltree: Mapping | None = None,
-    player_level: int | None = None,
-    singer_weight: float = 0.0,
-    singers: AbstractSet[str] | None = None,
-) -> TeamBoardPlan:
-    """Optimise every distinct character's board for this team and sum the gain.
-
-    `singer_weight` is the LEADER's singer context (`power_node_values`): 1.0
-    when the leader is a credited singer of the song this plan is for, 0.0 for
-    the song-agnostic plan. A member is valued as a singer when `singers` (the
-    song's cast, chr ids) holds her holomem -- her own solo/group yellows pay on
-    her board whoever leads; without it, members are valued at 0.0."""
-    members = tuple(members)
-    # ONE plan per distinct CHARACTER (the game has one board per holomem),
-    # leader first, so a leader whose holomem also fields a member card is
-    # valued as the leader (her reds reach the team because she leads) AND
-    # for that member card (her blues reach the card that scores) — instead of
-    # two plans, the member's overwriting the leader's name-keyed board and
-    # dropping every red (e.g. Calli leading with a Calli member card would lose
-    # R-044/062/063 and score no singer power on her own song).
-    by_chr = {"chr-" + m.id.split("-")[1]: m for m in members}
-    seen: set[str] = set()
-    plans: dict[str, BoardPlan] = {}
-    values_by_chr: dict[str, tuple] = {}  # members holding a generation chain
-    total = 0.0
-    for card, is_leader in [(leader, True), *[(m, False) for m in members]]:
-        chr_id = "chr-" + card.id.split("-")[1]
-        if chr_id in seen:
-            continue
-        seen.add(chr_id)
-        tree = tree_for(card)
-        if tree is None:
-            continue
-        values = power_node_values(
-            node_effect_ids,
-            is_leader=is_leader,
-            own_card=by_chr.get(chr_id, card),
-            member_cards=members,
-            bonus_permil=bonus_permil,
-            overall_power=overall_power,
-            k_constant=k_constant,
-            active_pool_rate=active_pool_rate,
-            skilltree=skilltree,
-            model_id=(model_for_character(skilltree, "chr-" + card.id.split("-")[1]) or "")
-            if skilltree
-            else "",
-            own_chr="chr-" + card.id.split("-")[1],
-            singer_weight=(
-                singer_weight if is_leader else singer_weight_for(singers or frozenset(), chr_id, False)
-            ),
-            song_scope=song_scope_of(singers),
-        )
-        plan = optimize_board(tree, budget_for(card), values, player_level=player_level)
-        if not is_leader and chr_id != _chr_of(leader):
-            # the grouping cap across the team (`cached_team_plan`'s surplus pass)
-            if _grouping_chain(plan.selected, chr_id, skilltree):
-                values_by_chr[chr_id] = (card, tree, values)
-        plans[card.id] = plan
-        total += plan.value
-    for card in sorted((values_by_chr[c][0] for c in values_by_chr), key=lambda c: (budget_for(c), c.id)):
-        if not _chain_is_surplus(card, plans, members, leader, skilltree):
-            continue
-        _card, tree, values = values_by_chr[_chr_of(card)]
-        values = {n: (NO_GROUPING_VALUE if n in GROUPING_GREEN_NODES else v) for n, v in values.items()}
-        plan = optimize_board(tree, budget_for(card), values, player_level=player_level)
-        total += plan.value - plans[card.id].value
-        plans[card.id] = plan
-    return TeamBoardPlan(total_gain=total, per_character=plans)
-
-
 # ---------------------------------------------------------------------------
-# The plan cache: one board plan per (character, role, budget, singer context).
-#
-# The board plan is a FIXED function of (character,
-# role, budget, singer context) — role in {leader, member, bench} (+ the leader
-# who ALSO fields a member card, whose blues then reach that card), singer
-# context = whether the character, as leader, is a credited singer of the song
-# being solved. So a plan is computed ONCE at a NOMINAL team context and reused
-# for every team the character appears in with that role/budget/context; the
-# per-team exact number comes from RE-SCORING the assembled board
-# (`board_model_from_plan`), never from the nominal linearised sum. Consequence:
-# the per-song objective becomes a pure function of the roster.
+# The plan cache: one board plan per (character, role, budget, singer context),
+# role in {leader, leader+member, member, bench}, singer context = which scope of
+# the song being solved the character sings, if any. A plan is computed ONCE at a
+# NOMINAL team context and reused for every team with that key; each team's exact
+# number comes from RE-SCORING the assembled board (`board_model_from_plan`), so
+# the per-song objective is a pure function of the roster.
 # ---------------------------------------------------------------------------
 
 PLAN_ROLE_LEADER = "leader"  # leads, no card of hers among the members
@@ -642,28 +103,6 @@ PLAN_ROLE_LEADER_MEMBER = "leader+member"  # leads AND fields a member card
 PLAN_ROLE_MEMBER = "member"
 PLAN_ROLE_BENCH = "bench"
 PLAN_ROLES = (PLAN_ROLE_LEADER, PLAN_ROLE_LEADER_MEMBER, PLAN_ROLE_MEMBER, PLAN_ROLE_BENCH)
-
-
-def _chr_of(card: Card) -> str:
-    return "chr-" + card.id.split("-")[1]
-
-
-def singer_weight_for(sings: bool | AbstractSet[str], chr_id: str, is_leader: bool) -> float:
-    """The singer context of one board: `sings` is either the LEADER's flag (a bool: only
-    the leader's board is valued as a singer) or the song's whole cast as a `frozenset` of chr
-    ids, which values EVERY board whose holomem sings -- a member singer's solo/group yellows
-    and her yellow socket included (otherwise, e.g., Towa as a member on her own solo m0365
-    has all 12 yellows bought but the Connect assignment values them 0 and leaves her yellow
-    socket empty, -39,254 against the server)."""
-    if isinstance(sings, (set, frozenset)):
-        return 1.0 if chr_id in sings else 0.0
-    return 1.0 if (is_leader and sings) else 0.0
-
-
-def song_scope_of(sings: bool | AbstractSet[str] | None) -> str:
-    """The song's scope a `sings` context carries (`SongCast.scope`), "" when it
-    carries none (a leader flag, a plain set, no cast)."""
-    return getattr(sings, "scope", "") or ""
 
 
 def sings_key(sings: bool | AbstractSet[str], chr_id: str, is_leader: bool) -> bool | str:
@@ -679,14 +118,12 @@ def sings_key(sings: bool | AbstractSet[str], chr_id: str, is_leader: bool) -> b
 def plan_key(card: Card, role: str, budget: int, sings: bool | str) -> tuple:
     """The cache key of one board plan: `(chr, role, budget, sings, own_card)`.
 
-    `card` is the card whose stats the plan's BLUE nodes use — the member card
-    for `member` / `leader+member`, the leader card for `leader`, any card of
-    the character for `bench`. `own_card` is part of the key only for the roles
-    whose blues reach a card (a 4-star and a 5-star of the same holomem value
-    their blues differently); for `leader` / `bench` it is `""` so every card
-    of the character shares the plan. `sings` is this board's OWN singer context:
-    meaningful for a leader role (the conditional reds) and for a member (her
-    solo/group yellows; `singer_weight_for`); a bench plan ignores it."""
+    `card` is the card whose stats the plan's BLUE nodes use: the member card for
+    `member` / `leader+member`, the leader card for `leader`, any card of the
+    character for `bench`. `own_card` is in the key only for the roles whose blues
+    reach a card (a 4-star and a 5-star of one holomem value their blues
+    differently); for `leader` / `bench` it is `""`, so every card of the character
+    shares the plan. `sings` is this board's own singer context (`sings_key`)."""
     if role not in PLAN_ROLES:
         raise ValueError(f"unknown plan role {role!r}; expected one of {PLAN_ROLES}")
     uses_blues = role in (PLAN_ROLE_MEMBER, PLAN_ROLE_LEADER_MEMBER)
@@ -711,9 +148,9 @@ SELECTED_PLAN = "selected-nodes"
 # How many bench mappings the caches keyed by one are held for at once (`PlanCache`'s parsed
 # benches, `_SINGER_BENCH`, `_bench_bought`, `held_bench_cards`), the least recently used
 # dropped first. With every board planned a search asks for one bench per singer context
-# (`singer_bench_characters`) and comes back to each of them team after team -- about 50 of
-# them over one In general search of an account -- so a cache of one entry rebuilt the bench
-# (its ~54 parsed boards, their digests and per-card memos) on about half of the teams.
+# (`singer_bench_characters`, about 50 over one In general search) and comes back to each
+# team after team; a one-entry cache would rebuild the bench (~54 parsed boards, their
+# digests and per-card memos) on about half of the teams.
 # A bound on memory only: an entry is a pure function of the objects it is keyed by.
 _BENCHES_HELD = 128
 # `PlanCache._bench_rows` holds at most this many parsed boards (one per rows list)
@@ -741,17 +178,16 @@ def _hold(cache: dict, key, entry):
 def plan_node_order(selected: Iterable[str]) -> list[str]:
     """A plan's nodes in the order its board lists them: by node id, the order of the
     account's own boards as the game reports them. A board's stat rates, uptime and song
-    bonus are float sums over its nodes in list order, and a plan holds its nodes in a
-    set, whose own order differs from one process to the next: a board assembled in that
-    order summed to another last bit in each process, a point or two of Overall Power
-    after the ceiling."""
+    bonus are float sums over its nodes in list order, and a set's order differs from one
+    process to the next: assembled in set order, a board would sum to a different last
+    bit per process, a point or two of Overall Power after the ceiling."""
     return sorted(selected)
 
 
 def selected_plan_key(chr_id: str, selected: Iterable[str]) -> tuple:
     """The plan cache key of a board plan the cache did not make (one the activation
-    refinement changed): the board and its nodes in the set's own order -- the order
-    `assembled_for` lists them in, so equal keys are equal assemblies."""
+    refinement changed): the board and its nodes as the set iterates them, so equal
+    keys are equal node sets and equal assemblies."""
     return (SELECTED_PLAN, chr_id, tuple(selected))
 
 
@@ -763,16 +199,12 @@ class PlanCache:
     """Per-(character, role, budget, singer context) board plans, valued at ONE
     nominal team context and reused across teams.
 
-    The NOMINAL CONTEXT is what `power_node_values` linearises around, fixed
-    at construction: `nominal_members` (the cards a leader's reds / a bench's
-    greens reach — five typical member cards; for a member or leader+member
-    plan the character's own card REPLACES one of them so its blues and its
-    active-pool share are valued as a member's), `overall_power`,
-    `bonus_permil` and `active_pool_rate` (the linearisation point:
-    `dUS/dPower`, `dUS/dpermil`, the bare ACTIVE pool). `from_team` derives
-    them from one reference team's board-off breakdown.
-
-    `hits` / `misses` count lookups so a caller can verify reuse."""
+    The nominal context is the linearisation point of `power_node_values`, fixed at
+    construction: `nominal_members` (five typical member cards the reds and greens
+    reach; for a member or leader+member plan the character's own card replaces one
+    of them), `overall_power`, `bonus_permil` and `active_pool_rate` (the bare ACTIVE
+    pool). `from_team` derives them from one reference team's board-off breakdown.
+    `hits` / `misses` count lookups."""
 
     nominal_members: tuple[Card, ...]
     overall_power: float
@@ -780,14 +212,16 @@ class PlanCache:
     active_pool_rate: float = 0.0
     k_constant: float = UNIT_SCORE_K
     player_level: int | None = None
+    # `{chr: nodes the account has}` for a plan made from scratch that should keep them
+    # where it costs nothing (`optimize_board`'s `prefer`); empty for a search's cache
+    prefer: Mapping[str, frozenset[str]] | None = None
     plans: dict = None  # type: ignore[assignment]
     hits: int = 0
     misses: int = 0
-    # The ASSEMBLED, team-invariant pieces of each plan (`AssembledPlan`),
-    # keyed like `plans`; filled lazily by `assembled_for`. Rebuilt whenever the
-    # (node_effect_ids, skilltree, connect_cards) objects they were derived
-    # from change identity — the cache holds those references, so an id cannot
-    # be recycled under it.
+    # The ASSEMBLED, team-invariant pieces of each plan (`AssembledPlan`), keyed
+    # like `plans`, filled by `assembled_for`; emptied when the (node_effect_ids,
+    # skilltree, connect_cards) objects change identity (they are held, so an id
+    # cannot be recycled).
     assembled: dict = None  # type: ignore[assignment]
     _assembled_src: tuple = ()
     _recipes: dict = None  # type: ignore[assignment]   # own_chr -> recipes
@@ -925,7 +359,13 @@ class PlanCache:
             )
         if no_grouping:
             values = {n: (NO_GROUPING_VALUE if n in GROUPING_GREEN_NODES else v) for n, v in values.items()}
-        plan = optimize_board(tree, budget, values, player_level=self.player_level)
+        plan = optimize_board(
+            tree,
+            budget,
+            values,
+            player_level=self.player_level,
+            prefer=(self.prefer or {}).get(chr_id, frozenset()),
+        )
         self.plans[key] = plan
         if self.store is not None:
             self.store.put(key, plan)  # type: ignore[attr-defined]
@@ -1041,14 +481,11 @@ class PlanCache:
     def team_board(
         self, key: tuple, holomem: str, asm: AssembledPlan, cmult: Mapping[str, float]
     ) -> tuple[CharacterBoard, BoardDigest]:
-        """One developed board — plan `key`'s nodes (`asm`, which
-        `assembled_for` returned for that key) under the Connect multipliers
-        the team-wide assignment gave them — and its digest, reused whenever
-        another team lands the same plan on the same multipliers. Keyed by
-        the character's whole `cmult` (a handful of covered nodes) rather than
-        by the multiplier of every node: the board is a function of (plan,
-        `cmult`), so equal keys are equal boards, and two `cmult`s that differ
-        only outside this plan's nodes merely build the same board twice."""
+        """One developed board (plan `key`'s nodes, `asm`, under the Connect multipliers
+        the team-wide matching gave them) and its digest, reused whenever another team
+        lands the same plan on the same multipliers. Keyed by the character's whole
+        `cmult` (a handful of nodes): equal keys are equal boards, and two `cmult`s that
+        differ only outside this plan's nodes merely build the same board twice."""
         cache_key = (key, holomem, frozenset(cmult.items()) if cmult else _NO_MULTS)
         hit = self._team_boards.get(cache_key)
         if hit is not None:
@@ -1132,13 +569,12 @@ class PlanCache:
 class AssembledPlan:
     """One plan's team-invariant assembly (`PlanCache.assembled_for`).
 
-    `nodes` — `(node_id, BoardEffect)` for every bought node with an effect, in
-    the plan's own iteration order (the order `board_model_from_plan`
-    emits). `entries` — `(socket, permil, covered nodes, card ids)`
-    per (eligible socket, distinct connect shape): the shape's covered bought
-    nodes in offset order and the account's cards carrying that exact (shape,
-    permil), id-sorted; `needed` — the union of covered nodes, i.e. the ONLY
-    nodes whose base value the Connect assignment reads (`None` = all, the
+    `nodes`: `(node_id, BoardEffect)` for every bought node with an effect, in node
+    id order (`plan_node_order`, as `board_model_from_plan` emits them). `entries`:
+    `(socket, permil, covered nodes, card ids)` per (eligible socket, distinct
+    connect shape), the covered bought nodes in offset order and the account's cards
+    of that exact (shape, permil), id-sorted. `needed`: the union of covered nodes,
+    the only nodes whose base value the Connect matching reads (`None` = all, the
     idealised no-`connect_cards` path)."""
 
     nodes: tuple[tuple[str, object], ...]
@@ -1160,12 +596,10 @@ def cached_team_plan(
 ) -> TeamBoardPlan:
     """`optimize_team_boards`'s twin on the plan cache: one plan per distinct
     CHARACTER, the leader's at role `leader` (or `leader+member` when a card of
-    hers is among the members, valued on THAT card so her blues reach it), each
-    other member's at role `member`; `sings` is the leader's singer context.
-    Same `per_character` shape (keyed by the leader/member card id, the leader
-    first) so `board_model_from_plan` re-scores it unchanged. `total_gain` is
-    the NOMINAL linearised sum — a bookkeeping figure, not this team's number;
-    the re-score is."""
+    hers is among the members, valued on that card), each other member's at role
+    `member`; `sings` is the singer context (`singer_weight_for`). Same
+    `per_character` shape, leader first. `total_gain` is the NOMINAL linearised
+    sum, a bookkeeping figure; the team's number is the re-score."""
     members = tuple(members)
     by_chr = {_chr_of(m): m for m in members}
     lead_chr = _chr_of(leader)
@@ -1211,10 +645,10 @@ def cached_team_plan(
         keys[m.id] = plan_key(m, PLAN_ROLE_MEMBER, budget_for(m), m_sings)
         total += plan.value
     # THE GROUPING CAP ACROSS THE TEAM: the plans above are per character, so three
-    # ID Gen 1 members each buy the whole G-008/011/021 chain (1,350; the game counts
-    # 900). A member whose chain lies wholly in the surplus adds nothing with it: she
-    # is re-planned without it (a cached variant), the fewest-points board first --
-    # those points are dearest there (e.g. a Lv40 Iofi would otherwise half-buy her blues)
+    # members of one generation can each buy the whole G-008/011/021 chain (1,350; the
+    # game counts 900). A member whose chain lies wholly in the surplus adds nothing
+    # with it and is re-planned without it (a cached variant), the fewest-points board
+    # first, where the freed points are dearest.
     for m in sorted(
         (m for m in members if m.id in plans and _chr_of(m) != lead_chr), key=lambda m: (budget_for(m), m.id)
     ):
@@ -1257,12 +691,11 @@ def singer_bench_characters(
     the yellows the song pays (`bench_node_values` with her `SongCast`), at the plan
     cache's nominal context and her points. A singer off the team still pays her song
     yellows (`song_score_bonus_for` sums the cast's boards), and a planned search
-    re-plans every board -- the materials re-plan buys her yellows on the bench -- so
-    the search's leaf must too: with her board as captured (no yellow bought), m0365's
-    leaf ranks every team without Towa ~5 % too low and the materials re-plan never sees
-    its best team (2,534,438 against 2,409,940). A singer on the team plans her own board (team boards take
-    the name), so this is the same mapping for every team of the song. The captured
-    Connect multiplier of a kept node stays; a new node starts at 1.0."""
+    re-plans every board, so the leaf must too: with her board as captured (no yellow
+    bought) every team without her ranks ~5 % too low on her solo song. A singer on the
+    team plans her own board (team boards take the name), so this is the same mapping
+    for every team of the song. A kept node keeps its captured Connect multiplier; a
+    new node starts at 1.0."""
     if not bench_characters or not cast:
         return bench_characters
     scope = song_scope_of(cast)
@@ -1304,50 +737,6 @@ def forget_plan_cache(cache: PlanCache) -> None:
     for a caller that discards a plan cache, so the memo does not keep it alive."""
     for key in [k for k, hit in _SINGER_BENCH.items() if hit[1] is cache]:
         del _SINGER_BENCH[key]
-
-
-def _grouping_cap() -> int:
-    from .board import GROUPING_ALL_CAP  # noqa: PLC0415
-
-    return GROUPING_ALL_CAP
-
-
-def _grouping_chain(selected, chr_id: str, skilltree: Mapping | None) -> dict[str, float]:
-    """`{grouping: amount}` of the generation greens in `selected` on `chr_id`'s
-    board. Per grouping, not one: a character's three nodes can feed different
-    groupings (Fubuki's G-008 goes to Gen 1, her G-011 to GAMERS)."""
-    nodes = (skilltree or {}).get("nodes", {})
-    out: dict[str, float] = {}
-    for nid in sorted(GROUPING_GREEN_NODES & set(selected)):
-        row = ((nodes.get(nid) or {}).get("chr") or {}).get(chr_id)
-        if row and row.get("v"):
-            tgt = row.get("tgt", "")
-            out[tgt] = out.get(tgt, 0.0) + float(row["v"])
-    return out
-
-
-def _grouping_supply(tgt: str, plans: Mapping, members, leader: Card, skilltree: Mapping | None) -> float:
-    """What grouping `tgt` receives from the team's planned boards plus the off-team
-    boards (`GROUPING_ROOM_KEY`'s source: the leaf's bench, `grouping_supply`)."""
-    cards = {c.id: c for c in (leader, *members)}
-    team_chrs = {_chr_of(c) for c in cards.values()}
-    total = 0.0
-    for card_id, plan in plans.items():
-        total += _grouping_chain(plan.selected, _chr_of(cards[card_id]), skilltree).get(tgt, 0.0)
-    bench = ((skilltree or {}).get(GROUPING_SUPPLY_KEY) or {}).get(tgt) or {}
-    return total + sum(v for c, v in bench.items() if c not in team_chrs)
-
-
-def _chain_is_surplus(card: Card, plans: Mapping, members, leader: Card, skilltree: Mapping | None) -> bool:
-    """Every grouping this card's board feeds would still reach the cap without it."""
-    chain = _grouping_chain(plans[card.id].selected, _chr_of(card), skilltree)
-    if not chain:
-        return False
-    cap = _grouping_cap()
-    return all(
-        _grouping_supply(tgt, plans, members, leader, skilltree) - amount >= cap
-        for tgt, amount in chain.items()
-    )
 
 
 def board_points_from_snapshot(snapshot: Mapping) -> dict[str, int]:
@@ -1407,18 +796,16 @@ def _max_weight_matching(
     weights: Sequence[Sequence[float]],
     capacities: Sequence[int] | None = None,
 ) -> dict[int, int]:
-    """EXACT maximum-weight bipartite matching — the Hungarian (Kuhn-Munkres)
-    algorithm in its successive-shortest-path form with dual potentials,
-    stdlib only, columns CAPACITATED so cards sharing one (shape, permil) need
-    no duplication. `weights[i][j] >= 0` is the value of pairing row `i` with
-    column `j`; every row is used at most once and column `j` at most
-    `capacities[j]` times (default 1). Rows may stay unmatched (one zero-value
-    dummy column of capacity n), so the result is the maximum over ALL
-    matchings, not only perfect ones. Returns `{row: column}` for the rows
-    matched at positive weight. Deterministic: on equal reduced cost the
-    lowest column index wins, so the answer is a pure function of the matrix.
-    O(n · (n + m) · m) worst case, n rows × m columns; about 0.05 ms on a
-    typical 16 × 20 team instance."""
+    """EXACT maximum-weight bipartite matching: the Hungarian (Kuhn-Munkres)
+    algorithm in its successive-shortest-path form with dual potentials, columns
+    CAPACITATED so cards sharing one (shape, permil) need no duplication.
+
+    `weights[i][j] >= 0` is the value of pairing row `i` with column `j`; every row
+    is used at most once and column `j` at most `capacities[j]` times (default 1).
+    Rows may stay unmatched (a zero-value dummy column of capacity n), so the result
+    is the maximum over ALL matchings. Returns `{row: column}` for the rows matched
+    at positive weight. Deterministic: on equal reduced cost the lowest column
+    index wins. O(n (n + m) m) worst case, about 0.05 ms on a 16 x 20 team."""
     n = len(weights)
     if n == 0:
         return {}
@@ -1509,13 +896,12 @@ def _connect_assignment_exact(
     """The team-wide REAL socketing, solved EXACTLY: one owned card per socket,
     each card at most once (the game's account-wide rule, restricted to this
     team's boards), maximising the summed linearised lift. The values are
-    additive per (socket, card) — a card's multiplier reaches only the nodes
-    of its own shape anchored at its own socket, and no two sockets of one
-    board can reach a common node (on the shipped skilltree: 4 models × 4
-    sockets × 17 shapes, 6,936 cross-socket shape pairs, 0 overlaps; even the
-    unions of every shape per socket are pairwise disjoint) — so the problem is a maximum-weight bipartite
-    matching between (character, socket) rows and card columns, and cards
-    with the same (shape, permil) are one column with capacity = their count.
+    additive per (socket, card): a card's multiplier reaches only the nodes of its
+    own shape anchored at its own socket, and no two sockets of one board reach a
+    common node (4 models x 4 sockets x 17 shapes: 0 overlaps in 6,936 cross-socket
+    shape pairs). So this is a maximum-weight bipartite matching between
+    (character, socket) rows and card columns; cards with the same (shape, permil)
+    are one column with capacity = their count.
 
     Deterministic: rows are ordered `(chr, socket)`, columns by their id-sorted
     card tuple, and among the placements the concrete card is chosen in
@@ -1523,11 +909,10 @@ def _connect_assignment_exact(
     column (the same tie-break a highest-lift-first greedy uses).
 
     `incumbent` (`(chr, socket) -> card id`, the account's own placements): on a
-    tie the account's card stays where it is (`INCUMBENT_TIE`). Without it, a card
-    lifting greens worth exactly the same on two boards would be moved from one to
-    the other -- a move that changes nothing but has to be made by hand -- and with
-    the bench in the matching, dozens of such moves would be shown. The placements'
-    values stay the true gains."""
+    tie the account's card stays where it is (`INCUMBENT_TIE`), so a card lifting
+    greens worth the same on two boards is not moved for nothing (with the bench in
+    the matching, dozens of such moves would be shown). The placements' values stay
+    the true gains."""
     if not triples:
         return {}, []
     row_keys = sorted({(t[1], t[2]) for t in triples})
@@ -1558,15 +943,13 @@ def _placements_from_matched(
     incumbent: Mapping[tuple[str, str], str] | None = None,
 ) -> tuple[dict[str, dict[str, float]], list[SocketPlacement]]:
     """The matched placements as `(multipliers per character and node, the
-    placements)`: largest lift first, each placement taking the first card of
-    its group not yet used. The naming half of `_connect_assignment_exact`,
-    shared with the compiled matching (`CONNECT_KERNEL`) so the two differ only
-    in who solved the matching.
+    placements)`: largest lift first, each placement taking the first card of its
+    group not yet used. The naming half of `_connect_assignment_exact`, shared with
+    the compiled matching (`CONNECT_KERNEL`).
 
-    `name_cards=False` returns the multipliers with an EMPTY placement list —
-    for a caller that scores the board and reports no sockets. The multipliers
-    do not depend on which card of a group took which socket (a node's is the
-    `max` over the placements covering it), so they are the same either way."""
+    `name_cards=False` returns the multipliers with an EMPTY placement list, for a
+    caller that reports no sockets; the multipliers do not depend on which card of a
+    group took which socket, so they are the same either way."""
     if not name_cards:
         only_mults: dict[str, dict[str, float]] = {}
         for _gain, chr_id, _socket, permil, covered, _card_ids in matched:
@@ -1610,11 +993,11 @@ def _team_connect_assignment(
     plan. `per_char` is `chr_id -> (model positions, selected nodes, node
     values)`; `connect_cards` is `card id -> (shape offsets, permil)`.
 
-    The geometry -- which selected nodes each (socket, shape group) covers -- does not
+    The geometry (which selected nodes each (socket, shape group) covers) does not
     depend on the values, and `_yellow_capped_assignment` asks for it up to 7 times per
-    team with only the values scaled: it is kept per (connect cards, board positions,
+    team with only the values scaled, so it is kept per (connect cards, board positions,
     selected nodes) object (`_CONNECT_GEOMETRY`). The gains are the same sums in the
-    same order, so the triples are identical."""
+    same order either way."""
     held = _CONNECT_GEOMETRY.get(id(connect_cards))
     if held is None or held[0] is not connect_cards:
         groups: dict[tuple, list[str]] = {}
@@ -1666,27 +1049,14 @@ _CONNECT_GEOMETRY: dict = {}
 _GREEN_HOLDERS: dict = {}
 
 
-def yellow_scope(skilltree: Mapping, node_id: str, chr_id: str) -> str | None:
-    """The song scope (`solo` / `group` / `all`) of a yellow song-score-bonus node on
-    `chr_id`'s board, or None for any other node."""
-    if not node_id.startswith("Y"):
-        return None
-    node = (skilltree.get("nodes") or {}).get(node_id) or {}
-    effect = (node.get("chr") or {}).get(chr_id) or node.get("e") or {}
-    if "live_score_bonus" not in str(effect.get("t") or ""):
-        return None
-    return effect.get("tr")
-
-
 class SongCast(frozenset):
     """A song's cast (chr ids) that also carries the song's scope (`Chart.singer_type`:
     `solo` / `group` / `all`). It is a `frozenset`, so every `sings` caller reads it as
     the cast; `bench_yellow_pays` reads the scope. The scorer pays ONE scope per song
     (`BoardModel.song_score_bonus_for(singers, scope=singer_type)`), and the cast's size
     does not say which: a `solo` song may name two singers (`Chart` validation). Without
-    the scope, Ina's and Kiara's SOLO yellows would fill the cap's room on their GROUP song
-    m0198, so their group yellows would be valued 0 and lose their sockets: -1.68 % on
-    every top-16 team."""
+    the scope, the singers' SOLO yellows would fill the cap's room on a GROUP song and
+    their group yellows would lose their sockets."""
 
     scope: str
 
@@ -1702,24 +1072,6 @@ class SongCast(frozenset):
 def song_cast(chart: SongChart) -> SongCast:
     """The `SongCast` of one chart: its singers' chr ids at its `singer_type`."""
     return SongCast(chart.singers, getattr(chart, "singer_type", "") or "")
-
-
-def bench_yellow_pays(scope: str | None, chr_id: str, cast: AbstractSet[str] | None) -> bool:
-    """Whether an OFF-TEAM board's yellow of `scope` reaches this song's score
-    (`BoardModel.song_score_bonus_for`): the song's own cast pays the yellows of the
-    song's scope whoever is on the team; a song with no cast (a whole-roster song, or
-    the song-agnostic score) pays every board's `all` yellows. A plain set says who
-    sings but not the scope, so it accepts either solo or group (a `SongCast` says
-    which). `cast` None: not known (a leader flag was passed instead), so no bench
-    yellow is counted."""
-    if scope is None or cast is None:
-        return False
-    if not cast:
-        return scope == "all"
-    if chr_id not in cast:
-        return False
-    song_scope = getattr(cast, "scope", "")
-    return scope == song_scope if song_scope else scope in ("solo", "group")
 
 
 def bench_sockets_from_state(state: Mapping | None) -> dict[str, dict[str, str | None]]:
@@ -1780,11 +1132,11 @@ def held_bench_cards(
 ) -> frozenset[str]:
     """The cards an OFF-TEAM board's socket holds (`bench_sockets`, chr -> {socket:
     card}) where they lift a node of that board that reaches the team, already
-    multiplied in `bench_characters`: a GREEN, or a YELLOW the song pays (`bench_yellow_pays` with `cast`, the song's singers: the
-    scorer sums every board's song yellows, so Miko's yellow socket counts on her song
-    with Miko off the team). The team's matching may not use such a card too, or the
-    card counts twice (+2.06 % on a Miko solo). A card whose
-    shape reaches neither lifts nothing this team sees, so it stays free for the team.
+    multiplied in `bench_characters`: a GREEN, or a YELLOW the song pays
+    (`bench_yellow_pays` with `cast`, the song's singers: the scorer sums every board's
+    song yellows, so an off-team singer's yellow socket counts on her song). The team's
+    matching may not use such a card too, or the card counts twice. A card whose shape
+    reaches neither lifts nothing this team sees, so it stays free for the team.
     `bought` (chr -> its bought nodes): only a bought node is multiplied; without it
     every node in the shape counts. The team's own boards are re-assigned, so their
     cards are free as well. The board walk is done once per input set."""
@@ -1841,16 +1193,15 @@ def _bench_socket_rows(
 ):
     """Add every BENCH board's root socket (`S-001`, free on any board) to the Connect
     matching (`per_char`, in place) and return `{chr: (holomem, nodes an S-001 shape can
-    reach)}` for the boards added. Keeping the bench's own sockets unoptimised lets a
-    card the team takes ALSO stay on its bench socket (8 such on the m0365 Towa team);
-    with the bench in the same matching each card is used once account-wide (+0.91 %
-    there, 2,458,852 -> 2,481,161). A bench board is valued by what reaches the
-    team from it (`bench_node_values`: its GREENs, and the yellows the song pays when
-    `cast` is the song's singers). Without `bench_sockets` its other
-    sockets are not known (a bench entry carries no socket nodes) and keep the
-    account's card; with it (`chr -> {unlocked socket: card}`) EVERY unlocked socket
-    of the board joins -- so unlocked-but-empty bench sockets can be filled too -- and
-    the cover is the whole board (`None`)."""
+    reach)}` for the boards added. With the bench in the same matching each card is
+    used once account-wide; left out, a card the team takes would also stay on its
+    bench socket. A bench board is valued by what reaches the team from it
+    (`bench_node_values`: its GREENs, and the yellows the song pays when `cast` is the
+    song's singers). Without `bench_sockets` its other sockets are not known (a bench
+    entry carries no socket nodes) and keep the account's card; with it
+    (`chr -> {unlocked socket: card}`) EVERY unlocked socket of the board joins, so
+    unlocked-but-empty bench sockets can be filled too, and the cover is the whole
+    board (`None`)."""
     inverse = {name: chr_id for chr_id, name in names.items()}
     shapes = {tuple(tuple(o) for o in offsets) for offsets, _permil in connect_cards.values()}
     rows = {}
@@ -1977,18 +1328,16 @@ def _yellow_capped_assignment(
 ):
     """`_team_connect_assignment` under the song bonus's per-song cap
     (`SONG_ALL_CAP_PERMIL`, `BoardModel.song_score_bonus_for`): the linear node values
-    price every yellow permil at full worth, but past the cap a yellow adds nothing.
-    E.g. on m0342 (a group song) four bench singers' bought yellows already sum 110
-    permil, and valuing them linearly sends four cards to their yellow sockets -- worth
-    0 -- off the greens: -0.47 % on every top-16 team.
+    price every yellow permil at full worth, but past the cap a yellow adds nothing
+    (when the bench singers' bought yellows already fill it, a linear matching sends
+    cards to yellow sockets worth 0, off the greens).
 
     The room is the cap minus what the bought yellows already pay (`fixed_rows`, the
     boards outside the matching, with their multipliers; the matched boards' own
     yellows unmultiplied). The yellow values are scaled (bisection on the scale, at
     most `rounds` more matchings) and the matching kept is the one worth most with its
-    yellow lift CAPPED at the room -- not the last one that fits: scaling only down,
-    m0198 (Ina + Kiara, 80 permil bought) drops Ina's yellow card for Kiara's alone,
-    leaving 6 permil of room unused, -0.40 % on every team."""
+    yellow lift CAPPED at the room, not the last one that fits (which can drop a
+    yellow card and leave part of the room unused)."""
 
     def paying(rows):
         return {n: p for n in rows if (p := _yellow_permil(skilltree, n, chr_id, cast, node_effect_ids))}
@@ -2074,10 +1423,9 @@ def _fixed_connect_placements(
     holds a card counts as unlocked (the server reports it so,
     `account_snapshot.refresh_board_state`), so it need not be in `selected`.
 
-    Re-assigning the sockets instead — what the develop does — moves the "as
-    they are" Overall Power off the server's `GetDraftDeckInfo` by +35..+3,450,
-    with a team-dependent per-member offset, because the matching gives boards
-    Connect cards they do not hold."""
+    Re-assigning the sockets (what the develop does) would move the "as they are"
+    Overall Power off the server's `GetDraftDeckInfo` (by +35..+3,450), because the
+    matching gives boards Connect cards they do not hold."""
     mults: dict[str, dict[str, float]] = {}
     placements: list[SocketPlacement] = []
     for chr_id, (positions, selected, values) in per_char.items():
@@ -2109,11 +1457,11 @@ def _fixed_connect_placements(
 ConnectInput = tuple[str, "AssembledPlan", tuple, bool, Card, float]
 
 # The seam for a COMPILED assignment (`tools/web/kernel/connect.py`), injected
-# the way `song.NOTE_WALK_KERNEL` is — this package imports nothing it does not
+# the way `song.NOTE_WALK_KERNEL` is: this package imports nothing it does not
 # ship. Called as `kernel(inputs, members, overall_power=, bonus_permil=,
 # k_constant=, active_pool_rate=)`; it returns the MATCHED `ConnectTriple`s, or
-# `None` to decline (a plan or a team it cannot express), and then the Python
-# below runs. It must never return an approximation.
+# `None` to decline (then the Python below runs). It must never return an
+# approximation.
 CONNECT_KERNEL: Callable | None = None
 # The same hook for WORKER PROCESSES (a spawned interpreter inherits the
 # environment and nothing else): `<dir>/connect.py:assign`, loaded by path on
@@ -2123,12 +1471,10 @@ CONNECT_KERNEL_ENV = "HBUILDER_CONNECT_KERNEL"
 # The seam for the COMPILED board assembly (`tools/web/kernel/connect.py`'s
 # `assemble`), injected the same way: on the plan cache with the song's cast known,
 # the team-wide Connect matching under the song bonus's cap exactly as
-# `board_model_from_plan` runs it in Python (`_song_bonus_over_cap` before and after
-# the matching, `_yellow_capped_assignment` when either binds, the incumbent tie where
-# the Python applies it). Called as `kernel(inputs, members, overall_power=,
-# bonus_permil=, k_constant=, active_pool_rate=, song_scope=, yellows=, bench=, cap=,
-# rounds=, incumbent=, tie_factor=, tie_first=, checks=)`; it returns the MATCHED
-# `ConnectTriple`s, or `None` to decline, and then the Python runs. It must never
+# `board_model_from_plan` runs it in Python. Called as `kernel(inputs, members,
+# overall_power=, bonus_permil=, k_constant=, active_pool_rate=, song_scope=,
+# yellows=, bench=, cap=, rounds=, incumbent=, tie_factor=, tie_first=, checks=)`;
+# it returns the MATCHED `ConnectTriple`s, or `None` to decline. It must never
 # return an approximation.
 BOARD_KERNEL: Callable | None = None
 BOARD_KERNEL_ENV = "HBUILDER_BOARD_KERNEL"
@@ -2229,8 +1575,8 @@ def _cached_connect_assignment(
     card of a shape group, so the held ones are dropped from each group (a group
     with none left offers nothing). The kernel is handed the same filtered entries
     (`_held_view`, one per plan and held set): with the full groups its answer
-    would be thrown away whenever a group is used beyond the cards left -- about
-    78 % of the leaf's teams, which would then run the Python path too.
+    would be thrown away whenever a group is used beyond the cards left (about
+    78 % of the leaf's teams, which would then run the Python path too).
 
     `incumbent` (the account's own placements, `_connect_assignment_exact`) is read
     only when the cards are NAMED: the kernel has no tie-break, so a named call with
@@ -2319,73 +1665,52 @@ def board_model_from_plan(
     socket_bench: bool = False,
     bench_sockets: Mapping[str, Mapping[str, str | None]] | None = None,
 ) -> BoardModel:
-    """Turn a plan into a real `BoardModel` so it can be RE-SCORED exactly. The
-    per-node valuation is a linearisation (it sums per-node Unit-Score deltas);
-    scoring the assembled board captures the true multiplicative compounding of
-    power and bonus, which is what makes the reported gain exact rather than the
-    ~+75% the linearised sum reports against the exact +99%.
+    """Turn a plan into a real `BoardModel` so it can be RE-SCORED exactly: the
+    per-node valuation is a linearisation, and only scoring the assembled board
+    captures the multiplicative compounding of power and bonus.
 
-    Connect: with `connect_cards` (`card id -> (shape offsets, permil at the
-    card's resolved level)`, the account's actual Connect cards) the multipliers
-    come from a REAL team-wide assignment, solved EXACTLY as a maximum-weight
-    matching (`_connect_assignment_exact`) — one card, one socket, sockets
-    beyond the free root only if bought — reported through `placements_out`.
-    Without it, the idealised model applies: every socket takes the best shape
-    in the game at max bloom (an optimistic upper bound, ~+4-5 pp above the real
-    assignment on a real account). Node SELECTION
-    (`optimize_team_boards`) still values under the idealised model either way;
-    only the re-score and the reported sockets change.
+    Connect: with `connect_cards` (`card id -> (shape offsets, permil at the card's
+    resolved level)`, the account's Connect cards) the multipliers come from a REAL
+    team-wide assignment solved exactly (`_connect_assignment_exact`: one card, one
+    socket, sockets beyond the free root only if bought), reported through
+    `placements_out`. Without it every socket takes the best shape in the game at
+    max bloom (an optimistic upper bound). Node selection values under that
+    idealised model either way; only the re-score and the reported sockets change.
 
-    `bench_characters`, when given, is the account's CURRENT board for
-    characters outside this team (`board.json`'s name-keyed `characters`
-    mapping, connect multipliers already resolved). Their GREEN nodes are
-    account-global, so any team's score carries them (leaving them out reads
-    ~4 % low).
-    A character this team develops takes the PLAN's board; its bench entry,
-    if any, is REPLACED, never merged.
+    `bench_characters`: the account's current boards for characters outside this
+    team (`board.json`'s name-keyed `characters`, Connect multipliers resolved).
+    Their GREENs are account-global, so every team's score carries them. A
+    character this team develops takes the PLAN's board; its bench entry is
+    replaced, never merged.
 
-    `name_by_chr` (chr-id -> holomem name) is what lets the per-song scorer
-    match a chart's chr-id CAST against this name-keyed board. The team's own
-    cards always contribute their mapping; a caller with the whole roster
-    (bench singers whose yellow nodes count from outside the team) widens it.
-    Without it every singer-conditional term — R-044/062/063 "+stat% to all
-    when this holomem sings", R-002, the yellow solo/group song bonus — is
-    silently ZERO on the develop path, and the song-scope bonus then replaces
-    the pooled bucket with 0, so a leader scores LOWER on their own song than on
-    a stranger's.
+    `name_by_chr` (chr id -> holomem name) lets the per-song scorer match a chart's
+    chr-id cast against this name-keyed board; the team's own cards are always
+    mapped, and a caller with the whole roster widens it. Without it every
+    singer-conditional term (R-044/062/063, R-002, the solo/group yellows) is zero.
 
-    `sings` is the LEADER's singer context, the same flag the planner takes
-    (`power_node_values.singer_weight`). It matters here because the socket
-    placement re-values the nodes (`base` below) to decide which Connect socket
-    is worth which shape: without it the leader's singer-conditional reds are
-    valued 0 even on a plan that bought them BECAUSE she sings, and the team-wide
-    connect assignment then moves the sockets off the branch that carries them
-    (e.g. Calli's S-001 valued 18,870 instead of 92,154 -> -1.41 % on m0334).
-    Default `False` is the song-agnostic valuation.
+    `sings` is the singer context the planner took (`singer_weight_for`): the socket
+    placement re-values the nodes (`base` below), and without it a singing leader's
+    conditional reds would be valued 0 and the matching would move her sockets off
+    the branch that carries them. Default `False` is the song-agnostic valuation.
 
-    `plan_cache`, when given together with a plan whose `plan_keys` it filled
-    (`cached_team_plan`), takes the FAST path: the node list,
-    parsed effects and socket coverage come from `PlanCache.assembled_for`,
-    the base values are computed only for the nodes the Connect assignment
-    reads, the assignment runs per distinct shape, and the `BoardModel` is
-    built directly. Same floats as the path below — proven by
-    `tests/test_fast_leaf.py` — only fewer seconds.
+    `plan_cache`, with a plan whose `plan_keys` it filled (`cached_team_plan`),
+    takes the FAST path: nodes, parsed effects and socket coverage come from
+    `PlanCache.assembled_for`, base values only for the nodes the Connect matching
+    reads, and the `BoardModel` is built directly. Same floats as the plain path
+    (`tests/test_fast_leaf.py`).
 
-    `fixed_slots` (`chr_id -> {socket: card id}`, with `connect_cards`): the
-    team's sockets are taken AS THEY ARE instead of assigned
-    (`_fixed_connect_placements`) — the account's real boards. It disables the
-    plan-cache fast path, which only knows the assignment.
+    `fixed_slots` (`chr_id -> {socket: card id}`, with `connect_cards`): the team's
+    sockets are taken AS THEY ARE instead of assigned (`_fixed_connect_placements`).
+    It disables the plan-cache fast path, which only knows the assignment.
 
-    `bench_sockets` (`chr_id -> {unlocked socket: card id or None}`, the account's
-    own placements, `board_state.json`) says what the OFF-TEAM boards' sockets hold.
-    A card placed on a bench socket keeps lifting that board (its multiplier is already
-    in `bench_characters`), so the team's matching may not use it too, or the card
-    counts twice. Without `socket_bench` the cards that lift a bench GREEN are
-    taken out of the team's pool (`held_bench_cards`); with it EVERY unlocked bench
-    socket joins the matching
-    (`_bench_socket_rows`), so unlocked-but-empty bench sockets can be filled
-    too. `socket_bench` disables the plan-cache fast path (its bench boards are
-    shared across teams)."""
+    `bench_sockets` (`chr_id -> {unlocked socket: card id or None}`, from
+    `board_state.json`) says what the OFF-TEAM boards' sockets hold. A card on a
+    bench socket keeps lifting that board (its multiplier is already in
+    `bench_characters`), so the team's matching may not use it too. Without
+    `socket_bench` those cards leave the team's pool (`held_bench_cards`); with it
+    EVERY unlocked bench socket joins the matching (`_bench_socket_rows`), so empty
+    bench sockets can be filled too. `socket_bench` disables the plan-cache fast
+    path (its bench boards are shared across teams)."""
     members = tuple(members)
     if fixed_slots is not None or socket_bench:
         plan_cache = None
@@ -2495,10 +1820,8 @@ def board_model_from_plan(
     # (card, chr_id, model_id, cplan, base) in build order; chars assembled after
     # the team-wide assignment is known. ONE entry per CHARACTER (one board per
     # holomem), leader first: a holomem who leads and also fields a member card is
-    # valued in both roles at once -- her reds reach the members, her blues her member
-    # card -- as `optimize_team_boards` plans her. Keyed per card, the member entry
-    # would replace the leader's in the matching and her reds would read 0 (up to
-    # -4.07 % on such teams).
+    # valued in both roles at once, as `optimize_team_boards` plans her. Keyed per
+    # card, the member entry would replace the leader's and her reds would read 0.
     member_by_chr = {"chr-" + m.id.split("-")[1]: m for m in members}
     ctx: list[tuple[Card, str, str, object, dict[str, float]]] = []
     for card, is_leader in [(leader, True), *[(m, False) for m in members]]:
@@ -2636,8 +1959,8 @@ def board_model_from_plan(
     if plan_cache is not None and bench_characters is not None:
         # the plain path with a plan cache at hand (the song bonus over its cap, or a
         # refined plan): the ~50 unchanged bench boards, their digests and `BoardBase`
-        # come from the cache as on the fast path, and only the team's boards are
-        # parsed -- the same `CharacterBoard`s, the same scores, ~5 s less per request
+        # come from the cache as on the fast path and only the team's boards are
+        # parsed (the same `CharacterBoard`s and scores, ~5 s less per request)
         boards = dict(plan_cache.bench_boards(bench_characters))
         digests = dict(plan_cache.bench_digests(bench_characters))
         for card, chr_id, _model_id, cplan, _base in ctx:  # type: ignore[assignment]
@@ -2803,8 +2126,8 @@ def _paying_yellows(
     selected: frozenset, chr_id: str, cast, skilltree: Mapping, node_effect_ids
 ) -> tuple[tuple[tuple[str, float], ...], float]:
     """One board's paying yellows on this song as `(rows, their sum)`: the `(node,
-    permil)` of `_yellow_capped_assignment`'s `paying(selected)` in the set's own order,
-    and their sum as it takes it. Remembered per (set, board, cast)."""
+    permil)` of `_yellow_capped_assignment`'s `paying(selected)` in node id order
+    (`plan_node_order`), and their sum as it takes it. Remembered per (set, board, cast)."""
     key = (id(selected), chr_id, cast, getattr(cast, "scope", None), id(skilltree), id(node_effect_ids))
     hit = _PAYING_YELLOWS.get(key)
     if hit is not None and hit[0] is selected and hit[1] is skilltree and hit[2] is node_effect_ids:
@@ -2891,20 +2214,17 @@ def _board_model_by_kernel(
     incumbent: Mapping,
 ) -> BoardModel | None:
     """`board_model_from_plan` with the Connect matching from `BOARD_KERNEL`: the plan
-    cache's team boards under the multipliers it chose, over the cached bench -- the model
-    either Python path builds -- or None to run the Python: a call the kernel does not
+    cache's team boards under the multipliers it chose, over the cached bench (the model
+    either Python path builds), or None to run the Python: a call the kernel does not
     express (a board without a model, a team name the roster maps elsewhere) or one it
     declines. A plan the cache did not make (the activation refinement's: no `plan_keys`)
-    is assembled by its nodes (`selected_plan_key`) and matched as the plain path matches it:
-    straight to `_yellow_capped_assignment`, the incumbents winning ties from its first
-    matching on, with no cap checks before.
+    is assembled by its nodes (`selected_plan_key`) and matched as the plain path does:
+    straight to `_yellow_capped_assignment`, with no cap checks before.
 
-    The account's case is the Python's too: the cards `held` on off-team sockets are out of
-    every group the matching sees (`_held_view`, as the plan cache's own matching drops
-    them), and the account's own placements (`incumbent`) win ties in every matching the
-    capped path solves, as `_yellow_capped_assignment` passes them on -- but in the first
-    matching only when the cards are named (`tie_first`), as the plan cache's matching
-    applies them, so a team below the cap gets the fast path's sockets."""
+    It follows the Python exactly: the cards `held` on off-team sockets are out of every
+    group (`_held_view`), and the account's placements (`incumbent`) win ties in every
+    matching of the capped path, but in the first matching only when the cards are named
+    (`tie_first`), as the plan cache's matching applies them."""
     if not name_by_chr or any(
         name_by_chr.get("chr-" + card.id.split("-")[1]) != card.member for card in (leader, *members)
     ):
@@ -2983,599 +2303,3 @@ def _board_model_by_kernel(
     return BoardModel(
         characters=chars, name_by_chr=dict(names), _digests=digests, _base=cache.bench_base(bench_characters)
     )
-
-
-@dataclass(frozen=True, slots=True)
-class BoardOptimisedTeam:
-    """One team's board-optimised standing: its board-off Unit Score, the Unit
-    Score once its own board is developed (RE-SCORED from the assembled plan, not
-    the linearised per-node sum), the plan that gets there, and the assembled
-    `BoardModel` itself so a caller can RE-SCORE it against anything else — e.g.
-    a per-song chart — without re-developing the board."""
-
-    team: Team
-    board_off_us: float
-    optimised_us: float
-    plan: TeamBoardPlan
-    board: BoardModel | None = None
-    # Real Connect placements when the caller passed `connect_cards`; empty under
-    # the idealised model (which places shapes, not actual cards).
-    sockets: tuple[SocketPlacement, ...] = ()
-
-
-def optimize_and_rerank(
-    teams: Sequence[Team],
-    cfg: ScoringConfig,
-    *,
-    tree_for: Callable[[Card], SkillTree | None],
-    budget_for: Callable[[Card], int],
-    node_effect_ids: Mapping[str, list[str]],
-    skilltree: Mapping,
-    connect_cards: Mapping[str, tuple[Sequence[Sequence[int]], int]] | None = None,
-    bench_characters: Mapping[str, Sequence[Mapping]] | None = None,
-    name_by_chr: Mapping[str, str] | None = None,
-    plan_cache: PlanCache | None = None,
-    sings: bool | AbstractSet[str] | Callable[[Card], bool | AbstractSet[str]] = False,
-    bench_sockets: Mapping[str, Mapping[str, str | None]] | None = None,
-) -> list[BoardOptimisedTeam]:
-    """The bounded JOINT team+board pass: board-optimise every team and RE-RANK by
-    the board-optimised Unit Score.
-
-    `sings` is the leader's singer context (`power_node_values.singer_weight`):
-    a bool for the whole list, or `Callable[[leader Card], bool]` when the
-    teams have different leaders on one song. `plan_cache`, when given, takes
-    every plan from `cached_team_plan` (fixed per (character, role, budget,
-    singer context) at the cache's nominal context) instead of re-planning per
-    team; the default `None` keeps the per-team `optimize_team_boards` path
-    unchanged.
-
-    A team a board-less ranking placed second may win once each team's board is
-    developed — the board is 29-49 % of Overall Power and is PER-team, so
-    rank-then-show-#1's-plan can miss the joint optimum. This is exactly what the
-    CLI's `--optimize-board` does; it lives here, not in the CLI, so the web serves
-    the SAME re-rank rather than a second implementation free to drift from it.
-
-    Each team is scored board-off for its base, its board optimised IN-PROCESS
-    (`optimize_team_boards` — the fast greedy knapsack, NOT the slow `tree_optimise`
-    subprocess, so re-ranking the top-K is seconds not minutes), then the ASSEMBLED
-    board is re-scored (`board_model_from_plan`) for the EXACT optimised Unit Score:
-    the plan's `total_gain` is a linearised sum, while scoring the real board
-    captures the power × bonus compounding. Sorted by optimised Unit Score,
-    highest first — the caller reads that order as the ranking."""
-    cfg_off = replace(cfg, board=None)
-    rows: list[BoardOptimisedTeam] = []
-    for team in teams:
-        bd = score_with_breakdown(team, cfg_off)
-        ds = deck_screen_unit_score(bd)
-        # The BARE active-pool rate a new skill_effect_up node multiplies:
-        # active_pool carries the support boost, exactly (1 + combined_support_rate).
-        bare_pool = bd.active_pool / (1.0 + bd.combined_support_rate)
-        # a cast (frozenset) passes through: every singing board valued as a singer
-        leader_sings = sings(team.leader) if callable(sings) else sings
-        if not isinstance(leader_sings, (set, frozenset)):
-            leader_sings = bool(leader_sings)
-        if plan_cache is not None:
-            plan = cached_team_plan(
-                team.leader,
-                team.members,
-                cache=plan_cache,
-                tree_for=tree_for,
-                budget_for=budget_for,
-                node_effect_ids=node_effect_ids,
-                skilltree=skilltree,
-                sings=leader_sings,
-            )
-        else:
-            plan = optimize_team_boards(
-                team.leader,
-                team.members,
-                tree_for=tree_for,
-                budget_for=budget_for,
-                node_effect_ids=node_effect_ids,
-                overall_power=ds.overall_power,
-                bonus_permil=ds.score_bonus_permil,
-                k_constant=UNIT_SCORE_K,
-                active_pool_rate=bare_pool,
-                skilltree=skilltree,
-                singer_weight=singer_weight_for(leader_sings, _chr_of(team.leader), True),
-                singers=leader_sings if isinstance(leader_sings, (set, frozenset)) else None,
-            )
-        placements: list[SocketPlacement] = []
-        board = board_model_from_plan(
-            plan,
-            team.leader,
-            team.members,
-            skilltree,
-            node_effect_ids,
-            overall_power=ds.overall_power,
-            bonus_permil=ds.score_bonus_permil,
-            k_constant=UNIT_SCORE_K,
-            active_pool_rate=bare_pool,
-            connect_cards=connect_cards,
-            placements_out=placements,
-            bench_characters=bench_characters,
-            name_by_chr=name_by_chr,
-            sings=leader_sings,
-            plan_cache=plan_cache,
-            bench_sockets=bench_sockets,
-        )
-        opt_us = deck_screen_unit_score(score_with_breakdown(team, replace(cfg_off, board=board))).unit_score
-        rows.append(
-            BoardOptimisedTeam(
-                team=team,
-                board_off_us=ds.unit_score,
-                optimised_us=opt_us,
-                plan=plan,
-                board=board,
-                sockets=tuple(placements),
-            )
-        )
-    rows.sort(key=lambda r: r.optimised_us, reverse=True)
-    return rows
-
-
-# The two node families whose value is a matter of TIMING, not of size: the
-# ACTIVE's activation frequency (cooldown) and its activation probability.
-ACTIVATION_EFFECT_TYPES = frozenset({"Act.CD", "Act.Prob"})
-
-
-def activation_node_ids(skilltree: Mapping) -> frozenset[str]:
-    """Node ids whose effect is an activation-timing family
-    (`ACTIVATION_EFFECT_TYPES`), read from the skill-tree dump's `nodes[*].e.t`."""
-    return frozenset(
-        node_id
-        for node_id, meta in (skilltree.get("nodes") or {}).items()
-        if ((meta or {}).get("e") or {}).get("t") in ACTIVATION_EFFECT_TYPES
-    )
-
-
-def cooldown_node_ids(skilltree: Mapping) -> frozenset[str]:
-    """Node ids whose effect is the ACTIVE's activation frequency (`Act.CD`, the cooldown
-    shortening), read from the skill-tree dump's `nodes[*].e.t`."""
-    return frozenset(
-        node_id
-        for node_id, meta in (skilltree.get("nodes") or {}).items()
-        if ((meta or {}).get("e") or {}).get("t") == "Act.CD"
-    )
-
-
-def _with_cooldown_subset(
-    tree: SkillTree, selected: frozenset[str], family: frozenset[str], want: frozenset[str], available
-) -> frozenset[str] | None:
-    """`selected` with its `family` nodes replaced by `want`: the family nodes not wanted are
-    dropped, each wanted node is bought with its cheapest path. `None` when the drop leaves
-    bought nodes cut off from the root (the board would come apart), or a wanted node
-    cannot be reached."""
-    # dropped together, so a node and the one hanging from it can both go
-    rest = frozenset(selected - ((selected & family) - want))
-    if tree.reachable(rest) != rest:
-        return None
-    sel = set(rest)
-    costs = {nid: tree.nodes[nid].cost for nid in tree.nodes}
-    for node in sorted(want - frozenset(sel)):
-        bundles = _cheapest_bundles(tree, frozenset(sel), available, costs)
-        if node not in bundles:
-            return None
-        sel |= set(bundles[node][1]) | {node}
-    return frozenset(sel)
-
-
-def cooldown_count_axes(
-    plan: TeamBoardPlan,
-    cards_by_id: Mapping[str, Card],
-    *,
-    tree_for: Callable[[Card], SkillTree | None],
-    budget_for: Callable[[Card], int],
-    cooldown_nodes: frozenset[str],
-    member_ids: frozenset[str],
-    player_level: int | None = None,
-    drops_only: bool = False,
-    memo: dict | None = None,
-) -> list[tuple[str, list[tuple[int, frozenset[str]]], int]]:
-    """The activation-frequency counts each MEMBER's board can take around `plan`:
-    `[(member card id, [(count, the board's nodes at that count)], its count now)]`, the
-    counts ascending, for every member with at least two of them.
-
-    Per member, each count is the variant closest to the member's current board (fewest
-    nodes changed, then the cheapest): a dropped node must not have bought nodes hanging
-    from it, an added node comes with its cheapest path, and the board stays within the
-    member's points (`refine_cooldown_counts`). `drops_only`: only the counts reached by
-    dropping frequency nodes the board holds, none bought. `memo` (a dict the caller
-    keeps): a member's counts are a function of its own board, so the plans of one team
-    for several songs, which mostly share their boards, work them out once."""
-    available_cache: dict[int, object] = {}
-    axes: list[tuple[str, list[tuple[int, frozenset[str]]], int]] = []
-    for card_id in plan.per_character:
-        if card_id not in member_ids:
-            continue
-        card = cards_by_id.get(card_id)
-        tree = tree_for(card) if card is not None else None
-        if tree is None:
-            continue
-        family = frozenset(cooldown_nodes & set(tree.nodes))
-        if not family:
-            continue
-        selected = frozenset(plan.per_character[card_id].selected)
-        here = len(selected & family)
-        key_m = (card_id, selected, drops_only)
-        states = memo.get(key_m) if memo is not None else None
-        if states is None:
-            budget = budget_for(card)  # type: ignore[arg-type]
-            available = available_cache.setdefault(id(tree), _available(tree, player_level))
-            best_by_count: dict[int, tuple[tuple, frozenset[str]]] = {}
-            nodes = sorted(family)
-            for mask in range(1 << len(nodes)):
-                want = frozenset(n for i, n in enumerate(nodes) if mask >> i & 1)
-                if drops_only and not want <= selected:
-                    continue
-                sel = _with_cooldown_subset(tree, selected, family, want, available)
-                if sel is None:
-                    continue
-                cost = tree.cost_of(sel - {ROOT_NODE})
-                if cost > budget:
-                    continue
-                key = (len(sel ^ selected), cost, tuple(sorted(sel)))
-                count = len(sel & family)
-                if count not in best_by_count or key < best_by_count[count][0]:
-                    best_by_count[count] = (key, sel)
-            # no axis for a member with one count, or whose own board is not among them
-            states = (
-                [(count, best_by_count[count][1]) for count in sorted(best_by_count)]
-                if len(best_by_count) >= 2 and here in best_by_count
-                else []
-            )
-            if memo is not None:
-                memo[key_m] = states
-        if states:
-            axes.append((card_id, states, here))
-    return axes
-
-
-def plan_with_counts(
-    plan: TeamBoardPlan,
-    axes: Sequence[tuple],
-    combo: Sequence[int],
-    cards_by_id: Mapping[str, Card],
-    tree_for: Callable[[Card], SkillTree | None],
-) -> TeamBoardPlan:
-    """`plan` with each axis of `cooldown_count_axes` at the state `combo` names (an index
-    into that member's counts). It carries no `plan_keys`: it is assembled by its nodes."""
-    per = dict(plan.per_character)
-    for (card_id, states, _here), k in zip(axes, combo):
-        sel = states[k][1]
-        old = plan.per_character[card_id]
-        if sel != old.selected:
-            tree = tree_for(cards_by_id[card_id])
-            per[card_id] = BoardPlan(
-                selected=sel,
-                spent=tree.cost_of(sel - {ROOT_NODE}),  # type: ignore[union-attr]
-                value=old.value,
-                steps=old.steps,
-            )
-    return replace(plan, per_character=per, plan_keys={})
-
-
-def refine_cooldown_counts(
-    plan: TeamBoardPlan,
-    cards_by_id: Mapping[str, Card],
-    *,
-    tree_for: Callable[[Card], SkillTree | None],
-    budget_for: Callable[[Card], int],
-    cooldown_nodes: frozenset[str],
-    member_ids: frozenset[str],
-    score: Callable[[TeamBoardPlan], float],
-    start_value: float | None = None,
-    player_level: int | None = None,
-    cooldown_of: Callable[[TeamBoardPlan], Mapping[str, float]] | None = None,
-    screen: Callable[[Sequence[Mapping[str, float]]], Sequence[float]] | None = None,
-    verify: int = 4,
-) -> tuple[TeamBoardPlan, float, list[str]]:
-    """Choose how many activation-frequency (`Act.CD`) nodes each MEMBER keeps, all
-    members jointly, by trying every combination on the real score.
-
-    With `cooldown_of` (a plan -> each member card's cooldown shortening on that plan's
-    board) and `screen` (a list of {member card: cooldown shortening} -> the score of the
-    START board with each, in order), the combinations are first scored by `screen`, which
-    re-assembles nothing, and only the best `verify` of them are scored by `score` on
-    their own assembled board; the answer is always one `score` measured. Without them
-    every combination is scored by `score`.
-
-    A member's frequency nodes all carry the same value, so what moves the score is how
-    many of them the member keeps (0 to 3), not which. And the counts act together: a
-    shorter cooldown moves every later window of that member, and the score at each
-    instant is the strongest live ACTIVE, so dropping one node on each of two strong
-    members can gain while either drop alone loses. A move-by-move search
-    (`refine_activation_nodes`) stops before such a combination; trying every combination
-    of counts (at most 4^5 = 1024 for five members) does not.
-
-    Per member, each count is the variant closest to the member's current board (fewest
-    nodes changed, then the cheapest): a dropped node must not have bought nodes hanging
-    from it, an added node comes with its cheapest path, and the board stays within the
-    member's points. Only the members' boards are tried: a frequency node shortens its
-    own holomem's ACTIVE, and the leader slot's own ACTIVE is not in the pool. A
-    combination is kept only when the score is strictly higher, so ties keep the start
-    and the result is never worse. Returns `(plan, its score, the changes made)`."""
-    current = start_value if start_value is not None else score(plan)
-    axes = cooldown_count_axes(
-        plan,
-        cards_by_id,
-        tree_for=tree_for,
-        budget_for=budget_for,
-        cooldown_nodes=cooldown_nodes,
-        member_ids=member_ids,
-        player_level=player_level,
-    )
-    if not axes:
-        return plan, current, []
-    start = tuple(next(i for i, (c, _s) in enumerate(states) if c == here) for _cid, states, here in axes)
-    best, best_value = start, current
-    ranges = [range(len(states)) for _cid, states, _here in axes]
-
-    def plan_for(combo: tuple[int, ...]) -> TeamBoardPlan:
-        return plan_with_counts(plan, axes, combo, cards_by_id, tree_for)
-
-    combos = [combo for combo in itertools.product(*ranges) if combo != start]
-    if cooldown_of is not None and screen is not None:
-        # each member state's own cooldown, read off a board where only that member moved
-        start_cd = cooldown_of(plan)
-        state_cd: list[list[float]] = []
-        for a, (card_id, states, _here) in enumerate(axes):
-            row = []
-            for k in range(len(states)):
-                if k == start[a]:
-                    row.append(start_cd[card_id])
-                else:
-                    one = tuple(k if b == a else start[b] for b in range(len(axes)))
-                    row.append(cooldown_of(plan_for(one))[card_id])
-            state_cd.append(row)
-        values = screen(
-            [
-                {card_id: state_cd[a][k] for a, ((card_id, _s, _h), k) in enumerate(zip(axes, combo))}
-                for combo in combos
-            ]
-        )
-        # best first, ties in enumeration order; only these are scored on their own board
-        screened = sorted(zip(values, combos), key=lambda vc: -vc[0])
-        combos = [combo for _v, combo in screened[:verify]]
-    for combo in combos:
-        value = score(plan_for(combo))
-        if value > best_value:
-            best, best_value = combo, value
-    if best == start:
-        return plan, current, []
-    changes = [
-        f"{card_id} Act.CD {states[s][0]}->{states[b][0]}"
-        for (card_id, states, _here), s, b in zip(axes, start, best)
-        if s != b
-    ]
-    return plan_for(best), best_value, changes
-
-
-def refine_activation_nodes(
-    plan: TeamBoardPlan,
-    cards_by_id: Mapping[str, Card],
-    *,
-    tree_for: Callable[[Card], SkillTree | None],
-    budget_for: Callable[[Card], int],
-    activation_nodes: frozenset[str],
-    score: Callable[[TeamBoardPlan], float],
-    player_level: int | None = None,
-    max_moves: int = 40,
-) -> tuple[TeamBoardPlan, float, list[str]]:
-    """Choose the team's activation nodes JOINTLY, on the real score.
-
-    What a shorter cooldown (or a higher activation chance) is worth depends on
-    where that member's windows then fall against the other members' windows and
-    the chart's cues — the active Score UP is a per-tick MAX, so an extra
-    activation can land on top of another and buy nothing, or shift a window off
-    a cue. No per-node value captures that, and the greedy planner over-buys them:
-    on six songs x two bases, dropping some of them raises the song score by
-    0.2-3.1 %.
-
-    Coordinate descent over single moves, first improvement kept: for each
-    character in turn, DROP an activation node the rest of its board does not
-    hang from, or ADD one (its cheapest path) that the character's points still
-    cover. `score(plan)` is the caller's real objective (a song score on the board
-    assembled from `plan`); a move is kept only when it raises it, so the result
-    is never worse than the start. Freed points stay unspent.
-
-    The returned plan carries no `plan_keys`: it is not one of the plan cache's
-    plans (`board_model_from_plan` assembles it by its nodes). Returns
-    `(plan, its score, the moves made)`."""
-    best = score(plan)
-    moves: list[str] = []
-    if plan.plan_keys:
-        plan = replace(plan, plan_keys={})
-    improved = True
-    while improved and len(moves) < max_moves:
-        improved = False
-        for card_id in list(plan.per_character):
-            card = cards_by_id.get(card_id)
-            tree = tree_for(card) if card is not None else None
-            if tree is None:
-                continue
-            current = plan.per_character[card_id]
-            selected = frozenset(current.selected)
-            budget = budget_for(card)  # type: ignore[arg-type]
-            spent = tree.cost_of(selected - {ROOT_NODE})
-            candidates: list[tuple[str, frozenset[str]]] = []
-            for node in sorted(selected & activation_nodes):
-                rest = selected - {node}
-                if tree.reachable(rest) == rest:
-                    candidates.append((f"-{node}", rest))
-            costs = {nid: tree.nodes[nid].cost for nid in tree.nodes}
-            bundles = _cheapest_bundles(tree, selected, _available(tree, player_level), costs)
-            for node in sorted(activation_nodes & set(bundles)):
-                added_cost, added = bundles[node]
-                if spent + added_cost <= budget:
-                    candidates.append((f"+{node}", selected | added))
-            for label, nodes in candidates:
-                trial = replace(
-                    plan,
-                    per_character={
-                        **plan.per_character,
-                        card_id: BoardPlan(
-                            selected=nodes,
-                            spent=tree.cost_of(nodes - {ROOT_NODE}),
-                            value=current.value,
-                            steps=current.steps,
-                        ),
-                    },
-                )
-                value = score(trial)
-                if value > best:
-                    plan, best = trial, value
-                    moves.append(f"{card_id} {label}")
-                    improved = True
-                    break
-            if len(moves) >= max_moves:
-                break
-    return plan, best, moves
-
-
-def develop_refined_team(
-    team: Team,
-    cfg: ScoringConfig,
-    charts_score: Callable[[BoardModel], float],
-    *,
-    tree_for: Callable[[Card], SkillTree | None],
-    budget_for: Callable[[Card], int],
-    node_effect_ids: Mapping[str, list[str]],
-    skilltree: Mapping,
-    connect_cards: Mapping[str, tuple[Sequence[Sequence[int]], int]] | None = None,
-    bench_characters: Mapping[str, Sequence[Mapping]] | None = None,
-    name_by_chr: Mapping[str, str] | None = None,
-    plan_cache: PlanCache | None = None,
-    sings: bool | AbstractSet[str] = False,
-    player_level: int | None = None,
-    bench_sockets: Mapping[str, Mapping[str, str | None]] | None = None,
-    cooldown_counts: bool = False,
-    charts_score_variants: Callable[[BoardModel, Sequence[Mapping[str, float]]], Sequence[float]]
-    | None = None,
-) -> tuple[BoardOptimisedTeam, float, list[str]]:
-    """`optimize_and_rerank`'s develop for ONE team, then
-    `refine_activation_nodes` on `charts_score(board)` — the caller's real
-    objective, e.g. the song score on one chart or the sum over a few — and, with
-    `cooldown_counts`, `refine_cooldown_counts` after it (every combination of the
-    members' activation-frequency node counts; ~1,000 scorings, so for a few finalists).
-    `charts_score_variants(board, [{holomem: cooldown shortening}, ...])`, when given, is
-    `charts_score(board.with_cooldowns(v))` for every `v` at once
-    (`song.score_song_cooldown_variants`); it only makes that screen cheaper.
-    The board is re-assembled exactly as `optimize_and_rerank` assembles it (same
-    linearisation point, Connect cards, bench, singer context), never from the
-    plan cache once the plan has been refined. Returns the same
-    `BoardOptimisedTeam` `optimize_and_rerank` would (its Unit Score and real
-    socket placements recomputed on the refined board), `charts_score` of that
-    board, and the moves made."""
-    cfg_off = replace(cfg, board=None)
-    bd = score_with_breakdown(team, cfg_off)
-    ds = deck_screen_unit_score(bd)
-    bare_pool = bd.active_pool / (1.0 + bd.combined_support_rate)
-    start = optimize_and_rerank(
-        [team],
-        cfg,
-        tree_for=tree_for,
-        budget_for=budget_for,
-        node_effect_ids=node_effect_ids,
-        skilltree=skilltree,
-        connect_cards=connect_cards,
-        bench_characters=bench_characters,
-        name_by_chr=name_by_chr,
-        plan_cache=plan_cache,
-        sings=sings,
-        bench_sockets=bench_sockets,
-    )[0]
-
-    def assemble(plan: TeamBoardPlan, placements: list | None = None) -> BoardModel | None:
-        if plan is start.plan:
-            if placements is not None:
-                placements.extend(start.sockets)
-            return start.board
-        return board_model_from_plan(
-            plan,
-            team.leader,
-            team.members,
-            skilltree,
-            node_effect_ids,
-            overall_power=ds.overall_power,
-            bonus_permil=ds.score_bonus_permil,
-            k_constant=UNIT_SCORE_K,
-            active_pool_rate=bare_pool,
-            connect_cards=connect_cards,
-            placements_out=placements,
-            bench_characters=bench_characters,
-            name_by_chr=name_by_chr,
-            sings=sings,
-            bench_sockets=bench_sockets,
-            # a refined plan carries no `plan_keys` (`refine_activation_nodes`): the
-            # compiled assembly takes it by its nodes, the Python's plain path otherwise
-            plan_cache=plan_cache,
-        )
-
-    cards = {c.id: c for c in (team.leader, *team.members)}
-    plan, value, moves = refine_activation_nodes(
-        start.plan,
-        cards,
-        tree_for=tree_for,
-        budget_for=budget_for,
-        activation_nodes=activation_node_ids(skilltree),
-        score=lambda p: charts_score(assemble(p)),  # type: ignore[arg-type]
-        player_level=player_level,
-    )
-    if cooldown_counts:
-        members_by_id = {c.id: c for c in team.members}
-        # the board `value` was measured on: the start's own when nothing moved
-        base = start.board if not moves else assemble(plan)
-
-        def cooldown_of(p: TeamBoardPlan) -> dict[str, float]:
-            board = base if p is plan else assemble(p)
-            return {
-                cid: board.uptime_for(c.member)[1] if board is not None else 0.0
-                for cid, c in members_by_id.items()
-            }
-
-        def screen(variants: Sequence[Mapping[str, float]]) -> list[float]:
-            by_holomem = [{members_by_id[cid].member: cd for cid, cd in v.items()} for v in variants]
-            if charts_score_variants is not None:
-                return list(charts_score_variants(base, by_holomem))  # type: ignore[arg-type]
-            return [charts_score(base.with_cooldowns(v)) for v in by_holomem]  # type: ignore[union-attr]
-
-        plan, value, changes = refine_cooldown_counts(
-            plan,
-            cards,
-            tree_for=tree_for,
-            budget_for=budget_for,
-            cooldown_nodes=cooldown_node_ids(skilltree),
-            member_ids=frozenset(members_by_id),
-            score=lambda p: charts_score(assemble(p)),  # type: ignore[arg-type]
-            start_value=value,
-            player_level=player_level,
-            cooldown_of=cooldown_of if base is not None else None,
-            screen=screen if base is not None else None,
-        )
-        moves = moves + changes
-    if not moves:  # unchanged: keep the start exactly (its plan-cache board)
-        return start, value, moves
-    placements: list[SocketPlacement] = []
-    board = assemble(plan, placements)
-    opt_us = deck_screen_unit_score(score_with_breakdown(team, replace(cfg_off, board=board))).unit_score
-    return (
-        BoardOptimisedTeam(
-            team=team,
-            board_off_us=ds.unit_score,
-            optimised_us=opt_us,
-            plan=plan,
-            board=board,
-            sockets=tuple(placements),
-        ),
-        value,
-        moves,
-    )
-
-
-def develop_and_refine(
-    team: Team, cfg: ScoringConfig, charts_score: Callable[[BoardModel], float], **kwargs: Any
-) -> tuple[BoardModel | None, TeamBoardPlan, float, list[str]]:
-    """`develop_refined_team` as `(board, plan, charts_score(board), moves)`."""
-    bt, value, moves = develop_refined_team(team, cfg, charts_score, **kwargs)
-    return bt.board, bt.plan, value, moves

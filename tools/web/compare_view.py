@@ -1,21 +1,13 @@
 """`POST /api/compare` — two hand-picked teams, scored side by side under ONE
 set of assumptions, with the differences explained.
 
-READS ONLY (tools/web/test_no_writes.py). Everything here is the same
-machinery the Solve page's routes already use — `load_inputs` /
-`apply_collection` for the cards, `optimize_and_rerank` for a developed board,
-`score_song_detailed` / `deck_screen_unit_score` for the numbers, and a
-same-instant-same-basis certificate (`heuristic_certificate`) — glued together for exactly two
-teams. There is deliberately NO second definition of what a card is worth:
-the only web-side computation is `override_card`, which restates ONE card at
-a chosen level/bloom through the domain's own `resolve_card_state` /
-`StatBasis.stats_at` / `restate_card_skills` (the per-card what-if that
-`apply_collection` has no switch for), and the panel-line derivation
-(`panel_lines`, below).
-
-The request parsers, the bases and the file paths are the web server's own
-(`hbweb.basis`, `hbweb.config`), so Compare reads every token exactly as the other
-routes do; the card faces and the per-row board section are built here.
+READS ONLY (tools/web/test_no_writes.py). It reuses the Optimizer's machinery
+(`load_inputs` / `apply_collection`, `optimize_and_rerank`, `score_song_detailed` /
+`deck_screen_unit_score`, `heuristic_certificate`) and the server's own parsers and paths
+(`hbweb.basis`, `hbweb.config`), so there is NO second definition of what a card is worth.
+The only web-side computations are `override_card` (one card restated at a chosen
+level/bloom through the domain's `resolve_card_state` / `StatBasis.stats_at` /
+`restate_card_skills`, a what-if `apply_collection` has no switch for) and `panel_lines`.
 
 Request body::
 
@@ -29,30 +21,24 @@ Request body::
      "platform": "mobile" | "pc",  "uptime_model": "finite" | "steady",
      "distribution": bool}                      # song mode: the run-score law per team
 
-`board: "state"` scores each team on the board a RANKED ROW was scored on: every
-team entry then carries that row's `board_state` ({chr: {nodes, slots}}) and,
-optionally, its `member_order`; the board is rebuilt exactly as the develop
-assembled it (`row_detail.board_from_state`) so the panel, the split, the law
-and the song figures are the row's own numbers.
+`board: "state"` scores each team on the board a ranked row was scored on: each entry
+carries that row's `board_state` ({chr: {nodes, slots}}) and optionally its `member_order`,
+rebuilt exactly as the develop assembled it (`row_detail.board_from_state`), so every
+figure is the row's own.
 
-Every per-song figure goes through `song_rank.score_team_on_chart` (the
-ranker's own entry point: Overall Power deck power by default) via
-`row_detail.figures`; each row also carries `score.deck_power`, the Score Bonus
-five-line split (`score_bonus`, `row_detail.score_bonus_lines`) in the row's
-slot order, and with `distribution: true` the exact run-score law
-(`distribution`, song mode).
+Per-song figures go through `song_rank.score_team_on_chart` (Overall Power deck power by
+default) via `row_detail.figures`; each row also carries `score.deck_power`, the five-line
+Score Bonus split (`score_bonus`, `row_detail.score_bonus_lines`) in the row's slot order,
+and with `distribution: true` the exact run-score law (song mode).
 
-`board: "develop"` scores each team on TWO boards and says which is which:
-the OBJECTIVE — the team on the FIXED plans of one PlanCache
-(`optimize_and_rerank(plan_cache=)`, the objective the EXACT certificates
-certify; seeded from the per-leader table's
-own seed when this request's inputs_hash + budget/uptime/platform match it,
-else from team A) — is the headline, `score.song_est` / `score.across_mean`
-and `board_state`; the per-team greedy re-develop is the LABELLED what-if
+`board: "develop"` scores each team on TWO boards: the OBJECTIVE — the team on the fixed
+plans of one PlanCache (`optimize_and_rerank(plan_cache=)`, what the exact certificates
+certify; seeded from the per-leader table's seed when this request's inputs_hash +
+budget/uptime/platform match it, else from team A) — is the headline (`score.song_est` /
+`score.across_mean`, `board_state`); the per-team greedy re-develop is the labelled what-if
 (`score.song_est_develop` / `score.across_mean_develop`, `develop_whatif`,
-`board_state_develop`, `board_plan_summary_develop`).
-Unit-Score mode (no song, no across) has no plan-cache objective and stays on
-the develop leaf, labelled.
+`board_state_develop`, `board_plan_summary_develop`). Unit-Score mode (no song, no across)
+has no plan-cache objective and stays on the develop leaf, labelled.
 """
 
 from __future__ import annotations
@@ -72,13 +58,12 @@ from hbuilder.domain.board import BoardError
 from hbuilder.domain.board_plan import (
     PlanCache,
     SongCast,
-    develop_refined_team,
     model_for_character,
     node_effect_ids_from_master,
-    optimize_and_rerank,
     skill_tree_from_dumps,
     song_cast,
 )
+from hbuilder.domain.board_refine import develop_refined_team, optimize_and_rerank
 from hbuilder.domain.card import Stats
 from hbuilder.domain.collection import (
     CollectionError,
@@ -116,9 +101,8 @@ LEVEL_RANGE = (1, 80)
 BLOOM_RANGE = (0, 6)
 FULL_TREE = TOTAL_BOARD_POINTS  # what the whole tree costs
 
-# The panel lines, in the order the deck screen lists them. `kind` says how
-# the Δ is read: a POWER line is absolute
-# points of Overall Power; a RATE line is percentage points.
+# The panel lines, in the order the deck screen lists them. `kind` says how the Δ is read:
+# a POWER line is absolute points of Overall Power; a RATE line is percentage points.
 PANEL_LINES: tuple[tuple[str, str, str], ...] = (
     ("member_parameter", "Member Parameter", "power"),
     ("passive", "Passive", "power"),
@@ -666,10 +650,9 @@ def _card_states() -> dict[str, Any]:
     """The inputs that resolve each card's `(level, bloom, ...)` for its face: the
     collection's per-card entries, its `card_default`, and the per-rarity level caps.
 
-    ⚠ These drive the DISPLAY only. `card_default: "max"` is a legitimate statement
-    about levels and stats (validated 167/167) and is what the solver already scored
-    against; it is **refuted for Connect**, and that rule lives where it belongs, in
-    `connect_bonus_level` and the board endpoint. Do not reuse this for Connect.
+    These drive the DISPLAY only: `card_default: "max"` holds for levels and stats but
+    not for Connect, whose rule lives in `connect_bonus_level` and the board endpoint. Do
+    not reuse this for Connect.
     """
     document = config.read_json(config.COLLECTION_PATH) or {}
     caps_raw = config.read_json(config.CAPS_PATH)
@@ -814,6 +797,15 @@ class _Developer:
             self.connect_cards = ma_scenario.connect_cards
             self.current_by_chr = ma_scenario.current_by_chr(self.name_by_chr)
             self.granted = {k: ma_scenario.points for k in self.current_by_chr}
+        # the account's own nodes: a plan made from scratch keeps them where it costs nothing,
+        # so a row never proposes taking one off without spending what that frees
+        # (`optimize_board`'s `prefer`). Not on the maxed-account basis, whose current boards
+        # are its scenario's, nor on a flat budget, which proposes no sale
+        self.prefer: dict[str, frozenset[str]] | None = (
+            {c: frozenset(v["owned"]) for c, v in self.current_by_chr.items()}
+            if ma_scenario is None and budget is None
+            else None
+        )
         self.cfg = cfg
         self.flat_budget = budget
         self._tree_cache: dict[str, object] = {}
@@ -868,6 +860,7 @@ class _Developer:
                 plan_cache=plan_cache,
                 sings=self.cast,
                 bench_sockets=self.bench_sockets,
+                prefer=self.prefer,
             )[0]
         return optimize_and_rerank(
             [team],
@@ -882,12 +875,16 @@ class _Developer:
             sings=self.cast,
             plan_cache=plan_cache,
             bench_sockets=self.bench_sockets,
+            prefer=self.prefer,
         )[0]
 
     def plan_cache_from(self, seed: Team) -> PlanCache:
         """ONE PlanCache for the whole request, seeded from `seed`'s board-off
-        standing — exactly `parallel_refine.new_plan_cache` (cfg board=None)."""
-        return PlanCache.from_team(seed, dataclasses.replace(self.cfg, board=None))
+        standing — `parallel_refine.new_plan_cache` (cfg board=None), with the
+        account's own nodes kept where it costs nothing (`prefer`)."""
+        cache = PlanCache.from_team(seed, dataclasses.replace(self.cfg, board=None))
+        cache.prefer = self.prefer
+        return cache
 
     def board_state_of(self, bt) -> dict:
         slots_by_chr: dict[str, dict[str, str]] = {}
@@ -1111,11 +1108,9 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
         difficulty=difficulty,
     )
 
-    # THE OBJECTIVE (module docstring): under board=develop, song / across
-    # mode: one PlanCache for the request,
-    # seeded from the per-leader table that certifies this song on this
-    # hash + budget/uptime/platform (so A's number and the certificate are
-    # the same objective), else from team A.
+    # THE OBJECTIVE (module docstring): under board=develop in song / across mode, one
+    # PlanCache for the request, seeded from the matching per-leader table, else from team A
+    # (so A's number and the certificate are the same objective)
     objective: dict[str, Any] = {"leaf": "develop"}
     plan_cache: PlanCache | None = None
     if developer is not None and mode in ("song", "across"):

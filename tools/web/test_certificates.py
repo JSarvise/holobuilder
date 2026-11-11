@@ -1,26 +1,9 @@
-"""Certificates on every song-mode optimize response.
+"""The certificate keys (`certificate.py`): the members-first enumeration key recipe.
 
-What is asserted, and why each assertion is not circular:
-
-* a song-mode `/solve` payload carries `model_version` (the ONE constant,
-  `hbuilder.domain.model_version.MODEL_VERSION`), `inputs_hash` and a
-  `certificate_basis`; every row carries a `certificate` whose status is
-  HEURISTIC when nothing on file matches — and it names the generator and N;
-* an index seeded with one EXACT and one BOUNDED row (no filesystem: the
-  package's no-writes guard forbids fixture files, so the rows are injected
-  through a `CertificateIndex` subclass) upgrades the matching rows to the
-  right status ONLY when the hash AND the basis tuple match; a hash mismatch
-  leaves the row HEURISTIC with a `certificate_note` naming the difference —
-  the "same instant, same basis" guard;
-* a row that scores ABOVE an EXACT certificate on the same hash is reported
-  as status "ERROR" (refined > exact on the same hash is a bug), never
-  as a better team;
-* the GUARD test: the server's `inputs_hash` for (Cards = maxed, uptime
-  finite, platform mobile, song m0334) equals the hash the per-leader-table
-  probe computes for the same basis (`leaf_inputs.load_context` +
-  platform — the probe's own expression, imported, not re-typed). If the two
-  ever differ the failure message prints the per-file digests so the differing
-  field is visible, not guessed.
+`chart_digest` hashes ONE song's chart entry, so a song appended to charts.json moves no
+other song's digest; `reference_key` / `enumeration_key` hash the recipe's per-file lines
+(plus the chart for the latter), never the whole-file charts digest; the `try_` wrapper
+reports a missing chart or file instead of raising.
 
     python -m pytest tools/web/test_certificates.py
 """
@@ -48,13 +31,6 @@ M1_ROSTER = [
     "card-00007-5-uniq-0008-00",
     "card-00006-5-uniq-0007-00",
 ]
-
-
-# Deliberately no test that a per-leader table on disk is still on today's basis --
-# that would be a freshness alarm on a frozen research result, red after every new
-# card. The hash RECIPE is pinned by `test_solve_song_mode_hash_equals_the_probes_hash`,
-# and what the product does with a table on another basis (no certificate, a note
-# naming the hash) by `test_hash_mismatch_is_heuristic_with_a_note_never_a_gap`.
 
 
 # ---------------------------------------------------------------------------

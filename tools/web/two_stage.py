@@ -366,8 +366,9 @@ def search_song(
     `"searched"` (step 3) or `"triage"` (the best of its short list — a LOWER
     bound of what a search would find, exact as a score). Every row carries
     `ranking`, its best 100 `(score, set)` under that leader (the search's
-    ranking, or the triage short list's), so a caller can show the next teams. `deadline` is checked
-    before each full search; leaders not reached keep their triage row.
+    ranking, or the triage short list's), so a caller can show the next teams.
+    `deadline` is checked before each full search; leaders not reached keep their
+    triage row.
 
     Returns `{"rows": [...] best first, "base": the base search's stats,
     "stats": {...}}`."""
@@ -508,12 +509,11 @@ def fitted_chart_sample(scores: Sequence[Sequence[float]], count: int) -> list[i
     team t's score on chart k (`RefinePool.batch_score_per_chart`), for teams
     drawn at random -- no search needed before the search.
 
-    Why not `chart_sample`: spreading charts by note count says nothing about how
-    a TEAM's score varies from chart to chart, and on a maxed account (every
-    singer node bought: +4 % on a song one of the team's holomems sings) its 6
-    charts ranked the strong teams worse than chance (Spearman -0.24; 6 random
-    charts 0.64; these 6 fitted on 300 random teams 0.96, the best team 2nd, 0.01 %
-    under the 1st). Deterministic: ties go to the lower index."""
+    Why not `chart_sample`: spreading charts by note count says nothing about how a
+    TEAM's score varies from chart to chart. On a maxed account (every singer node
+    bought: +4 % on a song one of the team's holomems sings) its 6 charts rank strong
+    teams worse than chance (Spearman -0.24; 6 random charts 0.64; 6 fitted on 300
+    random teams 0.96). Deterministic: ties go to the lower index."""
     teams = [list(map(float, row)) for row in scores if row and sum(row) > 0]
     if not teams:
         raise ValueError("no team with a positive score to fit the sample on")

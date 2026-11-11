@@ -188,7 +188,9 @@ def find(host: str = "us", metadata: str | None = None, *, out: Path = STATE_FIL
         doc = {}
     doc.update({"grpc_seed": hits[0].decode(), "metadata_key_hex": mkey.hex()})
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(doc, indent=1) + "\n", "utf8")
+    import atomic_io  # noqa: PLC0415 -- beside this file
+
+    atomic_io.write_text(out, json.dumps(doc, indent=1) + "\n", "utf8", private=True)
     print("found the payload seed: it opens the server's own Master/Get (values not printed)")
     print(f"wrote {out}")
     return 0

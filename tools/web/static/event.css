@@ -169,6 +169,8 @@ button.ev-tier:hover{background:var(--sheet-3);border-color:var(--line-2)}
 /* ---------- 4. reference ---------- */
 .ev-rules{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px 40px}
 .ev-rule.wide{grid-column:1 / -1}
+.ev-sum{color:var(--ink-2);font:600 14px/1.5 var(--f-ui);max-width:none}
+#evcardnote{margin-bottom:10px}
 .ev-rule .sh{margin-bottom:10px}
 .ev-rules > .ev-rule + .ev-rule.wide{padding-top:20px;border-top:1px solid var(--line)}
 .ev-mems{display:flex;flex-wrap:wrap;gap:8px}

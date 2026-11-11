@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -54,15 +56,30 @@ def verify(data: bytes, sig_b64: str, pubkey_hex: str | None = None) -> None:
         raise BadSignature("signature does not match the holobuilder release key") from exc
 
 
-def new_key() -> str:
-    if PRIVATE.exists():
-        raise SystemExit(f"{PRIVATE} exists: a new key would orphan every installed app")
+# the one line --new-key rewrites: whatever key it holds (empty, the official one, a self-hoster's)
+_PUBKEY_LINE = re.compile(rb'^RELEASE_PUBKEY = "[0-9a-f]*"', re.M)
+
+
+def new_key(private: Path | None = None, module: Path | None = None) -> str:
+    """A new release key pair: the private half to `private` (state/, never in git; owner-only
+    on Linux), the public half installed as `RELEASE_PUBKEY` in `module` (this file), which the
+    installer and the app are built from. Refuses before writing anything when the private key
+    exists or `module` has no single `RELEASE_PUBKEY` line to replace."""
+    private = private or PRIVATE
+    module = module or Path(__file__)
+    if private.exists():
+        raise SystemExit(f"{private} exists: a new key would orphan every installed app")
+    source = module.read_bytes()
+    if len(_PUBKEY_LINE.findall(source)) != 1:
+        raise SystemExit(f"{module}: no single RELEASE_PUBKEY line to install the new public key in")
     key = ECC.generate(curve="ed25519")
-    PRIVATE.parent.mkdir(exist_ok=True)
-    PRIVATE.write_text(key.export_key(format="PEM"), "utf8")
     pub = key.public_key().export_key(format="raw").hex()
-    me = Path(__file__)
-    me.write_text(me.read_text("utf8").replace('RELEASE_PUBKEY = ""', f'RELEASE_PUBKEY = "{pub}"', 1), "utf8")
+    private.parent.mkdir(exist_ok=True)
+    fd = os.open(private, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf8") as fh:
+        fh.write(key.export_key(format="PEM"))
+    # bytes in and out: the file keeps its own line endings
+    module.write_bytes(_PUBKEY_LINE.sub(f'RELEASE_PUBKEY = "{pub}"'.encode(), source, count=1))
     return pub
 
 

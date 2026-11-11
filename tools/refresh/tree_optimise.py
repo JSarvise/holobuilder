@@ -24,13 +24,9 @@ import sys
 import threading
 from pathlib import Path
 
-# Windows consoles and pipes default to cp1252, which cannot encode the ⚠ → ×
-# this tool prints -- a UnicodeEncodeError there aborts the run mid-output, and
-# it lands right before `--dump-state` writes the optimised board (so the plan
-# is computed and then thrown away). Force UTF-8 on this process's streams; errors=
-# "replace" degrades a stray glyph to "?" rather than crashing. Harmless on
-# platforms that are already UTF-8. This module is imported by board_export.py /
-# socket_optimise.py / precompute_optimisations.py, so it covers them too.
+# Windows consoles and pipes default to cp1252, which cannot encode the ⚠ → × this tool
+# prints: a UnicodeEncodeError would abort the run before `--dump-state` writes the board.
+# Force UTF-8 on this process's streams (it also covers the modules that import this one).
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8", errors="replace")
@@ -84,7 +80,10 @@ PRETTY = {
 
 def _load(path: Path):
     if not path.exists():
-        raise MissingInput(f"missing {path} -- gitignored account data")
+        raise MissingInput(
+            f"{path} is missing: the refresh builds it from your account. Run refresh.cmd "
+            "(./refresh.sh on Linux) in the holobuilder folder, or restart the app."
+        )
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -139,21 +138,14 @@ def _prices_from_export(path: Path | None = None) -> dict[str, dict]:
 def _prices():
     """group id -> {"points": int, currency-id: qty}.
 
-    ⛔ Read through `node_price.load`, which goes to the SQLCipher master
-    DIRECTLY and keeps field 1000 as BYTES. `dumps/master_SkillTreeNode.json`
-    cannot be used here: its field-1000 blob has been through a UTF-8 decode,
-    so a quantity byte like 0x8f is already U+FFFD and every price above 127
-    would read wrong. `tree_cost.py` and `node_price.py` both avoid it the same
-    way.
+    ⛔ Read through `node_price.load`, which reads the SQLCipher master directly and keeps
+    field 1000 as BYTES: `dumps/master_SkillTreeNode.json`'s field-1000 blob went through a
+    UTF-8 decode, so every price above 127 would read wrong. `node_price.price` reads EVERY
+    entry of the repeated field 1000 (the second one carries the Hexa currencies).
 
-    `node_price.price` reads EVERY entry of the repeated field 1000, which is
-    what recovers the four Hexa currencies -- reading only `raw[0]` silently
-    drops the second entry on many rows.
-
-    Reading the master needs the game's `sqlcipher.dll`. On a PC without it (the desktop
-    app away from a game install, Windows Sandbox) the prices come from the synced
-    `holodori/main_SkillTreeNode.json` instead (`_prices_from_export`), the same table
-    exported with typed fields, so no byte went through a UTF-8 decode."""
+    Without the game's `sqlcipher.dll` (the desktop app away from a game install) the
+    prices come from the synced `holodori/main_SkillTreeNode.json` (`_prices_from_export`),
+    the same table exported with typed fields."""
     if not _master_readable():
         return _prices_from_export()
     rows = node_price.load("SkillTreeNode")
@@ -161,10 +153,8 @@ def _prices():
     for row in rows:
         group = node_price.f(row, 1)
         if not group or group in out:
-            # Rows within a group differ by `characterIds`; the PRICE is
-            # identical across them, so the first is
-            # enough for a cost model. WHICH row's EFFECT applies is a
-            # different question and `build_board._select_row` owns it.
+            # Rows within a group differ by `characterIds` but share the price; which
+            # row's EFFECT applies is `build_board._select_row`'s business.
             continue
         vector = node_price.price(row)
         price = {"points": vector.get(node_price.POINT_ITEM, 0)}
@@ -248,9 +238,9 @@ def balance_from_disk(directory: Path = DUMPS) -> tuple[dict, str] | tuple[None,
 
 
 # `modelled_song_power()`: inside it, this thread's Oracle scores a song on the modelled stat
-# pool, as the planner valued boards before it used the deck screen's Overall Power. The
-# planner solves one candidate plan that way (`board_plan_solver`, the "modelled" valuation) so
-# that its choice can never score below that plan. Thread-local: the server plans in threads.
+# pool instead of the deck screen's Overall Power. The planner solves one candidate plan that
+# way (`board_plan_solver`, the "modelled" valuation), so its choice never scores below that
+# plan. Thread-local: the server plans in threads.
 _VALUATION = threading.local()
 
 
@@ -268,10 +258,9 @@ class modelled_song_power:
 class Oracle:
     """Scores a candidate board through the REAL scorer.
 
-    Everything except the board is loaded exactly once and exactly the way the
-    CLI loads it -- same `load_cards`, same `apply_collection`, same
-    `load_scoring_config`. A second definition of what a card is worth is how
-    the tools would drift into wrong numbers, so there is not one here.
+    Everything except the board is loaded once, exactly as the CLI loads it (same
+    `load_cards`, `apply_collection`, `load_scoring_config`), so there is no second
+    definition of what a card is worth.
     """
 
     def __init__(
@@ -286,37 +275,28 @@ class Oracle:
         uptime_model: str | None = None,
     ):
         self.quiet = quiet
-        # `scenario` is one of the three collection states of the board export.
-        # It is two axes — the scoring BASIS (real levels vs maxed) and the POOL
-        # (owned cards vs the full 169-card catalogue):
+        # `scenario` is one of the three collection states of the board export, on two
+        # axes, the scoring BASIS and the POOL:
         #
-        #   account               real levels   owned  (the default; legacy)
+        #   account               real levels   owned  (the default)
         #   my-cards-maxed         maxed         owned
         #   full-collection-maxed  maxed         all cards
         #
-        # `data/cards.json` IS the fully-maxed state, so a maxed basis is the
-        # collection deliberately NOT applied (see `apply_collection`). The two
-        # maxed scenarios score identical cards and differ ONLY in the pool.
+        # `data/cards.json` IS the fully-maxed state, so a maxed basis is the collection
+        # not applied (see `apply_collection`).
         #
-        # `scenario=None` keeps the legacy contract: the explicit `maxed` flag
-        # drives the basis and the pool is owned — so `--team`'s `maxed=True`
-        # Oracle is unchanged. A named scenario takes over both axes.
+        # `scenario=None`: the explicit `maxed` flag drives the basis and the pool is
+        # owned. A named scenario sets both axes.
         if scenario is not None:
             if scenario not in SCENARIOS:
                 raise ValueError(f"--scenario: unknown {scenario!r}; one of {', '.join(SCENARIOS)}")
             maxed = scenario != "account"
         self._full_pool = scenario == "full-collection-maxed"
         self.scenario = scenario or "account"
-        # `maxed=True` scores every card at max level and bloom -- the basis a
-        # NAMED team needs, because a team you are planning toward is usually not
-        # one you own at those levels yet (`--team`). It also removes
-        # the cwd-relative-curve trap below: with `maxed` there is no collection
-        # to apply, so there is nothing to silently fail to find.
+        # `maxed=True` scores every card at max level and bloom: the basis a team being
+        # planned toward needs (`--team`).
         self.maxed = maxed
-        # The CLI's OWN defaults, read off its parser rather than restated as
-        # path literals -- the same rule `tests/test_collection.py` follows,
-        # and stricter than a second constant because it cannot disagree with
-        # the tool.
+        # The CLI's own defaults, read off its parser, so they cannot disagree with it.
         defaults = default_paths()
         cards = load_cards(REPO / defaults.cards)
         owned = load_owned(REPO / defaults.owned, cards)
@@ -334,17 +314,10 @@ class Oracle:
             owned_ids=[c.id for c in cards] if self._full_pool else [c.id for c in owned],
             maxed=maxed,
         )
-        # ⛔ **THE SILENT BASIS SWITCH.** `apply_collection` reads
-        # `card_level_curve.json` and `card_caps.json` from `dumps/`. When they
-        # are missing, an absent curve is a FIRST-CLASS STATE by design: every card keeps
-        # `data/cards.json`'s value, and `data/cards.json` is the FULLY-MAXED
-        # state. So the run does not fail and does not degrade -- it quietly
-        # answers a different question ("every owned card maxed" instead of
-        # "the account as it is"), tens of percent apart on the same board.
-        #
-        # A board plan costed on the wrong basis is not slightly off, it ranks
-        # different nodes -- so this refuses to run rather than print a number
-        # that answers the other question.
+        # ⛔ THE SILENT BASIS SWITCH. Without `card_level_curve.json` in `dumps/`, every card
+        # keeps `data/cards.json`'s fully-maxed value and the run quietly answers "every
+        # owned card maxed" instead of "the account as it is" (tens of percent apart, and
+        # different nodes ranked). So it refuses to run.
         if basis.path and basis.applied == 0 and not basis.maxed:
             raise MissingInput(
                 "the collection could not be applied, so every card would be "
@@ -358,11 +331,8 @@ class Oracle:
         if basis.bonuses is not None:
             cfg = dataclasses.replace(cfg, account=basis.bonuses)
         by_id = {c.id: c for c in cards}
-        # The FULL catalogue lookup (all 169 cards), not just the owned pool.
-        # Building `by_id` from `self.pool` alone would KeyError on any card the
-        # account does not own -- the exact case `--team` needs.
-        # `cards` already carries every catalogue card (owned at real levels or,
-        # under `maxed`, all at max), so this resolves any id at the run's basis.
+        # The whole catalogue, not just the owned pool (`--team` names unowned cards), at
+        # the run's basis.
         self._by_id = by_id
         # full-collection-maxed searches the WHOLE catalogue; the other two
         # scenarios search only what the account owns.
@@ -383,14 +353,10 @@ class Oracle:
         # how many teams `score_team` has scored (the planner's stage log reads it)
         self.scorings = 0
         self.pool_size = pool_size
-        # `--song`: score every board through the PER-SONG scorer (`score_song`)
-        # instead of the general ranking scorer (`score_card_set`). The two share
-        # a return shape (`.total_score` per leader), so `_score_set` dispatches
-        # and the rest of the Oracle is unchanged. This is the SAME stage-1-as-
-        # filter shape the CLI's `--song` uses: `prime()` still enumerates the
-        # team pool song-AGNOSTICALLY (stage 1), and `score()` re-scores those
-        # candidates on the chart (stage 2). Scoring the pool per-song is a
-        # separate, heavier question left to a future `--song`-aware `prime`.
+        # `--song`: score every board through the per-song scorer (`score_song`) instead
+        # of `score_card_set`; both return `.total_score` per leader, so `_score_set`
+        # dispatches. As in the CLI's `--song`, `prime()` enumerates the team pool
+        # song-agnostically and `score()` re-scores those candidates on the chart.
         self.song = song
         self._chart = None
         if song:
@@ -451,15 +417,12 @@ class Oracle:
     def board_for(self, state: dict):
         """The `BoardModel` of a whole board state.
 
-        Built per CHARACTER and remembered: a planner's consecutive states differ in
-        one to six team boards while the ~50 off-team ones repeat, and rebuilding all
-        of them would be about two thirds of every scoring. Exact, not approximate:
-        character's rows from that character's nodes (in their order) and slots
-        alone, `board_from_mapping` parses each character alone, and `BoardModel`
-        replays the per-board `BoardDigest`s in `characters` order -- the same
-        objects in the same order give the same model, float for float. A state
-        whose new characters report any problem takes the full build below, which
-        names them exactly as before."""
+        Built per CHARACTER and remembered: consecutive states differ in one to six team
+        boards while the ~50 off-team ones repeat (rebuilding them is about two thirds of
+        a scoring). Exact: each character parses alone and `BoardModel` replays the
+        per-board `BoardDigest`s in `characters` order, so the model is the same float
+        for float. A state whose new characters report a problem takes the full build
+        below, which names them."""
         memo = self._board_memo
         keys = {}
         missing = {}
@@ -515,14 +478,9 @@ class Oracle:
     def score_team(self, leader_id: str, member_ids, state: dict) -> float:
         """ONE team's score under ONE board.
 
-        The per-team planner needs this rather than `score`, which maximises
-        over the whole pool: here the team is fixed by construction, and taking
-        a max would silently optimise some OTHER team's board and report it
-        under this team's name.
-
+        The team is fixed: a max over the pool would optimise some other team's board.
         Per-song when `--song` is set (via `_score_set`), else general."""
-        # `self._by_id` is the full catalogue, so a NAMED team may reference a
-        # card outside the owned pool; `self.pool` alone would KeyError on it.
+        # the full catalogue: a named team may hold a card outside the owned pool
         by_id = self._by_id
         self.scorings += 1
         cfg = dataclasses.replace(self.base_cfg, board=self.board_for(state))
@@ -544,9 +502,8 @@ class Oracle:
         return _fresh(held[1])
 
     def state_from(self, nodes_by_character: dict[str, list[str]]) -> dict:
-        """A whole board state, keeping every character's SLOTS. Dropping the
-        slots would silently drop the Connect multipliers, which is a change to
-        the thing being measured rather than to the thing being varied."""
+        """A whole board state, keeping every character's SLOTS (and so its Connect
+        multipliers)."""
         state = self._board_state()
         for cid, groups in nodes_by_character.items():
             entry = state.setdefault(cid, {"nodes": [], "slots": {}})
@@ -562,31 +519,21 @@ class Oracle:
 def adjacency(model: dict) -> dict[str, set[str]]:
     """`node -> the set of nodes the game links it to`, for one tree model.
 
-    Delegates to `hbuilder.domain.skilltree.neighbours` -- the game's real rule,
-    tested in `tests/test_skilltree_selection.py`. The game builds adjacency in
-    `SkillTreeMapController.SetAdjacentNode` by walking a static `Directions`
-    array of exactly FOUR axis steps `{(1,0),(-1,0),(0,1),(0,-1)}` -- four of
-    the six hex directions -- and linking a node at `(x,y)` to whatever node
-    sits at `(x+dx, y+dy)`.
+    Delegates to `hbuilder.domain.skilltree.neighbours`, the game's rule
+    (`SkillTreeMapController.SetAdjacentNode`): FOUR axis steps
+    `{(1,0),(-1,0),(0,1),(0,-1)}`, four of the six hex directions.
 
-    ⛔ A hex-distance-1 test would ALSO link the two hex diagonals
-    `(+1,-1)/(-1,+1)` the game never uses -- hundreds of phantom edges across
-    the four layouts -- and `cheapest_paths` would shortcut through them and
-    UNDER-COST plans. Reusing the one domain rule keeps the recon tool and the
-    solver from disagreeing."""
+    ⛔ A hex-distance-1 test would also link the two diagonals `(+1,-1)/(-1,+1)` the
+    game never uses, and `cheapest_paths` would under-cost plans through them."""
     return {node: set(links) for node, links in neighbours(model).items()}
 
 
 ROOT = "S-001"
 
 # The longest chain a single move may buy, and the depth `_branch_values` /
-# `fill_boards` look for buyable nodes. The deepest corridor across ALL
-# characters is the RED tree at 17 nodes (blue 12, green 10, yellow 12), so 20
-# covers every branch with margin. A cap of 10 would blind the planner to the
-# deep half of red/blue — the highest-value nodes (score-support + all-stats,
-# R-052..R-063) — and it would spill leftover points into flat greens instead.
-# Raising it costs one extra oracle call per newly-reachable node (~sub-second),
-# so the cap buys correctness cheaply.
+# `fill_boards` look for buyable nodes. The deepest corridor is the RED tree at 17 nodes
+# (blue 12, green 10, yellow 12), so 20 covers every branch; a shorter cap would hide the
+# deep red/blue nodes (score-support + all-stats, R-052..R-063), the most valuable ones.
 DEFAULT_PATH_LENGTH = 20
 
 
@@ -600,30 +547,16 @@ def cheapest_paths(
 ) -> dict[str, tuple[str, ...]]:
     """`target -> the cheapest chain of UNOWNED nodes that reaches it`.
 
-    ⛔ **This is a change of DECISION UNIT, not a smarter ranking.** A corridor
-    of eight consecutive worthless red nodes (28 points, 680 cube) can gate a
-    payoff of tens of thousands. Every single-node move across that stretch is
-    worth exactly 0, so no beam width and no k-step lookahead short of eight can
-    cross it. Priced as ONE move, the corridor is simply a purchase that costs
-    28 points and pays off, and the search sees it the way a player does.
+    A corridor of worthless nodes can gate a large payoff, and every single-node move
+    across it is worth 0; priced as ONE move, the corridor is a purchase that pays off.
 
-    Dijkstra with NODE weights (the point cost), sources = everything already
-    owned at distance 0, since reaching an owned node is free. `max_nodes` bounds
-    the chain length; without it every node in the tree is a move and the step
-    cost explodes.
-
-    Returns paths in purchase order, so a caller can charge them one at a time
-    and keep the board legal at every intermediate state — which matters,
-    because a partially-bought path is exactly what the adjacency rule permits."""
+    Dijkstra with NODE weights (the point cost) from everything owned at distance 0;
+    `max_nodes` bounds the chain length. Paths come in purchase order, so a caller can
+    charge them one at a time and keep the board legal at every step."""
     import heapq  # noqa: PLC0415
 
-    # ⛔ ROOT is always free, even when `owned` is empty. Seeding from `owned`'s
-    # neighbours alone would leave a character owning ZERO nodes -- exactly a
-    # `--respec` bare board or a fresh `--team` character -- with an empty seed,
-    # unable to buy anything. `frontier()` roots reachability at S-001
-    # regardless of `owned`; this must agree with it. `ROOT` carries no price,
-    # so it is never itself pushed as a purchase, and for a character who
-    # already owns the root it is a no-op.
+    # ⛔ ROOT is always free, even when `owned` is empty (a `--respec` bare board, a fresh
+    # `--team` character), as in `frontier()`. It carries no price, so it is never pushed.
     free = owned | {ROOT}
     best: dict[str, tuple[int, tuple[str, ...]]] = {}
     heap: list[tuple[int, int, str, tuple[str, ...]]] = []
@@ -664,15 +597,9 @@ def frontier(owned: set[str], graph: dict[str, set[str]]) -> set[str]:
     """The nodes buyable NEXT: adjacent to something already owned, rooted at
     the central socket.
 
-    This is a constraint rather than a guess: on every character an account
-    has touched, the owned set is fully reachable from `S-001`. Hundreds of
-    nodes do not land connected by accident, and it matches the UI's padlocks.
-
-    ⚠ Consistent with the rule, not a proof OF it: a player buying connected
-    sets by preference would look identical. What would settle it is one
-    `SkillTreeNode` unlock-condition field read off the master, or the game
-    refusing a disconnected purchase. A plan that respects adjacency is safe
-    under both readings, and one that ignores it is safe under neither."""
+    On every character an account has touched, the owned set is fully reachable from
+    `S-001`, matching the UI's padlocks. A plan that respects adjacency is safe whether or
+    not the game enforces it."""
     reachable = {ROOT}
     stack = [ROOT]
     while stack:
@@ -725,13 +652,11 @@ MAX_CHARACTER_LEVEL = 50
 PER_CHARACTER_GREEN = frozenset({"G-008", "G-011", "G-021"})
 
 # The ACTIVE-uptime effect types (activation probability + activation frequency /
-# cooldown). Their score is INTERACTIVE, not additive: the game's active Score UP
-# is a per-tick MAX over the live skills (as in the client; `scoring._score_up_pool`), so a
-# second activation saturates against the first, against the stat blues that raise
-# the same skill, and against whether an active lands under a SPECIAL cue (a special
-# pays nothing with no active beneath it). So an ISOLATED marginal wildly overstates
-# them — a node can read +9,000 alone but 0 on the built board — and they must be valued
-# IN CONTEXT of the board actually being built, not on a bare one.
+# cooldown). Their score is INTERACTIVE: the active Score UP is a per-tick MAX over the
+# live skills (`scoring._score_up_pool`), so a second activation saturates against the
+# first, against the blues that raise the same skill, and against whether an active lands
+# under a SPECIAL cue. A node can read +9,000 alone but 0 on the built board, so they are
+# valued IN CONTEXT of the board being built.
 _ACTIVE_UPTIME_EFFECT_TYPES = frozenset({"Act.Prob", "Act.CD"})
 
 
@@ -747,26 +672,18 @@ def _interactive_node_ids(skilltree) -> frozenset:
 def _move_in_scope(target: str, on_team: bool, *, song_mode: bool = False, is_singer: bool = False) -> bool:
     """Whether buying `target` is worth searching on this character.
 
-    RED is leader-scoped and BLUE reaches only its own character's cards, so both
-    are worth exactly 0 on a character that is not on the team being planned
-    (checked on off-team characters). GREEN is uncapped flat stats (it stacks
-    linearly past 30 boards, about +1,000 per board), so every board's
-    leftover points -- team included -- are worth a green, and G stays in
-    scope everywhere.
+    RED is leader-scoped and BLUE reaches only its own character's cards, so both are
+    worth 0 off the team. GREEN is uncapped flat stats (about +1,000 per board, linear),
+    so it is in scope everywhere.
 
     YELLOW pays differently in the two modes:
-    - GENERAL (song-agnostic): the account-global song-INDEPENDENT Y CAPS (~17
-      boards to saturate), and the ~24 BENCH boards cover that cap from points
-      red/blue can never use. So it goes on the BENCH, never a team board.
-    - SONG: only the chart's SINGERS contribute yellow (`song_score_bonus_for`
-      sums the cast). A singer's yellow is a real per-song bonus (up to +40k on
-      a solo song); a non-singer's is 0. So Y is in scope on the SINGERS (team
-      or bench) and nobody else.
+    - GENERAL (song-agnostic): the account-global Y caps (~17 boards to saturate), and
+      the bench boards cover that from points red/blue can never use: bench only.
+    - SONG: only the chart's SINGERS contribute (`song_score_bonus_for` sums the cast,
+      up to +40k on a solo song): singers only, team or bench.
 
-    Sockets (`S-`) are filtered by the caller before this is asked, so a
-    non-socket target's first character is one of R/B/G/Y. This is the single
-    definition of the branch-scope rule; `cmd_plan` and `_plan_for_team` both read
-    it so the two cannot drift."""
+    Sockets (`S-`) are filtered by the caller. The single definition of the
+    branch-scope rule."""
     branch = target[0]
     if branch == "Y":
         return is_singer if song_mode else not on_team
@@ -857,26 +774,20 @@ def _branch_values(
 ):
     """OWN value of each node FOR THE FIXED TEAM, computed ONCE per node:
     RED on the leader, BLUE on a member, GREEN global, YELLOW on a SINGER (song
-    mode) else global. `score_team` marginal over a bare board — the effect is
-    per-node and roughly state-independent (stat/global nodes stack linearly), so
-    one marginal answers it and `fill_boards` needs no oracle call in its loop.
+    mode) else global: the `score_team` marginal over a bare board (stat/global nodes
+    stack roughly linearly, so one marginal answers it).
 
-    ⛔ Score the node ALONE (`{ROOT, target}`), NOT its whole path: a path's
-    value would credit every node on the way (a reward green can look worth
-    thousands that way).
-    An unrouted family (reward/minigame/exp/life) raises `BoardError`/scores 0 and
-    is dropped; only nodes that move the team score keep a value.
+    ⛔ The node is scored ALONE (`{ROOT, target}`), not with its path, which would credit
+    every node on the way. An unrouted family (reward/minigame/exp/life) scores 0 and is
+    dropped.
 
-    ⚠ YELLOW is HOST-DEPENDENT in song mode: only a chart singer's yellow pays
-    (`song_score_bonus_for`), so a Y node valued on a non-singer reads 0 and is
-    never bought even on the singer where it is worth +40k. `singer_chars` (the
-    chart's cast) makes the Y host a singer, so the value is the real one.
+    ⚠ In song mode only a chart singer's yellow pays (`song_score_bonus_for`), so a Y node
+    is valued on a singer from `singer_chars`, or it would read 0.
 
     `context` (`{chr: nodes}`, e.g. a solved plan): each node is valued INSIDE that board
-    instead of over a bare one -- removed from its host if the board has it, added if not.
-    Over a bare board a node is worth less than inside a built one, and not by one factor
-    (measured: a flat-stat red x1.2, an Act.Power red x1.8), so the bare values can rank two
-    nearly equal plans the wrong way round; the planner re-solves on these."""
+    (removed from its host if the board has it, added if not). Inside a built board a node
+    is worth more than on a bare one, by a factor that differs per node (a flat-stat red
+    x1.2, an Act.Power red x1.8), so the planner re-solves on these values."""
 
     def tscore(nodes_by_chr):
         return oracle.score_team(
@@ -952,43 +863,26 @@ def fill_boards(
     socket_scope=None,
     node_ok=None,
 ):
-    """Top every character's LEFTOVER points after the beam, per its ROLE:
-    the LEADER with RED, each MEMBER with BLUE, GREEN everywhere, and YELLOW where
-    it pays. The beam (with its lookahead) crosses the red corridor; this greedy
-    fill spends whatever budget the depth cap left — without it, blue is starved
-    (thousands of Blue Cube left unspent at depth 12). Values are precomputed by
-    `_branch_values`, so no oracle call in the loop.
+    """Spend every character's LEFTOVER points greedily, per its ROLE: the LEADER with
+    RED, each MEMBER with BLUE, GREEN everywhere, and YELLOW where it pays (as in
+    `_move_in_scope`: the bench in general mode, the chart's singers in song mode).
 
-    YELLOW placement, mirroring `_move_in_scope`: GENERAL mode → the BENCH only
-    (the capped account-global Y the bench supplies for free, never a team board's
-    red/blue-worthy points); SONG mode → the chart's SINGERS only (team or bench),
-    since only a singer's yellow contributes to the song score.
-
-    Two phases. **Phase 1** (this pass) fills every non-interactive node on its
-    precomputed isolated value — sound because stat/global nodes stack roughly
-    linearly. **Phase 2** fills the ACTIVE-uptime nodes (`interactive_nodes`), whose
-    value is NOT additive (per-tick max, saturating against each other, the stat
-    blues and the SPECIAL cues), so it re-scores each one IN CONTEXT via `score_fn`
-    and buys only a real positive marginal, since an isolated value can read
-    thousands for a node worth 0 on the built board. Phase 2 is skipped without
-    a `score_fn`."""
+    Phase 1 fills every non-interactive node on its precomputed isolated value
+    (`values`; stat/global nodes stack roughly linearly), so no oracle call in the loop.
+    Phase 2 fills the ACTIVE-uptime nodes (`interactive_nodes`) and the generation greens,
+    whose value is not additive: each is re-scored IN CONTEXT via `score_fn` and bought
+    only on a real positive marginal. Phase 2 is skipped without a `score_fn`."""
     state = {c: set(n) for c, n in state.items()}
     wallet = dict(wallet)
     points = dict(points)
     member_set = set(member_chrs)
     bought = 0
 
-    # SOCKETS FIRST, on the team's boards. An empty Connect socket scores 0 for the
-    # tree (it boosts nothing until a card is placed), so the value-driven fill never
-    # buys one — but the socket optimiser can only place a card where a socket EXISTS,
-    # so an unbought S-002/3/4 is a placement it cannot make (an empty
-    # socket). They cost ~1 point + a short path on an already-filled board and hold
-    # a card worth thousands, so buy them BEFORE green claims the leftover points.
-    #
-    # But ONLY the sockets whose shape can PAY on this holder (`socket_scope`): a
-    # red-region socket (S-002) is dead on a member, and reaching it burns ~10 points
-    # of red corridor for a card that never lands. `None` keeps every socket, for
-    # callers that do not pass a scope.
+    # SOCKETS FIRST, on the team's boards. An empty socket scores 0, so the value-driven
+    # fill never buys one, yet the socket optimiser can only place a card where a socket
+    # exists; a socket costs ~1 point plus a short path and holds a card worth thousands.
+    # Only the sockets whose shape can PAY on this holder (`socket_scope`; None = all):
+    # a red-region socket (S-002) is dead on a member.
     for cid in sorted(({leader_chr} | member_set) & set(graphs)):
         graph = graphs[cid]
         allowed = None if socket_scope is None else socket_scope.get(cid, {ROOT})
@@ -1067,22 +961,14 @@ def fill_boards(
             wallet, points = _spend(price, wallet, points, cid)
             bought += 1
 
-    # Phase 2: nodes whose value is CONTEXTUAL, not additive, so their isolated
-    # marginal lies and they must be re-scored on the ACTUAL board via `score_fn`:
-    #   - ACTIVE-uptime (`interactive_nodes`): the active Score UP is a per-tick MAX,
-    #     so they saturate against each other / the stat blues / the SPECIAL cues.
-    #     Member-scoped, so only the team's own boards can move the score.
-    #   - GEN-GREENS (`PER_CHARACTER_GREEN`, G-008/011/021): "+stats to the holder's
-    #     whole GENERATION", so they pay on ANY character sharing a team gen (bench
-    #     included, on otherwise-idle points) and STACK across same-gen boards (buy
-    #     it on Kiara to buff a Calli team). G-008 is bought
-    #     incidentally as a green-corridor prereq; G-011/G-021 (the big +225/+300 and
-    #     +150/+200 rows) are what this reaches.
-    # Cost-bounded to ~2 score_fn calls per candidate: score each once against the
-    # filled board, then buy in value order, RE-VALIDATING each against the updated
-    # board just before it is bought. The re-validation is what catches saturation —
-    # a node that a prior buy made redundant re-scores to <=0 and is skipped — so
-    # this stays correct without an N-iterations full re-score.
+    # Phase 2: nodes whose value is CONTEXTUAL, re-scored on the actual board via `score_fn`:
+    #   - ACTIVE-uptime (`interactive_nodes`): member-scoped, so team boards only.
+    #   - GEN-GREENS (`PER_CHARACTER_GREEN`, G-008/011/021): "+stats to the holder's whole
+    #     GENERATION", so they pay on ANY character sharing a team gen (bench included)
+    #     and stack across same-gen boards.
+    # ~2 score_fn calls per candidate: each scored once on the filled board, then bought in
+    # value order, re-validated on the updated board just before (a node a prior buy made
+    # redundant re-scores to <=0 and is skipped).
     if score_fn is not None and (interactive_nodes or PER_CHARACTER_GREEN):
         team = ({leader_chr} | member_set) & set(graphs)
         base_score = score_fn(state)
@@ -1155,20 +1041,14 @@ def respec_budget(owned, prices, balance):
     """Everything back in the pot: a board RESET REFUNDS points and materials
     (it costs gold, which the player absorbs).
 
-    So the budget is the inventory PLUS everything already spent, the points
-    are each character's FULL grant rather than what is left, and the starting
-    board is bare. That turns the question from "what do I add" into "what is
-    the best board my total resources can buy", which is a different and
-    strictly larger problem.
+    So the budget is the inventory PLUS everything already spent, the points are each
+    character's FULL grant, and the starting board is bare: "the best board my total
+    resources can buy".
 
-    ⛔ ONLY S-001 starts owned — the free root at (0,0). **S-002/003/004 do NOT:
-    they cost 1 point EACH and need a path to S-001**, exactly like any node.
-    (Keeping all four sockets as free connected roots would let the beam ground
-    a whole R-cluster on S-002 — which sits at (0,-7), adjacent to the R
-    corridor — WITHOUT buying the (0,-1)..(0,-6) corridor that connects S-002 to
-    the root, leaving a DISCONNECTED board. The card PLACEMENTS still ride along
-    via `state_from`'s slots; a card on an unbought socket simply grants
-    nothing, as in the game.)"""
+    ⛔ ONLY S-001 (the free root at (0,0)) starts owned. S-002/003/004 cost 1 point each
+    and need a path to S-001 like any node; as free roots they would let a plan ground an
+    R-cluster on S-002 without its corridor, a disconnected board. The card placements
+    ride along via `state_from`'s slots; a card on an unbought socket grants nothing."""
     spent, _per_character = _spent(owned, prices)
     wallet = {item: balance.get(item, 0) + spent.get(item, 0) for item in CURRENCIES}
     levels = character_levels(owned, prices)

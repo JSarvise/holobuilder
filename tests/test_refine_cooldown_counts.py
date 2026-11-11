@@ -1,4 +1,4 @@
-"""`board_plan.refine_cooldown_counts` — every combination of the members'
+"""`board_refine.refine_cooldown_counts` — every combination of the members'
 activation-frequency (`Act.CD`) node counts, scored on the real score.
 
 Why it exists: a shorter cooldown moves every later window of that member, and the
@@ -13,12 +13,8 @@ from __future__ import annotations
 import itertools
 
 from hbuilder.domain.board_optimizer import BoardPlan
-from hbuilder.domain.board_plan import (
-    TeamBoardPlan,
-    cooldown_node_ids,
-    refine_activation_nodes,
-    refine_cooldown_counts,
-)
+from hbuilder.domain.board_plan import TeamBoardPlan
+from hbuilder.domain.board_refine import cooldown_node_ids, refine_activation_nodes, refine_cooldown_counts
 from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, TreeNode, neighbours
 
 # A line board: S-001 - B-001 - B-013 - B-020 , and a side branch S-001 - G-001 - B-031

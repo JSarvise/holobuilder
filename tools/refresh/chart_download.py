@@ -1,8 +1,7 @@
 # Fetch every chart (.sus) file (4 difficulties per song) from the Octo CDN, one per second, resumable.
 #
-# WHY THIS EXISTS. A chart only lands in the game's own cache once you clear that song and open
-# its chart info, so filling the cache by playing is not practical: most songs are not owned and
-# not clearable on the top difficulty, so only a handful are cached. The CDN is the only route.
+# A chart only lands in the game's own cache once its song is cleared and its chart info
+# opened, so most are not cached; the CDN is the only route to all of them.
 #
 # WHAT IT NEEDS, all already on disk -- nothing is guessed:
 #   dumps/octocacheevai_prod.dec   the PRODUCTION catalog (the review one shipped in the build
@@ -15,12 +14,9 @@
 #
 # WHAT COMES BACK. A .sus is served as an Octo *resource*: 9-byte "QUAVMAGIC" sentinel, then the
 # next 256 bytes XORed with the name-derived keystream (octo_crypto). So the served body is 9
-# bytes longer than the chart and its md5 is NOT the chart's md5. Verification is therefore done
-# on the body exactly as received, before touching it -- which is the right order anyway.
-#
-# This can be checked offline: re-encrypting a chart already on disk reproduces the catalog's
-# md5 and size exactly, which confirms the production catalog is current and the container
-# shape is right.
+# bytes longer than the chart and its md5 is NOT the chart's md5, so verification is done on the
+# body exactly as received. Offline, re-encrypting a chart on disk reproduces the catalog's md5
+# and size exactly.
 #
 # CONDITIONS THIS TOOL ENFORCES, to keep the load on the CDN low and the output verifiable:
 #   * 1 request/second, sequential, single-threaded. No concurrency knob exists.

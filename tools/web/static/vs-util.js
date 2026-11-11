@@ -1,7 +1,7 @@
 // Compare page: small shared helpers. No number is computed here; formatting only.
 // Copied from opt-util.js (the Optimizer page) and adapted to the .v- prefix, so the two
 // pages never depend on each other's files.
-export const byId = id => document.getElementById(id);  // not `$`: test_id_contract checks `byId("…")` against index.html only
+export const byId = id => document.getElementById(id);
 const QUOTE = String.fromCharCode(34);   // spelled out: a quote inside a regex trips test_js_syntax
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", [QUOTE]: "&quot;" };
 const ESC_RE = new RegExp("[&<>" + QUOTE + "]", "g");

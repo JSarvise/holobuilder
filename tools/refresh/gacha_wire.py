@@ -1,4 +1,4 @@
-"""Gacha wire decoding + fire, shared by gacha_probe.py and gacha_sync.py.
+"""Gacha wire decoding + fire, for gacha_sync.py.
 
 READ-ONLY. Whitelist widened IN MEMORY ONLY with four exact literals checked against
 gacha.gen.proto:

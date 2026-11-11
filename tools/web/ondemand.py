@@ -1,19 +1,16 @@
-"""The optimiser ON DEMAND: one song's best teams searched when asked, no cache.
+"""The optimiser on demand: one song's best teams searched when asked, no cache.
 
-The optimiser answers per request, as fast and as true as it can, with no
-hours-long precomputed cache that goes stale; a new card or song is data and
-needs no rebuild. This module is that path:
+A new card or song is data and needs no rebuild:
 
-* an `Engine` per (basis, difficulty) keeps a `RefinePool` over EVERY chart of
-  that difficulty alive between requests (the pool start and the leaf inputs,
-  ~2 s, are paid once; a refresh changes the inputs' key and the next request
-  rebuilds it);
-* a request runs `joint_search.search` — the leader chosen inside the search —
-  on the song's own chart (`chart_indices=(song,)`, the board developed for
-  that song), then re-scores the best teams with the activation refinement;
-* the answer of the last request with the same song and filters is kept IN
-  MEMORY as seeds for the next one (a hint, never the answer: every number
-  served is computed in this request). Nothing here writes to disk.
+* an `Engine` per (basis, difficulty) keeps a `RefinePool` over every chart of that difficulty
+  alive between requests (pool start and leaf inputs, ~2 s, are paid once; a refresh changes
+  the inputs' key and the next request rebuilds it);
+* a request runs `joint_search.search` — the leader chosen inside the search — on the song's
+  own chart (`chart_indices=(song,)`), then re-scores the best teams with the activation
+  refinement;
+* the last answer for the same song and filters is kept in memory as seeds for the next
+  request (a hint: every number served is computed in this request). Nothing here writes to
+  disk.
 
 `payload` carries `scope`, `ranking`, `rows`, ...; `state` is always "fresh".
 """
@@ -37,7 +34,6 @@ import joint_search  # noqa: E402
 import leaf_inputs  # noqa: E402
 import two_stage  # noqa: E402
 
-from hbuilder.domain.song import load_charts  # noqa: E402
 from hbuilder.solver import members_first  # noqa: E402
 from hbuilder.solver.parallel import default_workers  # noqa: E402
 from hbuilder.solver.parallel_refine import COUNTS, COUNTS_BOTH, RefinePool, SharedPool  # noqa: E402
@@ -47,56 +43,47 @@ if TYPE_CHECKING:
     from hbuilder.domain.collection import AccountBonuses
     from hbuilder.solver.parallel_refine import RefineContext
 
-# the served ranking with the activation refinement is the best REFINE_HEAD teams of the
-# search, every one refined, in refined order (~0.04 s a team): refining only a few teams
-# near the best would serve the rest at plain values beside refined ones, so a true #3 could
-# sit at #22 and the same team score differently with and without a leader filter
-# (refinement gains 0-3.3 %, mean about 0.5 %; plain teams ranked in the 50s-70s can be
-# refined top 10)
-# ... chosen from the search's best COUNTS_FUNNEL (30 a worker) by a cheap estimate of
-# their frequency node counts chosen, not by the plain value (`_count_funnel`)
+# The served ranking with the activation refinement is the best REFINE_HEAD teams of the
+# search, every one refined, in refined order (~0.04 s a team). Refining only a few near the
+# best would serve the rest at plain values beside refined ones (refinement gains 0-3.3 %,
+# mean ~0.5 %; plain teams ranked in the 50s-70s can refine into the top 10).
+# They are chosen from the search's best COUNTS_FUNNEL (30 a worker) by a cheap estimate of
+# their frequency node counts, not by the plain value (`_count_funnel`)
 COUNTS_FUNNEL = 480
 REFINE_HEAD = 100
-# ... and the refined teams within COUNTS_MARGIN of the best refined one (at most
-# COUNTS_HEAD, two per worker) are refined once more trying every combination of the
-# members' activation-frequency node counts (refine level 2,
-# `board_plan.refine_cooldown_counts`, ~0.5 s a team): a pair of members each dropping a
-# frequency node can gain while either drop alone loses, which the move-by-move
-# refinement never reaches. The gain measured on 16 top teams of four songs was
-# 0-1.26 %, so a team further than the margin below the best cannot take #1 by it.
+# Refined teams within COUNTS_MARGIN of the best (at most COUNTS_HEAD, two per worker) are
+# refined again over every combination of the members' activation-frequency node counts
+# (level 2, `board_refine.refine_cooldown_counts`, ~0.5 s a team): two members each dropping a
+# frequency node can gain where either drop alone loses, which move-by-move refinement never
+# reaches. Its gain on 16 top teams of four songs is 0-1.26 %, hence the margin.
 COUNTS_HEAD = 32
 COUNTS_MARGIN = 0.015
-# On one song with planned boards the search itself ranks every team by the LENS
-# (`parallel_refine.lens_value`): the plain develop and its best single-member frequency count
-# drop. The plain value buys every frequency node and ranks some teams up to ~5 % low, so the
-# set screen and the leader model never propose them: holodori.best's #1 on m0001 sits 1,754th
-# by the plain value and is never scored; ranked by the lens the same search finds it on 3 of
-# 3 seeds (0 of 3 plain), and the best known team on m0342, m0552 and m0155 as before. The lens
-# values only order: each served row is the refinement's, or its exact plain value
+# On one song with planned boards (from scratch, or re-planned within the materials after the
+# search) the search ranks every team by the LENS (`parallel_refine.lens_value`): the plain
+# develop plus its best single-member frequency count drop. The plain value buys every
+# frequency node and ranks some teams up to ~5 % low, so the set screen and leader model never
+# propose them (holodori.best's #1 on m0001 ranks 1,754th by the plain value; the lens finds it
+# on 3 of 3 seeds). The lens only orders: each served row is the refinement's value, its exact
+# plain value or its exact plan within the materials
 LENS_SEARCH = True
 RANKING = 50  # teams served, best first (a true top N)
 ROWS = 8  # per-leader rows (each leader's best), the secondary view
 HINTS = 20  # pairs kept per (song, filters) as the next request's seeds
 # In general (no song): the search ranks by the mean over this many charts
-# (`two_stage.chart_sample`), then the best GENERAL_RESCORE teams are scored on
-# EVERY chart and only those full means are served
+# (`two_stage.chart_sample`); the best GENERAL_RESCORE teams are then scored on every chart and
+# only those full means are served
 GENERAL_SAMPLE = 6
-# ... except on a maxed account, where every holomem's singer nodes bought makes a
-# team score ~4 % more on a song one of its holomems sings: 6 note-spread charts
-# ranked the strong teams worse than chance there and the search never scored the
-# true #1
+# ... except on a maxed account, where every singer node bought makes a team score ~4 % more
+# on a song one of its holomems sings: 6 note-spread charts there never score the true #1
 GENERAL_SAMPLE_BY_BASIS = {"maxed": 16}
-# The bases whose single-difficulty In general search uses a FITTED sample instead
-# (`two_stage.fitted_chart_sample`): SAMPLE_TRAIN random legal teams scored on every
-# chart once per engine, the FITTED_SAMPLE
-# charts whose mean best tracks each team's full mean to search on, then a hill
-# climb (`joint_search.climb`) on the first GENERAL_WIDE of the same selection from
-# the search's best CLIMB_START teams -- two tiers, like the 2 / 6 pseudo-maps of the
-# community tool holodori.best. On maxed EXPERT this reaches the best known team in
-# 4 of 5 runs in about 24-39 s, against 60-87 s with 16 note-spread charts. NOT used
-# with a level range (maxed 25-30: 0/5 runs; the note sample 4/5 in 12-20 s) nor on
-# the account (same answer, 29 s instead of 12 s). 8 fitted charts put every run
-# within 0.08 % of the best known team in 16-19 s; 6 charts leave some runs ~1 % low
+# Bases whose single-difficulty In general search uses a FITTED sample
+# (`two_stage.fitted_chart_sample`): SAMPLE_TRAIN random legal teams, scored on every chart once
+# per engine, pick the FITTED_SAMPLE charts whose mean best tracks each team's full mean; a hill
+# climb (`joint_search.climb`) then runs on the first GENERAL_WIDE of that selection from the
+# search's best CLIMB_START teams (two tiers, like holodori.best's 2 / 6 pseudo-maps). On maxed
+# EXPERT 8 fitted charts put every run within 0.08 % of the best known team in 16-19 s (6 leave
+# some ~1 % low; 16 note-spread charts take 60-87 s). Not used with a level range (0/5 runs,
+# the note sample 4/5) nor on the account (same answer, 29 s instead of 12 s)
 GENERAL_FITTED = frozenset({"maxed"})
 FITTED_SAMPLE = 8
 GENERAL_WIDE = 24
@@ -116,18 +103,15 @@ SETTLE_PAIR_MOVES = 20
 SAMPLE_TRAIN = 300
 SAMPLE_SEED = 20261022
 GENERAL_RESCORE = 200
-# In general with boards the leaf plans: the best this many re-scored teams are scored once
-# more on every chart with the members' activation-frequency node counts chosen FOR EACH
-# CHART (`parallel_refine.ChartCounts`), and they are the ranking served, on that one basis.
-# The plain develop buys every frequency node on every song; choosing them per song adds
-# 0.1-1.9 % to a top team's mean (median 0.6 %) and reorders the head: the plain #4 becomes
-# #1 over every EXPERT chart, the plain #7 over the charts of levels 25-30. As many as a
-# search serves (`RANKING`): "One per leader" picks from every row served
+# In general with planned boards, the best this many re-scored teams are scored again on every
+# chart with the members' activation-frequency node counts chosen per chart
+# (`parallel_refine.ChartCounts`), and they are the ranking served. Choosing counts per song
+# adds 0.1-1.9 % to a top team's mean (median 0.6 %) and reorders the head. As many as a search
+# serves (`RANKING`): "One per leader" picks from every row served
 GENERAL_COUNTS_HEAD = 50
 # ... picked from the best this many by the plain mean, by what the counts add on a
-# note-spread sample of GENERAL_COUNTS_SAMPLE charts (`Engine._counts_funnel`): of the 20
-# best teams with their counts chosen, some sit as deep as #34 (EXPERT) and #96 (levels
-# 25-30) by the plain mean, and all within the funnel's best 26
+# note-spread sample of GENERAL_COUNTS_SAMPLE charts (`Engine._counts_funnel`): the 20 best
+# teams with counts chosen sit as deep as #96 by the plain mean, all within the funnel's best 26
 GENERAL_COUNTS_FUNNEL = 200
 GENERAL_COUNTS_SAMPLE = 24
 # In general the joint search seeds every leader region (`joint_search.search`'s `tilt_of`):
@@ -137,31 +121,30 @@ GENERAL_COUNTS_SAMPLE = 24
 # the exact leaf judges every seed
 OUTFIT_TILT = 3 * 0.75 / 5
 OUTFIT_STATS = ("performance", "technique", "sense")
-# boards planned within the account's own materials: the search's best this many
-# teams are re-planned exactly within the wallet and re-scored (`materials_plan.py`)
-# 24: the ranking served is the re-planned teams, so this bounds it -- 20 shown plus room
-# for a team the wallet cannot plan
+# Boards planned within the account's own materials: the search's best this many teams are
+# re-planned exactly within the wallet and re-scored (`materials_plan.py`). The ranking served
+# is the re-planned teams: 20 shown plus room for a team the wallet cannot plan
 REPLAN_CANDIDATES = 24
 # ... plus the best this many teams led by a card whose holomem SINGS the song, wherever the
 # quick plan put them: the exact plan buys the singer's own song-score nodes, which the quick
 # plan values badly (a singer-led team can sit at the leaf's #190 and re-plan +8 % to the
 # served #4)
 SINGER_CANDIDATES = 4
-# ... chosen from this many of the search's best, re-ranked first with the
-# activation refinement: the plain leaf orders them badly against the exact plan
-# (Spearman about 0.37 on a song's best 96; 0.71 refined, 3 s), since the plan's cooldown
-# staircase adds +2.1 % on average and up to +7.5 % depending on the team (the exact top
-# 16 can come from as deep as the leaf's #87, the refined #39)
+# ... chosen from this many of the search's best, re-ranked first with the activation
+# refinement: the plain leaf orders them badly against the exact plan (Spearman ~0.37 on a
+# song's best 96; 0.71 refined, 3 s), since the plan's cooldown staircase adds +2.1 % on
+# average and up to +7.5 % depending on the team
 REPLAN_SCREEN = 96
-# the re-planned teams are planned with the board planner's first plan; the best this many
-# are re-planned again with its other candidates (`materials_plan.refine_rows`): the rows the
-# Optimizer page lists (at least 20; Versus takes the best 20). A row below them keeps its
-# first plan, so it could have risen into them by what a candidate adds (on the golden: up to
-# 0.18 % on a song, 1.9 % off a song). Off a song every re-planned team gets them: there that
-# lift is the largest (a row planned 23rd on its first plan is served 20th), each candidate a
-# task of its own behind the first plans, as on a song -- the same plans as one task per team
-# solving them all, and the workers stay busy to the end (the last of 24 long tasks ran on a
-# half-idle pool)
+# ... and, when the search ranks by the count lens, the same pick made on the PLAIN order of the
+# teams it scored too (`lens_both`: both values from one evaluation; no second search): the exact
+# plan gets the union, so a team the plain order would have planned is not lost to the lens
+LENS_UNION = True
+# Re-planned teams use the board planner's first plan; the best this many (the rows the
+# Optimizer page lists; Versus takes the best 20) are re-planned again with its other
+# candidates (`materials_plan.refine_rows`). A lower row keeps its first plan (a candidate adds
+# up to 0.18 % on a song, 1.9 % off a song). Off a song, where that lift is largest, every
+# re-planned team gets them, one task per candidate behind the first plans, so the workers
+# stay busy to the end
 SHOWN_ROWS = 20
 
 
@@ -280,9 +263,9 @@ class Filters:
 
 @dataclasses.dataclass(frozen=True)
 class Assumptions:
-    """What the answer assumes about the USER'S ACCOUNT, one switch per lever --
-    modelled on the community tool holodori.best's optimizer options: the account
-    as it is, untouched, by default, every assumption an explicit switch.
+    """What the answer assumes about the user's account, one switch per lever (modelled on
+    holodori.best's optimizer options): the account as it is by default, every assumption an
+    explicit switch.
 
     Cards: `level` "account" | an int | "max", `bloom` "account" | an int,
     `sp_training` "account" | 0..4 (holodori.best's "Assumed SP Training": the limit
@@ -299,9 +282,9 @@ class Assumptions:
     (only these of G/B/R/Y are bought or reset; the rest stay as owned) and
     `targets` (`(chr, node, "buy" | "keep")`: bought if the budget allows / kept
     only when owned), `reset_min_gain` (percent of the team's score a reset must
-    earn to be made, 0 = resets are free; within the account's materials only). Every one of those but max_points / all_invited / infinite
-    is a constraint the search's quick plan does not model: the best
-    REPLAN_CANDIDATES teams are then re-planned exactly under them
+    earn to be made, 0 = resets are free; within the account's materials only). Every
+    option but max_points / all_invited / infinite is a constraint the search's quick plan
+    does not model: the best REPLAN_CANDIDATES teams are then re-planned exactly under them
     (`materials_plan.py`) and ranked on those boards."""
 
     level: object = "account"
@@ -519,7 +502,7 @@ def account_bonuses(a: Assumptions) -> AccountBonuses | None:
     Raising every card's level raises the Member Power-Up, so the account's own
     figure is not the one an "Upgraded cards" search uses."""
     _cards, _owned, cfg = leaf_inputs.account_cards_and_cfg(_card_levers(leaf_inputs._namespace(), a))
-    return cfg.account  # type: ignore[return-value]
+    return cfg.account
 
 
 def maxed_bonuses() -> AccountBonuses | None:
@@ -528,9 +511,9 @@ def maxed_bonuses() -> AccountBonuses | None:
     as its leaf scores (`apply_collection(maxed=True)`)."""
     from hbuilder.inputs import apply_collection, load_inputs  # noqa: PLC0415
 
-    cards, owned, _cfg, _prov = load_inputs(leaf_inputs.CARDS_PATH, leaf_inputs.OWNED_PATH)
-    _cards, basis = apply_collection(cards, None, owned_ids=[c.id for c in owned], maxed=True)
-    return basis.bonuses  # type: ignore[return-value]
+    cards, _owned, _cfg, _prov = load_inputs(leaf_inputs.CARDS_PATH, None)
+    _cards, basis = apply_collection(cards, None, owned_ids=[], maxed=True)
+    return basis.bonuses
 
 
 def build_inputs(
@@ -627,17 +610,15 @@ class Engine:
         path = leaf_inputs.charts_path(self.difficulty)
         if self.levels:
             lo, hi = self.levels
-            library = load_charts(str(leaf_inputs.charts_path("HARD")))  # charts_all.json
+            library = leaf_inputs.chart_library(leaf_inputs.charts_path("HARD"))  # charts_all.json
             self.charts = tuple(
-                c
-                for _k, c in sorted(library.charts.items())  # type: ignore[union-attr]
-                if lo <= c.difficulty_level <= hi
+                c for _k, c in sorted(library.charts.items()) if lo <= c.difficulty_level <= hi
             )
             if not self.charts:
                 raise KeyError(f"no chart has a level in {lo}..{hi}")
             self.index = {}
         else:
-            self.charts = load_charts(str(path)).at(self.difficulty)  # type: ignore[union-attr]
+            self.charts = leaf_inputs.chart_library(path).at(self.difficulty)
             self.index = {chart.music_id: k for k, chart in enumerate(self.charts)}
         digests = leaf_inputs.chart_digests(path, self.difficulty)
         if assumptions is not None:
@@ -660,14 +641,21 @@ class Engine:
         self.hints: dict[tuple, list[tuple[str, tuple[str, ...]]]] = {}
         self.started_seconds = time.perf_counter() - t0
         self.closed = False
+        # the searches holding this engine (`engine()` counts one in, `release` one out): a
+        # close while one runs leaves the pool to the last of them
+        self._users = 0
+        self._users_lock = threading.Lock()
         self._sample: tuple[int, ...] | None = None
         self._wide: tuple[int, ...] = ()
         self._counts_charts: tuple[int, ...] | None = None  # `_counts_funnel`'s sample
 
-    def _within_materials(self, a, ranking, leaders, pool, song, chart_indices, cancel, progress=None):
+    def _within_materials(
+        self, a, ranking, leaders, pool, song, chart_indices, cancel, progress=None, also=None
+    ):
         """The best REPLAN_CANDIDATES distinct teams re-planned within the
         wallet and re-scored on those boards (`materials_plan.plan_and_score`, in
-        the engine's workers). Returns `(ranking of the re-planned teams, best
+        the engine's workers). `also`: a second ranking whose own pick joins the first's
+        (`LENS_UNION`). Returns `(ranking of the re-planned teams, best
         first, [why a team could not be planned], {(leader index, members): whether
         that team's plan solved to optimality}, {(leader index, members): (team board
         state, bench) it is served on})`."""
@@ -678,10 +666,14 @@ class Engine:
         # shown on a song and for every row off a song (`SHOWN_ROWS`)
         first = materials_plan.first_opts(opts)
         singers = set(self.charts[self.index[song]].singers or ()) if song in self.index else set()
-        cands = [
-            ranking[k]
-            for k in replan_pick(ranking, lambda r: "chr-" + leaders[r[1]].id.split("-")[1] in singers)
-        ]
+
+        def sings(r):
+            return "chr-" + leaders[r[1]].id.split("-")[1] in singers
+
+        cands = [ranking[k] for k in replan_pick(ranking, sings)]
+        if also:
+            have = {c[1:] for c in cands}
+            cands += [r for r in (also[k] for k in replan_pick(also, sings)) if r[1:] not in have]
         # each with the plan this process already holds for it (`carried_plan`): a filter
         # or option toggle re-plans mostly the teams the previous search planned
         items = [
@@ -875,25 +867,59 @@ class Engine:
                 ceilings[k] = top
         return refined, levels, ceilings
 
-    def _screen_for_replan(self, ranking, leaders, pool, chart_indices):
+    def _screen_for_replan(self, ranking, leaders, pool, chart_indices, also=None):
         """The search's best REPLAN_SCREEN teams re-ranked by their score with the
         activation nodes chosen jointly (each keeps the better of the two), so the
         REPLAN_CANDIDATES the exact plan gets are the ones its staircase favours.
-        Only the order changes: the served numbers are the re-planned ones."""
+        Only the order changes: the served numbers are the re-planned ones. `also`: a
+        second ranking of the same teams (the plain order of a lens search), screened in the
+        same batch; then both screened rankings are returned."""
         from hbuilder.domain.team import Team  # noqa: PLC0415
 
-        head = ranking[:REPLAN_SCREEN]
-        teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in head]
-        refined = self.pool.batch_score(teams, chart_indices=chart_indices, refine_activation=True)
-        head = sorted(
-            ((max(float(v), float(r)), li, s) for (v, li, s), r in zip(head, refined)),
-            key=lambda r: (-r[0], r[1], r[2]),
+        heads = [ranking[:REPLAN_SCREEN]] + ([also[:REPLAN_SCREEN]] if also else [])
+        keys = list(dict.fromkeys((li, s) for head in heads for _v, li, s in head))
+        teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for li, s in keys]
+        refined = dict(
+            zip(keys, self.pool.batch_score(teams, chart_indices=chart_indices, refine_activation=True))
         )
-        return head + list(ranking[REPLAN_SCREEN:])
+
+        def screened(full, head):
+            head = sorted(
+                ((max(float(v), float(refined[(li, s)])), li, s) for v, li, s in head),
+                key=lambda r: (-r[0], r[1], r[2]),
+            )
+            return head + list(full[REPLAN_SCREEN:])
+
+        out = [screened(full, head) for full, head in zip((ranking, also), heads)]
+        return (out[0], out[1]) if also else out[0]
+
+    def acquire(self) -> Engine:
+        """One more search holds this engine (`engine()` takes it for its caller)."""
+        with self._users_lock:
+            self._users += 1
+        return self
+
+    def release(self) -> None:
+        """A search is done with this engine; the last one out of a closed engine closes its
+        pool."""
+        with self._users_lock:
+            if self._users == 0:
+                return  # not held: nothing to give back
+            self._users -= 1
+            last = self.closed and self._users == 0
+        if last:
+            self.pool.__exit__(None, None, None)
 
     def close(self) -> None:
-        if not self.closed:
+        """Retire the engine. A search still running on it keeps its workers, context file and
+        plan store until it ends (`release`): closing them under it would leave it to finish
+        in one process, its workers unable to read a context file already deleted."""
+        with self._users_lock:
+            if self.closed:
+                return
             self.closed = True
+            busy = self._users > 0
+        if not busy:
             self.pool.__exit__(None, None, None)
 
     # ------------------------------------------------------------------ sample
@@ -1024,12 +1050,30 @@ class Engine:
         # boards as they are (nothing to plan) or re-planned within the materials after the
         # search: no frequency count to choose on the board the search develops
         as_is = a is not None and (a.boards == "as_is" or a.replan)
-        lens = LENS_SEARCH and not general and not as_is
+        # ...but a search whose best teams are re-planned within the materials still ranks by
+        # the lens: the exact plan chooses each team's counts, and the plain value would keep a
+        # team that only shines with fewer frequency nodes out of the teams it plans (m0342:
+        # a #1 0.85 % higher, the same #1 on four other songs, the same time). Boards as they
+        # are have no count to choose
+        lens = LENS_SEARCH and not general and (a is None or a.boards != "as_is")
+
+        # a lens search re-planned within the materials keeps each team's plain value too, for
+        # the plain order's pick (`LENS_UNION`)
+        plain_of: dict | None = {} if lens and replan and LENS_UNION else None
+        plain_order: list | None = None
 
         def score_pairs(pairs):
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
             teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for li, s in pairs]
+            if plain_of is not None:
+                both = self.pool.batch_score(
+                    teams,
+                    chart_indices=chart_indices,
+                    refine_activation="lens_both",  # type: ignore[arg-type]
+                )
+                plain_of.update(zip(pairs, (float(p) for p, _b in both)))
+                return [float(b) for _p, b in both]
             return self.pool.batch_score(
                 teams, chart_indices=chart_indices, refine_activation="lens" if lens else None
             )
@@ -1039,8 +1083,8 @@ class Engine:
         on_round = SearchRounds(emit, starts)
 
         # every leader region is seeded (`outfit_tilt`), In general and on one song alike: on
-        # one song the gate repair also missed whole regions (Lui / Ocean Elegance's holoX set
-        # on m0155, +1.0 %; Okayu / Salty Breeze Runway's GAMERS set on m0342)
+        # one song the gate repair alone misses whole regions (Lui / Ocean Elegance's holoX set
+        # on m0155, +1.0 %)
         tilt_of = outfit_tilt(pool)
         t0 = time.perf_counter()
         with self.lock:
@@ -1059,10 +1103,9 @@ class Engine:
             )
             ranking = found["ranking"]
             if starts > 1:
-                # In general on the two-tier (fitted) sample: further independent starts, merged. One search settles in
-                # one region of teams; the best can sit four members away and never be
-                # proposed: separate seeds can settle on different sets even where the
-                # sample ranks them the same way as every chart does, so it is the reach
+                # In general on the two-tier (fitted) sample: further independent starts,
+                # merged. One search settles in one region of teams and the best can sit four
+                # members away, never proposed; separate seeds settle on different sets
                 merged = {(li, s): v for v, li, s in ranking}
                 extra: Any
                 for extra in range(1, starts):
@@ -1132,11 +1175,10 @@ class Engine:
                     key=lambda r: (-r[0], r[1], r[2]),
                 )
                 if len(wide) > len(chart_indices) and SETTLE_FROM:
-                    # SETTLE: the climb swapped the best teams BY THE WIDE SAMPLE, which
-                    # does not order them as every chart does -- the full re-score's #1
-                    # may never have had its swaps tried (a team ONE swap away can score
-                    # higher on every chart and on both samples). So the
-                    # climb again from the full re-score's best, and its best on every chart
+                    # SETTLE: the climb swapped the best teams by the wide sample, which does
+                    # not order them as every chart does, so the full re-score's #1 may never
+                    # have had its swaps tried. Climb again from the full re-score's best and
+                    # re-score its best on every chart
                     settled = joint_search.climb(
                         pool,
                         leaders,
@@ -1187,7 +1229,15 @@ class Engine:
                 refined, levels, counted_ceilings = self._count_cooldowns(
                     chosen, teams, refined, chart_indices
                 )
-                if replan:
+                if replan and plain_of:
+                    plain_order = sorted(
+                        ((plain_of[(li, s)], li, s) for _v, li, s in ranking if (li, s) in plain_of),
+                        key=lambda r: (-r[0], r[1], r[2]),
+                    )
+                    ranking, plain_order = self._screen_for_replan(
+                        ranking, leaders, pool, chart_indices, also=plain_order
+                    )
+                elif replan:
                     ranking = self._screen_for_replan(ranking, leaders, pool, chart_indices)
         t_refine = time.perf_counter() - t0 - search_seconds
         better = {(li, s): max(float(v), plain) for (plain, li, s), v in zip(chosen, refined)}
@@ -1214,6 +1264,7 @@ class Engine:
                 None if general else song,
                 None if general else chart_indices,
                 cancel,
+                also=plain_order,
                 progress=(
                     lambda k, n: emit(
                         {"type": "progress", "stage": "refine", "sub": "materials", "done": k, "total": n}
@@ -1315,8 +1366,12 @@ class Engine:
         per_song = "the board rebuilt per song" + (
             " and its activation-frequency nodes chosen per song" if counted else ""
         )
+        # what went wrong with the workers during this search (each batch finished anyway)
+        take = getattr(self.pool, "take_warnings", None)
+        warnings = take() if take is not None else []
         return {
             **extra,
+            **({"warnings": warnings} if warnings else {}),
             "scope": "general" if general else "song",
             "song": song or None,
             "certified": False,
@@ -1401,11 +1456,10 @@ def shared_pool(workers: int | None) -> SharedPool | None:
         return held
 
 
-# account files a refresh rewrites that the scoring key (`leaf_inputs.today_keys`) does not hash:
-# the boards as they stand -- socketed cards and nodes (`board_state.json`, read for the
-# bench sockets and "boards as they are") -- and the materials (`inventory.json`, the
-# wallet the re-plan spends). Without them a refresh that only moved a socket or the
-# wallet would leave the engine on the old account.
+# Account files a refresh rewrites that the scoring key (`leaf_inputs.today_keys`) does not
+# hash: the boards as they stand (`board_state.json`: sockets and nodes) and the materials
+# (`inventory.json`, the wallet the re-plan spends). Without them a refresh that only moved a
+# socket or the wallet would leave the engine on stale inputs.
 ACCOUNT_STATE_FILES = ("board_state.json", "inventory.json")
 
 
@@ -1459,7 +1513,9 @@ def engine(
 ) -> Engine:
     """The live engine of (basis, difficulty[, assumptions]), rebuilt when the
     inputs' key moved (`current_key()` -> today's key, or None when it cannot
-    be read: then the engine in hand is kept)."""
+    be read: then the engine in hand is kept). The caller holds it (`Engine.acquire`) and
+    must `release()` it when its search is done; an engine retired meanwhile (a newer key, or
+    the oldest of MAX_ENGINES) closes its pool only then."""
     difficulty = leaf_inputs._difficulty(difficulty)
     # the plan's options that shape only the re-plan share one engine (`engine_key`)
     slot = (
@@ -1484,7 +1540,7 @@ def engine(
                 basis, difficulty, workers=workers, assumptions=assumptions, levels=levels, play=play
             )
         _ENGINES[slot] = held  # re-inserted last: most recently used
-        return held
+        return held.acquire()
 
 
 PLATFORMS = ("mobile", "pc")

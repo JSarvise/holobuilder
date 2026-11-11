@@ -209,6 +209,8 @@ def row_figures(req: Mapping, body: Mapping, *, keep_law: bool = False) -> dict:
         play=req["play"],
         keep_law=keep_law,
         want_notes=body.get("notes") is True,
+        # the score pace of each bar's runs (`song_distribution.score_pace`), with the law
+        pace=body.get("distribution") is True and body.get("pace") is True,
     )
     out.update(
         {
@@ -258,7 +260,8 @@ def row_detail_route(h: Handler) -> None:
     the activation refinement; 2: every frequency count tried too; "counts": an In
     general row, its frequency counts chosen on this song; default false),
     "member_order"?, "timeline"?: bool,
-    "distribution"?: bool, "as_is"?: bool (default true: `song_est_as_is` on the
+    "distribution"?: bool, "pace"?: bool (with "distribution": the score pace of the runs
+    in each bar, `distribution.pace`, `song_distribution.score_pace`), "as_is"?: bool (default true: `song_est_as_is` on the
     account's captured boards + `plan_cost` of the planned boards vs the
     wallet, `row_detail._as_is`), "reset_price"?: bool (a within-wallet row
     with resets: the same team re-planned with fewer, `row_detail.reset_price`;
@@ -273,7 +276,7 @@ def export_team_route(h: Handler) -> None:
     """`POST /api/export-team` — the row as a `.hbteam` document (`hbteam.document`): the
     request, the detail the server computes for it now (with the run law's summary), the
     numbers the page showed (`shown`), the search that ranked it (`search`) and the account
-    files the score reads, so another install can replay it (`tools/web/hbteam.py replay`).
+    files the score reads, so another install can replay it (`tools/refresh/team_file.py replay`).
     Body: a `/api/row-detail` body plus `shown`?: {...} and `search`?: {...}. Saves the file
     in the user's Downloads folder (`team_file.save`: the desktop app's window cannot download)
     and answers `{"path", "name", "bytes"}`; writes nothing else."""
@@ -606,8 +609,8 @@ def serve_meta(h: Handler) -> None:
                 "refresh_running": admin.REFRESH_LOCK.locked(),
                 "chart_count": chart_count,
                 # the chart difficulties a run may ask for (`difficulty` on the searches,
-                # /api/compare, /api/timeline, ?difficulty= on /api/songs): the default, what is on disk, how many
-                # charts each holds, and — only when they vary — the EXPERT
+                # /api/compare, /api/timeline, ?difficulty= on /api/songs): the default, what is
+                # on disk, how many charts each holds, and — only when they vary — the EXPERT
                 # songs with no chart at a difficulty
                 "difficulties": difficulties,
                 # whether the exact HiGHS plan can run at all (typed 503 otherwise)
@@ -618,10 +621,10 @@ def serve_meta(h: Handler) -> None:
                 "max_level_board_points": max_points,
                 "boards_total": len(bs),
                 "memory_posters": getattr(bonuses, "posters", None) if bonuses else None,
-                "memory_bonus_permil": (bonuses.memory_permil if bonuses is not None else None),  # type: ignore[attr-defined]
+                "memory_bonus_permil": (bonuses.memory_permil if bonuses is not None else None),
                 "power_up_permyriad": (
-                    bonuses.power_up_permyriad  # type: ignore[attr-defined]
-                    if bonuses is not None and bonuses.power_up_permyriad is not None  # type: ignore[attr-defined]
+                    bonuses.power_up_permyriad
+                    if bonuses is not None and bonuses.power_up_permyriad is not None
                     # `player.power_up_permyriad: "auto"` — the derived value the
                     # scoring itself uses, never a hand-typed stale one.
                     else getattr(collection_basis.derived_power_up, "permyriad", None)

@@ -14,7 +14,7 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hbuilder import paths
 from hbuilder.domain.board import BoardModel, load_board
@@ -47,7 +47,7 @@ from hbuilder.domain.team import TeamError
 if TYPE_CHECKING:
     from types import SimpleNamespace
 
-    from hbuilder.domain.collection import DerivedMemberPowerUp
+    from hbuilder.domain.collection import AccountBonuses, DerivedMemberPowerUp
 
 # What a failed `load_inputs` carries (`_LoadFailure`): which input was bad.
 EXIT_INPUT_DATA = 3  # cards.json / owned.json missing, unreadable, malformed.
@@ -78,8 +78,8 @@ COLLECTION_CURVE_PATH = f"{paths.DUMPS_REL}/card_level_curve.json"
 COLLECTION_CAPS_PATH = f"{paths.DUMPS_REL}/card_caps.json"
 
 
-# The per-level skill rows, for the bloom down-level. ⚠ NOT `skill_levels.json`
-# -- that path may hold a stale file no current tool generates.
+# The per-level skill rows, for the bloom down-level (not `skill_levels.json`, which
+# no tool generates).
 COLLECTION_LADDER_PATH = f"{paths.DUMPS_REL}/skill_ladder.json"
 
 
@@ -143,9 +143,8 @@ def max_level_board_points(
     return total
 
 
-# Which load step was in flight when a load-and-guard failure was
-# raised, so the shared guard can route to EXIT_INPUT_DATA or EXIT_CONFIG
-# without a second load path anywhere in this module.
+# Which load step was in flight when a load failure was raised, so the shared
+# guard routes to EXIT_INPUT_DATA or EXIT_CONFIG.
 _STEP_CARDS = "cards"
 _STEP_OWNED = "owned"
 _STEP_CONFIG = "config"
@@ -162,11 +161,9 @@ class _LoadFailure(Exception):
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class BoardBasis:
-    """Which of the two board states a run is in, and the numbers that prove
-    it. Reported rather than inferred: the Holomem Board is roughly 30-50 % of
-    Overall Power, so "board loaded" and "board absent" are two different
-    answers to the same question and a reader must never have to guess which
-    one they are holding."""
+    """Which of the two board states a run is in, and the numbers that prove it.
+    The Holomem Board is roughly 30-50 % of Overall Power, so "board loaded" and
+    "board absent" are different answers and a reader must never have to guess."""
 
     path: str | None
     model: BoardModel | None
@@ -200,12 +197,11 @@ class BoardBasis:
 class CollectionBasis:
     """Which of the two collection states a run is in, and what it changed.
 
-    Reported for the same reason `BoardBasis` is: **every card in
-    `data/cards.json` carries its FULLY-MAXED stats**, so a ranking without a
-    collection assumes a maxed collection. A run scored against the account's
-    real levels is a different answer to the same question and must say so."""
+    Every card in `data/cards.json` carries its FULLY-MAXED stats, so a ranking
+    without a collection assumes a maxed collection; a run on the account's real
+    levels is a different answer and must say so."""
 
-    bonuses: object | None
+    bonuses: AccountBonuses | None
     path: str | None
     applied: int
     unchanged: int
@@ -219,8 +215,8 @@ class CollectionBasis:
     # `P` computed from the account's own owned cards, so the hand-typed
     # `power_up_permyriad` can be contradicted instead of trusted.
     derived_power_up: object | None = None
-    # Scoring a fully-maxed account instead of the real one — a different
-    # question, deliberately available, and never the silent default.
+    # Scoring a fully-maxed account instead of the real one: a different
+    # question, never the silent default.
     maxed: bool = False
 
     @property
@@ -378,12 +374,11 @@ def _override_collection_levels(
     keep_higher_bloom: bool = False,
     assume_limit_break: object = None,
 ) -> dict:
-    """`document` with every card entry — and `card_default` — forced to the
-    assumed level and/or bloom: the "what if all my cards were at level X / bloom
-    Y" filter. Only the assumed field is touched (assume the OTHER stays the
-    account's). A level assumption also sets `limit_break` to `"max"`, so a real
-    card's low limit break does not silently clamp the hypothetical
-    (`resolve_card_state` resolves `"max"` to the rarity's top limit break).
+    """`document` with every card entry, and `card_default`, forced to the assumed
+    level and/or bloom: the "what if all my cards were at level X / bloom Y"
+    filter. Only the assumed field is touched. A level assumption also sets
+    `limit_break` to `"max"`, so a real card's low limit break does not clamp the
+    hypothetical (`resolve_card_state` resolves `"max"` to the rarity's top).
 
     `keep_higher_level` / `keep_higher_bloom` ("do not delevel / debloom", as in
     the community tool holodori.best): a card already ABOVE a numeric assumption keeps its
@@ -433,21 +428,21 @@ def apply_collection(
     keep_higher_level: bool = False,
     keep_higher_bloom: bool = False,
     assume_limit_break: object = None,
+    document: dict[str, Any] | None = None,
 ) -> tuple[tuple[Card, ...], CollectionBasis]:
     """Restate every card's stats from the collection at `path`.
 
-    `path is None` means no collection. An absent file is NOT an error and
-    never changes the exit code — the same first-class-state contract
-    `load_board` has. So is an absent `card_level_curve.json`: without the
-    per-level multiplier there is nothing to restate, every card keeps
-    `data/cards.json`'s value, and the run says so.
+    `document` stands for the file's content (a collection about to be saved, checked
+    before it reaches the disk); `path` is then only what the basis reports.
+
+    `path is None` means no collection. An absent file is NOT an error (the same
+    contract as `load_board`), nor is an absent `card_level_curve.json`: every
+    card then keeps `data/cards.json`'s value, and the run says so.
 
     A card the collection cannot restate keeps `data/cards.json`'s stats, which
     are the authoritative ones. Nothing here writes any file."""
-    # The maxed basis: answer "what would this team be on a maxed account"
-    # instead of "what is it on mine". The cards need no work — `data/cards.json`
-    # IS the maxed state — so this is the collection deliberately not applied,
-    # plus the account-level ceilings.
+    # The maxed basis: `data/cards.json` IS the maxed state, so the collection is
+    # not applied, plus the account-level ceilings.
     if maxed:
         curve_raw = _load_json_if_present(paths.REPO / COLLECTION_CURVE_PATH)
         basis = stat_basis_from_mapping(curve_raw) if curve_raw else None
@@ -464,10 +459,10 @@ def apply_collection(
     if path is None:
         return cards, CollectionBasis(None, None, 0, len(cards), (), ())
 
-    document = _load_json_if_present(Path(path))
-    # The level/bloom "what-if" filter: force every card to an assumed level
-    # and/or bloom before the stats are restated. Applied only on the collection
-    # (account) path — the maxed basis above already IS max, so it never gets here.
+    if document is None:
+        document = _load_json_if_present(Path(path))
+    # The level/bloom "what-if" filter, before the stats are restated (the maxed
+    # basis above already is max).
     if document is not None and (
         assume_level is not None or assume_bloom is not None or assume_limit_break is not None
     ):
@@ -487,11 +482,8 @@ def apply_collection(
     # reported and never folded into a score.
     bonuses = account_bonuses_from_mapping(document)
 
-    # Two restatements, and they are independent. STATS come from the level and
-    # bloom through the curve; SKILL LEVELS come from the bloom alone, through
-    # the exported ladder. A card can get one and not the other -- a card with
-    # no curve entry still has a bloom, and a card at full bloom still has
-    # stats to restate -- so neither is gated on the other.
+    # Two independent restatements: STATS from the level and bloom through the
+    # curve, SKILL LEVELS from the bloom alone through the exported ladder.
     restated: list[Card] = []
     skills_restated = 0
     skills_unavailable: list[str] = []
@@ -515,17 +507,13 @@ def apply_collection(
             skills_unavailable.append(card.id)
         restated.append(down_levelled)
 
-    # `power_up_permyriad` is hand-typed and easy to get wrong (e.g. `951` for a
-    # true `39`). It is derivable from the account's own cards, so derive it and
-    # let the run say when the file disagrees. Nothing here writes
-    # `state/collection.json`: the correction is the user's to make.
+    # `power_up_permyriad` is hand-typed and easy to get wrong; it is derivable
+    # from the account's own cards, so the run says when the file disagrees.
+    # Nothing here writes `state/collection.json`.
     derived_power_up = derived_member_power_up_permyriad(basis, report.states, owned_ids or ())
-    # `"auto"` in the document means "compute it", and this is where it is
-    # computed. Only an EXACT derivation may fill it: with an owned card whose
-    # level is not recorded the answer is a bound, and scoring the lower end of
-    # a bound as though it were the figure is the kind of plausible number this
-    # project refuses to invent. A partial derivation leaves the term unset and
-    # `lines()` says why.
+    # `"auto"` means "compute it". Only an EXACT derivation fills it: with an owned
+    # card whose level is not recorded the answer is only a bound, so the term is
+    # left unset and `lines()` says why.
     if (
         getattr(bonuses, "power_up_permyriad_is_auto", False)
         and derived_power_up is not None
@@ -549,13 +537,10 @@ def apply_collection(
 def load_board_basis(path: str | None) -> BoardBasis:
     """The board file at `path`, or the explicit "no board" state.
 
-    `path is None` means no board. An absent file is NOT an error and
-    never changes the exit code: `load_board` returns `None`, `cfg.board`
-    stays `None`, `scoring._board_bonus` stays the identity, and the run
-    scores without a board. A file that
-    exists but does not parse IS an error — a board that is silently zero
-    looks exactly like a board that is correctly zero, which is the whole
-    failure mode `board.BoardError` exists to prevent."""
+    `path is None` means no board. An absent file is NOT an error: the run scores
+    without a board. A file that exists but does not parse IS an error
+    (`board.BoardError`): a board that is silently zero looks exactly like one
+    that is correctly zero."""
     if path is None:
         return BoardBasis(path=None, model=None, characters=0, nodes=0)
     model = load_board(path)
@@ -570,37 +555,30 @@ def load_board_basis(path: str | None) -> BoardBasis:
 
 
 def load_inputs(
-    cards_path: Path, owned_path: Path
+    cards_path: Path, owned_path: Path | None
 ) -> tuple[tuple[Card, ...], tuple[Card, ...], ScoringConfig, CardProvenance | None]:
-    """The single shared load-and-guard function: every
-    `cards.json` / `owned.json` / `config.json` load goes through here,
-    never through a second load path. Never calls `json.load` itself —
-    every load delegates to `load_cards`, `card_provenance_of`,
-    `load_owned` and `load_scoring_config`.
+    """The single shared load-and-guard function: every `cards.json` /
+    `owned.json` / `config.json` load goes through here, delegating to
+    `load_cards`, `card_provenance_of`, `load_owned` and `load_scoring_config`.
 
-    Returns the loaded card document's `CardProvenance` as a fourth
-    element — `None` for the maxed default (mode A), populated for a
-    mode-B real-stat document.
+    Returns `(cards, owned, cfg, provenance)`: the card document's
+    `CardProvenance`, `None` for the maxed default document. `owned_path=None` (the maxed
+    basis, which owns the whole catalogue) reads no `owned.json` and returns no owned cards.
 
     Raises `_LoadFailure` with the exit code the caller should return:
-    `EXIT_INPUT_DATA` for a `load_cards`/`card_provenance_of`/`load_owned` failure,
-    `EXIT_CONFIG` for a `load_scoring_config` failure — decided by
-    the `current_step` tracking local, which also picks the printed
-    message's `current_input`."""
+    `EXIT_INPUT_DATA` for a cards/owned failure, `EXIT_CONFIG` for a config one."""
     current_input: str = str(cards_path)
     current_step = _STEP_CARDS
     try:
         cards = load_cards(cards_path)
-        # Second read of the same file, on purpose: see `load_cards`'s own
-        # docstring — an AST test identifies the shared load path by the
-        # name `load_cards`, so the stat basis is a separate call rather than
-        # a wider signature. Inside this same guard, so a malformed
-        # provenance block exits as an input-data error like any other bad
-        # card file.
+        # A second read of the same file, on purpose: an AST test identifies the
+        # shared load path by the name `load_cards`, so the provenance is a separate
+        # call rather than a wider signature. Inside this guard, a malformed
+        # provenance block exits as an input-data error.
         provenance = card_provenance_of(cards_path)
         current_input = str(owned_path)
         current_step = _STEP_OWNED
-        owned = load_owned(owned_path, cards)
+        owned = load_owned(owned_path, cards) if owned_path is not None else ()
         current_input = str(DEFAULT_CONFIG_PATH)
         current_step = _STEP_CONFIG
         cfg = load_scoring_config()

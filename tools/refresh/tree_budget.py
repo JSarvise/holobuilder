@@ -1,30 +1,19 @@
 """The Holomem Board point budget: where the points come from, and what the board costs.
 
-Answers two questions in one place:
+* The budget follows the CHARACTER level (1..50), not the player level, through a table:
+  budget(L) = sum of CharacterLevel.skill_tree_point_quantity over levels 1..L;
+  budget(50) = 361.
+* A node costs SkillTreeNode.consumption_skill_tree_point_quantity (field 9). Field 13 is
+  `auto_selection_priority`, a tie-break rank for the client's auto-allocate button, not a
+  price. One character's board = 154 nodes = 453 points, so a max-level character can buy
+  about four fifths of it.
 
-  1. "how is the holomem level obtained, which sets the number of points?"
-        -> CHARACTER level (1..50), not player level. The curve is a table, not a formula:
-           budget(L) = sum of CharacterLevel.skill_tree_point_quantity over levels 1..L.
-           budget(50) = 361.
-
-  2. "what does each node of the tree cost?"
-        -> SkillTreeNode.consumption_skill_tree_point_quantity  (field 9).
-           Field 13 is `auto_selection_priority` -- a tie-break rank for the client's
-           auto-allocate button, NOT a price. Both names are the client's own, from
-           `holodori_sync.py --names SkillTreeNode`.
-           One character's board = 154 nodes = 453 points.
-
-  361 < 447. A character at max level can buy about four fifths of its own board.
-
-The account's own numbers settle it. `User/Get` carries, per character, a
-`skill_tree_point-chr-NNNNN` resource with the UNSPENT balance. For every character with
-any points spent (26 in one account):
+`User/Get` carries, per character, a `skill_tree_point-chr-NNNNN` resource with the UNSPENT
+balance, and on every character with points spent
 
         spent(field 9) + unspent  ==  budget(L)  exactly, for some integer L
 
-26 hits out of 26. Field 13 does not do this. That simultaneously proves the cost field,
-proves levelling is the only source of points, and makes the character level RECOVERABLE
-(invert the curve) rather than hand-entered.
+which makes the character level recoverable (invert the curve) rather than hand-entered.
 
 Usage:
     python tree_budget.py               # curve + cost + verdict

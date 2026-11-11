@@ -100,6 +100,6 @@ def test_a_search_job_reports_a_missing_snapshot_as_an_error_event(tmp_path, mon
     events = _drain(job)
     kinds = [e["type"] for e in events]
     assert kinds[-2:] == ["error", "end"] and "result" not in kinds
-    assert "MissingInput" in events[-2]["message"]
     assert "account_snapshot_main.json" in events[-2]["message"]
+    assert "refresh.cmd" in events[-2]["message"]
     assert job.done

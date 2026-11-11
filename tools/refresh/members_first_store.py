@@ -9,10 +9,10 @@ A members-first enumeration is stored, per (song, proxy), as:
     members_first_<song>_<proxy>.scores.bin  — n_sets × float64 (native,
         little-endian on every supported machine) in
         `hbuilder.solver.members_first.legal_rosters(pool holomems, 5)` order
-and `tools/web/members_first_index.py` reads them.
+No code in the app reads them.
 
 This module is the small writer the web's tests use to build FAKE
-enumerations in a temp dir (`tools/web/test_no_writes.py` forbids any
+files in a temp dir (`tools/web/test_no_writes.py` forbids any
 file-writing call inside `tools/web/`, test files included — so the writer
 lives on the recon side).
 It never touches `data/` or `state/`.

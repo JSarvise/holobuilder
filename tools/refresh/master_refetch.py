@@ -123,8 +123,9 @@ def fetch(tables):
             bad += 1
             continue
         dst = path_for(table)
-        with open(dst, "wb") as fh:
-            fh.write(body)
+        import atomic_io  # noqa: PLC0415 -- beside this script
+
+        atomic_io.write_bytes(dst, body)
         if not opens(dst, e["seed_hex"]):
             os.remove(dst)  # never leave an undecryptable body sitting on disk
             print(f"  WILL NOT DECRYPT  {table}: discarded")

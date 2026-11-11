@@ -382,6 +382,8 @@ dialog.o-picker{margin:auto;width:min(900px,calc(100vw - 48px));max-height:min(7
 .o-law .bars{position:relative;height:96px;border-bottom:1px solid var(--line-2)}
 .o-law .bars > i{position:absolute;bottom:0;background:color-mix(in oklab,var(--accent) 70%,transparent);border-radius:2px 2px 0 0;box-shadow:inset -1px 0 0 var(--surface)}
 .o-law .bars > i:hover{background:var(--accent)}
+.o-law.pick .bars > i{cursor:pointer}
+.o-law .bars > i.on{background:var(--accent);box-shadow:0 0 0 2px #fff;z-index:1}
 .o-law .mk{position:absolute;top:-14px;bottom:0;width:0;border-left:2px solid var(--ink);pointer-events:auto}
 .o-law .mk span{position:absolute;top:-4px;left:4px;font-size:12px;font-weight:600;color:var(--ink);white-space:nowrap}
 .o-law .mk.n{border-left:2px dashed var(--ink-3)}
@@ -457,6 +459,7 @@ body.opt .o-top h1{display:flex;align-items:center;gap:10px;min-width:0}
 .o-opts{gap:8px}.o-opts .o-count{margin-left:2px}
 .o-prov{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 auto;white-space:nowrap}
 .o-provtxt{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.o-provwarn{color:var(--warn);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .o-bar .when{margin-left:auto;white-space:nowrap;color:var(--ink-2)}
 .o-bar .when .num{color:var(--ink)}
 .o-split{margin-top:14px}

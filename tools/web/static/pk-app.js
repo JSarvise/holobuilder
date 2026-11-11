@@ -13,7 +13,7 @@
 // on "Read again", the layer toggles and the holomem filter redraw from the data in hand.
 import { setFreeChat, chatStrip, chatMarkers, chatTally, chatMembers, left, TALK } from "/pk-chat.js";
 
-const byId = id => document.getElementById(id);   // not `$`: test_id_contract
+const byId = id => document.getElementById(id);
 const QUOTE = String.fromCharCode(34);
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", [QUOTE]: "&quot;" };
 const ESC_RE = new RegExp("[&<>" + QUOTE + "]", "g");

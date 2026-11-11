@@ -122,8 +122,10 @@ def free_port() -> int:
 class Server:
     """`tools/web/server.py` running inside a sandbox."""
 
-    def __init__(self, sandbox: Path, environ: dict[str, str], python: str, log: Path):
-        self.port = free_port()
+    def __init__(
+        self, sandbox: Path, environ: dict[str, str], python: str, log: Path, port: int | None = None
+    ):
+        self.port = port or free_port()
         self.log = log.open("w", encoding="utf-8")
         self.proc = subprocess.Popen(
             [python, "-u", str(sandbox / "tools" / "web" / "server.py"), "--port", str(self.port)],

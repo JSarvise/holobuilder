@@ -210,8 +210,9 @@ def main(argv: list[str] | None = None) -> int:
         print("identical to what we already have — nothing written")
         return 0
 
-    with open(OUT, "wb") as fh:
-        fh.write(new)
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    atomic_io.write_bytes(OUT, new)
     print(f"wrote {OUT}")
     return 0
 

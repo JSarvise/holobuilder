@@ -49,7 +49,7 @@ def event_open(event_meta: dict | None, chapter_metas: list[dict], now: float) -
 
 def stale_regions(status: dict | None, now: float, stale_after: float = STALE_AFTER_S) -> list[dict]:
     """The regions whose last border read is older than `stale_after` (or that never read).
-    A status from before `borders_at` existed falls back to `ok_at`."""
+    A status without `borders_at` falls back to `ok_at`."""
     out = []
     for r in (status or {}).get("regions") or []:
         last = r.get("borders_at") if "borders_at" in r else r.get("ok_at")

@@ -1,10 +1,8 @@
 # Octo header obfuscation for hololive Dreams assets -- decrypt and re-encrypt.
 #
 # WHAT IT IS. The first 256 bytes of an Octo asset are XORed with a keystream that is a pure
-# function of the asset's own name. There is no key and no secret: the name is printed in the
-# public catalog, so anyone holding the file already holds everything needed to reverse it.
-# XOR is an involution, so the recovered bytes are the ORIGINAL bytes, exactly -- this is not a
-# rebuild, nothing is donated, reconstructed or inferred.
+# function of the asset's own name (printed in the catalog); there is no key. XOR is an
+# involution, so the recovered bytes are the ORIGINAL bytes, exactly.
 #
 # THE KEYSTREAM, for a name of n characters:
 #   1. Lay out a 2n-byte buffer. Walking the name forwards, write each character's low byte at
@@ -22,14 +20,11 @@
 #   resources -- encrypted ones carry a literal "QUAVMAGIC" sentinel; the 256-byte window starts
 #                AFTER the sentinel, and the sentinel is stripped on decrypt.
 #
-# PLATFORM NOTE. Verified on OUR files: the Steam/StandaloneWindows64 build. The algorithm was
-# characterised from an Android-targeting third-party project, so anything of theirs that is
-# platform-scoped (CDN endpoint, app version, the android_* Octo API keys) does NOT transfer and
-# is deliberately not implemented here.
-# The header obfuscation itself is platform-independent, which the 790/790 run below establishes
-# on Windows bundles directly rather than assuming.
+# The header obfuscation is platform-independent; it is checked here on the Steam
+# (StandaloneWindows64) build's own bundles. Android-only details (CDN endpoint, the android_*
+# Octo API keys) do not apply and are not implemented.
 #
-# Stdlib only, by project constraint. Run this file directly to re-verify against real bundles.
+# Stdlib only. Run this file directly to re-verify against real bundles.
 
 BUNDLE_MAGIC = b"UnityFS"
 RESOURCE_MAGIC = b"QUAVMAGIC"
@@ -91,13 +86,10 @@ def decrypt(data: bytes, name: str) -> bytes:
 
 
 # --------------------------------------------------------------------------------------------
-# Self-verification. `python octo_crypto.py [dir]` re-runs the check that established this
-# module against real files: every *.bundle in dumps/card_assets/ is stored under its own asset
-# name, so the name is unambiguous and no catalog lookup (or guessing) is involved.
-#
-# Do NOT weaken this into a counter that only reports successes -- the lesson from the recovery
-# work this replaces is to verify artefacts, not counters, so it loads each result through
-# UnityPy and insists on a real Texture2D with real dimensions.
+# Self-verification. `python octo_crypto.py [dir]` checks the module against real files: every
+# *.bundle in dumps/card_assets/ is stored under its own asset name, so no catalog lookup is
+# involved. It loads each result through UnityPy and insists on a real Texture2D with real
+# dimensions: an artefact check, not a success counter.
 if __name__ == "__main__":
     import collections
     import glob

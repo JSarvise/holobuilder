@@ -63,3 +63,31 @@ def test_every_event_song_is_listed_with_its_kind_even_without_a_bonus_row():
 def test_the_singer_type_reads_the_master_enum():
     assert event_mode.singer_type({"musicSingerType": "MusicSingerType_MUSIC_SINGER_TYPE_GROUP"}) == "group"
     assert event_mode.singer_type(None) is None
+
+
+def test_a_song_bonus_row_that_names_no_card_still_marks_an_event_song_without_a_null_card():
+    raw = {
+        "current_group_ids": [f"music_score_bonus-{CHAPTER}"],
+        "groups": [
+            {
+                "group_id": f"music_score_bonus-{CHAPTER}",
+                "kind": "music",
+                "rows": [
+                    {"music_id": "m0369", "number": 1, "character_id": "chr-00007", "permil": 100},
+                    {"music_id": "m0369", "number": 2, "permil": 50},
+                    {"music_id": "m0551", "number": 1, "permil": 50},
+                ],
+            }
+        ],
+    }
+    _raw, event, _keys = event_mode.bundle_from_raw(raw)
+    got = event_mode.songs_payload(
+        [{"id": "m0369", "playingSeconds": 120}, {"id": "m0551", "playingSeconds": 120}],
+        titles={},
+        boosts=3,
+        event=event,
+        charted=None,
+    )
+    by_id = {s["music_id"]: s for s in got["songs"]}
+    assert by_id["m0369"]["event_song"] and by_id["m0369"]["event_song_cards"] == ["chr-00007"]
+    assert by_id["m0551"]["event_song"] and by_id["m0551"]["event_song_cards"] == []

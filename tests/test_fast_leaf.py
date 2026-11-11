@@ -29,17 +29,17 @@ from hbuilder.domain.board_plan import (
     cached_team_plan,
     compile_node_recipes,
     node_values_from_recipes,
-    optimize_and_rerank,
     power_node_values,
     song_cast,
 )
+from hbuilder.domain.board_refine import optimize_and_rerank
 from hbuilder.domain.card import Stats
 from hbuilder.domain.skilltree import ROOT_NODE, SkillTree, TreeNode
 from hbuilder.domain.team import Team, TeamError
 
 K = 2.03734
 REPO = Path(__file__).resolve().parents[1]
-RESEARCH = REPO / "tests" / "fixtures" / "research"
+FIXTURES = REPO / "tests" / "fixtures"
 
 # ---------------------------------------------------------------------------
 # parse_effect_id memo
@@ -384,7 +384,7 @@ _HAVE_REAL = all(
         # read this real-data skip guard as a fixture recoupling
         REPO / _DATA_DIR / "cards.json",
         REPO / _DATA_DIR / "owned.json",
-        RESEARCH / "exhaustive_m0334_0042_sample.json",
+        FIXTURES / "exhaustive_m0334_0042_sample.json",
     )
 )
 
@@ -421,7 +421,7 @@ def test_twenty_real_rosters_score_identically_on_the_fast_leaf():
     by_id = {c.id: c for c in cards}
     leader = by_id["card-04001-5-uniq-0042-00"]
     _five, reps, _dom = ex.build_pool(cards, leader.id)
-    rows = json.loads((RESEARCH / "exhaustive_m0334_0042_sample.json").read_text("utf-8"))
+    rows = json.loads((FIXTURES / "exhaustive_m0334_0042_sample.json").read_text("utf-8"))
     # The sample stores rosters as INDICES into `reps`, and `reps` moves whenever the
     # catalogue gains a card (an index can come to name a second skin of one holomem and
     # make the team illegal). The claim here is fast == plain on real rosters, not these

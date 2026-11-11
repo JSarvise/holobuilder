@@ -1,24 +1,11 @@
-"""The second and last I/O boundary in `domain/` — narrower than
-`loader.py` because `config.json` is scoring configuration, not canonical
-card data. Mirrors `loader.py`'s load/validate/construct idiom exactly:
-`json.load`, then `validate_scoring_config`, then construct a frozen
-dataclass, raising `SchemaError` naming the offending field on the first
-validation failure — the same discipline `loader.py` applies to
-`cards.json`.
+"""Scoring configuration: load, validate and construct `ScoringConfig` from `config.json`.
 
-`config.json` at the repo root holds the user-tunable scoring constants
-(probability tiers, family weights, the SPECIAL constant, model defaults,
-assumed run-state) — separate from `data/`, which holds card data. `DEFAULT_CONFIG` is used only when the file is
-absent (a plain missing-file fall back, the one sanctioned try/catch
-boundary in this module), and every load records per-top-level-key
-provenance (`"file"` vs. `"default"`) so a later run report can name an
-assumption as an assumption, never as a measurement. A present-but-malformed
-file always raises — never silently falls back to defaults, which would let a
-defaulted value be reported with `"file"` provenance. `validate_scoring_config`
-also enforces that `family_weights["activation_rate_up"]` is pinned to
-exactly `0.0`, so a hand-edited nonzero value — which would silently do
-nothing — is rejected loudly instead of read as a working knob.
-"""
+`config.json` (repo root) holds the user-tunable scoring constants: probability tiers,
+family weights, the SPECIAL constant, model choices and the assumed run state. Loading
+follows `loader.py`'s idiom (`json.load`, `validate_scoring_config`, a frozen dataclass,
+`SchemaError` naming the first bad field). `DEFAULT_CONFIG` applies only when the file is
+absent, and every top-level key records its provenance (`"file"` or `"default"`) so a run
+report can name an assumption as one. A present but malformed file always raises."""
 
 from __future__ import annotations
 
@@ -48,27 +35,24 @@ from hbuilder.domain.scoring_models import (
 
 if TYPE_CHECKING:
     from hbuilder.domain.board import BoardModel
+    from hbuilder.domain.collection import AccountBonuses
 
-# The two values `target_selection.under_supply` may take. Both are
-# implemented, never a stub — a user who believes the effect simply does not fire on under-supply can switch to
-# "do_not_apply" and compare rankings, the same escape hatch
-# STACKING_MODELS gives the other unverified semantics.
+# The values `target_selection.under_supply` may take, both implemented so a user can
+# compare rankings under either reading.
 UNDER_SUPPLY_RULES: tuple[str, ...] = ("apply_to_available", "do_not_apply")
 
-# How a member SET's stat pool is scored (`scoring.SLOT_ORDER_RESOLVERS` holds the
-# implementation and asserts it covers exactly these names).
+# How a member set's stat pool is scored (`scoring.SLOT_ORDER_RESOLVERS` implements it).
 #
-#   "free" — matches 690/690 captured server rows. A count-limited effect reaches the
-#            `count` matching members with the greatest base value of the STAT IT RAISES
-#            (total parameter for an all-stats effect), resolved by
-#            `targets.resolve_target_card_ids`. Slot order only breaks an exact tie,
-#            where the payout is the same either way, so a set has a single stat sum
-#            and `member_order` is `None`.
+#   "free": a count-limited effect reaches the `count` matching members with the
+#           greatest base value of the stat it raises (total parameter for an all-stats
+#           effect), via `targets.resolve_target_card_ids`; 690/690 against captured
+#           server rows. Slot order only breaks an exact tie, where the payout is the
+#           same, so `member_order` is `None`.
 #
-# Not a `config.json` key: the rule is measured from the game, not a user guess.
+# Not a config.json key: the rule is measured from the game.
 SLOT_ORDER_RULES: tuple[str, ...] = ("free",)
 
-# Model names a `config.json` could once select: alternatives to the game's rule, removed.
+# Model names a config may not select, with the reason its error message gives.
 REMOVED_MODELS: dict[tuple[str, str], str] = {
     ("stacking", "multiplicative"): "the game's rule is 'additive'",
     ("activation_rate", "pp"): "the game's rule is 'multiplicative'",
@@ -80,53 +64,42 @@ def _removed_note(key: str, value: object) -> str:
     return f" ({value!r} was removed: {reason})" if reason else ""
 
 
-# A fixed normalization denominator, not a config key. It makes
-# SPECIAL's `fires * duration / reference_run_seconds` commensurable with
-# ACTIVE's `duration / interval` — both formulas produce "fraction of the
-# run the effect is live". Tuning it would silently rescale the entire
-# SPECIAL family against ACTIVE, so it is reported as a fixed constant, never
-# as an assumed value alongside the config'd tiers.
+# A fixed normalisation denominator, not a config key: it makes SPECIAL's
+# `fires * duration / REFERENCE_RUN_SECONDS` commensurable with ACTIVE's uptime (both
+# "fraction of the run the effect is live"); tuning it would rescale the whole SPECIAL
+# family against ACTIVE.
 #
-# It is solved from the game's own numbers. Ten captured deck evaluations report a Score Bonus decomposition whose Special line is
-# `Active line * SUM(magnitude * duration) / T`; solving `T` per deck from
-# `LiveSpecialSkillLevel` gives, across the five distinct decks,
+# Solved from the game's numbers: captured deck evaluations report a Special line of
+# `Active line * SUM(magnitude * duration) / T`, and solving `T` per deck from
+# `LiveSpecialSkillLevel` gives, over five distinct decks,
 #
 #     130.5  133.7  126.8  127.1  125.8   ->  mean 128.8 s
 #
-# holding to 6.2 %, against a 90 % spread for a direct-score reading.
-#
-# The estimate is biased HIGH: it assumes every SPECIAL is at skill level 2,
-# and a card sitting at level 1 has a smaller magnitude, which inflates the
-# solved `T`. So 128.8 is an upper bound on a value somewhere near 126.
-# Recomputing it needs each card's real bloom stage, which the client's
-# `Transaction.UserCard` carries and the deck captures do not.
+# within 6.2 %, against a 90 % spread for a direct-score reading. It is biased high
+# (every SPECIAL is taken at skill level 2; a level-1 card has a smaller magnitude), so
+# the true value is likely nearer 126; fixing that needs each card's bloom stage, which
+# the deck captures lack.
 REFERENCE_RUN_SECONDS = 128.8
 
 DEFAULT_CONFIG_PATH = paths.CONFIG
 
-# The two ACTIVE-skill uptime references `active_uptime_model` selects between:
-# "finite" (in-run, with the start-of-song dead zone) and "steady" (the
-# deck-screen panel's song-independent min(1, duration/interval)). See
-# `ScoringConfig.active_uptime_model`.
+# The ACTIVE uptime references `ScoringConfig.active_uptime_model` selects between.
 ACTIVE_UPTIME_MODELS: tuple[str, ...] = ("finite", "steady")
 
-# The two clients the master's `LiveNote` table carries a PERFECT column for:
+# The master's `LiveNote` table has a PERFECT column per client:
 # `scoreCoefficientPermilMultiply` (mobile) and `pcScoreCoefficientPermilMultiply`
-# (the Steam build). The 38 rows differ in exactly ONE cell (note_type 2 FLICK
-# x PERFECT/PERFECT_PLUS): FLICK is 1050 permil on mobile and 1000 on PC.
-# `ScoringConfig.platform` selects the column at scoring time; the chart files
-# stay platform-neutral. Default "mobile".
+# (Steam). They differ in one cell: FLICK x PERFECT/PERFECT_PLUS is 1050 permil on mobile
+# and 1000 on PC. `ScoringConfig.platform` selects the column; charts stay neutral.
 PLATFORMS: tuple[str, ...] = ("mobile", "pc")
 DEFAULT_PLATFORM = "mobile"
 
-# Mirrors config.json exactly; used only when the file is absent.
+# Mirrors config.json; used only when the file is absent.
 DEFAULT_CONFIG: dict = {
     "schema_version": "1",
-    # Read from the game's own data. `LiveActiveSkillLevel.f8` is the activation chance in
-    # per-mille and takes exactly three values across all 167 cards: 370 / 460 / 550.
-    # 460 == "Medium" and 550 == "High" match an independent 50-card transcription card for
-    # card; 370 == "Low" is by elimination (the only remaining value, present only on 3★
-    # cards, and no "Low" appears anywhere in the 4★/5★ set).
+    # `LiveActiveSkillLevel.f8` is the activation chance in permil and takes exactly
+    # three values across the catalogue: 370 / 460 / 550. 460 and 550 match a 50-card
+    # transcription of "Medium" and "High"; 370 is "Low" by elimination (the only other
+    # value, present only on 3★ cards).
     "probability_tiers": {
         "Low": 0.37,
         "Medium": 0.46,
@@ -136,9 +109,7 @@ DEFAULT_CONFIG: dict = {
         "score_support": 1.0,
         "conditional_score_up": 1.0,
         "stat_up": 1.0,
-        # Pinned to 0.0: activation_rate_up folds entirely into
-        # team_rate_up, never a score pool, so this weight cannot scale
-        # anything. validate_scoring_config enforces the pin.
+        # Pinned to 0.0 (validated): the family folds into team_rate_up, not a pool.
         "activation_rate_up": 0.0,
         "life_recovery": 0.0,
         "judgment_enhancement": 0.0,
@@ -146,69 +117,40 @@ DEFAULT_CONFIG: dict = {
     "special": {
         "expected_fires_per_run": 1.0,
     },
-    # `multiplicative` is what the game does and `pp` is refuted. `Vision.LiveCore!ActiveSkillEffectDataCollection::
-    # CalcActivationProbabilityPermil` @ rva `0x5efcf00` ends
+    # `multiplicative` is the game's rule: `ActiveSkillEffectDataCollection::
+    # CalcActivationProbabilityPermil` (rva `0x5efcf00`) ends
     #
     #     addss xmm7,1000.0 ; addss xmm7,bonuses ; mulss xmm7,xmm0 ; divss xmm7,1000.0
     #
-    # — the accumulated bonuses are added to 1000 per-mille and the whole thing
-    # then MULTIPLIES the tier (`xmm0`) before the divide by 1000. The bonus
-    # SCALES the tier; it is not added in percentage points.
-    #
-    # The two models disagree by exactly `1 / tier` on the size of the bonus,
-    # so the error is TIER-DEPENDENT: `pp` overstates the bonus 1/0.37 = 2.70x
-    # at Low and 1/0.55 = 1.82x at High. A tier-dependent error REORDERS teams;
-    # it does not merely offset them.
-    # Pinned by `tests/test_activation_rate_model_default.py`.
+    # so the bonuses SCALE the tier rather than adding percentage points. Adding points
+    # would overstate the bonus by 1/tier (2.70x at Low, 1.82x at High), a tier-dependent
+    # error that reorders teams. Pinned by `tests/test_activation_rate_model_default.py`.
     "model": {
         "stacking": "additive",
         "activation_rate": "multiplicative",
-        # Which ACTIVE-skill uptime reference to score by: "finite" (in-run,
-        # with the start-of-song dead zone — the default) or "steady" (the
-        # deck-screen panel's song-independent min(1, duration/interval)). See
-        # ScoringConfig.active_uptime_model.
-        # Optional for back-compat: a "model" block that omits it reads "finite".
+        # "finite" (in-run, the default) or "steady" (deck screen); see
+        # ScoringConfig.active_uptime_model. Optional: absent reads "finite".
         "active_uptime": "finite",
     },
-    # Which N members receive a targeted buff when more than N qualify is
-    # client logic in no master table — `LiveSkillEffectTarget` has no
-    # priority/ordering field and neither do `LiveSkillTrigger`,
-    # `LiveSkillEffectFilterCategory`, `Setting` or `Rule`. The default is
-    # "top-N by the buffed stat".
-    # `under_supply` (fewer qualifying cards than the target's own count)
-    # has no rule in the master data either — the default assumes the count is not itself a gate, a deliberately weak
-    # argument, which is why it is reported on every run rather than
-    # buried (see `output/assumptions.py`).
+    # Which N members receive a targeted buff when more than N qualify is client logic in
+    # no master table (`LiveSkillEffectTarget`, `LiveSkillTrigger`,
+    # `LiveSkillEffectFilterCategory`, `Setting` and `Rule` have no ordering field): the
+    # top N by the base value of the stat the buff raises, as the server's deck figures
+    # show. With fewer qualifiers than the count, the ones there are receive it (the count
+    # is not a gate), as the server's figures show too.
     "target_selection": {
         "strategy": "top_n_by_stat",
         "under_supply": "apply_to_available",
     },
-    # Numeric run-state snapshot. `life` is 1000
-    # because LIFE STARTS at its 1000 maximum and only decreases on missed
-    # notes — under the project's perfect-play premise it never leaves the
-    # maximum, so every attested LIFE gate (600 and 1000 are both attested,
-    # on different skills) fires.
+    # Numeric run-state snapshot (numeric because gates use several thresholds per
+    # dimension). `life` 1000: LIFE starts at its 1000 maximum and only drops on misses,
+    # so under perfect play every LIFE gate (600 and 1000 in the data) fires.
     #
-    # `combo` is an all-or-nothing assumption, not a simulated value. Two
-    # independent reasons: (1) a combo gate is satisfied only from the note
-    # that reaches its threshold onward, so modelling it proportionally needs
-    # the song's note count, and the run-average scorer takes no song-length
-    # parameter because song length cancels out of every team-vs-team comparison;
-    # (2) expectation is linear — `(duration/interval) * P(tier)` already IS
-    # the expected active fraction, so simulating discrete procs would add
-    # variance, not a better expectation, and the objective is maximum
-    # EXPECTED score.
-    #
-    # Attested combo thresholds in the 50-card SSR dataset: 40 (7 ACTIVE
-    # skills) and 100 (4 SPECIAL skills). Both fire at this value. A combo
-    # gate ABOVE this number would NOT fire; raise it if one is ever found
-    # (the value is printed in the assumptions header, so the assumption is
-    # visible rather than silent).
-    #
-    # Attested LIFE thresholds: 600 (6 ACTIVE) and 1000 (5 SPECIAL). Both
-    # fire at life=1000. Four distinct run-state thresholds across two
-    # dimensions is why run state is numeric rather than one boolean per
-    # dimension.
+    # `combo` is all-or-nothing, not simulated: a combo gate holds only from the note
+    # that reaches its threshold, which needs the song's note count, and the run-average
+    # scorer takes no song. The data's combo thresholds are 40 (ACTIVE) and 100 (SPECIAL);
+    # a gate above this value would not fire, and the value is printed in the
+    # assumptions header.
     "assumed_run_state": {
         "life": 1000,
         "combo": 100,
@@ -219,19 +161,14 @@ _TOP_LEVEL_KEYS: tuple[str, ...] = tuple(DEFAULT_CONFIG.keys())
 
 
 def _split_error(error: str) -> tuple[str, str]:
-    """Split a `validate_scoring_config` error string into (field,
-    message). Every error is formatted as `{field}: {detail}`, mirroring
-    `loader.py`'s own `_split_error` exactly, so this split is exact, not a
-    heuristic."""
+    """Split a `{field}: {detail}` error string into `(field, message)`."""
     field, _, _ = error.partition(": ")
     return field, error
 
 
 def _contains_reference_run_seconds(value: object) -> bool:
-    """True if the string `"reference_run_seconds"` appears as a key
-    anywhere in `value`, at any nesting depth — not just at the top level.
-    It is kept off the config surface on purpose: it looks like a
-    harmless calibration knob but would silently rescale the entire
+    """True if `"reference_run_seconds"` is a key anywhere in `value`, at any depth. It stays
+    off the config surface: it looks like a calibration knob but would rescale the whole
     SPECIAL family against ACTIVE."""
     if isinstance(value, dict):
         if "reference_run_seconds" in value:
@@ -243,24 +180,13 @@ def _contains_reference_run_seconds(value: object) -> bool:
 
 
 def validate_scoring_config(doc: object) -> list[str]:
-    """Validate a `config.json`-shaped document (or a partial fragment of
-    one). Returns human-readable error strings, each formatted as
-    `{field}: {detail}` (empty list means valid) — mirrors `schema.py`'s
-    `validate_*` convention exactly: it never raises and never repairs a
-    value.
+    """Validate a `config.json`-shaped document or fragment. Returns `{field}: {detail}` error
+    strings (empty means valid); never raises and never repairs.
 
-    Only validates top-level keys actually present in `doc` — an absent
-    key is `load_scoring_config`'s responsibility (filled from
-    `DEFAULT_CONFIG`), not a validation failure here. This lets the same
-    function validate a hand-authored partial fragment (e.g. a file
-    supplying only `probability_tiers`), the fully-merged document
-    `load_scoring_config` builds, and the repo-root `config.json` and
-    `DEFAULT_CONFIG` themselves.
-
-    Reuses `schema.py`'s constant tables (`PROBABILITY_TIERS`,
-    `SKILL_FAMILIES`, `RUN_STATE_DIMENSIONS`) and `scoring_models.py`'s
-    `STACKING_MODELS`/`ACTIVATION_RATE_MODELS` key sets — never
-    re-declares them."""
+    Only keys present in `doc` are checked (absent keys are filled from `DEFAULT_CONFIG` by
+    `load_scoring_config`), so the same function validates a partial fragment, the merged
+    document, `config.json` and `DEFAULT_CONFIG`. Reuses `schema.py`'s and
+    `scoring_models.py`'s tables rather than redeclaring them."""
     if not isinstance(doc, dict):
         return ["root: scoring config document must be a JSON object"]
 
@@ -308,10 +234,8 @@ def validate_scoring_config(doc: object) -> list[str]:
                         f"family_weights: family '{family_name}' weight must be a number, got {value!r}"
                     )
                 elif family_name == "activation_rate_up" and value != 0.0:
-                    # This family's entire contribution is
-                    # folded into team_rate_up, never a score pool, so no
-                    # weight here can scale anything — a nonzero value
-                    # would be an inert knob masquerading as a live one.
+                    # The family is folded into team_rate_up, so a nonzero weight would be
+                    # an inert knob that looks live.
                     errors.append(
                         f"family_weights: family 'activation_rate_up' "
                         f"weight must be exactly 0.0 (D-17 folds this "
@@ -320,12 +244,8 @@ def validate_scoring_config(doc: object) -> list[str]:
                         f"anything), got {value!r}"
                     )
                 elif value < 0:
-                    # There is no known hololive Dreams mechanic
-                    # where a skill family reduces score. A negative weight
-                    # would silently collapse the non-negativity
-                    # invariant the >= lower-bound guarantee rests on — a
-                    # hand-edited `judgment_enhancement: -0.5` validates
-                    # clean without this check.
+                    # No game mechanic lowers score through a skill family, and the `>=`
+                    # lower-bound guarantee rests on non-negative weights.
                     errors.append(
                         f"family_weights: family '{family_name}' weight must be non-negative, got {value!r}"
                     )
@@ -366,8 +286,7 @@ def validate_scoring_config(doc: object) -> list[str]:
                     f"is not one of {sorted(ACTIVATION_RATE_MODELS)}"
                     f"{_removed_note('activation_rate', model['activation_rate'])}"
                 )
-            # Optional (a pre-existing "model" block omits it and reads "finite"),
-            # but a PRESENT value must be one of the two references.
+            # Optional (absent reads "finite"), but a present value must be valid.
             if "active_uptime" in model and model["active_uptime"] not in ACTIVE_UPTIME_MODELS:
                 errors.append(
                     f"model.active_uptime: {model['active_uptime']!r} "
@@ -409,10 +328,8 @@ def validate_scoring_config(doc: object) -> list[str]:
                     errors.append(
                         f"assumed_run_state: {dimension!r} is not one of {list(RUN_STATE_DIMENSIONS)}"
                     )
-                # `bool` is a subclass of `int`, so it must be rejected
-                # explicitly — otherwise legacy boolean `true`/`false`
-                # values would silently load as 1/0 and every run-state gate
-                # above threshold 1 would stop firing without an error.
+                # `bool` is an `int`: reject it, or `true`/`false` would load as 1/0 and
+                # silently disable every gate above threshold 1.
                 elif isinstance(value, bool) or not isinstance(value, int) or value < 0:
                     errors.append(
                         f"assumed_run_state: dimension '{dimension}' must be "
@@ -433,126 +350,58 @@ class ScoringConfig:
     target_under_supply: str
     run_state: RunState
     provenance: dict
-    # Holomem -> ACTIVE cooldown reduction, as a fraction. ONLY the Holomem
-    # Board supplies this (no card can change an Active's cooldown or
-    # probability), branch B carries exactly three 4 % nodes so 0.12 is the
-    # ceiling, and it DIVIDES: `cooldown / (1 + reduction)`.
-    #
-    # This is account state, not a model choice, so it does not belong on a
-    # config object on principle — it lives here because `_score_active`
-    # receives the config and nothing else that knows whose board applies.
-    #
-    # Empty by default, which is the correct baseline: an absent entry means
-    # "no board data for this holomem", and the reduction is then zero.
+    # Holomem -> ACTIVE cooldown reduction as a fraction. Only the Holomem Board supplies
+    # it (branch B: three 4 % nodes, so 0.12 at most), and it DIVIDES:
+    # `cooldown / (1 + reduction)`. Account state, here because `_score_active` receives
+    # only the config. Empty means no reduction.
     active_cooldown_reduction: dict = field(default_factory=dict)
-    # Holomem -> that holomem's Holomem Board Score Bonus
-    # contribution, as a fraction (0.115 means +11.5%). This is the game's own
-    # `CalcScoreResult.ScoreUpBonusRatioBySkillTree`, read out of
-    # `Vision.LiveCore!LiveScoreCalculator::CalcScore` @ rva 0x5f01f80, whose
-    # tail is
-    #     ... x (1 + SkillScoreUpRatio) x (1 + ScoreUpBonusRatioBySkillTree)
-    # — two SEPARATE multiplicative factors, corroborated by an independent
-    # IDA Pro derivation. Everything the cards contribute is the first factor
-    # (`combined_score_rate`); the board is the second and must never be summed
-    # into it. `scoring.py::_board_score_rate` is the one place it is read.
-    #
-    # Keyed by HOLOMEM for the same reason `active_cooldown_reduction` is: the
-    # board is per-character, so it reaches every skin of that character. Like
-    # `active_cooldown_reduction`, this is account state, not a model choice.
-    #
-    # ⚠ The per-team AGGREGATION — summing the five members' entries — is an
-    # assumption. The game gives one deck-level float; it is not known how the
-    # deck's members combine into it, nor whether the leader slot contributes a
-    # term of its own (`Live/GetDeck` carries a leader-scoped board field, for a
-    # different quantity).
-    #
-    # Empty by default, which is the correct baseline: an absent entry means
-    # "no board data for this holomem" and contributes a factor of exactly 1.0.
+    # Holomem -> that holomem's board Score Bonus as a fraction (0.115 = +11.5 %): the
+    # game's `ScoreUpBonusRatioBySkillTree`, a separate trailing factor in `CalcScore`
+    # (`... x (1 + SkillScoreUpRatio) x (1 + ScoreUpBonusRatioBySkillTree)`), read only by
+    # `scoring._board_score_rate`. Keyed by holomem because the board reaches every skin
+    # of a character. Summing the five members' entries is an assumption: the game gives
+    # one deck-level float. Account state; empty means a factor of exactly 1.0.
     board_score_bonus: dict = field(default_factory=dict)
-    # The structural Holomem Board model (`domain/board.py`), or `None` for
-    # "no board data". When set it takes precedence over `board_score_bonus` —
-    # the dict is one float per holomem and cannot
-    # express the branch scopes the board actually has (a red node applies to
-    # the whole team only while that holomem LEADS, which no per-member dict
-    # can say). Both are kept because the dict is the simple hook and this is
-    # the model that fills it in.
-    #
-    # `None` by default, and deliberately NOT a `config.json` key: a board is
-    # captured account state, like `data/owned.json`, not a modelling choice.
+    # The structural Holomem Board model (`domain/board.py`), or `None`. When set it takes
+    # precedence over `board_score_bonus`, which cannot express branch scopes (a red node
+    # applies to the whole team only while its holomem leads). Captured account state,
+    # not a config.json key.
     board: BoardModel | None = None
-    # How the team's ACTIVE score-up skills combine into one pool. NOT a
-    # `config.json` key — see `scoring_models.ACTIVE_STACKING_MODELS`'s own
-    # comment for why (the same reasoning as for `REFERENCE_RUN_SECONDS`). It lives on the config object because
-    # `scoring.py` receives the config and nothing else, and because a test
-    # comparing a refuted alternative needs one `dataclasses.replace` rather
-    # than a monkeypatch.
+    # How the team's ACTIVE score-up skills combine into one pool; not a config.json key
+    # (see `scoring_models.ACTIVE_STACKING_MODELS`). On the config because `scoring.py`
+    # receives nothing else.
     active_stacking_model: ActiveStackingModel = DEFAULT_ACTIVE_STACKING
-    # Which deck power the PER-SONG modes score on. `True` (the default) is the
-    # deck screen's own Overall Power (`song.overall_power_for`) — the quantity
-    # the game actually multiplies, bit-exact against the server. `False` is the
-    # modelled stat pool, which is a fine quantity for a COMPARISON (the absolute
-    # scale cancels).
-    #
-    # Why `True` is the default: the report calls its figure an "expected run
-    # score", and on the modelled pool that figure is about 4 % low. Over 150
-    # legal teams on m0303 the server power is +3.4 % .. +5.2 % higher, and the
-    # ORDER barely moves (Kendall tau 0.993, top-10 identical, same top-1). So
-    # it buys a truthful absolute for no meaningful change of objective — unlike
-    # `active_stacking_model`, whose alternatives change the ranking and
-    # therefore stay opt-in.
-    #
-    # Cost: +8 % on a per-song run (`overall_power_for` 0.21 ms against
-    # `score_song_detailed`'s 2.5 ms on m0303), documented at `_score_one`.
+    # Which deck power the per-song modes score on. `True`: the deck screen's own Overall
+    # Power (`song.overall_power_for`), the quantity the game multiplies, bit-exact against
+    # the server. `False`: the modelled stat pool, fine for comparisons but about 4 % low
+    # in absolute terms (over 150 teams on m0303 the server power is 3.4-5.2 % higher,
+    # with Kendall tau 0.993 and the same top 10). Costs about 8 % of a per-song run.
     song_absolute_deck_power: bool = True
-    # Score the per-song modes for an AUTO run instead of manual play. Reaches
-    # `score_song_detailed(auto=True)` through `song_rank._score_one`.
-    #
-    # ⚠ IT IS ONLY HALF THE PREMISE. A trace of a live run shows that on AUTO
-    # the combo never accumulates, so a `SlotOverride` gated on `combo >= N`
-    # NEVER fires — Luna ran a whole song
-    # at her base 50 % where this config, at `run_state.combo = 100`, resolves
-    # her to 100 %. Life-gated overrides DO fire (life is full from the first
-    # second). So an AUTO ranking must ALSO set `run_state.combo = 0`, or it
-    # keeps granting magnitudes the run cannot produce and over-values exactly
-    # the cards that carry them. The CLI's `--auto` sets both and says so.
+    # Score the per-song modes for an AUTO run (`song_rank._score_one` ->
+    # `score_song_detailed(auto=True)`). On AUTO the combo never accumulates, so a
+    # `combo >= N` override never fires (life-gated ones do): an AUTO ranking must also
+    # set `run_state.combo = 0` (the web app's AUTO option sets both).
     song_auto: bool = False
-    # Which ACTIVE-skill uptime a run averages. Two DIFFERENT references, both
-    # measured, and the choice is NOT a free knob:
-    #   "finite" — the finite-window count on the real cooldown lattice, with the
-    #     start-of-song DEAD ZONE (the first activation check sits one whole
-    #     cooldown in). This is the IN-RUN truth: `_finite_window_uptime` is
-    #     validated to the note-weighted integral over the 704 shipped charts.
-    #   "steady" — the steady-state ratio `min(1, duration/interval)`, no dead
-    #     zone. This is what the DECK-SCREEN panel shows: the deck screen is
-    #     song-independent, so it has no first-cooldown dead zone to discount.
-    #     Switching the deck-screen Score-Bonus from "finite" to "steady" moves
-    #     its residual over 71 saved decks from median -8.1% to +2.3%, and decks
-    #     within +/-5% from 15/71 to 45/71 — the finite dead zone is the whole
-    #     systematic bias there. `min(1, .)` is wrong in-run but is the
-    #     deck-screen's own reference.
-    # Default "finite" preserves every in-run/`total_score` number; the
-    # deck-screen driver passes "steady".
+    # Which ACTIVE uptime a run averages (not a free knob):
+    #   "finite": the finite-window count on the real cooldown lattice, with the
+    #     start-of-song dead zone; the in-run truth (`_finite_window_uptime`, checked
+    #     against the note-weighted integral over the shipped charts).
+    #   "steady": `min(1, duration/interval)`, no dead zone; what the song-independent
+    #     deck screen shows. It moves the deck-screen Score Bonus residual over 71 saved
+    #     decks from median -8.1 % to +2.3 % (decks within +/-5 %: 15/71 -> 45/71).
+    # The deck-screen driver passes "steady".
     active_uptime_model: str = "finite"
-    # Runtime-only CEILING toggle: when True, every ACTIVE skill is treated as
-    # firing with probability 1 (all actives always trigger) — the "max possible
-    # score if all actives fired" ceiling, above the probabilistic estimate. NOT a
-    # config.json key; set at runtime via `replace(cfg, active_all_fire=True)`.
+    # Runtime-only ceiling: every ACTIVE fires with probability 1, the "all actives fired"
+    # upper bound. Not a config.json key: `replace(cfg, active_all_fire=True)`.
     active_all_fire: bool = False
-    # The two account-level scalars the player supplies (posters collected and
-    # the Member Power-Up permyriad). Deliberately NOT a config.json key, for
-    # the same reason `board` is not: these are captured ACCOUNT state, not a
-    # modelling choice. `None` is the default and leaves both terms out.
-    account: object | None = None
-    # Which slot-order rule scores the stat pool — one of `SLOT_ORDER_RULES`,
-    # whose comment carries the evidence. Default "free".
+    # The account scalars (posters collected, Member Power-Up permyriad): captured account
+    # state, not a config.json key. `None` leaves both terms out.
+    account: AccountBonuses | None = None
+    # The slot-order rule that scores the stat pool, one of `SLOT_ORDER_RULES`.
     slot_order_rule: str = SLOT_ORDER_RULES[0]
-    # Which client's PERFECT column the per-song scorer weighs notes with — one
-    # of `PLATFORMS`. Only FLICK differs (1050 mobile / 1000 PC in the master's
-    # `LiveNote` table); everything else, including the AUTO column and
-    # the hold ticks, is identical. Charts carry a per-note flick flag and the
-    # PC-column base permil, so the choice is made HERE at scoring time and never
-    # baked into `charts.json`. NOT a config.json key: it is a runtime what-if
-    # like `active_all_fire`, set via `replace(cfg, platform="pc")`.
+    # Which client's PERFECT column the per-song scorer weighs notes with (`PLATFORMS`).
+    # Charts carry a per-note flick flag, so the choice is made at scoring time. A runtime
+    # what-if, not a config.json key: `replace(cfg, platform="pc")`.
     platform: str = DEFAULT_PLATFORM
 
 
@@ -570,7 +419,7 @@ def _config_from_merged(merged: dict, provenance: dict) -> ScoringConfig:
         expected_fires_per_run=merged["special"]["expected_fires_per_run"],
         stacking_model=STACKING_MODELS[merged["model"]["stacking"]],
         activation_rate_model=ACTIVATION_RATE_MODELS[merged["model"]["activation_rate"]],
-        # .get for back-compat: a "model" block predating this key reads "finite".
+        # Optional key: a "model" block without it reads "finite".
         active_uptime_model=merged["model"].get("active_uptime", "finite"),
         target_selection_model=TARGET_SELECTION_MODELS[merged["target_selection"]["strategy"]],
         target_under_supply=merged["target_selection"]["under_supply"],
@@ -580,21 +429,12 @@ def _config_from_merged(merged: dict, provenance: dict) -> ScoringConfig:
 
 
 def load_scoring_config(path: Path = DEFAULT_CONFIG_PATH) -> ScoringConfig:
-    """Read `path` (default: repo-root `config.json`) and construct a
-    `ScoringConfig`. `FileNotFoundError` is the one sanctioned try/catch in
-    this codebase's `domain/` layer — an absent file falls back to
-    `DEFAULT_CONFIG` in full, with every provenance entry recorded as
-    `"default"`. When the file loads, it is merged over `DEFAULT_CONFIG` at
-    top-level-key granularity: a key present in the file wins in full (no
-    field-level merge inside a key) and is recorded `"file"`; a key absent
-    from the file falls back to `DEFAULT_CONFIG[key]` and is recorded
-    `"default"`.
+    """Read `path` (default: repo-root `config.json`) into a `ScoringConfig`.
 
-    The merged document is then run through `validate_scoring_config`
-    before construction: a malformed-but-present file raises `SchemaError`
-    naming the offending field, rather than silently falling back to
-    `DEFAULT_CONFIG` (which would let a defaulted value be reported with
-    `"file"` provenance)."""
+    A missing file falls back to `DEFAULT_CONFIG` in full (every provenance `"default"`).
+    Otherwise the file is merged over `DEFAULT_CONFIG` per top-level key (a present key wins
+    whole and is `"file"`), then validated: a malformed file raises `SchemaError` naming the
+    field rather than falling back."""
     try:
         with open(path, encoding="utf-8") as fh:
             doc = json.load(fh)
@@ -620,8 +460,7 @@ def load_scoring_config(path: Path = DEFAULT_CONFIG_PATH) -> ScoringConfig:
     return _config_from_merged(merged, provenance)
 
 
-# Import-time guarantee: the shipped default cannot drift out of
-# its own validation contract.
+# The shipped default must pass its own validator.
 assert validate_scoring_config(DEFAULT_CONFIG) == [], (
     "DEFAULT_CONFIG must itself pass validate_scoring_config — a shipped "
     "default cannot be rejected by the same validator that gates a "

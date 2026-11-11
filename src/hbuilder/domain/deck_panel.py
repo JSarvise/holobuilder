@@ -1,202 +1,110 @@
 """The deck screen's **Unit Score Details** panel, from card parameters alone.
 
-This module is a SECOND, opt-in model. It does not touch `total_score`, the
-`_score_up_pool`, `DEFAULT_ACTIVE_STACKING` or `deck_screen_unit_score` — those
-are the shipped ranking objective and stay exactly as they are. What this adds
-is the ability to compute the five panel lines the server shows, for an
-ARBITRARY hypothetical deck (unowned cards, maxed levels, a board the account
-does not have), because every input is a plain number rather than a captured
-server response.
+An opt-in second model, separate from the ranking objective (`total_score`,
+`deck_screen_unit_score` are untouched): it computes the five panel lines the server shows
+for an arbitrary hypothetical deck (unowned cards, maxed levels, a board the account does
+not have), because every input is a plain number rather than a captured server response.
+The laws below were extracted from captured `SaveDeck` -> `GetDeck` panels; a quoted hit
+rate is the share of captured decks on which the law's integer equals the server's.
 
-Exact integer/`Fraction` arithmetic everywhere EXCEPT the two window sums the
-server itself accumulates in float64 (see "the float64 window sums" below): the
-model reproduces that accumulation in the server's own order, because the
-displayed integers are its ceilings and on integral-valued decks the float lands
-on the far side of the integer. `a_raw` and `tot_raw` are still reported exact.
-
-## Provenance
-
-The laws were extracted from captured server panels
-(`tools/recon/proxy/dumps/bonus_extract_db.jsonl`, `SaveDeck` -> `GetDeck`
-oracles) and re-checked in exact rational arithmetic. A hit rate quoted below is
-the share of captured decks on which the integer the law produces equals the
-server's own integer.
+Arithmetic is exact (`Fraction`) except the two window sums, which the server accumulates
+in float64: the displayed integers are their ceilings, and on integral-valued decks the
+float lands on the far side of the integer, so the model repeats the server's order.
+`a_raw` and `tot_raw` are reported exact.
 
 ## The laws
 
-Per member card `i`, all permil integers unless noted:
+Per member card `i`, all permil integers unless noted, `c_i` the board's cooldown-shorten
+and `u_i` its activation-probability-up:
 
-    cool'_i = cool_i * 1000 / (1000 + c_i)          EXACT Fraction, never rounded
-    P'_i    = ceil( P_i * (1000 + u_i) / 1000 )     WHOLE PERMIL, rounded UP
+    cool'_i = cool_i * 1000 / (1000 + c_i)          exact Fraction, never rounded
+    P'_i    = ceil( P_i * (1000 + u_i) / 1000 )     whole permil, rounded UP
 
-`c_i` is the board's cooldown-shorten and `u_i` the board's
-activation-probability-up.
+The server stores `P'` as a whole permil (a no-op when `u_i = 0`); the rounded value is
+used in the numerator and in the saturation denominator alike. Keeping it exact reads
+`tot` about 0.06 low and loses an integer where `tot` sits just under one. The captured
+`(P, u)` pairs only pin the cut at <= 0.36 (it is not round-half-up, not floor).
 
-⚠ **`P'` is a WHOLE PERMIL, rounded UP — the server does not carry it exactly.**
-Equivalently `P'_i = P_i + ceil(P_i * u_i / 1000)`: the board's probability-up
-increment is itself a whole permil. It only matters on boarded cards — with
-`u_i = 0` the rounding is a no-op. Keeping `P'` exact makes `tot` come out low
-by about 0.06, decisive only where `tot` sits just under an integer, and the
-total then loses an integer to the ceiling.
-
-The rounded `P'` must be used in the numerator AND in the saturation denominator
-— one rounded value everywhere, which is what "the server stores an integer
-permil" means; rounding only one side breaks decks. The Active line is untouched
-by construction (it is the base lattice, `u_i = 0`).
-
-⚠ **What is NOT pinned:** the captured boards offer only a few distinct `(P, u)`
-pairs, whose fractional parts are all >= 0.36. So `ceil` is indistinguishable
-from any round-up-above-threshold rule with a cut <= 0.36. It IS distinguished
-from round-half-up and from `floor`. The client's own arithmetic helper
-`CalcUtility` uses only truncation and round-half-away-from-zero — but the panel
-is computed SERVER-side, so that is evidence about the client, not the server,
-whose observable convention is to round up everywhere.
-
-Card `i` is **live at integer second t** iff
-
-    k * cool'_i <= t < k * cool'_i + dur_i     for some integer k >= 1
-
-(so t = 0 is never live: the first activation ends the first cooldown). The
-window is the first `PANEL_WINDOW_S` = 200 whole seconds.
+Card `i` is live at integer second t iff `k * cool'_i <= t < k * cool'_i + dur_i` for
+some integer k >= 1 (t = 0 is never live), over the first `PANEL_WINDOW_S` = 200 seconds:
 
     v(t) = SUM_{i live at t} mag_i * P'_i / max(1000, SUM_{i live at t} P'_i)
     A    = SUM_{t=1..200} v(t) / 200
-
     [Active Skill] = ceil( float64(A) )            bit-exact on every captured deck
 
-### The float64 window sums
+The float64 sums: one quotient `n_t / d_t` per live second (the exact integers of `v(t)`,
+`d_t = max(10**6, SUM P'*1000)`), added in timeline order, divided by 200 last. It differs
+from the exact ceiling only where the exact sum is an integer (the float lands a few ulp
+above); other orders fit the boosted total worse.
 
-The server accumulates both window sums in float64, one quotient per live second
-in timeline order, and divides by 200 at the end:
-
-    s = 0.0;  for t = 1..200:  s += n_t / d_t;   A = s / 200      (same for tot)
-
-with `n_t = SUM mag*P'*1000` and `d_t = max(10**6, SUM P'*1000)` the exact
-integer numerator and denominator of `v(t)`. The exact ceiling and the float
-ceiling differ ONLY where the exact sum is an integer: there the float lands a
-few ulp above and the ceiling comes out one higher. The exact ceiling misses a
-handful of Active lines, all with integral `A`; this float order repairs exactly
-those and bumps none of the other integral-`A` decks. Other orders (per-term
-/200 first, ascending, denominator-last, grouped equal terms) fit the boosted
-total clearly worse.
-
-⚠ The **[Active Skill] line is computed on the BASE lattice** — `u_i` and `c_i`
-are set aside for it. The server books the board's lattice gain under
-[Holomem Board], not under [Active Skill] (using the buffed lattice for the line
-breaks it on about a third of decks). The buffed lattice is used for the
-boosted total below, which is where the board's gain appears.
-
-The three effect-up lines share ONE pool. With `E_i` the total active-skill
-effect-up landing on card i (leader costume outfit + passives targeting it +
-board effect-up):
+The [Active Skill] line is on the BASE lattice (`u_i = c_i = 0`): the server books the
+board's lattice gain under [Holomem Board]. The three effect-up lines share one pool, with
+`E_i` the active-skill effect-up landing on card i (outfit + passives + board):
 
     mag'_i = ceil(mag_i * (1000 + E_i) / 1000)
     tot    = the same window sum, on the BUFFED lattice, using mag'_i
+    if tot <= A (exact, base-lattice A): Outfit, Passive and Board all show 0
+    base   = ceil( float64(tot) ) - Active       the integer the three lines split
 
-    CLAMP: if tot <= A the server shows Outfit, Passive AND Board as ZERO,
-    together — never a negative line, never a partial one.
-    The comparison is against the BASE-lattice A, the same one the Active line
-    ceils, and is taken EXACTLY (the two floats cannot straddle it: they are
-    ceilings of the same numbers). Comparing against a buffed-lattice A instead
-    makes every board-buffed, effect-up-free deck clamp (its boosted total
-    equals its own buffed A by construction) and throws the board line away.
+(Comparing against a buffed-lattice A would clamp every board-only deck, whose boosted
+total equals its own buffed A.)
 
-    base = ceil( float64(tot) ) - Active         the integer the three lines split
+### The per-line split
 
-### The per-line SPLIT
+Each displayed line is an independent ceiling of its share of `base`:
 
-Every displayed line is an INDEPENDENT ceiling of its share of `base`; there is
-no common divisor and no fitted pedestal:
-
-    w_i    = mag_i * P_i * dur_i / cool_i        the card's expected uptime RATE,
-                                                 NOMINAL cooldown, base P
+    w_i    = mag_i * P_i * dur_i / cool_i        expected uptime rate, nominal cooldown, base P
     q_o    = SUM_i outfit_i  * w_i
     q_p    = SUM_i passive_i * w_i
-    q_b    = SUM_i w_i * 1000 * [ (1 + E_i/1000)(1 + u_i/1000)(1 + c_i/1000) - 1 ]
+    q_b    = SUM_i w_i * 1000 * [ (1 + b_i/1000)(1 + u_i/1000)(1 + c_i/1000) - 1 ]
     line_s = ceil( base * q_s / (q_o + q_p + q_b) )     for each present source
 
-Consequences:
+with `outfit_i` and `passive_i` the effect-up the outfit and the passives give card i, and
+`b_i`, `u_i`, `c_i` the board's own effect-up, probability-up and cooldown shorten on it
+(the board part of `E_i` only).
 
-* the lines need not sum to `ceil(tot)`: `SUM_s line_s = base + #{s : share_s
-  not an integer} - SUM_s frac(share_s)`, an identity rather than a term, so no
-  fitted `+ max(N-1, 0)` pedestal is needed. Independent ceilings ARE Adams'
-  method at the standard divisor `(SUM q)/base`; Adams forced onto a fitted
-  target is not.
-* the weight is a continuous RATE, not a count of live seconds (on the exactly
-  pinned ratio pairs, `mag*P*live` fails the one pair that separates them);
-  it is on the NOMINAL cooldown — the shorten multiplies the card's own rate
-  inside ITS board gain and must not enter the outfit/passive weights.
-* the board quota is a PER-CARD product, not a product of deck-level means:
-  additive within a buff kind, multiplicative across kinds — the same convention
-  as the `eff3` law. It has no fitted parameter.
+The lines need not sum to `base` (independent ceilings are Adams' method at the standard
+divisor). The weight is a continuous rate on the nominal cooldown (the shorten enters only
+the card's own board gain); the board quota is a per-card product, additive within a buff
+kind and multiplicative across kinds, as in the `eff3` law. Every line holds on about
+96.5 % of unclamped captured decks. Not modelled: on decks with exactly one non-zero quota
+the wire reads `line + 1` on about 5 % (deterministic, formula unknown), so a single-line
+deck's displayed total is exact or one low.
 
-Strict lines, every displayed value equal, hold on about 96.5 % of unclamped
-captured decks with a drawn line, and on every cooldown-shorten cohort.
+The Special line multiplies the Active integer, additive over cards, the special's
+activation-rate rider counting half (a special whose composition gate is not met loses its
+rider and keeps its magnitude, `deck_panel_team._rider_permil`):
 
-⚠ **What remains is a single-source `+1`**: on decks with exactly ONE non-zero
-quota the wire reads `line + 1` on about 5 % of them, always exactly +1,
-deterministic in the sorted per-card `(mag, P, cd, dur, E, u, c)` multiset,
-non-additive over cards, absent from both window sums and from every
-multi-quota deck, and it persists under a song read.
-Its formula is not known; the model does not add it. A caller that needs the
-displayed total on a single-line deck should treat `Active + Outfit + Passive +
-Board` as exact or one low.
+    [Special Skill] = ceil( Active * SUM_i smag_i * (1 + R_i/2000) * sdur_i / 120000 )
 
-The Special line is a deck-wide multiplier on the Active INTEGER, additive over
-the cards, with the special's activation-rate rider counting HALF:
-
-    [Special Skill] = ceil( Active * SUM_i smag_i * (1 + R_i/2000) * sdur_i
-                            / 120000 )
-
-    It matches about 99.9 % of board-free decks. The misses are all decks whose
-    product `Active * pool / 120000` is an exact integer; where it is
-    fractional the line is never wrong. Why the server reads differently on
-    some integral decks is not known: no float64/float32 evaluation order or
-    reciprocal-multiplication route reproduces it. Trigger conditions on
-    specials are ignored (cards with one sit on the same line).
+It matches about 99.9 % of board-free decks; the misses are all decks where the product is
+an exact integer, and no float evaluation order reproduces them.
 
     Score Bonus = Active + Outfit + Passive + Board + Special
     Unit Score  = ceil( OverallPower * (1000 + ScoreBonus) * 203734 / 10**8 )
 
-The Unit Score identity is bit-exact on every captured deck — including
-per-song rows — when fed the server's own Score Bonus. K = 2.03734 exactly; the
-admissible interval over all rows is [2.037339999, 2.037340003] and floor/round
-are infeasible for any K.
+The Unit Score identity is bit-exact on every captured deck given the server's Score Bonus
+(K = 2.03734; floor and round are infeasible for any K).
 
 ## Per-song board bonus
 
-`song_bonus_permil` (`eff3`) adds the song's per-song (yellow) board nodes: the
-per-song board line is `board + ceil(eff3 + (Active + Outfit + Passive +
-special_raw) * eff3 / 1000)`, with `eff3` the song's singers' own per-song bonus
-(`BoardModel.song_score_bonus_for`, capped at 100 permil; the pooled `all`
-bucket on a whole-roster song). `eff3` can be fractional (55.5) and is kept
-exact under the one ceiling. It matches the game's deck screen exactly.
-
-A singer's conditional skill effect-up (the red R-002 family: "when X is
-included as a singer, grants Score Support to all") is NOT part of `eff3`: it
-is added to every reached card's `board_effect_up_permil` before the panel is
-computed, so it moves the Board line through the boosted window sum like any
-other board effect-up. The two compose in that order.
-
-## What is NOT modelled
-
-* The single-source `+1` above, and a few multi-line decks whose exactly
-  integral shares read one above on the wire.
+`song_bonus_permil` (`eff3`, the song's singers' own yellow nodes,
+`BoardModel.song_score_bonus_for`, capped at 100 permil) adds
+`ceil(eff3 + (Active + Outfit + Passive + special_raw) * eff3 / 1000)` to the Board line,
+`eff3` kept exact (it can be 55.5) under the one ceiling. A singer's conditional skill
+effect-up (red R-002, "when X is included as a singer...") is not part of `eff3`: the
+caller adds it to `board_effect_up_permil` first, so it moves the Board line through the
+boosted window sum.
 
 ## Resolving the inputs
 
-`magnitude_permil` is **override-resolved by the caller**: a run-state trigger
-(life/combo) uses the override magnitude; a deck-composition trigger
-(type/generation) uses the override iff the count of matching members
-*including the card itself* meets the trigger count; otherwise the base
-magnitude. Skill level 2 iff bloom >= 1; special skill level 2 iff bloom >= 3
-(bloom >= 1 for the special does not fit the captured panels). `probability_permil` is
-the master's `LiveActiveSkillLevel` field 8 (Low 370 / Medium 460 / High 550),
-NOT the tier label in `data/cards.json`.
-
-`tests/support/deck_panel_params.py` does that resolution against the
-game's own master tables; this module deliberately takes plain numbers and does
-no I/O.
+`magnitude_permil` is override-resolved by the caller: a run-state trigger (life/combo)
+uses the override; a deck-composition trigger (type/generation) uses it iff the matching
+members, the card itself included, meet the trigger count. Skill level 2 iff bloom >= 1;
+special skill level 2 iff bloom >= 3. `probability_permil` is the master's
+`LiveActiveSkillLevel` field 8 (Low 370 / Medium 460 / High 550), not the tier label in
+`data/cards.json`. `tests/support/deck_panel_params.py` does that resolution against the
+master tables; this module takes plain numbers and does no I/O.
 """
 
 from __future__ import annotations
@@ -231,14 +139,13 @@ _PROBABILITY_FLOOR_PERMIL = 1000
 _SPECIAL_DENOMINATOR = 120_000
 _SPECIAL_RIDER_DENOMINATOR = 2000
 
-#: THE COMBO-GATE ONSET: a combo-gated override counts at its BASE
-#: magnitude for t < 20 s of the 200 s timeline (combo 40 assumed reached at
-#: t = 20 — 2 combo/s). The only onset in 0..44 s that fits the captured panels.
+#: The combo-gate onset: a combo-gated override counts at its BASE magnitude for
+#: t < 20 s of the 200 s timeline (combo 40 reached at t = 20, 2 combo/s). The only
+#: onset in 0..44 s that fits the captured panels.
 COMBO_GATE_ONSET_S = 20
 
-#: Whether the onset law also gates the BOOSTED pass (`tot_raw`). The base pass
-#: (Active line) is confirmed; whether the boosted side is gated is not known —
-#: flip to compare hypotheses against captured totals.
+#: Whether the onset also gates the boosted pass (`tot_raw`). The Active line's gating
+#: fits the captured panels; the boosted side's is not pinned by them.
 GATE_BOOSTED_PASS = True
 
 
@@ -246,9 +153,8 @@ GATE_BOOSTED_PASS = True
 class PanelCard:
     """One member's panel inputs. Every field is an integer permil or second.
 
-    The three `*_effect_up_permil` fields are kept apart ONLY so the model can
-    count how many panel lines are non-zero (the `N - 1` term) and attribute
-    the pool; the magnitude boost uses their sum.
+    The three `*_effect_up_permil` fields are kept apart only so the model can tell
+    which panel lines are present and split the pool; the magnitude boost uses their sum.
     """
 
     magnitude_permil: int
@@ -309,15 +215,10 @@ class PanelCard:
 class DeckPanel:
     """The five panel lines, the Score Bonus and the Unit Score, as integers.
 
-    `a_raw` and `tot_raw` are the UNROUNDED exact quantities the lines are
-    derived from — kept so a caller can see how close a line was to tipping.
-    The displayed integers are ceilings of the server's FLOAT64 accumulation
-    of the same sums (module docstring), which differs from the exact ceiling
-    only on integral-valued decks.
-
-    ⚠ `outfit`, `passive` and `board` are independent ceilings of their shares
-    of `base` (about 96.5 % strict on captured decks); on a deck with exactly one
-    non-zero quota the wire may read one above (`+1`, about 5 %).
+    `a_raw` and `tot_raw` are the unrounded exact quantities the lines come from, so a
+    caller can see how close a line was to tipping (the displayed integers are ceilings
+    of the float64 sums, module docstring). On a deck with exactly one non-zero quota the
+    wire may read one above `outfit`, `passive` or `board`.
     """
 
     active: int
@@ -338,10 +239,9 @@ class DeckPanel:
 def live_seconds(*, cooldown_s: int, duration_s: int, shorten_permil: int = 0) -> tuple[int, ...]:
     """The whole seconds in `1..PANEL_WINDOW_S` at which a card is live.
 
-    `cool' = cooldown_s * 1000 / (1000 + shorten_permil)` is kept as an exact
-    `Fraction`; the window `[k*cool', k*cool' + dur)` is then intersected with
-    the integers. Rounding `cool'` to a whole second first is wrong and shows
-    up immediately in the Active line.
+    `cool' = cooldown_s * 1000 / (1000 + shorten_permil)` is an exact `Fraction`; the
+    window `[k*cool', k*cool' + dur)` is intersected with the integers. Rounding `cool'`
+    to a whole second first breaks the Active line.
     """
     if cooldown_s <= 0:
         raise ValueError(f"cooldown_s must be positive, got {cooldown_s!r}")
@@ -368,18 +268,12 @@ def _second_terms(
     buffed: bool,
     pre20_magnitudes: Sequence[int] | None = None,
 ) -> list[tuple[int, int]]:
-    """`(numerator, denominator)` of `v(t)` for every LIVE second, in timeline
-    order — the exact integers behind both the exact and the float64 sums.
+    """`(numerator, denominator)` of `v(t)` for every live second, in timeline order:
+    the exact integers behind both the exact and the float64 sums.
 
-    `P'` is carried as the integer `Q = P * (1000 + u)` (i.e. `P' * 1000`), so
-    `v(t) = SUM mag*Q / max(10**6, SUM Q)` is a ratio of integers and the
-    saturation floor stays exact. Seconds where no card is live contribute
-    nothing to either sum and are omitted.
-
-    `pre20_magnitudes` is the combo-gate onset law: when given, seconds
-    `t < COMBO_GATE_ONSET_S` read magnitudes from it instead (the combo-gated
-    overrides at their BASE value). `None` is bit-identical to passing
-    `magnitudes` itself.
+    `P'` is carried as the integer `Q = P' * 1000`, so `v(t) = SUM mag*Q / max(10**6,
+    SUM Q)` is a ratio of integers. Seconds with no live card are omitted.
+    `pre20_magnitudes`, when given, replaces `magnitudes` for `t < COMBO_GATE_ONSET_S`.
     """
     q = [
         1000 * -(-c.probability_permil * (1000 + (c.board_probability_up_permil if buffed else 0)) // 1000)
@@ -412,9 +306,8 @@ def _second_terms(
 
 
 def _exact_window_average(terms: Sequence[tuple[int, int]]) -> Fraction:
-    """`SUM_{t=1..200} v(t) / 200`, EXACTLY (reported as `a_raw` / `tot_raw` and
-    used for the clamp). Distinct terms are memoized: a deck's live set repeats
-    with the cooldown period, so most seconds share a value.
+    """`SUM_{t=1..200} v(t) / 200`, exactly (`a_raw` / `tot_raw`, and the clamp).
+    Distinct terms are memoized: the live set repeats with the cooldown period.
     """
     total = Fraction(0)
     seen: dict[tuple[int, int], Fraction] = {}
@@ -430,9 +323,7 @@ def _exact_window_average(terms: Sequence[tuple[int, int]]) -> Fraction:
 def _forward_float_sum(terms: Sequence[tuple[int, int]]) -> float:
     """The server's accumulation: `s = 0.0; for each live second s += n/d; s / 200`.
 
-    One correctly-rounded float64 quotient per live second, added in timeline
-    order, divided by 200 last: the order that fits the captured panels (module
-    docstring).
+    The order that fits the captured panels (module docstring).
     """
     s = 0.0
     for n, d in terms:
@@ -441,57 +332,30 @@ def _forward_float_sum(terms: Sequence[tuple[int, int]]) -> float:
 
 
 def _attribution_weights(cards: Sequence[PanelCard]) -> list[Fraction]:
-    """`w_i = mag_i * P_i * dur_i / cool_i` — the card's expected uptime RATE on
-    the NOMINAL cooldown, as an exact Fraction.
+    """`w_i = mag_i * P_i * dur_i / cool_i`: the card's expected uptime rate, exact.
 
-    Base magnitude, base `P` (the board's probability-up is not in the weight),
-    nominal cooldown (the board's shorten is not in the weight either: it
-    multiplies the card's own rate inside its board gain, see `_split_quotas`).
-    There is no saturation clamp and no truncation to whole windows or whole
-    seconds: on the exactly pinned ratio pairs only the continuous rate fits
-    all of them — the one pair that separates them needs `w_p/w_c` in
-    [0.8462, 1.0128) and the rate gives 1.0119 where `mag*P*live` gives
-    1.0492.
+    Base magnitude, base `P` and nominal cooldown: the board's probability-up and
+    shorten enter only the card's own board gain (`_split_quotas`). No saturation clamp
+    and no truncation to whole windows or seconds: on the exactly pinned ratio pairs only
+    the continuous rate fits all of them (a live-second count `mag*P*live` does not).
     """
     return [Fraction(c.magnitude_permil * c.probability_permil * c.duration_s, c.cooldown_s) for c in cards]
 
 
 def _split_quotas(cards: Sequence[PanelCard]) -> list[Fraction]:
-    """The three sources' quotas `(q_outfit, q_passive, q_board)` as exact
-    Fractions — only their RATIOS matter to the split.
+    """The three sources' quotas `(q_outfit, q_passive, q_board)` as exact Fractions;
+    only their ratios matter to the split.
 
         q_outfit  = SUM_i outfit_i  * w_i
         q_passive = SUM_i passive_i * w_i
         q_board   = SUM_i w_i * 1000 * [ (1+E_i/1000)(1+u_i/1000)(1+c_i/1000) - 1 ]
 
-    ## The board quota is a PER-CARD product
-
-    Outfit and passive each have one buff kind, so their quota is the plain
-    `w`-weighted sum. The board has three — effect-up, probability-up and
-    cooldown-shorten — and they do **not** add: each card's board gain is the
-    multiplicative excess of its own three buffs, weighted by its own rate.
-    Additive within a source, multiplicative across sources — the convention the
-    `eff3` law follows.
-
-    Why this is a mechanism and not a fit:
-
-    * **Zero fitted parameters.** Weighting by the SHORTENED rate, or by a
-      product of deck-level mean permils, makes the shorten look concave; on the
-      unshortened per-card rate the concavity is gone.
-    * **It predicts.** A 251-permil effect-up pedestal (Calliope leading)
-      predicts the probability-up's coefficient becomes `1 + E/1000 = 1.251`;
-      prob-up-only decks spanning an 8x range of E/P give 1.250, flat across
-      every band. Without the pedestal the same form predicts 1.000 and a
-      matched control gives 1.015.
-    * **Every cooldown-shorten cohort fits** once the weight is the unshortened
-      rate and the board gain is per card. A deck-level mean form loses
-      three-line decks because the passive quota must shrink when the shorten
-      carrier is a passive target and grow when it is not — exactly what the
-      per-card weight does and no deck-level mean can.
-
-    Per-card `(1+u_i)(1+c_i)` versus a product of deck means is indistinguishable
-    while the board effect-up is leader-scope (uniform on every deck); the
-    per-card form is the statement.
+    The board has three buff kinds (effect-up, probability-up, cooldown-shorten) and they
+    do not add: each card's board gain is the multiplicative excess of its own three
+    buffs, weighted by its own unshortened rate. A deck-level mean form fails three-line
+    decks: the passive quota must shrink when the shorten carrier is a passive target and
+    grow when it is not, which only the per-card weight does. The form has no fitted
+    parameter.
     """
     w = _attribution_weights(cards)
     q_outfit = sum((c.outfit_effect_up_permil * wi for c, wi in zip(cards, w)), Fraction(0))
@@ -509,10 +373,8 @@ def _split_quotas(cards: Sequence[PanelCard]) -> list[Fraction]:
 def _independent_ceilings(quotas: Sequence[Fraction], base: int) -> list[int]:
     """`line_s = ceil(base * q_s / SUM q)` for every source, each on its own.
 
-    The lines do NOT re-sum to `base` in general: `SUM ceil(x_s) = base +
-    #{non-integral shares} - SUM frac(x_s)` (an integer). That identity is the
-    observed pedestal, which is why a fixed `+max(N-1, 0)` target is wrong on a
-    minority of decks and Adams forced onto it can never be exact.
+    The lines do not re-sum to `base` in general: `SUM ceil(x_s) = base +
+    #{non-integral shares} - SUM frac(x_s)`, which is why no fixed target total fits.
     """
     total = sum(quotas, Fraction(0))
     if total <= 0 or base <= 0:
@@ -523,9 +385,8 @@ def _independent_ceilings(quotas: Sequence[Fraction], base: int) -> list[int]:
 def _largest_remainder(total: int, weights: Sequence[int]) -> list[int]:
     """Split `total` across `weights` so the parts sum to `total` exactly.
 
-    Retained as the FALLBACK for the degenerate case where every displayed
-    source is weightless (every carrier dead on the lattice, `SUM q = 0`), so
-    the parts still sum exactly and a present source still shows.
+    The fallback when every displayed source is weightless (`SUM q = 0`), so a present
+    source still shows.
     """
     pool = sum(weights)
     if total <= 0 or pool <= 0:
@@ -552,13 +413,11 @@ def deck_panel(
     overall_power: int = 0,
     song_bonus_permil: int | float | Fraction = 0,
 ) -> DeckPanel:
-    """Compute the panel for one deck. See the module docstring for every law.
+    """Compute the panel for one deck (the laws are in the module docstring).
 
-    `overall_power` is the server's Overall Power for the deck; it only feeds
-    `unit_score`, and defaults to 0 so the bonus lines can be computed without
-    it. `song_bonus_permil` (`eff3`) is the song's per-song board bonus -- the
-    singers' own yellow nodes, on any team -- folded into the Board line by the
-    per-song law (module docstring); 0 = the song-free panel.
+    `overall_power` only feeds `unit_score` (0 computes the bonus lines without it).
+    `song_bonus_permil` (`eff3`) is the song's per-song board bonus, folded into the
+    Board line; 0 = the song-free panel.
     """
     members = tuple(cards)
     if not members:

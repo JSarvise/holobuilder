@@ -89,8 +89,7 @@ def test_no_string_literal_spans_a_line_break(path: Path) -> None:
 
 def test_the_check_catches_the_bug_it_was_written_for() -> None:
     """The negative control. A guard nobody has seen fail is a guard nobody
-    knows works — and this one was written from a real defect, so the real
-    defect is the fixture."""
+    knows works, so the fixture is the real defect this check guards against."""
     broken = 'const x = "Refresh finished.\n" + y;'
     assert _unterminated(broken), "the check missed a genuinely broken literal"
 

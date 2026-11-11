@@ -64,8 +64,6 @@ NEEDS_MAINTAINER = {
 }
 # what reads your own account as a refresh leaves it (your cards, your boards)
 NEEDS_ACCOUNT = {
-    "tools/web/test_leaf_inputs.py::test_the_maxed_basis_scores_every_bench_holomem_on_a_complete_board": "data/owned.json",
-    "tools/web/test_leaf_inputs.py::test_the_maxed_bench_as_a_board_state_is_every_whole_tree_with_its_connect_cards": "data/owned.json",
     "tools/web/test_leaf_inputs.py::test_the_maxed_bench_targets_are_only_what_scores": "data/owned.json",
     "tools/refresh/test_board_plan_solver_ties.py::test_no_refund_charges_only_new_buys_against_the_inventory": "tools/recon/proxy/dumps/board_state.json",
 }

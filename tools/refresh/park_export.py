@@ -154,9 +154,10 @@ def export():
         # the Free Chats: every conversation the player can read, its site and map pixel
         "free_chat": free_chat,
     }
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
     # bytes, not text: Path.write_text would re-translate newlines on Windows
-    with open(JSON_PATH, "wb") as f:
-        f.write(json.dumps(doc, ensure_ascii=False, indent=1).encode("utf-8"))
+    atomic_io.write_bytes(JSON_PATH, json.dumps(doc, ensure_ascii=False, indent=1).encode("utf-8"))
     print(f"  wrote {os.path.relpath(JSON_PATH, paths.REPO)}  ({os.path.getsize(JSON_PATH)} bytes)")
 
 

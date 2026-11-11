@@ -28,6 +28,24 @@ HERE = paths.APP_DIR
 REPO = paths.REPO
 WORK = REPO / "build" / "_setup"
 EXE = REPO / "build" / "holobuilder-setup.exe"
+# what the exe is frozen from: installer.py, the tools/app modules it imports, and ui/
+SOURCES = ("installer.py", "setup_exe.py", "signing.py", "system_trust.py")
+# beside the exe: the digest of the sources it was built from (`sources_digest`)
+STAMP = EXE.with_name(EXE.name + ".sources")
+
+
+def sources_digest() -> str:
+    """One hash of every file the exe is frozen from, so a build of the app can tell an exe
+    built from these sources from a stale one (build_app.py names the installer in each
+    release's version.json)."""
+    import hashlib  # noqa: PLC0415
+
+    files = [HERE / name for name in SOURCES]
+    files += sorted(p for p in (HERE / "ui").rglob("*") if p.is_file() and p.name != "index.html")
+    h = hashlib.sha256()
+    for p in files:
+        h.update(p.relative_to(HERE).as_posix().encode() + b"\0" + p.read_bytes() + b"\0")
+    return h.hexdigest()
 
 
 def build() -> Path:
@@ -77,7 +95,9 @@ def build() -> Path:
     ]
     if icon:
         cmd += ["--icon", str(icon)]
+    digest = sources_digest()
     subprocess.run(cmd + [str(HERE / "installer.py")], check=True, cwd=str(WORK))
+    STAMP.write_text(digest + "\n", "utf8")
     print(f"built {EXE} ({EXE.stat().st_size / 1e6:.0f} MB)")
     return EXE
 
@@ -113,11 +133,19 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     import importlib.util  # noqa: PLC0415
 
-    if importlib.util.find_spec("PyInstaller") is None:
-        ap.error("PyInstaller is not installed: pip install -r requirements-build.txt")
-    exe = build()
-    for p in sums([exe], exe.parent):
-        print(f"wrote {p}")
+    built_from = STAMP.read_text("utf8").strip() if STAMP.is_file() else ""
+    if args.publish and EXE.is_file() and built_from == sources_digest():
+        # the exe a release's version.json already names (build_app.py --publish uploaded it and
+        # signed its sha256): published as it is, since a rebuild is not byte-identical and
+        # would no longer match that signed hash
+        exe = EXE
+        print(f"publishing the exe already built from these sources: {exe}")
+    else:
+        if importlib.util.find_spec("PyInstaller") is None:
+            ap.error("PyInstaller is not installed: pip install -r requirements-build.txt")
+        exe = build()
+        for p in sums([exe], exe.parent):
+            print(f"wrote {p}")
     if args.publish:
         publish(exe)
     return 0
