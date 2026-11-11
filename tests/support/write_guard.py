@@ -40,12 +40,20 @@ GUARDED_FILES = frozenset(
 WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
 
 
-def guarded(path) -> str | None:
-    """The real path when `path` lies inside a guarded folder or is a guarded file, else None."""
+def guarded(path, dir_fd=None) -> str | None:
+    """The real path when `path` lies inside a guarded folder or is a guarded file, else None.
+    A relative `path` with a `dir_fd` (how `shutil.rmtree` deletes on Linux) is relative to that
+    folder, not to the working directory; when the folder cannot be named, it is not ours to judge."""
     if isinstance(path, int) or path is None:
         return None
     try:
-        full = os.path.normcase(os.path.abspath(os.fsdecode(path)))
+        name = os.fsdecode(path)
+        if isinstance(dir_fd, int) and not os.path.isabs(name):
+            try:
+                name = os.path.join(os.readlink(f"/proc/self/fd/{dir_fd}"), name)
+            except OSError:
+                return None
+        full = os.path.normcase(os.path.abspath(name))
     except (TypeError, ValueError):
         return None
     return full if (full + os.sep).startswith(GUARDED) or full in GUARDED_FILES else None
@@ -67,14 +75,18 @@ def _hook(event: str, args: tuple) -> None:
         if writing and (hit := guarded(path)):
             _refuse("data (open for writing)", hit)
     elif event == "os.rename":
-        for p in args[:2]:
-            if hit := guarded(p):
+        fds = (tuple(args) + (None, None, None, None))[2:4]
+        for p, fd in zip(args[:2], fds):
+            if hit := guarded(p, fd):
                 _refuse("data (rename/replace)", hit)
-    elif event in ("os.remove", "os.rmdir", "os.truncate", "shutil.rmtree"):
+    elif event in ("os.remove", "os.rmdir"):
+        if hit := guarded(args[0], args[1] if len(args) > 1 else None):
+            _refuse(f"data ({event})", hit)
+    elif event in ("os.truncate", "shutil.rmtree"):
         if hit := guarded(args[0]):
             _refuse(f"data ({event})", hit)
     elif event == "os.mkdir":
-        hit = guarded(args[0])
+        hit = guarded(args[0], args[2] if len(args) > 2 else None)
         if hit and not os.path.exists(hit):
             _refuse("data (new directory)", hit)
 

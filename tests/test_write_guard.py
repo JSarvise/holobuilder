@@ -5,6 +5,8 @@ still work."""
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 
 import pytest
 
@@ -57,3 +59,28 @@ def test_the_account_and_the_catalogue_files_are_guarded_too(name, tmp_path):
         with pytest.raises(PermissionError, match="real"):
             os.close(os.open(real, os.O_WRONLY))
         assert real.read_bytes() == before
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="names a folder by its fd through /proc")
+def test_a_name_relative_to_a_folder_fd_is_judged_in_that_folder(tmp_path):
+    """On Linux `shutil.rmtree` deletes by name relative to a folder's fd. A copy's own `state/`
+    is not the checkout's: judged against the working directory it was refused, and a test
+    server's copies or an uninstall under tmp_path were silently left behind."""
+    from support import write_guard
+
+    (tmp_path / "state").mkdir()
+    fd = os.open(tmp_path, os.O_RDONLY)
+    try:
+        assert write_guard.guarded("state", fd) is None
+    finally:
+        os.close(fd)
+    real = os.open(paths.STATE.parent, os.O_RDONLY)
+    try:
+        assert write_guard.guarded(paths.STATE.name, real)
+    finally:
+        os.close(real)
+    tree = tmp_path / "box" / "state"
+    tree.mkdir(parents=True)
+    (tree / "collection.json").write_text("{}")
+    shutil.rmtree(tmp_path / "box")
+    assert not (tmp_path / "box").exists()
