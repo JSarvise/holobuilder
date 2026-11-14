@@ -259,6 +259,59 @@ def test_scores_over_several_singer_benches_do_not_depend_on_how_many_are_held(m
     assert contexts_many >= 3 and benches_many in (contexts_many, contexts_many + 1)
 
 
+@pytest.mark.parametrize("use_cache", [False, True])
+@pytest.mark.parametrize("budget", [453, TIGHT_BUDGET])
+def test_develop_team_rebuilds_the_one_board_several_charts_share(use_cache, budget):
+    """ONE board for several charts (`board_per_chart` off, a `board_cast`: the Holomem Rating
+    team for every song of a holomem): `evaluate` develops one board for the cast and scores
+    every chart on it. `develop_team` on one of those charts with `sings=shared_sings(ctx)` must
+    be that board, or a row's detail on a chart shows another number than the row there (on
+    the chart's own cast it develops that chart's board, 2.5..6.8 % higher on Momosuzu Nene's
+    songs)."""
+    from hbuilder.domain.board_plan import SongCast
+    from hbuilder.domain.song_rank import score_team_on_chart
+    from hbuilder.solver.parallel_refine import develop_team, evaluate, new_plan_cache, shared_sings
+
+    ctx, teams = _context()
+    library = load_charts(str(config.CHARTS_PATH))
+    team, charts = None, ()
+    for t in teams:
+        lead = "chr-" + t.leader.id.split("-")[1]
+        sung = tuple(
+            library.get(m) for m in sorted(library.music_ids) if lead in (library.get(m).singers or ())
+        )
+        if len(sung) >= 2:
+            team, charts = t, sung[:3]
+            break
+    if team is None:
+        pytest.skip("no test team's leader sings two charts of the library")
+    scopes = {c.singer_type for c in charts}
+    cast = SongCast(
+        frozenset({"chr-" + team.leader.id.split("-")[1]}), scopes.pop() if len(scopes) == 1 else ""
+    )
+    ctx = dataclasses.replace(ctx, charts=charts, board_per_chart=False, board_cast=cast, flat_budget=budget)
+    if use_cache:
+        ctx = dataclasses.replace(
+            ctx, use_plan_cache=True, plan_cache_seed=(team.leader.id, tuple(m.id for m in team.members))
+        )
+    ids = (team.leader.id, tuple(m.id for m in team.members))
+    with RefinePool(ctx, workers=1) as pool:
+        cache = new_plan_cache(ctx, pool._by_id) if use_cache else None
+        per_chart = evaluate(
+            ctx, pool._by_id, pool._tree_for, pool._budget_for, ids, plan_cache=cache, per_chart=True
+        )
+        assert shared_sings(ctx) == cast
+        for k, chart in enumerate(charts):
+            one = dataclasses.replace(ctx, charts=(chart,))
+            bt = develop_team(
+                one, team, pool._tree_for, pool._budget_for, chart, plan_cache=cache, sings=shared_sings(ctx)
+            )
+            got = score_team_on_chart(team, chart, dataclasses.replace(ctx.cfg, board=bt.board))
+            assert got.total_score == per_chart[k], chart.music_id
+    # with no cast the one board is song-agnostic
+    assert shared_sings(dataclasses.replace(ctx, board_cast=None)) is False
+
+
 @pytest.mark.parametrize("refine", [False, True])
 def test_the_ceiling_is_the_all_fire_score_on_the_leaf_board(refine):
     """`evaluate`'s ceiling mode (a ranking sorted by Max): the run if every ACTIVE fires,

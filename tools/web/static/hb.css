@@ -509,3 +509,9 @@ dialog.sp-dialog[open]{display:flex;flex-direction:column;margin:auto;padding:0;
 .hb-update-x{flex:none;width:30px;height:30px;border-radius:50%;border:0;background:transparent;color:var(--ink-2);
   font:700 20px/1 var(--f-ui);cursor:pointer}
 .hb-update-x:hover{background:rgb(255 255 255 / .06);color:var(--ink)}
+
+/* Export search (hb-debug.js): a quiet button beside an answer, full strength on hover */
+.hb-xsearch { margin-left: 10px; opacity: .62; transition: opacity .15s; }
+.hb-xsearch:hover, .hb-xsearch:focus-visible { opacity: 1; }
+.hb-xsearch[disabled] { opacity: .35; cursor: progress; }
+.hb-xsearch-row { display: flex; justify-content: flex-end; margin: 6px 0 0; }

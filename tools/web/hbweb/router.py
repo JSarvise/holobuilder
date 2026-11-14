@@ -56,9 +56,21 @@ def serve_server(h: Handler) -> None:
     h.reply_json(200, {"repo": str(paths.REPO), "pid": os.getpid()})
 
 
+def serve_version(h: Handler) -> None:
+    """`GET /api/version`: the app's version (`src/hbuilder/VERSION`), which a search export
+    (`static/hb-debug.js`) records."""
+    path = paths.REPO / "src" / "hbuilder" / "VERSION"
+    try:
+        version = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        version = None
+    h.reply_json(200, {"version": version})
+
+
 GET_ROUTES: dict[str, Route] = {
     "/": static.redirect_home,
     "/api/server": serve_server,
+    "/api/version": serve_version,
     "/api/collection": collection.serve_collection,
     "/api/board": board.serve_board,
     "/api/meta": search.serve_meta,

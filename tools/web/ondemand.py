@@ -179,6 +179,15 @@ def is_five_star(card_id: str) -> bool:
     return len(parts) > 2 and parts[2] == "5"
 
 
+def shared_plan_chart(chart_keys: Sequence[str], charts: Sequence, cast) -> str:
+    """The chart key ONE board for every chart (`Engine.search_merged` with a `board_cast`) is
+    planned for within the materials: the first chart of the scope the cast's songs share,
+    else the first chart. Planned for a song, the singer's own nodes are valued (with no
+    song the plan ignores them); the plan is judged on every chart."""
+    scope = getattr(cast, "scope", "")
+    return next((k for k, c in zip(chart_keys, charts) if scope and c.singer_type == scope), chart_keys[0])
+
+
 def replan_pick(
     ranked: list, sings: Callable[[Any], bool], n: int = REPLAN_CANDIDATES, extra: int = SINGER_CANDIDATES
 ) -> list[int]:
@@ -1714,14 +1723,7 @@ class Engine:
                     emit({"type": "progress", "stage": "refine", "evaluated": 0, "sub": "materials"})
                 head = ranking[:MERGED_REPLAN_TEAMS] if self.board_cast is None else ranking
                 if self.board_cast is not None:
-                    # one plan for every song: planned for one of the songs of the cast every
-                    # chart shares (so the singer's own nodes are valued; with no song the
-                    # plan ignores them) and judged on all of them
-                    scope = getattr(self.board_cast, "scope", "")
-                    rep = next(
-                        (k for k, c in zip(self.chart_keys, self.charts) if scope and c.singer_type == scope),
-                        self.chart_keys[0],
-                    )
+                    rep = shared_plan_chart(self.chart_keys, self.charts, self.board_cast)
                     _out, failed, _opt, planned = self._within_materials(
                         a, head, leaders, pool, rep, chart_indices, cancel
                     )
@@ -1815,6 +1817,17 @@ class Engine:
             "charts": list(self.chart_keys),
             "ranked_by": objective,
             "one_board": self.board_cast is not None,
+            # what a row's detail (`/api/row-detail`) sends back to be shown on its ONE board
+            # rather than on a board of the song's own
+            "shared_board": (
+                {
+                    "charts": list(self.chart_keys),
+                    "cast": sorted(self.board_cast),
+                    "scope": getattr(self.board_cast, "scope", ""),
+                }
+                if self.board_cast is not None
+                else None
+            ),
             "basis_id": self.basis,
             "basis": (a.describe() if a is not None else leaf_inputs.basis_text(self.basis)),
             "assumptions": dataclasses.asdict(a) if a else None,

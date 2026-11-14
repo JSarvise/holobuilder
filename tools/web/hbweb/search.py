@@ -148,6 +148,23 @@ def row_request(body: Mapping) -> dict:
         except (TypeError, ValueError) as exc:
             raise basis.HttpError(400, {"error": f"assumptions: {exc}"}) from None
     pool = [str(s) for s in body.get("pool") or [] if s] if isinstance(body.get("pool"), list) else []
+    shared = body.get("shared_board")
+    if shared is not None:
+        if (
+            not isinstance(shared, dict)
+            or not isinstance(shared.get("charts"), list)
+            or not shared["charts"]
+            or not isinstance(shared.get("cast"), list)
+        ):
+            raise basis.HttpError(
+                400,
+                {"error": "shared_board: {charts: ['<music>/<DIFFICULTY>', ...], cast: [chr ids], scope}"},
+            )
+        shared = {
+            "charts": [str(k) for k in shared["charts"]],
+            "cast": [str(c) for c in shared["cast"]],
+            "scope": str(shared.get("scope") or ""),
+        }
     return {
         "song": song,
         "ids": ids,
@@ -157,6 +174,8 @@ def row_request(body: Mapping) -> dict:
         "order": [str(c) for c in order] if order else None,
         "assumptions": assumptions,
         "pool": pool,
+        # a Holomem Rating row on ONE board for every song (the merged search's `shared_board`)
+        "shared": shared,
         # the search's platform and AUTO, or the row is not its own
         "play": ondemand.parse_play(body),
     }
@@ -211,6 +230,7 @@ def row_figures(req: Mapping, body: Mapping, *, keep_law: bool = False) -> dict:
         want_notes=body.get("notes") is True,
         # the score pace of each bar's runs (`song_distribution.score_pace`), with the law
         pace=body.get("distribution") is True and body.get("pace") is True,
+        shared_board=req.get("shared"),
     )
     out.update(
         {
@@ -267,7 +287,10 @@ def row_detail_route(h: Handler) -> None:
     with resets: the same team re-planned with fewer, `row_detail.reset_price`;
     a few plans more, so the page asks for it on its own), "pool"?: [music ids] (a
     Highlight row on the WHOLE pool, `row_detail.pool_detail`: one board and one slot
-    order for every song; `song` is then any of them)}`. Read-only."""
+    order for every song; `song` is then any of them), "shared_board"?: {"charts",
+    "cast", "scope"} (a Holomem Rating row on ONE board for every song, the merged
+    search's own `shared_board`: the figures are `song`'s on that board,
+    `row_detail.two_stage_detail`)}`. Read-only."""
     body = h.body_or_empty()
     _row_reply(h, lambda: row_figures(row_request(body), body))
 

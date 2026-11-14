@@ -749,10 +749,7 @@ def evaluate(
     # one chart: its whole cast, so a singing MEMBER's yellows and yellow socket are valued
     # too (`board_plan.singer_weight_for`); several charts: song-agnostic, or planned for the
     # cast they share (`RefineContext.board_cast`)
-    if len(charts) == 1:
-        sings = song_cast(charts[0])
-    else:
-        sings = ctx.board_cast if ctx.board_cast is not None else False
+    sings = song_cast(charts[0]) if len(charts) == 1 else shared_sings(ctx)
     board = develop(sings, charts)
     cfg_x = dataclasses.replace(ctx.cfg, board=board)
     if not charts:
@@ -866,6 +863,12 @@ def board_from_state(
     return board, placements
 
 
+def shared_sings(ctx: RefineContext) -> bool | AbstractSet[str]:
+    """The singer context of the ONE board `evaluate` develops for several charts
+    (`board_per_chart` off): the cast they share (`ctx.board_cast`), else song-agnostic."""
+    return ctx.board_cast if ctx.board_cast is not None else False
+
+
 def develop_team(
     ctx: RefineContext,
     team: Team,
@@ -875,6 +878,7 @@ def develop_team(
     *,
     plan_cache: PlanCache | None = None,
     refine: bool | int | None = None,
+    sings: bool | AbstractSet[str] | None = None,
 ) -> BoardOptimisedTeam:
     """The `BoardOptimisedTeam` (board, plan, sockets) behind ONE leaf
     evaluation of `team` on `chart` — what `evaluate` develops, kept whole so a
@@ -886,9 +890,14 @@ def develop_team(
     activation refinement when `refine` (default `ctx.refine_activation`), on
     the same per-chart score `evaluate` uses. `tests` pin that the board this
     returns scores to `evaluate`'s float, the song's off-team singers' boards planned
-    for it as `evaluate` plans them (`_with_singer_bench`)."""
+    for it as `evaluate` plans them (`_with_singer_bench`).
+
+    `sings`: the singer context to develop for instead of the chart's cast. The ONE
+    board `evaluate` develops for several charts (`board_per_chart` off) is
+    `shared_sings(ctx)`'s; with it this is the board each of those charts is scored on."""
     refine = ctx.refine_activation if refine is None else refine
-    sings = song_cast(chart) if chart is not None else False
+    if sings is None:
+        sings = song_cast(chart) if chart is not None else False
     ctx = _with_singer_bench(ctx, {c.id: c for c in ctx.cards}, tree_for, budget_for, plan_cache, sings)
     if ctx.board_state is not None:
         # boards as they are: nothing developed, the same board `evaluate` scores

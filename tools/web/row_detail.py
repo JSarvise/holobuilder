@@ -419,14 +419,17 @@ def board_state_of(bt: BoardOptimisedTeam) -> dict:
 # ---------------------------------------------------------------------------
 _LEAF_CACHE: dict[tuple, tuple[float, dict]] = {}
 _LEAF_TTL = 120.0
+# leaves held at once: a detail on a shared board reads the song's leaf and the engine's
+_LEAF_HELD = 3
 
 
 def _leaf_inputs(
-    basis: str, song: str, difficulty: str, assumptions=None, play: tuple[str, bool] | None = None
+    basis: str, song: str | None, difficulty: str, assumptions=None, play: tuple[str, bool] | None = None
 ) -> dict:
     """The two-stage builder's own leaf inputs for `basis` on `song` (cached a
     couple of minutes per (basis, song, difficulty): ~0.3 s to build), scored for
-    `play` (`ondemand.parse_play`: platform, AUTO) as the search that ranked the row."""
+    `play` (`ondemand.parse_play`: platform, AUTO) as the search that ranked the row.
+    `song` None: the builders' own nominal song, the leaf an engine is built on."""
     built = _leaf_inputs_cached(basis, song, difficulty, assumptions)
     if play is None:
         return built
@@ -435,22 +438,25 @@ def _leaf_inputs(
     return dict(built, ctx=ondemand.with_play(built["ctx"], tuple(play)))  # type: ignore[arg-type]
 
 
-def _leaf_inputs_cached(basis: str, song: str, difficulty: str, assumptions=None) -> dict:
+def _leaf_inputs_cached(basis: str, song: str | None, difficulty: str, assumptions=None) -> dict:
     import time  # noqa: PLC0415
 
     import leaf_inputs  # noqa: PLC0415
 
     key = (basis, song, difficulty, assumptions.key() if assumptions is not None else None)
-    held = _LEAF_CACHE.get(key)
+    held = _LEAF_CACHE.pop(key, None)
     if held is not None and time.monotonic() - held[0] < _LEAF_TTL:
+        _LEAF_CACHE[key] = held  # the most recently used last
         return held[1]
+    nominal = () if song is None else (song,)
     if assumptions is not None:
         import ondemand  # noqa: PLC0415
 
-        built = ondemand.build_inputs(assumptions, difficulty, song)
+        built = ondemand.build_inputs(assumptions, difficulty, *nominal)
     else:
-        built = leaf_inputs.leaf_inputs(basis, difficulty, song)
-    _LEAF_CACHE.clear()
+        built = leaf_inputs.leaf_inputs(basis, difficulty, *nominal)
+    while len(_LEAF_CACHE) >= _LEAF_HELD:
+        del _LEAF_CACHE[next(iter(_LEAF_CACHE))]
     _LEAF_CACHE[key] = (time.monotonic(), built)
     return built
 
@@ -469,12 +475,14 @@ def leaf_detail(
     keep_law: bool = False,
     want_notes: bool = False,
     pace: bool = False,
+    sings=None,
 ) -> dict:
     """`team` re-developed on a two-stage leaf (`built`: a `leaf_inputs` /
     `leaf_inputs.build_account` result) on `chart` (default `built["chart"]`) and
     every figure from that one board (`panel=False`: the song figures only, plus
     the run law when `want_distribution`). `as_is` adds `song_est_as_is` (the
-    team on the account's boards as captured) and `plan_cost` (`_as_is`)."""
+    team on the account's boards as captured) and `plan_cost` (`_as_is`). `sings`:
+    `develop_team`'s (the ONE board several charts share, `parallel_refine.shared_sings`)."""
     from hbuilder.solver.parallel_refine import RefinePool, develop_team, new_plan_cache  # noqa: PLC0415
 
     chart = chart if chart is not None else built["chart"]
@@ -482,7 +490,14 @@ def leaf_detail(
     with RefinePool(ctx, workers=1) as helper:
         cache = new_plan_cache(ctx, helper._by_id) if ctx.use_plan_cache else None
         bt = develop_team(
-            ctx, team, helper._tree_for, helper._budget_for, chart, plan_cache=cache, refine=refine
+            ctx,
+            team,
+            helper._tree_for,
+            helper._budget_for,
+            chart,
+            plan_cache=cache,
+            refine=refine,
+            sings=sings,
         )
         budget = {_chr(c): helper._budget_for(c) for c in (team.leader, *team.members)}
         helper_tree_for = helper._tree_for
@@ -810,14 +825,35 @@ def two_stage_detail(
     keep_law: bool = False,
     want_notes: bool = False,
     pace: bool = False,
+    shared_board: Mapping | None = None,
 ) -> dict:
     """A searched (or event, `refine=False`) row re-developed on the leaf that
     ranked it, with every figure from that one board. `refine`: the refinement level the
     row was ranked at (`parallel_refine.refine_level`: True or 1, or 2).
     `assumptions` (`ondemand.Assumptions`): the on-demand search's account levers
     instead of a fixed `basis` -- the same leaf that ranked the row. `play`: how the
-    run is played (platform, AUTO), as the search was asked."""
-    built = _leaf_inputs(basis, song, difficulty, assumptions, play)
+    run is played (platform, AUTO), as the search was asked.
+
+    `shared_board` (a merged search's `shared_board`: `{"charts", "cast", "scope"}`): the
+    row is ONE board for every chart of `charts`, the Holomem Rating team for every song
+    (`ondemand.Engine.search_merged` with a `board_cast`). The board is that search's, on
+    its engine's leaf: planned within the wallet for its plan chart
+    (`ondemand.shared_plan_chart`) and judged on every chart, else developed for the cast
+    (`parallel_refine.shared_sings`); the figures are `song`'s chart's on it."""
+    chart = None
+    sings = None
+    judge_charts = None
+    plan_song, judge_difficulty = song, difficulty
+    if shared_board is not None:
+        built, chart, plan_song, sings, judge_charts = _shared_board(
+            basis, song, difficulty, shared_board, assumptions, play
+        )
+        judge_difficulty = _rating_engine_difficulty()
+        # the merged search scores the plain develop (no activation refinement)
+        refine = False
+    else:
+        built = _leaf_inputs(basis, song, difficulty, assumptions, play)
+    base = built
     if assumptions is not None and assumptions.replan:
         # the row was ranked on its plan WITHIN THE WALLET (`materials_plan`): the
         # same plan, the same off-team boards, scored by the same leaf
@@ -828,15 +864,23 @@ def two_stage_detail(
         # the plan's candidates rated by this leaf, as the search rated them
         # (`materials_plan.leaf_judge`); a plan the search already holds is reused as it is
         # held under its judge too: a plan the search picked on another leaf is not this one
-        opts = materials_plan.judged_opts(assumptions.plan_opts(), assumptions, difficulty, built["ctx"])
+        opts = materials_plan.judged_opts(
+            assumptions.plan_opts(), assumptions, judge_difficulty, built["ctx"]
+        )
         with RefinePool(built["ctx"], workers=1) as helper:
             planned = materials_plan.plan_for(
                 leader_id,
                 list(member_ids),
-                song,
+                plan_song,
                 opts,
                 judge=materials_plan.leaf_judge(
-                    built["ctx"], built["by_id"], helper._tree_for, helper._budget_for, leader_id, member_ids
+                    built["ctx"],
+                    built["by_id"],
+                    helper._tree_for,
+                    helper._budget_for,
+                    leader_id,
+                    member_ids,
+                    judge_charts,
                 ),
                 parallel=True,
             )
@@ -849,7 +893,9 @@ def two_stage_detail(
             ),
         )
         whole_plan = planned[2]
-        optimal = materials_plan.plan_optimal(leader_id, list(member_ids), song, opts)
+        optimal = materials_plan.plan_optimal(leader_id, list(member_ids), plan_song, opts)
+        # a planned board is scored on each chart's own cast, as the search scores it
+        sings = None
     else:
         whole_plan = optimal = None  # type: ignore[assignment]
     by_id = built["by_id"]
@@ -864,11 +910,16 @@ def two_stage_detail(
         want_distribution=want_distribution,
         want_timeline=want_timeline,
         member_order=member_order,
+        chart=chart,
         as_is=as_is,
         keep_law=keep_law,
         want_notes=want_notes,
         pace=pace,
+        sings=sings,
     )
+    if shared_board is not None:
+        # the song the ONE board was planned for (the whole-account plan view re-plans it)
+        out["plan_song"] = plan_song if whole_plan is not None else None
     if whole_plan is not None:
         out["plan_optimal"] = optimal  # False: a MILP stopped on the solver's time limit
     if as_is and whole_plan is not None:
@@ -876,14 +927,59 @@ def two_stage_detail(
         out["plan_cost"] = _whole_plan_cost(whole_plan, built["ctx"])
         if want_reset_price and (out["plan_cost"].get("resets") or 0) > 0:
             out["reset_price"] = reset_price(
-                _leaf_inputs(basis, song, difficulty, assumptions, play),
+                base,
                 team,
-                song,
+                plan_song,
                 assumptions,  # type: ignore[arg-type]
                 refine=refine,
                 current=(out["plan_cost"]["resets"], out["song_est"]),
+                chart=chart,
             )
     return out
+
+
+def _rating_engine_difficulty() -> str:
+    import rating_mode  # noqa: PLC0415
+
+    return rating_mode.ENGINE_DIFFICULTY
+
+
+def _shared_board(
+    basis: str, song: str, difficulty: str, shared: Mapping, assumptions, play
+) -> tuple[dict, SongChart, str, Any, tuple[int, ...]]:
+    """`(leaf, chart, plan song, sings, judge charts)` of a row on ONE board for several
+    charts (`two_stage_detail`'s `shared_board`), built as the merged search's engine is:
+    its leaf at the engine's difficulty, every chart from `charts_all.json`, the board cast,
+    one board for all of them. `chart`: `song`'s chart among them; `sings`: the cast the
+    board is developed for; the plan's judge scores every chart."""
+    import leaf_inputs  # noqa: PLC0415
+    import ondemand  # noqa: PLC0415
+
+    from hbuilder.domain.board_plan import SongCast  # noqa: PLC0415
+    from hbuilder.solver.parallel_refine import shared_sings  # noqa: PLC0415
+
+    keys = tuple(str(k) for k in shared.get("charts") or ())
+    if not keys:
+        raise ValueError("shared_board names no chart")
+    library = leaf_inputs.chart_library(leaf_inputs.charts_path("HARD")).charts  # charts_all.json
+    missing = [k for k in keys if k not in library]
+    if missing:
+        raise KeyError(f"no chart on disk for {', '.join(missing)}")
+    key = f"{song}/{difficulty}"
+    if key not in keys:
+        raise ValueError(f"{key} is not one of the shared board's charts")
+    charts = tuple(library[k] for k in keys)
+    cast = SongCast(frozenset(str(c) for c in shared.get("cast") or ()), str(shared.get("scope") or ""))
+    built = _leaf_inputs(basis, None, _rating_engine_difficulty(), assumptions, play)
+    ctx = dataclasses.replace(built["ctx"], charts=charts, board_per_chart=False, board_cast=cast)
+    plan_song = ondemand.shared_plan_chart(keys, charts, cast).split("/", 1)[0]
+    return (
+        dict(built, ctx=ctx),
+        charts[keys.index(key)],
+        plan_song,
+        shared_sings(ctx),
+        tuple(range(len(charts))),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1132,10 +1228,13 @@ def reset_price(
     *,
     refine: bool | int,
     current: tuple[int, float],
+    chart: SongChart | None = None,
 ) -> dict:
     """What the row's resets BUY: the same team re-planned within the wallet with
     fewer resets (none; only those earning 0.2 % / 0.05 % of the score each), every
     plan scored by the same leaf as the row. `current` = the row's `(resets, score)`.
+    `song`: the song the plans are made for; `chart`: the chart they are scored on
+    (default the leaf's own: a shared board is planned for one song, scored on another).
     Rather than a reset COUNT cap, this shows the price of each step, so the
     user can see that the last resets often buy almost nothing (e.g. one m0342
     team: 64 resets 1,909,985; 45 at 0.05 % -0.43 %; 0 resets -6.8 %)."""
@@ -1173,7 +1272,7 @@ def reset_price(
                 built["ctx"], board_state=planned[0], bench_characters=planned[1], socket_bench=True
             ),
         )
-        est = leaf_detail(b, team, refine=refine, as_is=False)["song_est"]
+        est = leaf_detail(b, team, refine=refine, as_is=False, chart=chart)["song_est"]
         current_state = json.loads(CAPTURED_BOARD.read_text("utf-8"))
         n = sum(
             len(

@@ -209,8 +209,8 @@ def run_job(job: jobs.Job, opts: Mapping, *, engine_for=None) -> None:
                     return engine_for(keys, cast)
                 return ondemand.engine(
                     basis_name,
-                    "EXPERT",
-                    current_key=key_for("EXPERT"),
+                    rating_mode.ENGINE_DIFFICULTY,
+                    current_key=key_for(rating_mode.ENGINE_DIFFICULTY),
                     chart_keys=keys,
                     board_cast=cast,
                     **kw,

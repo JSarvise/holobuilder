@@ -70,6 +70,7 @@ REQUEST_KEYS = (
     "platform",
     "auto",
     "pool",
+    "shared_board",
 )
 # Detail fields a file does not carry: the timeline is drawn from the rest and is large.
 DETAIL_SKIP = ("timeline",)

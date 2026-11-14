@@ -29,6 +29,19 @@ MAX_SONGS = 20
 # A team for several songs is searched on at most this many charts (each team is scored on
 # every one of them).
 MAX_MERGED_SONGS = 8
+# The difficulty the one-team engine is built at: its charts are each song's own, this names
+# the leaf it starts from and the judge its board plans are held under (a row's detail
+# rebuilds the board on the same leaf, `row_detail.two_stage_detail`'s `shared_board`).
+ENGINE_DIFFICULTY = "EXPERT"
+
+
+def one_board_cast(holomem: str, singer_types: Sequence[str]):
+    """The cast ONE board for every song of a holomem's rating is planned for
+    (`RefineContext.board_cast`): her, with the songs' singer type when they all share one."""
+    from hbuilder.domain.board_plan import SongCast  # noqa: PLC0415
+
+    scopes = {t or "" for t in singer_types}
+    return SongCast((holomem,), scopes.pop() if len(scopes) == 1 else "")
 
 
 def _read_json(path) -> Any:
@@ -340,16 +353,13 @@ def run_one_team(
 ) -> dict:
     """One team for the songs of `opts["songs"]` (`engine_for(chart keys, board cast)` -> an
     acquired engine, released here)."""
-    from hbuilder.domain.board_plan import SongCast  # noqa: PLC0415
-
     songs_ = list(opts["songs"])[:MAX_MERGED_SONGS]
     keys = tuple(f"{s['music_id']}/{s['difficulty']}" for s in songs_)
     current = opts.get("current") or {}
     objective = opts.get("objective") or "max"
     cast = None
     if opts.get("one_board", True):
-        scopes = {s.get("singer_type") or "" for s in songs_}
-        cast = SongCast((opts["holomem"],), scopes.pop() if len(scopes) == 1 else "")
+        cast = one_board_cast(opts["holomem"], [s.get("singer_type") or "" for s in songs_])
     emit({"type": "progress", "stage": "songs", "done": 0, "total": 1})
     eng = engine_for(keys, cast)
     try:

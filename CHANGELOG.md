@@ -2,6 +2,12 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.7 (2026-11-14)
+- **Fix: Holomem Rating, "One team for every song" on one Holomem Board setup.** A team's details planned a board of the shown song's own, so on every song but one they read 2.5 to 6.8 % above the team's row, with another slot order. They now show the team on its one board, as the row was scored: the same Expected Score, Max, Unit Score, slot order and board plan on every song.
+- **Fix: Holomem Rating, switching songs.** When the same team was found for two songs, picking the other song showed the first song's details for a moment, with a false warning that the details differ from the row (by up to about 5 %). The details now load for the song picked.
+- **Export search:** a small button beside an answer (Score's status line, Holomem Rating's heading and the Event goal's list of teams) saves a .json file with your options, the page's last requests and what came back. Attach it when you report a problem; it holds no login or player ID.
+- The Event search's progress no longer reads "undefined / 3" while it reads the best teams' boards.
+
 ## 0.2.6 (2026-11-14)
 - **Better teams on a maxed account: every Connect card in one place.** The team's Connect cards and the bench's are now dealt together on every song, so a team can take a bench card that lifts it more, a bench singer keeps the card her song bonus wants, and no card counts twice. The #1 rises on one song (+0.17 % on EXPERT) and on the every-song average (+0.69 %); a team's details show the bench's Connect cards too.
 - **Searches that miss fewer leaders.** Every class of leader is searched (an outfit that raises one stat gets the sets it favours), each leader's song sample is weighed for her, and each leader's best team is re-scored on every song: every-song searches now find teams they used to miss (+0.2 % at levels 25-30).

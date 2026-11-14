@@ -255,7 +255,7 @@ function render(ctx) {
   if (doc && !selSong) selSong = firstSong(doc);
   const noRecords = !st.have_records
     ? `<div class="o-error">Your records are not on this PC yet: press Refresh (it reads your highest scores, the songs you own and your rank).</div>` : "";
-  const head = `${noRecords}${tiles(st)}${borderLine(st)}`;
+  const head = `${noRecords}${tiles(st)}${borderLine(st)}${doc && window.hbExportButton ? `<div class="hb-xsearch-row">${window.hbExportButton()}</div>` : ""}`;
   const prog = running && pc ? `<div class="o-progwrap" data-rt-prog></div>` : "";
   const body = S.rmode === "one" && doc ? oneTeam(ctx, doc, cardOf) : songTable(ctx, st, doc, running, cardOf);
   const detail = doc && selSong ? `<section class="o-rt-detail" aria-label="Teams on the chosen song">${detailHead(ctx, doc)}<div id="o-rt-detail"></div></section>` : "";
@@ -299,7 +299,7 @@ function detailHead(ctx, doc) {
   if (!got) return "";
   const s = got.e || got.c;
   const what = doc.mode === "one"
-    ? (doc.one_board ? "The teams found, on this song; pick one to see it above. The board shown is planned for this song; the one setup for every song can differ a little." : "The teams found, on this song, each on the board planned for it; pick one to see it above.")
+    ? (doc.one_board ? "The teams found, on this song, each on its one Holomem Board setup for every song; pick one to see it above." : "The teams found, on this song, each on the board planned for it; pick one to see it above.")
     : `The best teams the search found for this song, each on its own Holomem Boards.`;
   return `<div class="o-rt-dhead">${jacket(s.music_id)}<div><h2>${esc(s.title || s.music_id)} ${diffBadge(s.difficulty, s.level)}</h2><p>${esc(what)}</p></div></div>`;
 }
@@ -321,9 +321,12 @@ function showDetail(ctx, doc) {
     const { T, c } = got;
     ({ music_id: music, difficulty, title } = c);
     basis = doc.basis; seconds = doc.seconds;
+    // one board for every song: the detail is the team on THAT board (the search's
+    // `shared_board`), shown on this song, as the row was scored
     ranking = doc.rows.map(t => {
       const tc = t.charts.find(x => x.music_id === c.music_id) || {};
-      return { leader: t.leader, leader_name: t.leader_name, members: t.members, best: tc.expected, song_max: tc.max, refined: false };
+      return { leader: t.leader, leader_name: t.leader_name, members: t.members, best: tc.expected, song_max: tc.max, refined: false,
+        shared: doc.one_board ? doc.shared_board || null : null };
     });
   }
   const S = { ...ctx.S, goal: "score", song: music, difficulty, sort: byMax ? "max" : "avg", top: Math.max(3, ranking.length), lvmode: "expert" };

@@ -233,6 +233,8 @@ export function renderTeams(ctx, doc, ranking, { selected = 0, onSelect = null }
     leader: r.leader, leaderName: r.leader_name, members: r.member_order || r.members, ordered: !!r.member_order,
     expected: r.best, kind: "song", sings: true, status: "searched", refinedLeaf: r.refined,
     p10: null, p50: null, p90: null, max: r.song_max ?? null,
+    // a Holomem Rating team on ONE board for every song: its detail is on that board
+    shared: r.shared || null,
   }));
   const res = { url: "rating:" + optsKey(ctx.S), doc, rows, cards: ctx.D.cards, cached: true, onSelect };
   sel = Math.max(0, Math.min(selected, rows.length - 1)); open = new Set([sel]);
@@ -325,7 +327,9 @@ function setProv(res) {
     + (d.on_demand && d.seconds != null ? ` in ${Number(d.seconds).toFixed(1)} s` : "");
   // the worker processes failed during the search (the batches finished in one process)
   const warn = (d.warnings || []).length ? `<span class="o-provwarn" title="${esc(d.warnings.join("\n"))}">${esc(d.warnings[0])}</span>` : "";
-  el.innerHTML = `<span class="o-state ${st[0]}">${st[1]}</span><span class="o-provtxt">${n}${d.written ? ` · ${esc(when(d.written))}` : ""}</span>${warn}${info("prov")}`;
+  // Export search: the Holomem Rating goal has its own, at the head of its answer
+  const xs = window.hbExportButton && !String(res.url).startsWith("rating:") ? window.hbExportButton() : "";
+  el.innerHTML = `<span class="o-state ${st[0]}">${st[1]}</span><span class="o-provtxt">${n}${d.written ? ` · ${esc(when(d.written))}` : ""}</span>${warn}${info("prov")}${xs}`;
 }
 function cacheLine(doc) {
   const bits = [];
@@ -359,9 +363,16 @@ function perf({ c, slot, lead }, k) {
     </figcaption>
   </figure>`;
 }
+// a row's detail as fetched under these options: the same team's detail fetched for another
+// song (a Holomem Rating team found on several songs) or other options is not this row's, and
+// until its own arrives the row shows its figures loading, never the other one's
+function shownDetail(S, T) {
+  const det = details.get(T.source + ":" + T.key);
+  return det && det.optsKey === optsKey(S) ? det : {};
+}
 function block(ctxT, T, i) {
   const { ctx, rows, cardOf } = ctxT;
-  const det = details.get(T.source + ":" + T.key) || {};
+  const det = shownDetail(ctx.S, T);
   const f = det.fig || null;
   const L = cardOf(T.leader) || {};
   const general = T.source === "cached" && T.kind === "across";   // boards (and slot order) rebuilt per song
@@ -454,8 +465,8 @@ function repaint(ctxT, T, i) {
   const p = el.querySelector("details.o-plan"); if (p) p.open = keepPlan;
   el.querySelectorAll("details.o-pr").forEach((d, k) => { if (openRows[k]) d.open = true; });
   el.querySelectorAll(".o-reveal").forEach(x => x.classList.add("in"));
-  wireTimeline(el, details.get(T.source + ":" + T.key) || {}, ctxT.cardOf);
-  wirePlan(el, T, details.get(T.source + ":" + T.key) || {}, [T.leader, ...T.members].map(id => "chr-" + String(id).split("-")[1]));
+  wireTimeline(el, shownDetail(ctxT.ctx.S, T), ctxT.cardOf);
+  wirePlan(el, T, shownDetail(ctxT.ctx.S, T), [T.leader, ...T.members].map(id => "chr-" + String(id).split("-")[1]));
   const rp = el.querySelector("[data-rp]");
   if (rp) rp.onclick = () => resetPrice(ctxT, T, i);
   const ps = el.querySelector("[data-persong]");
@@ -505,8 +516,10 @@ function boardDoc(ctxT, T, i, det, bs, cards) {
   if (A && A.boards === "plan" && !det.acct && !det.acctLoading) {
     // a general row's detail is ON one song (det.song): the plan is that song's, as its figures are
     const song = det.song || S.song || null;
+    // a board shared by several songs was planned for one of them (`plan_song`): that plan
+    const planSong = (det.fig || {}).plan_song || song;
     det.acctLoading = true;
-    postJSON("/api/board-plan-account", { cards, song, assumptions: A, board_state: bs, bench_slots: (det.fig || {}).bench_slots || null })
+    postJSON("/api/board-plan-account", { cards, song: planSong, assumptions: A, board_state: bs, bench_slots: (det.fig || {}).bench_slots || null })
       .then(d => { if ((det.song || S.song || null) === song) { det.acct = d; det.acctErr = null; } })
       .catch(e => { if ((det.song || S.song || null) === song) det.acctErr = e.message; })
       .finally(() => { if ((det.song || S.song || null) === song) { det.acctLoading = false; repaint(ctxT, T, i); } });
@@ -601,7 +614,8 @@ async function after(ctxT, T, i) {
       try {
         const body = { song: S.song, difficulty: S.difficulty, basis: tsBasis(S) || "account", cards, ...playOf(S),
           member_order: T.ordered ? T.members : undefined,
-          ...(T.od ? { refine: refineOf(T.refinedLeaf), ...(assumptionsOf(S) ? { assumptions: assumptionsOf(S) } : {}) } : {}) };
+          ...(T.od ? { refine: refineOf(T.refinedLeaf), ...(assumptionsOf(S) ? { assumptions: assumptionsOf(S) } : {}) } : {}),
+          ...(T.shared ? { shared_board: T.shared } : {}) };
         det.body = body;
         const d = await postJSON("/api/row-detail", { ...body, timeline: true });
         det.fig = fromRowDetail(d);

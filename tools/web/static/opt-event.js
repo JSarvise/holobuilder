@@ -144,8 +144,10 @@ function progress(ctx, order, stage, detail, ev) {
   }
   const k = order.indexOf(stage);
   const e = ev || {};
-  pc.update({ active: k >= 0 ? k : undefined, detail: detail || (e.total ? `${e.done} / ${e.total}` : ""),
-    done: e.done, total: e.total });
+  // a stage announces its total before its first step: none done yet
+  const done = e.total ? e.done ?? 0 : e.done;
+  pc.update({ active: k >= 0 ? k : undefined, detail: detail || (e.total ? `${done} / ${e.total}` : ""),
+    done, total: e.total });
 }
 let lastCtx = null;
 // "Prove it": the same search again with the bound's exact check (POST /api/event/run certify)
@@ -232,7 +234,7 @@ function render(ctx, L) {
       <div class="o-listctl" role="group" aria-label="List view">
         <button class="chip" type="button" data-diffmode aria-pressed="${diffMode}" title="Outline the cards that differ from #1">Diff vs #1</button></div>
       <div class="o-list" id="o-list">${listHTML(c)}</div>
-      <p class="o-runinfo">${esc([`Event search · ${res.basis || "account"}`, res.highlight ? `Highlight · mean over ${(res.highlight.pool || []).length} songs` : "", `${fmt(res.pool)} cards in the pool`, res.elapsed_s != null ? `${res.elapsed_s.toFixed(1)} s` : ""].filter(Boolean).join(" · "))}</p>
+      <p class="o-runinfo">${esc([`Event search · ${res.basis || "account"}`, res.highlight ? `Highlight · mean over ${(res.highlight.pool || []).length} songs` : "", `${fmt(res.pool)} cards in the pool`, res.elapsed_s != null ? `${res.elapsed_s.toFixed(1)} s` : ""].filter(Boolean).join(" · "))}${window.hbExportButton ? window.hbExportButton() : ""}</p>
     </aside>
     <section class="o-sel" aria-label="Selected team"><article class="o-team" data-open="true" id="team${sel}">${block(c, rows[sel], sel)}</article></section>
   </div>`;
