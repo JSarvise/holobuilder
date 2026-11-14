@@ -62,6 +62,10 @@ def cmd_inventory(args: argparse.Namespace) -> tuple[list[str], dict[str, str], 
     return [_pyexe(args), str(HERE / "inventory_snapshot.py")], {}, HERE
 
 
+def cmd_holomem_rating(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
+    return [_pyexe(args), str(HERE / "holomem_rating.py")], {}, HERE
+
+
 def cmd_account(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
     cmd = [
         _pyexe(args),
@@ -268,7 +272,15 @@ def cmd_chibi(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path
 # event_cutoffs reads only the account's own region there (`--region own`): the app has no guest
 # accounts, and the borders come from the tracker; what only this account can read is its own
 # rank and Event Pt (without this step the app's Event page shows no points after a refresh).
-ACCOUNT_STEPS = ("account", "inventory", "board", "board_export", "event_cutoffs", "event_history")
+ACCOUNT_STEPS = (
+    "account",
+    "inventory",
+    "holomem_rating",
+    "board",
+    "board_export",
+    "event_cutoffs",
+    "event_history",
+)
 
 
 # Steps that only bring pictures: nothing the optimizer scores reads them, and the pages draw
@@ -324,6 +336,16 @@ STEPS: list[Step] = [
         network=True,
         probes=["inventory"],
         build=cmd_inventory,
+    ),
+    # The Optimizer's Holomem Rating goal reads it (your records, songs and rank); nothing
+    # else does, so a failure is a warning, never a failed refresh.
+    Step(
+        "holomem_rating",
+        "dumps/holomem_rating.json -- songs owned, highest-score records, rank per holomem",
+        network=True,
+        probes=[],
+        build=cmd_holomem_rating,
+        soft=True,
     ),
     Step(
         "cards",

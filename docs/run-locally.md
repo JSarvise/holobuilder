@@ -8,7 +8,8 @@ Prefer an installer? See [Getting started with the app](getting-started.md) inst
 only).
 
 It runs on **Windows** and on **Linux**. Every step below has a script for each: `setup.cmd`,
-`refresh.cmd`, `start.cmd` on Windows, `./setup.sh`, `./refresh.sh`, `./start.sh` on Linux. They
+`refresh.cmd`, `start.cmd` on Windows, `./setup.sh`, `./refresh.sh`, `./start.sh` on Linux, and
+`update.cmd` / `./update.sh` for a new version ([Updating](#updating)). They
 do the same thing and take the same options; [On Linux](#on-linux) lists what differs.
 
 ## What you need
@@ -137,9 +138,37 @@ How to use the pages: [Using holobuilder](guide.md).
 ## Updating
 
 - **After a game update**: run `refresh.cmd` (or press Refresh). New cards, songs and events are
-  read in; the game's build constants are found again if the update changed them.
-- **A new holobuilder version**: `git pull` (or a new ZIP), then `setup.cmd` if
-  `requirements.txt` changed, then `refresh.cmd`.
+  read in; the game's build constants are found again if the update changed them. An event's
+  chapters and bonus cards are only known once it has started: refresh again after its start.
+- **A new holobuilder version**: run `update.cmd` (`./update.sh` on Linux). It brings the newest
+  version from GitHub (`git pull`), runs `setup.cmd` when the packages changed, then refreshes;
+  `update.cmd --no-refresh` updates the code only. Close holobuilder first, or start it again
+  afterwards: a running one keeps the old version.
+
+  A refresh adds the game's new cards to `data/cards.json`, a file the repository also carries,
+  and a plain `git pull` refuses to run over it (*Your local changes to the following files would
+  be overwritten by merge*). `update.cmd` handles that: when those added cards are the only
+  change, it sets them aside (a copy goes to `tools\recon\proxy\dumps\cards_before_update.json`),
+  pulls, and the refresh adds back whatever the new version lacks. A change of your own to any
+  tracked file stops it, named, and is never touched. Without git (a ZIP), download the new ZIP,
+  unpack it over this folder, then run `setup.cmd` and `refresh.cmd`.
+
+### `git pull` says "Your local changes ... would be overwritten by merge: data/cards.json"
+
+A folder cloned before `update.cmd` existed has no `update.cmd` yet, so its first update is by
+hand. In the holobuilder folder (Linux: the same with `./setup.sh` and `./refresh.sh`):
+
+```
+git checkout -- data/cards.json
+git pull
+.\setup.cmd
+.\refresh.cmd
+```
+
+`git checkout -- data/cards.json` drops only the cards your refreshes added to the catalogue (your
+collection, account and settings live elsewhere and are not touched), `git pull` brings the new
+version, and `refresh.cmd` adds back the cards the new version lacks. From then on, `update.cmd`
+does all of it.
 
 ## What is where
 

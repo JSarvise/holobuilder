@@ -6,17 +6,22 @@ import { loadRanks as loadGradeRanks } from "/hb-grade.js";
 import { showScoreIdle, runScore, cancelScore } from "/opt-score.js";
 import { showEventIdle, runEvent, cancelEvent, HL, isHighlight, highlightTile, highlightPool, hlPct } from "/opt-event.js";
 import { initTargets } from "/opt-targets.js";
+import { setPowerUpNote } from "/opt-detail.js";
+import { wireCardDialog } from "/opt-carddlg.js";
+import { showRatingIdle, runRating, cancelRating, loadRatingList, ratingHolomem, ratingHeader, openHolomemPicker, levelOptions } from "/opt-rating.js";
 import { openSongPicker } from "/hb-songpick.js";
 import { showMaxPoints } from "/hbd-util.js";
 
 /* ------------------------------------------------------------------ state */
 const DEFAULTS = {
   goal: "score", evgoal: "event_points", song: "", difficulty: "EXPERT", cards: "asis", boards: "develop", sort: "avg",
-  boosts: 3, holopass: true, pool: "all", platform: "mobile", top: 5, evtop: 5,
+  boosts: 3, holopass: true, pool: "all", platform: "mobile", top: 5, evtop: 5, evsort: "avg",
   lmember: "", loutfit: "", nooverlap: false, maxpoints: false, infmats: false,
   alevel: "account", abloom: "account", aspt: "account", keephigher: false, maxresets: "-1", resetgain: "0.01", auto: false, exact: false,
   allinvited: false, norefund: false, branches: "GBRY", targets: [], lvmode: "expert", lvlo: 25, lvhi: 30,
   require: [], exclude: [],
+  // goal "rating" (opt-rating.js): the holomem, the highest level she Full Combos, and the search
+  rholomem: "", rlevel: 30, rowned: true, rmode: "each", rboard: "one", rsort: "max", rsongs: "5", rteams: 3,
 };
 const KEEP = Object.keys(DEFAULTS).filter(k => !["require", "exclude"].includes(k));
 const S = { ...DEFAULTS };
@@ -28,8 +33,9 @@ if (S.cards === "maxed-account") S.cards = "maxed";
 if (S.boards !== "current") S.boards = "develop";
 { // deep links: /optimizer?goal=event_points&song=m0342&difficulty=EXPERT&boosts=3&holopass=1
   const q = new URLSearchParams(location.search);
-  if (["score", "event_points", "event_song"].includes(q.get("goal"))) S.goal = q.get("goal");
-  if (S.goal !== "score") S.evgoal = S.goal;
+  if (["score", "event_points", "event_song", "rating"].includes(q.get("goal"))) S.goal = q.get("goal");
+  if (S.goal === "event_points" || S.goal === "event_song") S.evgoal = S.goal;
+  if (q.has("holomem")) S.rholomem = q.get("holomem") || "";
   if (q.has("song")) S.song = q.get("song") || "";
   if (q.has("difficulty")) S.difficulty = String(q.get("difficulty")).toUpperCase();
   if (q.has("boosts")) S.boosts = Math.max(1, Math.min(10, +q.get("boosts") || 3));
@@ -52,11 +58,15 @@ function save() {
   q.set("goal", S.goal);
   if (S.song) q.set("song", S.song);
   if (S.difficulty !== "EXPERT") q.set("difficulty", S.difficulty);
-  if (S.goal !== "score") { q.set("boosts", S.boosts); if (S.goal === "event_points") q.set("holopass", S.holopass ? "1" : "0"); }
+  if (isEvent()) { q.set("boosts", S.boosts); if (S.goal === "event_points") q.set("holopass", S.holopass ? "1" : "0"); }
+  if (isRating()) { q.delete("song"); q.delete("difficulty"); if (S.rholomem) q.set("holomem", S.rholomem); }
   history.replaceState(null, "", "/optimizer?" + q.toString());
 }
-const isEvent = () => S.goal !== "score";
+const isEvent = () => S.goal === "event_points" || S.goal === "event_song";
+const isRating = () => S.goal === "rating";
 const isHL = () => isEvent() && isHighlight(S.song);
+// Event Song Score ranked by Max (opt-event.js reads the same choice)
+const evMax = () => S.goal === "event_song" && S.evsort === "max" && !isHL();
 const setProv = html => { const p = byId("prov"); if (p) p.innerHTML = html; };
 
 /* ------------------------------------------------------------------ data */
@@ -76,6 +86,8 @@ export const CTX = {
     return m;
   },
   setBusy, rerenderIdle: () => showIdle(),
+  // goal Holomem Rating: the header line follows the account's rating once it is read
+  onStatus: () => showSong(),
 };
 
 /* ------------------------------------------------------------------ hero */
@@ -109,6 +121,18 @@ function untint() { const r = document.documentElement.style; r.setProperty("--h
 function showSong() {
   const song = CTX.song();
   const art = byId("jacketart");
+  if (isRating()) {
+    // the holomem whose ranking is climbed stands where the jacket is
+    const h = ratingHolomem(S.rholomem);
+    untint();
+    art.className = "o-every";
+    art.innerHTML = S.rholomem ? `<img class="o-rt-face" src="/chricon/${encodeURIComponent(S.rholomem)}" alt="" onerror="this.remove()">`
+      : `<i class="ico" style="--ico:url(/ui/music/ui_999_ico_music_l.png)" aria-hidden="true"></i>`;
+    byId("songtitle").innerHTML = h ? `${esc(h.name)} <span class="tag">Holomem Rating</span>` : "Choose a holomem";
+    byId("singer").innerHTML = h ? ratingHeader(S) : `<span>Whose high-score ranking are you climbing?</span>`;
+    document.title = `${h ? h.name + " · " : ""}Holomem Rating · Optimizer`;
+    return;
+  }
   const diff = S.difficulty.charAt(0) + S.difficulty.slice(1).toLowerCase();
   if (isHL()) {
     // no jacket of its own: the tile the game composes (opt-event.js highlightTile), its orange
@@ -168,7 +192,9 @@ const LABEL = {
   evgoal: { event_points: "Event Points", event_song: "Event Song Score" },
 };
 function summary() {
-  if (isEvent()) return [LABEL.evgoal[S.goal], `Live Boost ${S.boosts}`, S.goal === "event_points" ? `HoloPass ${S.holopass ? "on" : "off"}` : "",
+  if (isRating()) return ["Holomem Rating", S.rmode === "one" ? `One team${S.rboard === "per" ? ", a setup per song" : ""}` : "A team per song",
+    S.rsort === "max" ? "by Max" : "by Expected", LABEL.cards[S.cards], S.cards === "maxed" ? "" : LABEL.boards[S.boards]].filter(Boolean).join(" · ");
+  if (isEvent()) return [LABEL.evgoal[S.goal], `Live Boost ${S.boosts}`, S.goal === "event_points" ? `HoloPass ${S.holopass ? "on" : "off"}` : LABEL.sort[evMax() ? "max" : "avg"],
     LABEL.cards[S.cards], S.cards === "maxed" ? "" : LABEL.boards[S.boards]].filter(Boolean).join(" · ");
   return [LABEL.cards[S.cards], LABEL.boards[S.boards], LABEL.sort[S.sort]].join(" · ");
 }
@@ -180,7 +206,7 @@ let assumed = { q: null, v: null };
 function bonusRows(M) {
   const pct = (v, div, places) => v != null ? `+${dec(v / div, places)}%` : null;
   const own = [["Memory Bonus", pct(M.memory_bonus_permil, 10, 1)], ["Member Power-Up Bonus", pct(M.power_up_permyriad, 100, 2)]];
-  if (S.cards === "asis") return own.filter(r => r[1]);
+  if (S.cards === "asis") { setPowerUpNote(null); return own.filter(r => r[1]); }
   const q = S.cards === "maxed" ? "basis=maxed"
     : new URLSearchParams({ level: S.alevel, bloom: S.abloom, sp_training: S.aspt, keep_higher: S.keephigher ? "1" : "0" }).toString();
   if (assumed.q !== q) {
@@ -188,6 +214,9 @@ function bonusRows(M) {
     getJSON("/api/meta?" + q).catch(() => ({})).then(m => { if (assumed.q === q) { assumed.v = m.assumed || {}; renderFresh(); } });
   }
   const A = assumed.v, wait = A ? "unavailable" : "…";
+  // the team detail's Member Power-Up Bonus line says how much the search's levels raise it
+  setPowerUpNote(A && A.power_up_permyriad != null && M.power_up_permyriad != null
+    ? { own: M.power_up_permyriad, assumed: A.power_up_permyriad } : null);
   const note = S.cards === "maxed" ? "maxed account" : "custom levels applied";
   // "Upgraded cards" changes levels only: the posters, and so the Memory Bonus, stay the account's
   return [S.cards === "maxed" ? ["Memory Bonus", pct(A && A.memory_permil, 10, 1) || wait, note] : own[0],
@@ -289,9 +318,23 @@ function applyGoal() {
   mx.disabled = !S.song;
   mx.title = S.song ? "Rank by each team's best possible run on this chart: every Active skill fires"
     : "Every song averages every chart: there is no single best run to rank by";
+  // Event Song Score by Max: a Highlight row is a mean over a pool of songs, no single run
+  const emx = byId("evsort").querySelector('[data-v="max"]');
+  emx.disabled = isHL();
+  emx.title = isHL() ? "A Highlight pool has no single best run to rank by"
+    : "Rank by each team's Event Song Score if every Active skill fires on this chart";
   byId("lvrow").hidden = S.lvmode !== "range";
   byId("boostx").textContent = `×${AC[S.boosts - 1]} Event Pt`;
-  setPressed(byId("goal"), isEvent() ? "event" : "score");
+  setPressed(byId("goal"), isEvent() ? "event" : isRating() ? "rating" : "score");
+  // Holomem Rating: each song is played at its own hardest chart within the level; the holomem leads
+  byId("difficulty").hidden = isRating();
+  byId("rlevelwrap").hidden = !isRating();
+  byId("leadergroup").hidden = isRating();
+  byId("rboardrow").hidden = S.rmode !== "one";
+  byId("rteamsrow").hidden = S.rmode === "one";
+  byId("change").textContent = isRating() ? "Change holomem" : "Change song";
+  byId("jacket").setAttribute("aria-label", isRating() ? "Change holomem" : "Change song");
+  if (!busy) byId("playlabel").textContent = isRating() ? "Find best teams" : "Find best team";
   if (isEvent()) setPressed(byId("evgoal"), S.goal);
 }
 // options set beyond the three the summary names (Cards, Boards, Sort)
@@ -309,8 +352,9 @@ async function changed(key) {
     if (isEvent()) await loadEventSongs();
     if (isEvent() && !S.song) S.song = defaultEventSong();
   }
+  if (["rholomem", "rlevel", "rowned", "rmode", "rboard", "rsort", "rsongs", "rteams"].includes(key)) { if (isRating()) { showSong(); renderFresh(); showIdle(); } return; }
   if (["goal", "song", "difficulty", "cards", "boards", "maxpoints", "infmats", "maxresets", "resetgain", "alevel", "abloom", "aspt", "keephigher", "allinvited", "norefund", "branches", "targets", "lvmode", "lvlo", "lvhi", "boosts", "holopass"].includes(key)) { setProv(""); showSong(); renderFresh(); showIdle(); }
-  else if (key === "sort" || key === "top") { renderFresh(); showIdle(true); }
+  else if (key === "sort" || key === "evsort" || key === "top") { renderFresh(); showIdle(true); }
   else if (isEvent()) { renderFresh(); showIdle(); }   // a leader or pinned-card change: the event answer shown no longer applies
   else renderFresh();
 }
@@ -355,7 +399,15 @@ function wireMore() {
   }
   initTargets(S, D.cards.values(), () => changed("targets"));
   bindSeg("pool", "pool"); bindSeg("platform", "platform");
-  bindSeg("top", "top", Number); bindSeg("evtop", "evtop", Number);
+  bindSeg("rmode", "rmode"); bindSeg("rboard", "rboard"); bindSeg("rsort", "rsort"); bindSeg("rsongs", "rsongs");
+  bindSeg("rteams", "rteams", Number);
+  byId("rowned").checked = !!S.rowned;
+  byId("rowned").addEventListener("change", e => { S.rowned = e.target.checked; changed("rowned"); });
+  byId("rlevel").innerHTML = levelOptions().map(v => `<option value="${v}">${v}</option>`).join("") + `<option value="40">Any</option>`;
+  byId("rlevel").value = String(S.rlevel);
+  if (byId("rlevel").value !== String(S.rlevel)) { S.rlevel = 30; byId("rlevel").value = "30"; }
+  byId("rlevel").onchange = e => { S.rlevel = +e.target.value; changed("rlevel"); };
+  bindSeg("top", "top", Number); bindSeg("evtop", "evtop", Number); bindSeg("evsort", "evsort");
 }
 const pinDraw = {};
 // Card pool switched to 5★ only: a member pinned below 5★ can no longer be in the team
@@ -411,6 +463,7 @@ function fillLeaders() {
 
 /* ------------------------------------------------------------------ song picker */
 function openPicker() {
+  if (isRating()) { openHolomemPicker(byId("hmpicker"), S, chr => { S.rholomem = chr; changed("rholomem"); }); return; }
   // the shared picker (hb-songpick.js): predictive search over songs, talents and groups,
   // holodori.best-style sorts; event goals open on the songs ranked by the length bonus, best first
   const sorts = [];
@@ -442,22 +495,26 @@ let busy = false;
 function setBusy(on) {
   busy = on;
   byId("play").disabled = on;
-  byId("playlabel").textContent = on ? "Searching…" : "Find best team";
+  byId("playlabel").textContent = on ? "Searching…" : isRating() ? "Find best teams" : "Find best team";
 }
 function showIdle(keepLive) {
   if (busy) return;
-  if (isEvent()) showEventIdle(CTX, keepLive); else showScoreIdle(CTX, keepLive);
+  if (isRating()) showRatingIdle(CTX, keepLive);
+  else if (isEvent()) showEventIdle(CTX, keepLive); else showScoreIdle(CTX, keepLive);
 }
 async function play() {
   if (busy) return;
-  if (isEvent()) {
+  if (isRating()) {
+    if (!S.rholomem) { toast("Choose a holomem first."); openPicker(); return; }
+    runRating(CTX);
+  } else if (isEvent()) {
     if (!S.song) { toast("Choose a song first."); openPicker(); return; }
     runEvent(CTX);
   } else runScore(CTX);
   byId("out").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
 }
 document.addEventListener("click", e => {
-  if (e.target.closest("[data-cancel]")) { if (isEvent()) cancelEvent(); else cancelScore(); return; }
+  if (e.target.closest("[data-cancel]")) { if (isRating()) cancelRating(); else if (isEvent()) cancelEvent(); else cancelScore(); return; }
   const c = e.target.closest("[data-close]"); if (c) { c.closest("dialog").close(); return; }
 });
 // a click on the backdrop closes a dialog -- only when the press began there too: a press inside
@@ -485,6 +542,7 @@ const defaultEventSong = () => ((D.evsongs || []).find(s => s.chart_available !=
 
 async function init() {
   wirePopovers();
+  wireCardDialog(CTX);
   // difficulty segment from /api/meta's list
   const [meta, coll] = await Promise.all([
     getJSON("/api/meta").catch(e => ({ error: e.message })),
@@ -494,6 +552,7 @@ async function init() {
   D.meta = meta;
   showMaxPoints(meta);
   for (const c of coll.cards || []) D.cards.set(c.id, normCard(c));
+  D.coll = { gen_labels: coll.gen_labels || {}, skill_bloom_step: coll.skill_bloom_step || {} };
   const diffs = (meta.difficulties && meta.difficulties.available) || ["EASY", "NORMAL", "HARD", "EXPERT"];
   if (!diffs.includes(S.difficulty)) S.difficulty = "EXPERT";
   byId("difficulty").innerHTML = diffs.map(d => `<button type="button" data-v="${d}" aria-pressed="false">${d[0] + d.slice(1).toLowerCase()}</button>`).join("");
@@ -503,7 +562,7 @@ async function init() {
   // Goal: Score or Event; which event figure ranks the teams is chosen in More options
   byId("goal").addEventListener("click", e => {
     const b = e.target.closest("button[data-v]"); if (!b) return;
-    const g = b.dataset.v === "event" ? (S.evgoal || "event_points") : "score";
+    const g = b.dataset.v === "event" ? (S.evgoal || "event_points") : b.dataset.v === "rating" ? "rating" : "score";
     if (g !== S.goal) {
       const hadHL = isHL();
       S.goal = g; fixHighlight();
@@ -521,7 +580,7 @@ async function init() {
   bindSeg("holopass", "holopass", v => v === "1");
   wireMore(); fillLeaders(); prunePins();
   byId("jacket").onclick = openPicker; byId("change").onclick = openPicker; byId("play").onclick = play;
-  await loadSongs();
+  await Promise.all([loadSongs(), loadRatingList()]);
   try { D.event = await getJSON("/api/event"); } catch (_) { D.event = null; }
   if (isEvent()) { await loadEventSongs(); if (!S.song) S.song = defaultEventSong(); }
   save(); applyGoal(); showSong(); renderFresh(); showIdle();

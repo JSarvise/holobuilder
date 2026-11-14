@@ -646,6 +646,132 @@
       "type": "Happy"
     },
     {
+      "costume_name": "Cloud-Padded Tartan",
+      "costume_skill": {
+        "condition": {
+          "count": 2,
+          "kind": "type",
+          "target": "Pure"
+        },
+        "duration": null,
+        "effect_type": "sense",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 80.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "condition": {
+            "count": 2,
+            "kind": "type",
+            "target": "Pure"
+          },
+          "effect_type": "score",
+          "family": "score_support",
+          "kind": "rider",
+          "magnitude": 25.0,
+          "target": {
+            "kind": "all"
+          }
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "0期生"
+      ],
+      "id": "card-00002-5-uniq-0104-00",
+      "member": "Robocosan",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 12.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 33.0,
+          "magnitude": 60.0,
+          "override": {
+            "condition": {
+              "count": 2,
+              "kind": "type",
+              "target": "Pure"
+            },
+            "kind": "override",
+            "magnitude": 120.0
+          },
+          "probability_tier": "Medium",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": null,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 11.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "type",
+            "value": "Pure"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 12.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 120.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "condition": {
+              "kind": "ungated"
+            },
+            "effect_type": "activation_rate",
+            "family": "activation_rate_up",
+            "kind": "rider",
+            "magnitude": 40.0,
+            "target": null
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 6947,
+        "sense": 11146,
+        "technique": 7828
+      },
+      "title": "Autumn Date with High-Spec Me",
+      "type": "Pure"
+    },
+    {
       "costume_name": "Default",
       "costume_skill": {
         "condition": {
@@ -6298,6 +6424,108 @@
       "type": "Cute"
     },
     {
+      "costume_name": "Obsidian Lace",
+      "costume_skill": {
+        "condition": {
+          "count": 2,
+          "kind": "type",
+          "target": "Pure"
+        },
+        "duration": null,
+        "effect_type": "sense",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 130.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "3期生"
+      ],
+      "id": "card-00019-5-uniq-0108-00",
+      "member": "Usada Pekora",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 8.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 25.0,
+          "magnitude": 125.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": "High",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": null,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 11.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "type",
+            "value": "Pure"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 11.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 145.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 6803,
+        "sense": 11381,
+        "technique": 7683
+      },
+      "title": "Whimsical Steps, Dressed to Shine",
+      "type": "Pure"
+    },
+    {
       "costume_name": "Default",
       "costume_skill": {
         "condition": {
@@ -9677,6 +9905,117 @@
       },
       "title": "Pureheart Song",
       "type": "Cute"
+    },
+    {
+      "costume_name": "Outdoor Vibe",
+      "costume_skill": {
+        "condition": {
+          "count": 2,
+          "kind": "generation",
+          "target": "5期生"
+        },
+        "duration": null,
+        "effect_type": "technique",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 135.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "5期生"
+      ],
+      "id": "card-00031-5-uniq-0105-00",
+      "member": "Momosuzu Nene",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 6.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 17.0,
+          "magnitude": 120.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": "Medium",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": null,
+          "effect_type": "technique",
+          "family": "stat_up",
+          "interval": null,
+          "magnitude": 43.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "generation",
+            "value": "5期生"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 12.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 120.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "condition": {
+              "count": 2,
+              "kind": "generation",
+              "target": "5期生"
+            },
+            "effect_type": "activation_rate",
+            "family": "activation_rate_up",
+            "kind": "rider",
+            "magnitude": 45.0,
+            "target": null
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 7828,
+        "sense": 6947,
+        "technique": 11146
+      },
+      "title": "Vibrant Shower of Fallen Gold",
+      "type": "Happy"
     },
     {
       "costume_name": "Default",
@@ -14686,6 +15025,117 @@
       "type": "Happy"
     },
     {
+      "costume_name": "Vibrant Peafowl",
+      "costume_skill": {
+        "condition": {
+          "count": 2,
+          "kind": "generation",
+          "target": "ID2"
+        },
+        "duration": null,
+        "effect_type": "performance",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 135.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "ID2"
+      ],
+      "id": "card-03006-5-uniq-0107-00",
+      "member": "Pavolia Reine",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 10.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 27.0,
+          "magnitude": 115.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": "Medium",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": null,
+          "effect_type": "performance",
+          "family": "stat_up",
+          "interval": null,
+          "magnitude": 43.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "generation",
+            "value": "ID2"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 11.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 130.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "condition": {
+              "count": 2,
+              "kind": "generation",
+              "target": "ID2"
+            },
+            "effect_type": "activation_rate",
+            "family": "activation_rate_up",
+            "kind": "rider",
+            "magnitude": 50.0,
+            "target": null
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 11146,
+        "sense": 7828,
+        "technique": 6947
+      },
+      "title": "The Breeze of Ginkgo Trees",
+      "type": "Cute"
+    },
+    {
       "costume_name": "Default",
       "costume_skill": {
         "condition": {
@@ -17476,6 +17926,114 @@
       },
       "title": "Nephilim Sonority",
       "type": "Happy"
+    },
+    {
+      "costume_name": "Girly Vintage",
+      "costume_skill": {
+        "condition": {
+          "kind": "ungated"
+        },
+        "duration": null,
+        "effect_type": "score",
+        "family": "score_support",
+        "interval": null,
+        "magnitude": 60.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "Promise"
+      ],
+      "id": "card-04007-5-uniq-0106-00",
+      "member": "IRyS",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 7.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 20.0,
+          "magnitude": 60.0,
+          "override": {
+            "condition": {
+              "count": 600,
+              "kind": "run_state",
+              "target": "life"
+            },
+            "kind": "override",
+            "magnitude": 120.0
+          },
+          "probability_tier": "High",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "count": 2,
+            "kind": "type",
+            "target": "Cute"
+          },
+          "duration": null,
+          "effect_type": "performance",
+          "family": "stat_up",
+          "interval": null,
+          "magnitude": 43.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "type",
+            "value": "Cute"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 14.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 115.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 10433,
+        "sense": 7982,
+        "technique": 7669
+      },
+      "title": "Sowing Hope",
+      "type": "Cute"
     },
     {
       "costume_name": "Default",

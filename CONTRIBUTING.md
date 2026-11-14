@@ -26,7 +26,7 @@ mypy
 | `src/hbuilder` | the optimizer: cards, gates, scoring, Holomem Boards, the searches. Standard library only. |
 | `tools/web` | the local web app: `server.py` (the entry), the server package `hbweb/`, the searches, the C kernels in `kernel/` and the pages in `static/` |
 | `tools/app` | the desktop app: launcher, installer, updater, settings, content store, server pieces |
-| `tools/local`, `*.cmd` | running it from a clone: `setup.cmd`, `refresh.cmd`, `start.cmd` |
+| `tools/local`, `*.cmd` | running it from a clone: `setup.cmd`, `refresh.cmd`, `start.cmd`, `update.cmd` |
 | `tools/refresh` | reading the game: account refresh, master data, charts, card data (into `tools/recon/proxy/dumps/`) |
 | `tests`, `tools/*/test_*.py` | the tests |
 

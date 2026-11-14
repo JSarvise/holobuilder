@@ -153,11 +153,13 @@ def test_item_icons_is_a_soft_local_step_after_the_catalogue() -> None:
     step = {s.name: s for s in refresh_all.STEPS}["item_icons"]
     assert step.network is False and step.soft is True
     # soft = never fails the refresh: the icons, the event cutoffs + history, the web's
-    # pictures, and the Park scan's quest data (without it the scan only refuses to start)
+    # pictures, the Park scan's quest data (without it the scan only refuses to start), and the
+    # Holomem Rating (read by one Optimizer goal only)
     assert sorted(s.name for s in refresh_all.STEPS if s.soft) == [
         "event_cutoffs",
         "event_emblems",
         "event_history",
+        "holomem_rating",
         "item_icons",
         "member_icons",
         "park_export",

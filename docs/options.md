@@ -11,6 +11,17 @@ the page itself (`tools/oss/options_glossary.py`): the wording is the app's own.
 
 > The leader adds no Event Bonus: it counts the five members only.
 
+## Holomem Rating *(rating)*
+
+- **Search**: Choices: A team per song (default) — The best team for each song, each on its own boards; One team for every song — One team that raises your rating the most over her songs: no change between songs.
+- **Holomem Boards of the one team**: Choices: One setup for every song (default) — One board setup for every song: nothing to reset between songs; A setup per song — Each song on boards planned for it: a little higher, but nodes are reset between songs (1,000 Hologold each).
+- **Rank by**: Choices: Max (default) — The team's run if every Active skill fires: the ranking keeps your best run; Expected — An average run.
+- **Songs to search**: Choices: 3; 5 (default); 8; All.
+- **Teams per song**: Choices: 1; 3 (default); 5.
+- **Only songs you own** (switch): Off: every song of hers, owned or not.
+
+> She leads every team: a play counts for the leader's ranking. The songs searched are her best by chart; tick others in the list.
+
 ## Cards
 
 - **Which cards**: Choices: My cards (default) — Your cards at their real level, bloom and SP training; My cards, upgraded — Your cards at a level, bloom or SP training you choose; Maxed account — Your account maxed: every card in the game at max level and bloom, every holomem at max level, complete Holomem Boards, no material limit (Score and Event).
@@ -54,6 +65,7 @@ the page itself (`tools/oss/options_glossary.py`): the wording is the app's own.
 
 - **Sort by** *(Score goal only)*: Choices: Expected (default); Max.
 - **Teams to show** *(Score goal only)*: Choices: 3; 5 (default); 10; 20.
+- **Sort by** *(event_song)*: Choices: Expected (default); Max.
 - **Teams to show** *(Event goal only)*: Choices: 5 (default); 10; 20.
 - **Score for AUTO** (switch): Rank teams for auto play: notes score like a GREAT and combo-gated skills stay at their base value.
 - **Exhaustive search** (switch) *(Score goal only)*: Slower; checks every combination in the first stage.

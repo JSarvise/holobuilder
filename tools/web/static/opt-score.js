@@ -1,7 +1,7 @@
 // Optimizer page, goal "Score": the on-demand search (POST /api/search + SSE), and the results
 // laid out as the Night Deck setlist (hb-rank.js, left) and the selected team (right).
 // Scores are the server's.
-import { byId, esc, fmt, sgn, info, thumb, getJSON, postJSON, toast, reveal, outfitText, NOTES, when, stash, unstash, withState, loadStates } from "/opt-util.js";
+import { byId, esc, fmt, sgn, gap, info, thumb, getJSON, postJSON, toast, reveal, outfitText, NOTES, when, stash, unstash, withState, loadStates, cardHook } from "/opt-util.js";
 import { score } from "/hb-grade.js";
 import { list as rankList, shownRows } from "/hb-rank.js";
 import { progressCard, countLine } from "/opt-progress.js";
@@ -10,6 +10,10 @@ import { unitPanel, runPanel, timelinePanel, wireTimeline, boardPanel, matchLine
 let cache = null;     // {key, doc, rows, cards}
 let open = new Set([0]);   // always {sel}: the one team shown on the right
 let sel = 0, diffMode = true, onePer = false;
+// the render the page shows. A detail that answers after a newer render paints into it only
+// when it is the same row of the same answer (the page renders again when the card states
+// arrive); another song's or another answer's row never paints into this one's panel
+let shown = null;
 const details = new Map();   // team key -> detail {dev, cur, tl, doc, err…}
 let wallet = null;
 
@@ -214,6 +218,27 @@ function progress(ctx, kind, steps, active, detail, ev) {
 // "Find best team" searches again now (never on load or on an option change)
 export async function runScore(ctx) { cache = null; searchNow(ctx, optsKey(ctx.S)); }
 
+// Another goal's answer laid out as this goal's setlist and team detail (the Holomem Rating
+// goal, opt-rating.js): `ctx` carries that song's options (S.song, S.difficulty, S.sort) and an
+// `out()` of its own; `doc` is the answer's search document and `ranking` its rows in the
+// on-demand search's shape. Each team's detail is the row's own board, as for a search here.
+export function renderTeams(ctx, doc, ranking, { selected = 0, onSelect = null } = {}) {
+  const A = assumptionsOf(ctx.S);
+  const boards = A && A.boards === "as_is" ? "current" : "develop";
+  const rows = ranking.map(r => ({
+    // the detail cache is per team AND per answer kind: the same team served by another search
+    // (its board refined or not) has another detail
+    key: `${teamKey(r.leader, r.members)}|${doc.variant || ""}|${r.refined}`,
+    source: "cached", od: true, route: "the search", api: "/api/rating/run", boards,
+    leader: r.leader, leaderName: r.leader_name, members: r.member_order || r.members, ordered: !!r.member_order,
+    expected: r.best, kind: "song", sings: true, status: "searched", refinedLeaf: r.refined,
+    p10: null, p50: null, p90: null, max: r.song_max ?? null,
+  }));
+  const res = { url: "rating:" + optsKey(ctx.S), doc, rows, cards: ctx.D.cards, cached: true, onSelect };
+  sel = Math.max(0, Math.min(selected, rows.length - 1)); open = new Set([sel]);
+  render(ctx, res);
+}
+
 /* ------------------------------------------------------------------ rendering */
 function sorted(ctx, res) {
   const rows = [...res.rows];
@@ -237,7 +262,7 @@ function render(ctx, res) {
     return;
   }
   setProv(res);
-  const ctxT = { ctx, res, rows, cardOf };
+  const ctxT = shown = { ctx, res, rows, cardOf };
   if (sel >= rows.length) { sel = 0; open = new Set([0]); }
   ctx.out().innerHTML = `<div class="o-split">
     <aside class="dlg o-setlist" aria-label="Ranked teams">
@@ -281,6 +306,7 @@ function relist(ctxT) {
 function select(ctxT, i) {
   if (!ctxT.rows[i]) return;
   sel = i; open = new Set([i]);
+  if (ctxT.res.onSelect) ctxT.res.onSelect(i);
   if (ctxT.res === cache) remember(ctxT.ctx);
   const el = ctxT.ctx.out().querySelector(".o-sel > .o-team"); if (!el) return;
   el.id = "team" + i; el.innerHTML = block(ctxT, ctxT.rows[i], i);
@@ -323,7 +349,7 @@ const scoreLabel = T => T.od ? "Expected Score" : T.source === "cached" ? "Score
 const scoreNote = T => T.boards === "current" ? "expected_cur" : T.kind === "song" ? "expected" : T.kind === "across" ? "across" : "unitscore";
 
 function perf({ c, slot, lead }, k) {
-  return `<figure class="o-perf" style="--i:${k}">
+  return `<figure class="o-perf" style="--i:${k}" ${cardHook(c)}>
     ${window.HBCard.face(c, { lead, roleText: "Leader", w: 400 })}
     <figcaption>
       <span class="slot" aria-label="${slot ? "Slot " + slot : ""}">${slot || ""}</span>
@@ -340,22 +366,31 @@ function block(ctxT, T, i) {
   const L = cardOf(T.leader) || {};
   const general = T.source === "cached" && T.kind === "across";   // boards (and slot order) rebuilt per song
   const delta = rows.length < 2 ? "" : i === 0
-    ? `${sgn((T.expected / rows[1].expected - 1) * 100)} over #2`
-    : `${sgn((T.expected / rows[0].expected - 1) * 100)} vs #1`;
+    ? `${gap((T.expected / rows[1].expected - 1) * 100)} over #2`
+    : `${gap((T.expected / rows[0].expected - 1) * 100)} vs #1`;
   const now = det.cur && T.boards !== "current" ? det.cur.value : null;
   const max = general ? null : (f && f.song_max != null ? f.song_max : T.max);
-  const pend = w => `<span class="o-sk" style="width:${w}px;height:22px;margin-top:6px"></span>`;
+  const pend = w => `<span class="o-sk" style="width:${w}px;height:26px;margin-top:6px"></span>`;
   const dash = `<span class="n">—</span>`;
+  // one fixed slot per figure, in one order (Max, Now / Unit Score, Overall Power): a figure this
+  // row has none of keeps its slot with a dash and the reason, so the grid never reflows
+  const tile = (lbl, val, small, none = false, wide = false) => `<div class="stat-tile${none ? " none" : ""}${wide ? " wide" : ""}"><div><span class="lbl">${lbl}</span>${val}<small>${small}</small></div></div>`;
   // a general row's Unit Score / Overall Power are the boards-as-they-are figures (song-free);
   // a song row's are its own board's, the same basis as its Expected Score
   const src = general ? det.cur : f;
   const srcErr = general ? det.curErr : det.err;
   const us = deckUnit(src), op = src && src.panel ? src.panel.overall_power : null;
   const side = [];
-  if (max != null) side.push(`<div class="stat-tile"><div><span class="lbl">Max ${info("max")}</span>${score(max)}<small>every Active fires</small></div></div>`);
-  if (T.boards !== "current" && T.kind !== "unit") side.push(`<div class="stat-tile"><div><span class="lbl">Now ${info("now")}</span>${now != null ? score(now) : det.curErr ? dash : pend(150)}<small>${general ? "average, boards as they are" : "boards as they are"}</small></div></div>`);
-  if (T.kind !== "unit") side.push(`<div class="stat-tile"><div><span class="lbl">Unit Score ${info("grade")}</span>${us != null ? score(us) : srcErr ? dash : pend(110)}<small>${general ? "boards as they are" : "this team's board"}</small></div></div>`);
-  side.push(`<div class="stat-tile"><div><span class="lbl">Overall Power</span>${op != null ? `<span class="n o-num">${fmt(op)}</span>` : srcErr ? dash : pend(110)}<small>${general ? "boards as they are" : "this team's board"}</small></div></div>`);
+  if (T.kind !== "unit") {
+    // an every-song row is an average over the charts: it has no single best run, so no Max
+    // slot; its Now takes the first row whole
+    if (!general) side.push(max != null ? tile(`Max ${info("max")}`, score(max), "every Active fires")
+      : tile(`Max ${info("max")}`, pend(150), "every Active fires"));
+    side.push(T.boards === "current" ? tile(`Now ${info("now")}`, dash, "the score above", true)
+      : tile(`Now ${info("now")}`, now != null ? score(now) : det.curErr ? dash : pend(150), general ? "average over every chart, boards as they are" : "boards as they are", now == null && !!det.curErr, general));
+    side.push(tile(`Unit Score ${info("grade")}`, us != null ? score(us) : srcErr ? dash : pend(150), general ? "boards as they are" : "this team's board", us == null && !!srcErr));
+  }
+  side.push(tile("Overall Power", op != null ? `<span class="n o-num">${fmt(op)}</span>` : srcErr ? dash : pend(110), general ? "boards as they are" : "this team's board", op == null && !!srcErr));
   // the run spread on one line under the hero score: the row's own when served, else its
   // detail's run law once that has arrived (a general row's figure is an average: no spread)
   const law = !general && f && f.distribution && f.distribution.available !== false ? f.distribution : null;
@@ -405,6 +440,11 @@ function block(ctxT, T, i) {
 
 function repaint(ctxT, T, i) {
   const el = byId("team" + i);
+  if (ctxT !== shown) {
+    const now = shown && shown.rows[i];
+    if (!now || shown.res.url !== ctxT.res.url || now.source !== T.source || now.key !== T.key) return;
+    ctxT = shown; T = now;
+  }
   if (!el || !open.has(i) || ctxT.rows[i] !== T) return;
   const planOpen = el.querySelector("details.o-plan");
   const keepPlan = planOpen ? planOpen.open : i === 0;

@@ -5,6 +5,7 @@ no sign-in, no approval. The scripts at the top of the repository call it, `.cmd
     setup     run_local.py setup: creates .venv, installs the packages, then run_local.py check
     refresh   run_local.py refresh [--region us|jp|as] [any refresh_all.py option]
     start     run_local.py start [--port N] [--no-browser] [--region us|jp|as]
+    update    run_local.py update [--no-refresh]: the newest holobuilder from GitHub, then refresh
 
 `refresh` does what the desktop app does before it reads an account, with this PC's own game
 install in place of the holobuilder server:
@@ -26,6 +27,13 @@ says which folder it serves at /api/server; anything else keeps the port, and th
 is used), starts tools/web/server.py on
 127.0.0.1 with the same account settings, so the pages' Refresh button works too, and opens
 the browser once it answers.
+
+`update` is `git pull` made safe for this folder, then `setup` when the packages changed, then
+`refresh`. A refresh adds the game's new cards to data/cards.json, a file the repository tracks,
+and git refuses to pull over a changed file. When those added cards are the only change, they are
+put aside (a copy goes to dumps/cards_before_update.json), the pull runs, and the refresh adds
+again whatever the new catalogue lacks. Any other change to a tracked file stops the update and
+is named: it is someone's own work, and an update never touches it.
 """
 
 from __future__ import annotations
@@ -43,6 +51,7 @@ import sys
 import time
 import urllib.request
 import webbrowser
+from collections.abc import Callable
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
@@ -319,6 +328,139 @@ def _stream(cmd: list[str], env: dict) -> tuple[int, str]:
         if "DATE_CHANGED" in line:
             seen.add("DATE_CHANGED")
     return proc.wait(), " ".join(sorted(seen))
+
+
+# ---------------------------------------------------------------- update
+CATALOGUE = "data/cards.json"  # the one tracked file a refresh writes (card_append.py adds to it)
+CATALOGUE_BACKUP = "cards_before_update.json"  # in dumps/: the catalogue as it was before an update
+PACKAGES_FILES = ("requirements.txt", "pyproject.toml")  # a change to these needs setup again
+
+
+def only_added_cards(before: object, now: object) -> bool:
+    """True when the catalogue `now` is `before` plus whole cards: the only change a refresh makes
+    to it (card_append.py adds cards and never edits or removes one)."""
+    if not (isinstance(before, dict) and isinstance(now, dict)):
+        return False
+    if {k: v for k, v in before.items() if k != "cards"} != {k: v for k, v in now.items() if k != "cards"}:
+        return False
+    mine = {c.get("id"): c for c in now.get("cards") or [] if isinstance(c, dict)}
+    return all(isinstance(c, dict) and mine.get(c.get("id")) == c for c in before.get("cards") or [])
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdin=subprocess.DEVNULL,
+    )
+
+
+def changed_files(repo: Path) -> list[str]:
+    """The tracked files this folder has changed or staged (untracked files are left out)."""
+    items = _git(repo, "status", "--porcelain", "--untracked-files=no", "-z").stdout.split("\0")
+    out, skip = [], False
+    for item in items:
+        if skip:  # a rename's or copy's former name
+            skip = False
+            continue
+        if len(item) > 3:
+            out.append(item[3:])
+            skip = "R" in item[:2] or "C" in item[:2]
+    return out
+
+
+def catalogue_only_grew(repo: Path) -> bool:
+    """True when data/cards.json differs from the commit only by cards a refresh added."""
+    head = _git(repo, "show", f"HEAD:{CATALOGUE}")
+    if head.returncode:
+        return False
+    try:
+        now = json.loads((repo / CATALOGUE).read_text(encoding="utf-8"))
+        return only_added_cards(json.loads(head.stdout), now)
+    except (OSError, ValueError):
+        return False
+
+
+def update(args: argparse.Namespace, repo: Path = REPO, run: Callable[[list[str]], int] | None = None) -> int:
+    """Bring this clone to the newest holobuilder on its GitHub branch, then refresh (see the
+    module docstring). `run` runs one step (setup, refresh) and returns its exit code."""
+    if run is None:
+        run = lambda cmd: _stream(cmd, dict(os.environ))[0]  # noqa: E731
+    print("\n  holobuilder update\n  ==================\n")
+    if shutil.which("git") is None or not (repo / ".git").exists():
+        print("  [X] This folder was not cloned with git, so it cannot update itself.")
+        print(
+            "      Download the newest ZIP (the green Code button on GitHub), unpack it over this "
+            f"folder, then run {launcher('setup')} and {launcher('refresh')}."
+        )
+        return 1
+    if _git(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode:
+        print("  [X] This folder's branch follows no branch on GitHub: there is nothing to update from.")
+        return 1
+    blockers = [p for p in changed_files(repo) if p != CATALOGUE or not catalogue_only_grew(repo)]
+    if blockers:
+        print("  [X] These files have changes of your own, and an update never touches them:")
+        for path in blockers:
+            print(f"        {path}")
+        print(
+            "      Keep them aside with `git stash` (and `git stash pop` after the update), or undo "
+            f"them with `git checkout -- <file>`; then run {launcher('update')} again."
+        )
+        return 1
+    print("  asking GitHub for a newer holobuilder ...")
+    fetch = _git(repo, "fetch", "--quiet")
+    if fetch.returncode:
+        print("  [X] git could not reach GitHub:")
+        print("      " + (fetch.stderr.strip() or f"exit {fetch.returncode}").replace("\n", "\n      "))
+        return 1
+    old = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    new = _git(repo, "rev-parse", "@{u}").stdout.strip()
+    put_aside = False
+    if _git(repo, "merge-base", "--is-ancestor", new, old).returncode == 0:
+        print("  this folder already has the newest holobuilder")
+    else:
+        backup = repo / paths.DUMPS_REL / CATALOGUE_BACKUP
+        if (
+            CATALOGUE in changed_files(repo)
+            and _git(repo, "diff", "--quiet", old, new, "--", CATALOGUE).returncode
+        ):
+            # the new version changes the catalogue too: git would refuse to pull over the cards
+            # a refresh added, so they are put aside and the refresh below adds them again
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(repo / CATALOGUE, backup)
+            _git(repo, "checkout", "--", CATALOGUE)
+            put_aside = True
+            print(
+                f"  the cards your refreshes added to {CATALOGUE} are put aside for the update "
+                f"(a copy is in {shown(backup)})"
+            )
+        merge = _git(repo, "merge", "--ff-only", "--quiet", new)
+        if merge.returncode:
+            if put_aside:
+                shutil.copyfile(backup, repo / CATALOGUE)
+            print("  [X] git could not update this folder (it has commits of its own?):")
+            print("      " + (merge.stderr.strip() or f"exit {merge.returncode}").replace("\n", "\n      "))
+            return 1
+        titles = _git(repo, "log", "--format=%s", f"{old}..{new}").stdout.splitlines()
+        print(f"  updated: {len(titles)} new change(s); CHANGELOG.md says what each version brings")
+        for title in titles[:3]:
+            print(f"    - {title if len(title) <= 100 else title[:97] + '...'}")
+        print(f"  if holobuilder is open, close it and run {launcher('start')} again to use the new version")
+        changed = set(_git(repo, "diff", "--name-only", old, new).stdout.split())
+        if changed & set(PACKAGES_FILES):
+            print("\n  the packages changed: running setup\n")
+            code = run([sys.executable, "-u", str(repo / "tools" / "local" / "run_local.py"), "setup"])
+            if code:
+                return code
+    if args.no_refresh:
+        if put_aside:
+            print(f"\n  Run {launcher('refresh')} next: it adds back the cards the new catalogue lacks.")
+        return 0
+    print("\n  now the refresh: it signs in to your account, so close the game first\n")
+    return run([sys.executable, "-u", str(repo / "tools" / "local" / "run_local.py"), "refresh"])
 
 
 # ---------------------------------------------------------------- the web app
@@ -655,6 +797,12 @@ def main(argv: list[str] | None = None) -> int:
         help="turn on the Park page's 'Scan all areas': it logs into your account, "
         "enters every Park area with Free Chats and goes back to yours",
     )
+    u = sub.add_parser(
+        "update",
+        help="the newest holobuilder from GitHub (git pull, safe for the cards a refresh added), "
+        "setup when the packages changed, then refresh",
+    )
+    u.add_argument("--no-refresh", action="store_true", help="update the code only; refresh later")
     args, extra = ap.parse_known_args(argv)
     if extra and args.cmd != "refresh":
         ap.error("unrecognized arguments: " + " ".join(extra))
@@ -666,6 +814,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.cmd == "refresh":
         return refresh(args, extra)
+    if args.cmd == "update":
+        return update(args)
     return start(args)
 
 

@@ -48,6 +48,10 @@ problem. `setup.cmd` can be run again at any time to see what is missing.
 | The pages are empty, or say there is no data | No refresh has run in this folder yet. | Run `refresh.cmd`, then reload the page. |
 | Card art, jackets or figures missing after the first refresh | The pictures are still being fetched in the background. | Wait; progress is in `tools\recon\proxy\dumps\pictures_refresh.log`. |
 | Scores look out of date | Results use your account as of the last refresh. | Run `refresh.cmd` or press **Refresh**. |
+| **Your local changes to the following files would be overwritten by merge: data/cards.json** (`git pull`) | A refresh added the game's new cards to `data/cards.json`, and the new version changes that file too. | Run `update.cmd` (`./update.sh`) instead of `git pull`: it sets those cards aside, pulls, and the refresh adds back what the new version lacks. No `update.cmd` in the folder yet: `git checkout -- data/cards.json`, `git pull`, `setup.cmd`, `refresh.cmd` ([Updating](run-locally.md#updating)). |
+| **These files have changes of your own** (`update`) | A tracked file was edited by hand, not by a refresh; an update never touches it. | `git stash`, run `update.cmd`, then `git stash pop`; or undo the change with `git checkout -- <file>`. |
+| **This folder was not cloned with git** (`update`) | The folder came from a ZIP, or Git is not installed. | Download the newest ZIP, unpack it over this folder, then run `setup.cmd` and `refresh.cmd`. |
+| **git could not update this folder** (`update`) | The folder has commits of its own that GitHub's version does not have. | Bring them in line with GitHub's version yourself (for example `git pull --rebase`), then run `update.cmd` again. |
 
 ## Reporting a problem
 

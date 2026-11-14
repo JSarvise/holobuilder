@@ -36,6 +36,7 @@ from hbweb import (
     inventory,
     jobs,
     park,
+    rating,
     search,
     session,
     songs,
@@ -63,6 +64,8 @@ GET_ROUTES: dict[str, Route] = {
     "/api/meta": search.serve_meta,
     "/api/songs": songs.serve_songs,
     "/api/ranks": search.serve_ranks,
+    "/api/rating": rating.serve_rating,
+    "/api/rating/status": rating.serve_status,
     "/api/event": event.serve_event,
     "/api/event/songs": event.serve_event_songs,
     "/api/event/cutoffs": event.serve_event_cutoffs,
@@ -99,6 +102,7 @@ POST_ROUTES: dict[str, Route] = {
     "/api/event/run": event.start_event_run,
     "/api/event/points": event.event_points,
     "/api/search": search.start_search,
+    "/api/rating/run": rating.start_run,
     "/api/board-plan-account": boardplan.serve_board_plan_account,
     "/api/card-states": collection.serve_card_states,
     "/api/board-doc": boardplan.serve_board_doc,
@@ -242,6 +246,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class ThreadingServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
+
+    # The listen backlog. Python's default (5) is too small for a page: opening one starts ~10
+    # connections at once (its stylesheets and scripts), and while the Optimizer's requests run
+    # pure Python in other threads the accept loop falls behind. Windows then REFUSES the
+    # connections past the backlog instead of queueing them, and a refused <script> fails for
+    # good: the page loads without its scripts and nothing on it responds.
+    request_queue_size = 128
 
     # ⛔ FALSE on Windows, and there this is a correctness fix rather than a
     # preference: `SO_REUSEADDR` means **a second process may HIJACK a port

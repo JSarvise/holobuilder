@@ -41,6 +41,7 @@ import socket
 import ssl
 import struct
 import sys
+import threading
 import time
 import uuid
 import zlib
@@ -116,6 +117,12 @@ ALLOWED = frozenset(
         "/rpc.api.Marathon/ListMusicHighestScoreRankingTop",
         # event history: the account's own score and rank per chapter
         "/rpc.api.Marathon/Top",
+        # Holomem Rating (the per-holomem high-score ranking): the account's own rank per
+        # holomem, each holomem's reward borders and its top 100. The service's two mutators,
+        # SwitchFavorite and ReleaseMusic, stay off.
+        "/rpc.api.Music/ListHighestScoreRatingRankingRank",
+        "/rpc.api.Music/ListHighestScoreRatingRankingRewardThresholdRankingRankInfo",
+        "/rpc.api.Music/GetHighestScoreRatingRankingInfo",
     }
 )
 
@@ -467,10 +474,21 @@ def _request_headers(host: str, path: str, *, token: str | None, ident, master_v
     return [(":method", "POST"), (":scheme", "https"), (":authority", host), (":path", path)] + hdrs
 
 
+_SSL_CONTEXT: ssl.SSLContext | None = None
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """One TLS context per process (loading the system's CA store costs ~10 ms a time)."""
+    global _SSL_CONTEXT
+    if _SSL_CONTEXT is None:
+        ctx = ssl.create_default_context()
+        ctx.set_alpn_protocols(["h2"])
+        _SSL_CONTEXT = ctx
+    return _SSL_CONTEXT
+
+
 def _open_h2(host: str, timeout: float):
-    ctx = ssl.create_default_context()
-    ctx.set_alpn_protocols(["h2"])
-    sock = ctx.wrap_socket(_connect(host, timeout), server_hostname=host)
+    sock = _ssl_context().wrap_socket(_connect(host, timeout), server_hostname=host)
     if sock.selected_alpn_protocol() != "h2":
         raise RuntimeError(f"ALPN negotiated {sock.selected_alpn_protocol()!r}, not h2")
     conn = h2.connection.H2Connection(config=h2.config.H2Configuration(client_side=True))
@@ -592,6 +610,119 @@ class Channel:
                     raise
         raise AssertionError("unreachable")
 
+    def call_many(
+        self,
+        requests: list[tuple[str, bytes]],
+        *,
+        streams: int,
+        token: str | None = None,
+        ident=None,
+        master_version: str | None = None,
+    ) -> list[tuple[dict, dict, bytes]]:
+        """Several calls on this connection at once: up to `streams` in flight (HTTP/2 streams),
+        the next one sent as each answer ends -> one (headers, trailers, payload) per request, in
+        the order given. A dropped connection is reopened once and only the unanswered calls are
+        sent again."""
+        for path, _ in requests:
+            _check_allowed(path, self.host, self.guest_account)
+        results: list[tuple[dict, dict, bytes] | None] = [None] * len(requests)
+        for attempt in (0, 1):
+            fresh = self.sock is None
+            try:
+                if fresh:
+                    self.sock, self.conn = _open_h2(self.host, self.timeout)
+                self._exchange_many(requests, results, streams, token, ident, master_version)
+                self.used_at = time.time()
+                return results  # type: ignore[return-value]  # every slot is filled
+            except (OSError, ConnectionError, h2.exceptions.ProtocolError):
+                self.close()
+                if fresh or attempt:
+                    raise
+        raise AssertionError("unreachable")
+
+    def _exchange_many(self, requests, results, streams, token, ident, master_version) -> None:
+        sock, conn = self.sock, self.conn
+        waiting = iter([i for i, r in enumerate(results) if r is None])
+        open_: dict[int, dict] = {}  # stream id -> the request's index and its answer so far
+        resets: list[str] = []
+
+        def send(i: int) -> None:
+            path, body = requests[i]
+            sid = conn.get_next_available_stream_id()
+            conn.send_headers(
+                sid,
+                _request_headers(self.host, path, token=token, ident=ident, master_version=master_version),
+            )
+            conn.send_data(sid, body, end_stream=True)
+            open_[sid] = {"i": i, "rh": {}, "tr": {}, "payload": b""}
+
+        limit = max(1, min(streams, conn.remote_settings.max_concurrent_streams or streams))
+        for i in waiting:
+            send(i)
+            if len(open_) >= limit:
+                break
+        sock.sendall(conn.data_to_send())
+        while open_:
+            chunk = sock.recv(262144)
+            if not chunk:
+                raise ConnectionError("connection closed mid-response")
+            for ev in conn.receive_data(chunk):
+                if isinstance(ev, h2.events.ConnectionTerminated):
+                    raise ConnectionError(f"GOAWAY error_code={ev.error_code}")
+                st = open_.get(getattr(ev, "stream_id", None))
+                if st is None:
+                    continue
+                if isinstance(ev, h2.events.ResponseReceived):
+                    st["rh"] = {k.decode(): v.decode() for k, v in ev.headers}
+                elif isinstance(ev, h2.events.DataReceived):
+                    st["payload"] += ev.data
+                    conn.acknowledge_received_data(ev.flow_controlled_length, ev.stream_id)
+                elif isinstance(ev, h2.events.TrailersReceived):
+                    st["tr"] = {k.decode(): v.decode() for k, v in ev.headers}
+                elif isinstance(ev, (h2.events.StreamEnded, h2.events.StreamReset)):
+                    del open_[ev.stream_id]
+                    if isinstance(ev, h2.events.StreamReset):
+                        resets.append(f"{requests[st['i']][0]}: error_code={ev.error_code}")
+                    else:
+                        results[st["i"]] = (st["rh"], st["tr"], st["payload"])
+                    nxt = next(waiting, None)
+                    if nxt is not None:
+                        send(nxt)
+            out = conn.data_to_send()
+            if out:
+                sock.sendall(out)
+        if resets:
+            raise RuntimeError(f"stream reset ({'; '.join(resets)})")
+
+
+# `call` keeps one connection per thread, host and account kind, as the game client keeps one:
+# a fresh TCP + TLS handshake per call cost ~0.3 s, a call on the open connection ~0.1-0.2 s
+# (Master/Get from Spain to the US host). A connection idle longer than REUSE_IDLE_S may have
+# been dropped by the server or a NAT without a word, so it is replaced rather than trusted
+# (a dead one would hang a call until its timeout).
+REUSE_IDLE_S = 20.0
+_POOL = threading.local()
+
+
+def _channel(host: str, timeout: float, guest_account: str | None) -> Channel:
+    chans = getattr(_POOL, "chans", None)
+    if chans is None:
+        chans = _POOL.chans = {}
+    key = (host, guest_account)
+    ch = chans.get(key)
+    if ch is None:
+        ch = chans[key] = Channel(host, timeout=timeout, guest_account=guest_account)
+    elif ch.sock is not None and time.time() - ch.used_at > REUSE_IDLE_S:
+        ch.close()
+    ch.timeout = timeout
+    return ch
+
+
+def close_connections() -> None:
+    """Close this thread's open connections (the next `call` opens fresh ones)."""
+    for ch in (getattr(_POOL, "chans", None) or {}).values():
+        ch.close()
+
 
 def call(
     host: str,
@@ -604,53 +735,32 @@ def call(
     timeout: int = 30,
     _guest_account: str | None = None,
 ):
+    """One gRPC call -> (response headers, trailers, payload), on this thread's connection to
+    `host` (opened on first use, reconnected once if the server has closed it)."""
     _check_allowed(path, host, _guest_account)
+    return _channel(host, timeout, _guest_account).call(
+        path, body, token=token, ident=ident, master_version=master_version
+    )
 
-    ctx = ssl.create_default_context()
-    ctx.set_alpn_protocols(["h2"])
-    sock = ctx.wrap_socket(_connect(host, timeout), server_hostname=host)
-    if sock.selected_alpn_protocol() != "h2":
-        raise RuntimeError(f"ALPN negotiated {sock.selected_alpn_protocol()!r}, not h2")
 
-    conn = h2.connection.H2Connection(config=h2.config.H2Configuration(client_side=True))
-    conn.initiate_connection()
-    sock.sendall(conn.data_to_send())
-
-    hdrs = _request_headers(host, path, token=token, ident=ident, master_version=master_version)
-
-    sid = conn.get_next_available_stream_id()
-    conn.send_headers(sid, hdrs)
-    conn.send_data(sid, body, end_stream=True)
-    sock.sendall(conn.data_to_send())
-
-    payload, rh, tr, reset, done = b"", {}, {}, None, False
-    while not done:
-        chunk = sock.recv(262144)
-        if not chunk:
-            break
-        for ev in conn.receive_data(chunk):
-            if isinstance(ev, h2.events.ResponseReceived):
-                rh = {k.decode(): v.decode() for k, v in ev.headers}
-            elif isinstance(ev, h2.events.DataReceived):
-                payload += ev.data
-                conn.acknowledge_received_data(ev.flow_controlled_length, ev.stream_id)
-            elif isinstance(ev, h2.events.TrailersReceived):
-                tr = {k.decode(): v.decode() for k, v in ev.headers}
-            elif isinstance(ev, h2.events.StreamReset):
-                reset, done = ev.error_code, True
-            elif isinstance(ev, h2.events.StreamEnded):
-                done = True
-        out = conn.data_to_send()
-        if out:
-            sock.sendall(out)
-    sock.close()
-
-    if reset is not None:
-        raise RuntimeError(
-            f"stream reset, error_code={reset}. A PROTOCOL_ERROR (1) here usually means a "
-            f"malformed header value (one the server's HTTP/2 layer refuses), not a bad endpoint."
-        )
-    return rh, tr, payload
+def call_many(
+    host: str,
+    requests: list[tuple[str, bytes]],
+    *,
+    streams: int,
+    token: str | None = None,
+    ident: list[tuple[str, str]] | None = None,
+    master_version: str | None = None,
+    timeout: int = 30,
+    _guest_account: str | None = None,
+) -> list[tuple[dict, dict, bytes]]:
+    """`call` for a list of (path, body): up to `streams` at once on this thread's connection to
+    `host` -> one (response headers, trailers, payload) per request, in order."""
+    for path, _ in requests:
+        _check_allowed(path, host, _guest_account)
+    return _channel(host, timeout, _guest_account).call_many(
+        requests, streams=streams, token=token, ident=ident, master_version=master_version
+    )
 
 
 def fetch_master_version(host: str, ident) -> str:
@@ -761,6 +871,50 @@ def refresh_event_info(host: str, token: str, ident, master_version: str) -> Pat
             print(f"event info: {EVENT_INFO_PATH.name} ({EVENT_INFO_PATH.stat().st_size} bytes)")
             return EVENT_INFO_PATH
     raise RuntimeError("empty Event/ListEventInfo response")
+
+
+# A refresh logs in ONCE. `refresh_all.py` opens the session for the user's own account
+# (Master/Get, Auth/Login, User/Get) and hands it to its steps in these variables, with the
+# account's User/Get in a temporary file it deletes when the run ends. The token never touches
+# disk. An account has one session at a time -- each login ends the one before, the game's
+# included -- so a step logging in again only costs time (~1-2 s each).
+SESSION_ENV = ("HB_SESSION_HOST", "HB_SESSION_TOKEN", "HB_SESSION_MASTER_VERSION")
+SESSION_USERDATA_ENV = "HB_SESSION_USERDATA"
+
+
+def shared_session(account: str) -> tuple[str, str, str] | None:
+    """(host, token, master_version) the refresh handed down for the user's own account."""
+    if account != "main":
+        return None
+    host, token, mv = (os.environ.get(k) for k in SESSION_ENV)
+    return (host, token, mv) if host and token and mv else None
+
+
+def session(account: str) -> tuple[str, list[tuple[str, str]], str, str]:
+    """(host, ident, master_version, token) for `account`: the refresh's shared login for the
+    user's own account when there is one, else Master/Get + Auth/Login now."""
+    shared = shared_session(account)
+    if shared:
+        host, token, mv = shared
+        return host, client_headers(account), mv, token
+    host, credential = load_credential(account)
+    ident = client_headers(account)
+    mv = fetch_master_version(host, ident)
+    return host, ident, mv, login(host, credential, ident, mv)
+
+
+def userdata(host: str, token: str, ident, master_version: str) -> bytes:
+    """The account's `User/Get` plaintext: the refresh's copy when `token` is its shared
+    session, else fetched now."""
+    path = os.environ.get(SESSION_USERDATA_ENV)
+    if path and token == os.environ.get("HB_SESSION_TOKEN"):
+        try:
+            blob = Path(path).read_bytes()
+        except OSError:
+            blob = b""
+        if blob:
+            return blob
+    return fetch_userdata(host, token, ident, master_version)
 
 
 def fetch_userdata(host: str, token: str, ident, master_version: str) -> bytes:
@@ -1417,16 +1571,21 @@ def main() -> None:
         print("  and x-app-master-version fetched at runtime from Master/Get.")
         return
 
-    master_version = fetch_master_version(host, ident)
-    stale = master_version != MASTER_VERSION_FALLBACK
-    print(
-        f"master    : {master_version[:16]}...  "
-        f"({'CHANGED since the capture' if stale else 'same as the capture'})"
-    )
-
-    token = login(host, credential, ident, master_version)
-    print(f"login     : OK, token {len(token)} chars (not printed)")
-    blob = fetch_userdata(host, token, ident, master_version)
+    shared = shared_session(args.account)
+    if shared and shared[0] == host:
+        _, token, master_version = shared
+        print(f"master    : {master_version[:16]}...  (the refresh's shared session)")
+        print("login     : the refresh's shared login (not logged in again)")
+    else:
+        master_version = fetch_master_version(host, ident)
+        stale = master_version != MASTER_VERSION_FALLBACK
+        print(
+            f"master    : {master_version[:16]}...  "
+            f"({'CHANGED since the capture' if stale else 'same as the capture'})"
+        )
+        token = login(host, credential, ident, master_version)
+        print(f"login     : OK, token {len(token)} chars (not printed)")
+    blob = userdata(host, token, ident, master_version)
     print(f"snapshot  : {len(blob):,} B plaintext")
 
     snap = decode_snapshot(blob)

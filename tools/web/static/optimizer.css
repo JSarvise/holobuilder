@@ -479,12 +479,22 @@ body.opt .o-top h1{display:flex;align-items:center;gap:10px;min-width:0}
 /* the leader card already says LEADER; no decorative dot before it */
 .opt .gc .gc-role::before{content:none}
 
-/* hero row: the score, then Max / Now / Unit Score / Overall Power on one rule-split row */
+/* hero row: the score, then the side figures on a fixed two-column grid. Every slot is drawn
+   from the first paint (a skeleton, then the figure, or a dash that says why there is none),
+   each at a reserved height, so nothing moves while the detail fills in */
 .o-tiles{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start}
-.o-sidetiles{display:flex;flex-wrap:wrap;align-content:flex-start;gap:18px 8px;align-self:stretch;
-  border-left:1px solid var(--line);padding:4px 0 4px 8px}
-.o-sidetiles .stat-tile{padding:2px 14px;border-left:0;min-width:150px}
-.o-sidetiles .stat-tile .n{font-size:22px}
+/* the line under the big score takes the score's width (it wraps), so a longer line arriving
+   with the detail never widens the column and pushes the side figures */
+.o-tiles .stat-tile.prime small{width:0;min-width:100%;min-height:34px}
+.o-sidetiles{display:grid;grid-template-columns:repeat(2,minmax(150px,1fr));gap:16px 8px;align-content:start;
+  align-self:stretch;border-left:1px solid var(--line);padding:4px 0 4px 8px}
+.o-sidetiles .stat-tile,.o-tiles .o-sidetiles .stat-tile:first-child{padding:2px 14px;border-left:0;min-width:0;min-height:62px;align-items:flex-start}
+.o-sidetiles .stat-tile > div{min-width:0}
+.o-sidetiles .stat-tile .n{font-size:22px;line-height:26px;height:26px;white-space:nowrap}
+.o-sidetiles .stat-tile .o-sk{display:block}
+.o-sidetiles .stat-tile small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.o-sidetiles .stat-tile.none .n{color:var(--ink-3)}
+.o-sidetiles .stat-tile.wide{grid-column:1 / -1}
 
 /* fewer boxes: the detail's two blocks are columns split by a rule, figures are rule-split tiles */
 .o-card{background:none;border:0;border-radius:0;padding:0}
@@ -738,3 +748,108 @@ dialog.o-tgb::backdrop{background:rgb(5 6 10 / .62);backdrop-filter:blur(4px)}
 .o-hlpool li small{color:var(--ink-3);font-size:11px}
 /* Event Song Score while Highlight is the song: off (Highlight ranks by Event Points only) */
 #evgoal button:disabled{opacity:.45;cursor:not-allowed}
+
+/* ---------------------------------------------------------------- Holomem Rating (opt-rating.js) */
+.o-rtlv{display:inline-flex;align-items:center;gap:8px;font:700 12px/1 var(--f-ui);color:var(--ink-2)}
+.o-rtlv[hidden],#difficulty[hidden]{display:none}
+.o-rtlv select{height:32px}
+.o-every .o-rt-face{width:100%;height:100%;object-fit:cover}
+.o-rt-tiles .stat-tile.prime{min-width:300px}
+.o-rt-tiles .o-sidetiles{display:flex;flex-wrap:wrap;grid-template-columns:none}
+.o-rt-tiles .o-sidetiles .stat-tile{min-width:220px}
+.o-rt-tiles .stat-tile.prime .n{font-size:64px;margin:8px 0 10px}
+.o-rt-note{margin:-8px 0 20px;color:var(--ink-3);font:700 12px/1.5 var(--f-ui)}
+.o-rt .o-progwrap{margin-bottom:20px}
+/* the predicted rating: now > after, the new top three */
+.o-rt-sum{display:flex;flex-wrap:wrap;align-items:center;gap:16px 40px;margin:0 0 20px;padding:18px 22px;border-radius:var(--r-panel);border:1px solid var(--line);background:var(--sheet)}
+.o-rt-arrow{display:flex;align-items:center;gap:12px}
+.o-rt-arrow .lbl{margin-right:6px}
+.o-rt-arrow .n{font:800 28px/1 var(--f-num)}
+.o-rt-arrow .n.hi{color:var(--sky)}
+.o-rt-arrow .i{width:20px;height:20px;color:var(--ink-3)}
+.o-rt-top{display:flex;flex-wrap:wrap;gap:10px 24px;margin:0;padding:0;list-style:none;counter-reset:rt}
+.o-rt-top li{display:flex;align-items:center;gap:10px;font:700 13.5px/1.2 var(--f-ui);color:var(--ink-2)}
+.o-rt-top li.new{color:var(--ink)}
+.o-rt-top li::before{counter-increment:rt;content:counter(rt);font:800 15px/1 var(--f-num);color:var(--ink-3)}
+.o-rt-top .o-rt-jk{width:36px;height:36px}
+.o-rt-top .num{font-size:15px}
+.o-rt-gain{display:inline-flex;align-items:center;height:24px;padding:0 9px;border-radius:999px;font-size:13px;background:rgb(255 255 255 / .08);color:var(--ink-2)}
+.o-rt-gain.up{background:var(--good);color:#0E0D20}
+/* the songs that count */
+.o-rt-songs{margin-bottom:20px}
+.o-rt-songs .dlg-h .r{display:flex;gap:6px;align-items:center}
+.o-link{color:var(--sky);font:inherit;text-decoration:underline;padding:0}
+.o-rt-list{display:grid}
+.o-rt-row{display:grid;grid-template-columns:28px 56px minmax(220px,1.6fr) minmax(130px,.9fr) minmax(170px,1fr) minmax(120px,.8fr) minmax(300px,1.6fr);
+  align-items:center;gap:14px;padding:12px 22px;border-top:1px solid var(--line)}
+.o-rt-row:not(.on){opacity:.62}
+.o-rt-row:not(.on):hover{opacity:.85}
+.o-rt-row.top3 .o-rt-title b::after{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--sky);margin-left:8px;vertical-align:middle}
+.o-rt-chk input{width:18px;height:18px;accent-color:var(--sky)}
+.o-rt-jk{width:56px;height:56px;border-radius:var(--r-tile, 8px);object-fit:cover;background:var(--surface)}
+.o-rt-title{display:grid;gap:6px;min-width:0}
+.o-rt-title b{font:800 15px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.o-rt-title > span{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.o-rt-cell{display:grid;gap:4px;min-width:0;justify-items:start}
+.o-rt-cell .lbl{background:none;padding:0;color:var(--ink-3);font-size:11px}
+.o-rt-cell .num{font-size:20px;line-height:1.1}
+.o-rt-cell small{color:var(--ink-3);font:700 12px/1.3 var(--f-ui)}
+.o-rt-cell .dim,.o-rt-r.dim{color:var(--ink-3)}
+.o-rt-cell span.dim{font:700 12px/1.3 var(--f-ui)}
+.o-rt-r{font-family:var(--f-num);font-weight:800}
+.o-rt-to{display:flex;align-items:center;gap:10px}
+.o-rt-teamcell{display:flex;align-items:center;gap:12px;justify-content:space-between}
+.o-rt-team{display:flex;gap:4px}
+.o-rt-team img{width:40px;height:40px;border-radius:8px;object-fit:cover;background:var(--surface)}
+.o-rt-team img.lead{outline:2px solid #fff;outline-offset:-2px}
+.o-rt-alt{grid-column:3 / -1;display:grid;gap:8px;padding:6px 0 4px;justify-items:start}
+.o-rt-altrow{display:flex;align-items:center;gap:14px;padding:6px 10px;border-radius:var(--r-row);background:var(--sheet-2);color:var(--ink)}
+.o-rt-altrow .rk-n{font:800 15px/1 var(--f-num);color:var(--ink-3);width:18px;text-align:center}
+.o-rt-altrow .num{font-size:15px}
+.o-rt-sub{color:var(--ink-3);font:700 12px/1 var(--f-ui)}
+.o-rt-empty{padding:18px 22px;color:var(--ink-2);margin:0}
+/* one team for every song */
+.o-rt-one{padding:20px 22px;display:grid;gap:18px}
+.o-rt-one .o-perf figcaption{grid-template-columns:minmax(0,1fr)}
+.o-rt-others{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.o-rt-others .lbl{background:none;padding:0;color:var(--ink-3)}
+button.o-rt-altrow{border:2px solid transparent;cursor:pointer}
+button.o-rt-altrow.on{border-color:#fff}
+.o-rt-one ~ .o-rt-list .o-rt-row{grid-template-columns:0 56px minmax(220px,1.6fr) minmax(130px,.9fr) minmax(170px,1fr) minmax(120px,.8fr) auto}
+/* songs of hers not searched */
+.o-rt-skip{margin:0 0 28px;color:var(--ink-2);font:700 13px/1.4 var(--f-ui)}
+.o-rt-skip summary{cursor:pointer;color:var(--ink-2)}
+.o-rt-skip ul{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:8px}
+.o-rt-skip li{display:grid;grid-template-columns:36px minmax(160px,320px) 1fr auto;align-items:center;gap:12px}
+.o-rt-skip .o-rt-jk{width:36px;height:36px}
+.o-rt-skip .dim{color:var(--ink-3)}
+/* the holomem picker */
+.o-rt-pick{width:min(1100px,92vw);max-height:86vh;padding:0;color:var(--ink)}
+.o-rt-pick::backdrop{background:rgb(8 8 20 / .6)}
+.o-rt-pick .dlg-h .o-x{margin-left:12px}
+.o-rt-pick-b{padding:16px 22px 22px;display:grid;gap:14px}
+.o-rt-find{height:36px;padding:0 14px;border-radius:999px;border:1px solid var(--line-2);background:var(--deep);color:var(--ink);font:700 13.5px var(--f-ui);max-width:360px}
+.o-rt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;overflow:auto;max-height:64vh}
+.o-rt-hm{display:grid;grid-template-columns:40px minmax(0,1fr) auto;grid-template-rows:auto auto;column-gap:10px;align-items:center;text-align:left;
+  padding:8px 12px;border-radius:var(--r-row);background:var(--sheet-2);border:2px solid transparent;color:var(--ink);cursor:pointer}
+.o-rt-hm[hidden]{display:none}
+.o-rt-hm:hover{border-color:var(--line-2)}
+.o-rt-hm[aria-selected="true"]{border-color:#fff}
+.o-rt-hm img{grid-row:span 2;width:40px;height:40px;border-radius:50%;object-fit:cover}
+.o-rt-hm .nm{font:800 13.5px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.o-rt-hm .rt{grid-row:span 2;font-size:18px}
+.o-rt-hm .rk{color:var(--ink-3);font:700 12px/1.2 var(--f-ui)}
+/* a song with results opens its teams below the list (the Score goal's layout) */
+.o-rt-row.pick{cursor:pointer}
+.o-rt-row.pick:hover{background:rgb(255 255 255 / .03)}
+.o-rt-row.pick[aria-selected="true"]{background:var(--sheet-2);box-shadow:inset 3px 0 0 var(--sky)}
+.o-rt-see{display:inline-flex;align-items:center;gap:4px;color:var(--ink-2);font:700 12px/1 var(--f-ui);white-space:nowrap}
+.o-rt-row.pick[aria-selected="true"] .o-rt-see{color:var(--sky)}
+.o-rt-detail{margin:8px 0 40px;scroll-margin-top:16px}
+.o-rt-dhead{display:flex;align-items:center;gap:16px;margin:0 0 16px}
+.o-rt-dhead .o-rt-jk{width:64px;height:64px}
+.o-rt-dhead h2{margin:0 0 6px;font:800 20px/1.2 var(--f-ui);display:flex;align-items:center;gap:10px}
+.o-rt-dhead p{margin:0;color:var(--ink-2);font:700 13px/1.4 var(--f-ui)}
+/* the Member Power-Up Bonus raised by the search's card levels (opt-detail.js powerUpLabel) */
+.o-pu{text-decoration:underline dotted var(--ink-3);text-underline-offset:3px;cursor:help}
+.o-rt-lead{margin-left:10px;color:var(--ink-2);font:700 12px/1 var(--f-ui)}

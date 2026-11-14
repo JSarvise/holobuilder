@@ -166,6 +166,12 @@ class RefineContext:
     # set by `RefinePool` on worker processes, so a board plan is solved once per pool
     # instead of once per worker. None: every cache solves its own.
     plan_store: str | None = None
+    # ONE BOARD FOR SEVERAL CHARTS, planned for a cast. With several charts and
+    # `board_per_chart` off, the shared board is planned song-agnostic (`sings=False`) unless
+    # this names the cast every chart shares (a `SongCast`, e.g. the holomem whose songs a
+    # Holomem Rating team plays): then it is planned as for one of her songs, and each chart's
+    # scorer still pays its own cast's conditional terms.
+    board_cast: frozenset | None = None
 
 
 class PlanStore:
@@ -703,8 +709,12 @@ def evaluate(
             "the per-chart frequency counts need a board per chart (`RefineContext.board_per_chart`)"
         )
     # one chart: its whole cast, so a singing MEMBER's yellows and yellow socket are valued
-    # too (`board_plan.singer_weight_for`); several charts: song-agnostic, as always
-    sings = song_cast(charts[0]) if len(charts) == 1 else False
+    # too (`board_plan.singer_weight_for`); several charts: song-agnostic, or planned for the
+    # cast they share (`RefineContext.board_cast`)
+    if len(charts) == 1:
+        sings = song_cast(charts[0])
+    else:
+        sings = ctx.board_cast if ctx.board_cast is not None else False
     board = develop(sings, charts)
     cfg_x = dataclasses.replace(ctx.cfg, board=board)
     if not charts:
@@ -1792,10 +1802,21 @@ class RefinePool:
         teams: Sequence[Team],
         chart_indices: Sequence[int] | None = None,
         refine_activation: bool | int | None = None,
+        ceiling: bool = False,
     ) -> list[float]:
         """One float per team, in order. `chart_indices` restricts THIS batch
         to those of the context's charts (see `evaluate`); `None` is all.
-        `refine_activation` overrides the context's flag (a `refine_level`) for this batch."""
+        `refine_activation` overrides the context's flag (a `refine_level`) for this batch.
+        `ceiling`: each team's run score if every ACTIVE fires (on the plain develop, or the
+        level `refine_activation` names), the value a ranking by Max searches on."""
+        if ceiling:
+            chosen = None if chart_indices is None else tuple(chart_indices)
+            return self._run(
+                [
+                    (t.leader.id, tuple(m.id for m in t.members), chosen, refine_activation, True)
+                    for t in teams
+                ]
+            )
         if refine_activation is not None:
             chosen = None if chart_indices is None else tuple(chart_indices)
             items: list[tuple] = [
@@ -1887,10 +1908,27 @@ class RefinePool:
         # a "both" item answers `(expectation, ceiling)`
         return [v if isinstance(v, tuple) else float(v) for v in out]  # type: ignore[arg-type]
 
-    def batch_score_per_chart(self, teams: Sequence[Team]) -> list[list[float]]:
-        """Each team's score on EVERY chart of the context, in chart order (their
-        mean is `batch_score(teams)`'s float). One list per team, in order."""
-        items = [(t.leader.id, tuple(m.id for m in t.members)) for t in teams]
+    def batch_score_per_chart(
+        self,
+        teams: Sequence[Team],
+        chart_indices: Sequence[int] | None = None,
+        *,
+        ceiling: bool = False,
+        planned: Sequence[tuple | None] | None = None,
+    ) -> list[list[float]]:
+        """Each team's score on EVERY chart of the context (or on `chart_indices`), in chart
+        order (their mean is `batch_score(teams)`'s float). One list per team, in order.
+        `ceiling`: each chart's all-fire score instead. `planned[k]`: the `(team board state,
+        bench)` team k is scored on (a re-plan within the materials), None to develop it."""
+        if chart_indices is None and not ceiling and planned is None:
+            items: list[tuple] = [(t.leader.id, tuple(m.id for m in t.members)) for t in teams]
+        else:
+            chosen = None if chart_indices is None else tuple(chart_indices)
+            boards = list(planned) if planned is not None else [None] * len(teams)
+            items = [
+                (t.leader.id, tuple(m.id for m in t.members), chosen, None, ceiling, board)
+                for t, board in zip(teams, boards)
+            ]
         if not items:
             return []
         out: list = [None] * len(items)

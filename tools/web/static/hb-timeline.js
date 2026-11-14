@@ -84,51 +84,118 @@ function paceSeries(o) {
   const P = o.pace, k = o.bar;
   const all = { mean: P.cuts.map(c => c.mean), lo: P.cuts.map(c => c.p10), hi: P.cuts.map(c => c.p90) };
   const sel = k == null ? all : { mean: P.bars.mean[k], lo: P.bars.p10[k], hi: P.bars.p90[k] };
-  return { P, k, all, sel, main: paceLine(P, sel.mean), avg: paceLine(P, all.mean) };
+  return { P, k, all, sel, main: paceLine(P, sel.mean), avg: paceLine(P, all.mean),
+    lo: paceLine(P, sel.lo), hi: paceLine(P, sel.hi) };
 }
+// one stretch per gap between two cuts (0 to the first cut too): the selection's gain, an
+// average run's, their difference, and how much the 10-90 % spread of every run grows there
+// (null when the payload carries no band)
+function paceSegs({ P, all, sel }) {
+  const prev = (a, j) => j ? a[j - 1] : 0;
+  const width = j => all.hi[j] != null && all.lo[j] != null ? all.hi[j] - all.lo[j] : null;
+  return P.cuts.map((c, j) => {
+    const gain = sel.mean[j] == null || (j && sel.mean[j - 1] == null) ? null : sel.mean[j] - prev(sel.mean, j);
+    const avg = all.mean[j] - prev(all.mean, j);
+    const w0 = j ? width(j - 1) : 0, w1 = width(j);
+    return { t0: j ? P.cuts[j - 1].t : 0, t1: c.t, gain, avg, d: gain == null ? null : gain - avg,
+      spread: w0 == null || w1 == null ? null : w1 - w0 };
+  });
+}
+const biggest = (segs, f) => segs.reduce((b, s) => f(s) != null && (b == null || Math.abs(f(s)) > Math.abs(f(b))) ? s : b, null);
+// the lane's layout in px, as hb.css sets it: .tl-pbox starts PB_TOP below the lane's top and is
+// PB_H tall (grade names and value hairlines are placed in px, so they need the plot's height)
+const PB_TOP = 30, PB_H = 132, GRADE_GAP = 14, VAL_ROW = 19, VAL_MIN = .06, STRIP_MID = 14, STRIP_H = 12;
 
 /** `{ who, track }`: the inner HTML of the Score pace label and lane. */
 export function paceParts(o, dur) {
-  const { P, k, all, sel, main, avg } = paceSeries(o);
+  const S = paceSeries(o), { P, k, all, sel, main, avg, lo, hi } = S;
   const pm = o.pmf || {};
   const share = k == null ? null : (P.bars.mass[k] || [])[P.cuts.length - 1];
   const from = k == null ? null : pm.start + k * pm.width, to = from == null ? null : from + pm.width;
   const ok = P.check && P.check.mass != null && P.check.mass < 1e-3;
-  const who = `Score pace${ok ? ` <span class="tl-ok" title="The two sweeps, joined at each cue, give back every bar's share of runs (largest gap ${(P.check.mass * 100).toFixed(3)} points of a percent)">Verified</span>` : ""}
+  const head = `Score pace${ok ? ` <span class="tl-ok" title="The two sweeps, joined at each cue, give back every bar's share of runs (largest gap ${(P.check.mass * 100).toFixed(3)} points of a percent)">Verified</span>` : ""}
     <small>${k == null ? "Average run · click a bar of the Score distribution"
-      : `Runs ending ${thousands(from)} – ${thousands(to)}${share != null ? ` · ${(share * 100).toFixed(1)}% of runs` : ""}`}</small>`;
-  if (!main) return { who, track: `<span class="tl-pnone">No run ends in this bar</span>` };
+      : `Runs ending <b>${thousands(from)} – ${thousands(to)}</b>${share != null ? ` · ${(share * 100).toFixed(1)}% of runs` : ""}`}</small>`;
+  if (!main) return { who: head, track: `<span class="tl-pnone">No run ends in this bar</span>` };
+  const n = P.cuts.length, segs = paceSegs(S);
+  const cls = d => d < 0 ? "dn" : "up";
+  // the strip under the plot: the gap to an average run per stretch (a bar picked), or where
+  // every run's spread grows (no bar picked); hidden when the payload has neither
+  const f = k == null ? (s => s.spread) : (s => s.d);
+  const big = biggest(segs, f);
+  const span = s => `${mmss(s.t0)}–${mmss(s.t1)}`;
+  let who = head;
+  if (k != null) {
+    const endD = sel.mean[n - 1] - all.mean[n - 1];
+    who += `<small><b class="${cls(endD)}">${signedKilo(endD)}</b> vs average at the end</small>`;
+    if (big && big.d) who += `<small>${big.d < 0 ? "Lost" : "Gained"} most ${span(big)} (<b class="${cls(big.d)}">${signedKilo(big.d)}</b>)</small>`;
+  } else if (big && big.spread > 0) {
+    who += `<small>Strip: where runs diverge · most ${span(big)} (<b>+${kilo(big.spread)}</b>)</small>`;
+  }
   const ends = [sel.hi, all.hi].map(a => a[a.length - 1] || 0);
-  const top = Math.max(...ends, 1) * 1.04;
+  const top = Math.max(...ends, sel.mean[n - 1] || 0, 1) * 1.04;
   const X = t => (Math.max(0, Math.min(t, dur)) / dur * PW).toFixed(1), Y = v => (PH - v / top * PH).toFixed(1);
   const L = t => (Math.max(0, Math.min(t, dur)) / dur * 100).toFixed(3) + "%", T = v => ((1 - v / top) * 100).toFixed(2) + "%";
+  const ypx = v => (1 - v / top) * PB_H;
   const path = pts => pts.map(([t, v], i) => `${i ? "L" : "M"}${X(t)},${Y(v)}`).join("");
-  const lo = paceLine(P, sel.lo), hi = paceLine(P, sel.hi);
   const band = lo && hi ? `<path class="band" d="${path(hi)}${lo.slice().reverse().map(([t, v]) => `L${X(t)},${Y(v)}`).join("")}Z"/>` : "";
   const last = main[main.length - 1];
   const area = `<path class="area" d="${path(main)}L${X(last[0])},${PH}L0,${PH}Z"/>`;
   const ref = k == null ? "" : `<path class="ref" d="${path(avg)}"/>`;
-  // the grades these runs pass, with when (≈: between two cues the shape is the Expected's)
   // the grades in the upper part of the lane: the low ones crowd the start, where the curve is
   const grades = (o.grades || []).filter(g => g.threshold >= top * .3 && g.threshold <= top);
   const gLines = grades.map(g => `<line class="g" x1="0" x2="${PW}" y1="${Y(g.threshold)}" y2="${Y(g.threshold)}"/>`).join("");
-  const gMarks = grades.map(g => {
+  const gInfo = grades.map(g => {
     const t = paceCrossing(main, g.threshold), ta = paceCrossing(avg, g.threshold);
-    const tip = t == null ? `Grade ${g.grade} at ${thousands(g.threshold)}: ${k == null ? "not reached by an average run" : "these runs end below it"}`
-      : `Grade ${g.grade} at ${thousands(g.threshold)}: ${k == null ? "an average run reaches it" : "these runs reach it"} at ≈${mmss(t)}${k != null && ta != null ? ` (an average run at ${mmss(ta)})` : ""}`;
-    // a grade passed: a diamond where, named with when; one not passed: its name at the end
-    return t == null ? `<span class="tl-pg" style="top:${T(g.threshold)}" title="${esc(tip)}">${esc(g.grade)}</span>`
-      : `<span class="tl-pd" style="left:${L(t)};top:${T(g.threshold)}" title="${esc(tip)}"><i></i><b>${esc(g.grade)} ≈${mmss(t)}</b></span>`;
-  }).join("");
+    const tip = t == null ? `${g.grade} (${thousands(g.threshold)}): ${k == null ? "not reached by an average run" : "these runs end below it"}`
+      : `${g.grade} (${thousands(g.threshold)}) at ≈${mmss(t)}${k != null && ta != null ? `, an average run at ≈${mmss(ta)}` : ""}`;
+    return { g, t, tip, y: ypx(g.threshold) };
+  });
+  // a grade passed: a bare diamond where (its time in the tooltip and the hover readout)
+  const gMarks = gInfo.filter(x => x.t != null).map(x => `<span class="tl-pd" style="left:${L(x.t)};top:${T(x.g.threshold)}" title="${esc(x.tip)}"><i></i></span>`).join("");
+  // grade names on their lines at the left edge, at least GRADE_GAP apart: pushed down in
+  // threshold order, then back up if the lowest one would leave the plot
+  const names = gInfo.slice().sort((a, b) => a.y - b.y);
+  for (let i = 1; i < names.length; i++) names[i].y = Math.max(names[i].y, names[i - 1].y + GRADE_GAP);
+  for (let i = names.length - 1; i >= 0; i--) names[i].y = Math.min(names[i].y, i + 1 < names.length ? names[i + 1].y - GRADE_GAP : PB_H - 6);
+  const gNames = names.map(x => `<span class="tl-pg${x.t != null ? " on" : ""}" style="top:${x.y.toFixed(1)}px" title="${esc(x.tip)}">${esc(x.g.grade)}</span>`).join("");
   const dots = P.cuts.map((c, j) => {
     const v = sel.mean[j]; if (v == null) return "";
     // the gap to an average run, unless there is none to speak of (before the first window)
     const d = k == null || Math.abs(v - all.mean[j]) < 500 ? null : v - all.mean[j];
-    const band = sel.lo[j] != null && sel.hi[j] != null ? ` ${k == null ? "8 in 10 runs" : "8 in 10 of these runs"} have ${thousands(sel.lo[j])}–${thousands(sel.hi[j])} here.` : "";
-    const tip = `${mmss(c.t)} · ${c.label} · ${k == null ? "An average run" : `Runs ending ${thousands(from)}–${thousands(to)}`}: ${thousands(v)} by here on average${d == null ? "" : ` (an average run: ${thousands(all.mean[j])}, ${d < 0 ? "−" : "+"}${thousands(Math.abs(d))})`}.${band} Exact: from the same calculation as the bars.`;
-    return `<span class="tl-pc${j === P.cuts.length - 1 ? " end" : ""}" style="left:${L(c.t)};top:${T(v)}" title="${esc(tip)}"><i></i><b>${kilo(v)}</b>${d == null ? "" : `<em class="${d < 0 ? "dn" : "up"}">${signedKilo(d)}</em>`}</span>`;
+    const bnd = sel.lo[j] != null && sel.hi[j] != null ? ` ${k == null ? "8 in 10 runs" : "8 in 10 of these runs"} have ${thousands(sel.lo[j])}–${thousands(sel.hi[j])} here.` : "";
+    const tip = `${mmss(c.t)} · ${c.label} · ${k == null ? "An average run" : `Runs ending ${thousands(from)}–${thousands(to)}`}: ${thousands(v)} by here on average${d == null ? "" : ` (an average run: ${thousands(all.mean[j])}, ${d < 0 ? "−" : "+"}${thousands(Math.abs(d))})`}.${bnd} Exact: from the same calculation as the bars.`;
+    return `<span class="tl-pc${j === n - 1 ? " end" : ""}" style="left:${L(c.t)};top:${T(v)}" title="${esc(tip)}"><i></i></span>`;
   }).join("");
-  const track = `<div class="tl-pbox"><svg viewBox="0 0 ${PW} ${PH}" preserveAspectRatio="none" aria-hidden="true">${gLines}${band}${area}${ref}<path class="line" d="${path(main)}"/></svg>${gMarks}${dots}</div>`;
+  // the value row: each cue's figure above its dot, the end's first, then the later cues; a
+  // figure closer than VAL_MIN of the width to a kept one is dropped
+  const kept = [];
+  for (let j = n - 1; j >= 0; j--) {
+    const v = sel.mean[j], x = Math.min(P.cuts[j].t, dur) / dur;
+    if (v == null || kept.some(q => Math.abs(q.x - x) < VAL_MIN)) continue;
+    kept.push({ j, v, x });
+  }
+  const vals = kept.map(({ j, v, x }) => {
+    const side = x > .97 ? " r" : x < .03 ? " l" : "", hair = PB_TOP + ypx(v) - 6 - VAL_ROW;
+    return `<span class="tl-pv${j === n - 1 ? " end" : ""}${side}" style="left:${L(P.cuts[j].t)}">${kilo(v)}</span>` +
+      (hair > 2 ? `<i class="tl-ph" style="left:${L(P.cuts[j].t)};height:${hair.toFixed(1)}px"></i>` : "");
+  }).join("");
+  // the strip: one block per stretch, the largest labelled
+  let strip = "";
+  const fs = segs.map(f);
+  if (fs.some(v => v != null)) {
+    const mx = Math.max(1, ...fs.map(v => Math.abs(v || 0)));
+    const blocks = segs.map((s, i) => {
+      const v = fs[i]; if (v == null) return "";
+      const h = Math.max(1, Math.abs(v) / mx * STRIP_H), c = k == null ? "sp" : cls(v);
+      const tip = `${span(s)}: ${k == null ? `the spread of 8 in 10 runs grows ${signedKilo(v)}` : `${signedKilo(s.gain)} here, an average run ${signedKilo(s.avg)} (${signedKilo(v)})`}`;
+      return `<span class="tl-pb ${c}" style="left:calc(${L(s.t0)} + 2px);width:calc(${L(s.t1)} - ${L(s.t0)} - 4px);top:${(v < 0 ? STRIP_MID : STRIP_MID - h).toFixed(1)}px;height:${h.toFixed(1)}px" title="${esc(tip)}"></span>`;
+    }).join("");
+    const bv = big ? f(big) : null;
+    const lab = bv ? `<span class="tl-pbl ${k == null ? "sp" : cls(bv)}" style="left:${L((big.t0 + big.t1) / 2)};top:${bv < 0 ? STRIP_MID - 7 : STRIP_MID + 7}px">${signedKilo(bv)}</span>` : "";
+    strip = `<div class="tl-pstrip"><i class="z"></i>${blocks}${lab}</div>`;
+  }
+  const track = `${vals}<div class="tl-pbox"><svg viewBox="0 0 ${PW} ${PH}" preserveAspectRatio="none" aria-hidden="true">${gLines}${band}${area}${ref}<path class="line" d="${path(main)}"/></svg>${gMarks}${dots}${gNames}</div>${strip}`;
   return { who, track };
 }
 /** Show another bar's pace (`o.bar`) in a rendered timeline. */
@@ -137,7 +204,9 @@ export function setPace(el, o) {
   const who = tl.querySelector(".tl-pace-who"), track = tl.querySelector(".tl-pace");
   if (!who || !track) return;
   const parts = paceParts(o, +tl.dataset.dur || 1);
-  who.innerHTML = parts.who; track.innerHTML = parts.track;
+  // the lane's 15 s grid and cue lines stay; everything the pace draws is replaced together
+  const grid = [...track.children].filter(c => c.matches(".tl-g, .tl-c")).map(c => c.outerHTML).join("");
+  who.innerHTML = parts.who; track.innerHTML = grid + parts.track;
   el._pace = o;
 }
 
@@ -148,6 +217,8 @@ export function html(T, opts = {}) {
   const dur = T.song_seconds || 1;
   const pc = v => (Math.max(0, Math.min(v, dur)) / dur * 100).toFixed(3) + "%";
   const wd = (a, b) => `calc(${pc(b)} - ${pc(a)})`;
+  // a window at either end of the song: its chance reads inward, never past the lane's edge
+  const edge = a => a.start / dur < .03 ? " edge-l" : Math.min(a.end, dur) / dur > .97 ? " edge-r" : "";
   const lanes = T.lanes.map((ln, k) => ({ ...ln, color: LANE[k % LANE.length] }));
   const name = opts.name || (id => id), face = opts.face || (id => `/chricon/${encodeURIComponent(chrOf(id))}`);
   const grid = []; for (let s = 15; s < dur; s += 15) grid.push(s);
@@ -200,7 +271,7 @@ export function html(T, opts = {}) {
         <span class="tl-nm"><b>${esc(name(ln.card_id) || ln.member)}</b><small>${esc(facts)}</small></span></div>
       <div class="tl-track" style="--lc:${ln.color}">${gridHTML}
         ${ln.special.map(s => `<span class="tl-sp" style="left:${pc(s.start)};width:${wd(s.start, s.end)}"><img src="${UI}ui_800_thm_skill_sp_base.png" alt=""></span>`).join("")}
-        ${ln.active.filter(a => a.start < dur).map(a => `<span class="tl-ac${boosted(a) ? " up" : ""}" style="left:${pc(a.start)};width:${wd(a.start, a.end)}"${boosted(a) ? ` title="${esc(`${pct(chance(a))} here: raised by the Special of ${a.rider_from.join(" and ")}`)}"` : ""}>${(a.end - a.start) / dur > .035 ? `<em>${pct(chance(a))}</em>` : ""}</span>`).join("")}
+        ${ln.active.filter(a => a.start < dur).map(a => `<span class="tl-ac${boosted(a) ? " up" : ""}${edge(a)}" style="left:${pc(a.start)};width:${wd(a.start, a.end)}"${boosted(a) ? ` title="${esc(`${pct(chance(a))} here: raised by the Special of ${a.rider_from.join(" and ")}`)}"` : ""}>${(a.end - a.start) / dur > .035 ? `<em>${pct(chance(a))}</em>` : ""}</span>`).join("")}
       </div>`;
   }).join("");
   const cueRail = (T.special_cues || []).map((s, k) => `<span class="tl-cue" style="left:${pc(s)};--lc:${lanes[k] ? lanes[k].color : "#fff"}" title="Special cue ${k + 1} at ${s.toFixed(1)} s fires slot ${k + 1}">
@@ -210,7 +281,9 @@ export function html(T, opts = {}) {
     const parts = paceParts(opts.pace, dur);
     paceRow = `<div class="tl-who tl-lab tl-pace-who">${parts.who}</div><div class="tl-track tl-pace">${gridHTML}${parts.track}</div>`;
   }
-  const axis = [0, ...grid].map(s => `<span style="left:${pc(s)}">${mmss(s)}</span>`).join("") + `<span class="end" style="left:100%">${mmss(dur)}</span>`;
+  // a 15 s mark too close to the song end would print over the end's own label
+  const axis = [0, ...grid].filter(s => s === 0 || (dur - s) / dur > .05).map(s => `<span style="left:${pc(s)}">${mmss(s)}</span>`).join("")
+    + `<span class="end" style="left:100%">${mmss(dur)}</span>`;
   return `<div class="tl" data-dur="${dur}" title="Active % = that check's chance as the score rolls it: the card's base chance raised by the team's and the Holomem Board's Activation Rate UP, and by a Special's Activation Rate UP while it is live (brighter windows). Windows are as the scorer schedules them, not clamped to the song end.">
     <div class="tl-who tl-lab">Special cues</div><div class="tl-rail">${cueRail}</div>
     ${notesRow}
@@ -249,13 +322,25 @@ export function render(el, T, opts = {}) {
       (sp.length || live.length ? "" : `<div class="r">No skill window open</div>`) +
       `<div class="f">Expected Actives live <b>${exp.toFixed(2)}</b></div>` + paceRead(t);
   };
-  // the selected runs' score by the hovered time, against an average run's
+  // the selected runs' score by the hovered time, against an average run's, their 8-in-10
+  // band and the stretch between two cues the time falls in
   const paceRead = t => {
     const o = el._pace; if (!o || !o.pace) return "";
-    const { k, main, avg } = paceSeries(o), v = paceAt(main, t), a = paceAt(avg, t);
+    const S = paceSeries(o), { k, main, avg, lo, hi } = S, v = paceAt(main, t), a = paceAt(avg, t);
     if (v == null) return "";
     const at = o.pace.cuts.some(c => Math.abs(c.t - t) < .25) ? "" : "≈";
-    return `<div class="f">${k == null ? "An average run" : "These runs"} by here <b>${at}${thousands(v)}</b>${k == null || a == null ? "" : ` · average ${at}${thousands(a)}`}</div>`;
+    const gap = k == null || a == null || Math.abs(v - a) < 500 ? "" : ` · <b>${signedKilo(v - a)}</b> vs average`;
+    const l = paceAt(lo, t), h = paceAt(hi, t);
+    const band = l != null && h != null && h > l ? `<br>8 in 10 ${k == null ? "runs" : "of these"} <b>${kilo(l)}–${kilo(h)}</b>` : "";
+    const seg = paceSegs(S).find(s => t <= s.t1) || null;
+    const segR = seg && seg.gain != null ? `<br>${mmss(seg.t0)}–${mmss(seg.t1)} gains <b>${signedKilo(seg.gain)}</b>${k == null || seg.d == null ? "" : ` (${signedKilo(seg.d)} vs average)`}` : "";
+    // the grades these runs pass in that stretch, with when (and when an average run does)
+    const fin = main[main.length - 1][1];
+    const crossed = !seg ? [] : (o.grades || []).filter(g => g.threshold >= fin * .3)
+      .map(g => ({ g, t: paceCrossing(main, g.threshold), ta: paceCrossing(avg, g.threshold) }))
+      .filter(x => x.t != null && x.t > seg.t0 && x.t <= seg.t1);
+    const gr = crossed.length ? `<br>${crossed.map(x => `<b>${esc(x.g.grade)}</b> at ≈${mmss(x.t)}${k != null && x.ta != null ? ` (average ≈${mmss(x.ta)})` : ""}`).join(" · ")}` : "";
+    return `<div class="f">${k == null ? "An average run" : "These runs"} by here <b>${at}${thousands(v)}</b>${gap}${band}${segR}${gr}</div>`;
   };
   tl.addEventListener("mousemove", e => {
     const r = over.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right) { pin.hidden = read.hidden = true; return; }

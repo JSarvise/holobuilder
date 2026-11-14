@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/hb.css">
 <link rel="stylesheet" href="/holoboard.css">
 <link rel="stylesheet" href="/optimizer.css">
+<link rel="stylesheet" href="/hb-carddetail.css">
 <!-- the leader's Live2D figure (hb-live2d.js): the engine imports the bare name "pixi.js";
      the search's runner chibi (hb-runner.js): three.js's GLTFLoader imports the bare name "three" -->
 <script type="importmap">{"imports":{"pixi.js":"https://cdn.jsdelivr.net/npm/pixi.js@8.22.0/dist/pixi.min.mjs","three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"},
@@ -59,8 +60,10 @@
           <div class="seg" id="goal" role="group" aria-label="Goal">
             <button type="button" data-v="score" aria-pressed="true">Score</button>
             <button type="button" data-v="event" aria-pressed="false">Event</button>
+            <button type="button" data-v="rating" aria-pressed="false" title="Climb a holomem's high-score ranking">Holomem Rating</button>
           </div>
           <div class="seg" id="difficulty" role="group" aria-label="Difficulty"></div>
+          <label class="o-rtlv" id="rlevelwrap" hidden title="The hardest chart you Full Combo with few Greats: each song is played at its hardest chart up to this level"><span>Up to level</span><select id="rlevel" aria-label="Highest level you Full Combo"></select></label>
         </div>
         <div class="o-actions">
           <button class="btn" id="change" type="button">Change song</button>
@@ -102,6 +105,41 @@
           </div></div>
       </div>
       <p class="o-muted">The leader adds no Event Bonus: it counts the five members only.</p>
+    </div>
+    <div class="o-group" data-goal="rating">
+      <h4>Holomem Rating</h4>
+      <div class="o-sel"><span>Search</span>
+        <div class="seg" id="rmode" role="group" aria-label="Search">
+          <button type="button" data-v="each" aria-pressed="true" title="The best team for each song, each on its own boards">A team per song</button>
+          <button type="button" data-v="one" aria-pressed="false" title="One team that raises your rating the most over her songs: no change between songs">One team for every song</button>
+        </div></div>
+      <div class="o-sel" id="rboardrow"><span>Holomem Boards of the one team</span>
+        <div class="seg" id="rboard" role="group" aria-label="Holomem Boards of the one team">
+          <button type="button" data-v="one" aria-pressed="true" title="One board setup for every song: nothing to reset between songs">One setup for every song</button>
+          <button type="button" data-v="per" aria-pressed="false" title="Each song on boards planned for it: a little higher, but nodes are reset between songs (1,000 Hologold each)">A setup per song</button>
+        </div></div>
+      <div class="o-two">
+        <div class="o-sel"><span>Rank by</span>
+          <div class="seg" id="rsort" role="group" aria-label="Rank by">
+            <button type="button" data-v="max" aria-pressed="true" title="The team's run if every Active skill fires: the ranking keeps your best run">Max</button>
+            <button type="button" data-v="avg" aria-pressed="false" title="An average run">Expected</button>
+          </div></div>
+        <div class="o-sel"><span>Songs to search</span>
+          <div class="seg" id="rsongs" role="group" aria-label="Songs to search">
+            <button type="button" data-v="3" aria-pressed="false">3</button>
+            <button type="button" data-v="5" aria-pressed="true">5</button>
+            <button type="button" data-v="8" aria-pressed="false">8</button>
+            <button type="button" data-v="all" aria-pressed="false">All</button>
+          </div></div>
+      </div>
+      <div class="o-sel" id="rteamsrow"><span>Teams per song</span>
+        <div class="seg" id="rteams" role="group" aria-label="Teams per song">
+          <button type="button" data-v="1" aria-pressed="false">1</button>
+          <button type="button" data-v="3" aria-pressed="true">3</button>
+          <button type="button" data-v="5" aria-pressed="false">5</button>
+        </div></div>
+      <label class="o-toggle"><span><b>Only songs you own</b><small>Off: every song of hers, owned or not.</small></span><input class="o-switch" id="rowned" type="checkbox" checked></label>
+      <p class="o-muted">She leads every team: a play counts for the leader's ranking. The songs searched are her best by chart; tick others in the list.</p>
     </div>
     <div class="o-group">
       <h4>Cards</h4>
@@ -172,7 +210,7 @@
         <label class="o-sel"><span>To level</span><input type="number" id="lvhi" min="1" max="40"></label>
       </div>
     </div>
-    <div class="o-group">
+    <div class="o-group" id="leadergroup">
       <h4>Leader</h4>
       <label class="o-sel"><span>Holomem</span><select id="lmember"><option value="">Any holomem</option></select></label>
       <label class="o-sel"><span>Outfit</span><select id="loutfit" disabled><option value="">The best outfit she has</option></select></label>
@@ -197,6 +235,11 @@
           <button type="button" data-v="5" aria-pressed="true">5</button>
           <button type="button" data-v="10" aria-pressed="false">10</button>
           <button type="button" data-v="20" aria-pressed="false">20</button>
+        </div></div>
+      <div class="o-sel" data-goal="event_song"><span>Sort by</span>
+        <div class="seg" id="evsort" role="group" aria-label="Sort by">
+          <button type="button" data-v="avg" aria-pressed="true">Expected</button>
+          <button type="button" data-v="max" aria-pressed="false">Max</button>
         </div></div>
       <div class="o-sel" data-goal="event"><span>Teams to show</span>
         <div class="seg" id="evtop" role="group" aria-label="Teams to show">
@@ -245,6 +288,8 @@
 
 <!-- Song picker -->
 <dialog class="o-picker sp-dialog" id="picker" aria-label="Choose a song"></dialog>
+<!-- Holomem picker (goal Holomem Rating) -->
+<dialog class="dlg o-rt-pick" id="hmpicker" aria-label="Choose a holomem"></dialog>
 <div class="o-pop" id="pop" role="dialog" hidden></div>
 <div class="o-tip" id="tip" role="tooltip" hidden></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>

@@ -8,6 +8,9 @@ const NF = new Intl.NumberFormat("en-US");
 export const fmt = n => (n == null || Number.isNaN(+n)) ? "—" : NF.format(Math.round(+n));
 export const dec = (n, d) => (+n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 export const sgn = (n, d = 1) => (n >= 0 ? "+" : "−") + dec(Math.abs(n), d) + "%";
+// a gap between two rows: one decimal, two when it would read 0.0 % (close teams differ by a
+// few hundredths), and an exact tie without a sign
+export const gap = n => Math.abs(n) < 0.0005 ? "±0%" : sgn(n, Math.abs(n) < 0.05 ? 2 : 1);
 export const pct = permil => permil == null ? "—" : `+${dec(permil / 10, permil % 10 ? 1 : 0)}%`;
 // dates in the app's one style, "15 Oct 19:04" (HBFmt.date, /hb-format.js); the local
 // fallback only covers a page loaded without that script
@@ -171,6 +174,13 @@ export function unstash(name, ctx) {
     const s = JSON.parse(sessionStorage.getItem("hb.optimizer." + name) || "null");
     return s && s.read === ((ctx.D.meta || {}).snapshot_mtime ?? null) ? s.value : null;
   } catch (_) { return null; }
+}
+
+// A team card that opens the card dialog (opt-carddlg.js): its id and the level, Bloom and
+// Limit Break this view drew it with (the "As scored" column).
+export function cardHook(c) {
+  const at = (k, a) => (c && c[k] != null ? ` data-${a}="${esc(c[k])}"` : "");
+  return `data-card="${esc((c && c.id) || "")}"${at("level", "lv")}${at("bloom", "bl")}${at("limit_break", "lb")} tabindex="0" role="button" aria-haspopup="dialog" aria-label="${esc(((c && c.member) || "") + " card details")}"`;
 }
 
 // Each result card AS THE SEARCH SCORED IT (with "max level, bloom 5" a card must show the

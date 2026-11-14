@@ -951,6 +951,10 @@ def row_payload(
     }
     if "plan_optimal" in r:
         out["plan_optimal"] = r["plan_optimal"]
+    if r.get("song_max") is not None:
+        # the row's Max (`row_ceilings`) and its Event Song Score
+        out["song_max"] = float(r["song_max"])
+        out["event_song_score_max"] = mar.event_song_score(round(r["song_max"]), p)
     return out
 
 
@@ -997,7 +1001,7 @@ def add_row_detail(
         {
             "member_order": got.get("member_order"),
             "deck_power": got.get("deck_power"),
-            "song_max": got.get("song_max"),
+            "song_max": got.get("song_max") if got.get("song_max") is not None else row.get("song_max"),
             "board_state": got.get("board_state"),
             "bench_slots": got.get("bench_slots"),
             "unit_score": split.get("unit_score")
@@ -1015,6 +1019,33 @@ def add_row_detail(
         import row_detail  # noqa: PLC0415
 
         row.update({k: v for k, v in row_detail.quantile_fields(got).items() if k != "song_max"})
+    if row.get("event_song_score_max") is not None and row.get("song_max") is not None:
+        # the detail's own Max (the same board): the Event Song Score follows it
+        row["event_song_score_max"] = mar.event_song_score(round(row["song_max"]), row["song_permil"])
+
+
+def row_ceilings(
+    rows: Sequence[dict], reps: Sequence[Card], pool: Any, planned: Mapping[int, tuple] | None
+) -> None:
+    """Each row's `song_max`: the run score if every ACTIVE fires, at the slot order its
+    expectation plays, on the board it is served on -- the activation refinement it was
+    served at (`refined`), or its own plan within the materials (`planned[id(row)]`, the
+    `(team board state, bench)` of a re-planned search; a row without one keeps none). One
+    pass in the pool's workers (`RefinePool.batch_ceiling`, as the Score search's
+    `ondemand.Engine._ceilings`), on the context's one chart."""
+    from hbuilder.domain.team import Team  # noqa: PLC0415
+
+    keys, teams, refine, boards = [], [], [], []
+    for r in rows:
+        board = None if planned is None else planned.get(id(r))
+        if planned is not None and board is None:
+            continue
+        keys.append(r)
+        teams.append(Team(leader=r["leader"], members=tuple(reps[i] for i in r["members"])))
+        refine.append(1 if r.get("refined") else 0)
+        boards.append(board)
+    for r, value in zip(keys, pool.batch_ceiling(teams, [0], refine, boards)):
+        r["song_max"] = float(value)
 
 
 # --- the real account basis -------------------------------------------------------
@@ -1473,6 +1504,9 @@ def run_account_search(
         # Highlight: the exact plan within materials is per song (one board for one chart),
         # so it is not run; the bound's certification neither (HIGHLIGHT notes)
         replan = assumptions is not None and assumptions.replan and not highlight
+        # Event Song Score on one song: every served row gets its Max (a Highlight pool has
+        # no single run; Event Points are not ranked by a best run)
+        with_max = objective == "event_song" and not highlight
         found = search_event(
             reps=reps,
             leaders=leaders,
@@ -1548,7 +1582,8 @@ def run_account_search(
                 difficulty=difficulty,
             )
             found["bound"] = None
-            for r in found["rows"][:DETAIL_ROWS]:
+            # the rows served on their own plan: the detail's, and every row's ceiling below
+            for r in found["rows"][: max(DETAIL_ROWS, opts["top"]) if with_max else DETAIL_ROWS]:
                 whole = materials_plan_for(r, reps, song, assumptions)  # type: ignore[arg-type]
                 if whole is not None:
                     planned[id(r)] = whole
@@ -1572,6 +1607,12 @@ def run_account_search(
             )
             check()
             on_stage("refine", "done", {})
+        if with_max:
+            # every served row's Max (`row_ceilings`), so the page can rank by it
+            on_stage("ceiling", "active", {"teams": min(len(found["rows"]), opts["top"])})
+            row_ceilings(found["rows"][: opts["top"]], reps, pool, planned if replan else None)
+            check()
+            on_stage("ceiling", "done", {})
 
     seconds = None if highlight else song_info.get("seconds")
     length = length_permil_estimate(HIGHLIGHT_SECONDS if highlight else seconds, opts["boosts"])

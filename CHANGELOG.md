@@ -2,6 +2,29 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.5 (2026-11-13)
+- **Running from source: `update.cmd`** (`./update.sh` on Linux) brings each new version from GitHub, runs setup when the packages changed, then refreshes. A plain `git pull` stops with "Your local changes ... would be overwritten by merge: data/cards.json" once a refresh has added cards; `update.cmd` sets those cards aside and the refresh adds them back. **This first time, update by hand** (the folder has no `update.cmd` yet): `git checkout -- data/cards.json`, `git pull`, `setup.cmd`, `refresh.cmd` ([Run it from source, Updating](docs/run-locally.md#updating)).
+- **Refresh about four times faster** (35 s to 9 s on a typical account). It signs in once instead of five times, keeps one connection to the game open, reads your own event rank without pauses, and fetches the 54 Holomem Rating reward borders four at a time. What it brings in is the same as before.
+- **Fix:** opening a page (Collection, for example) while the Optimizer was still working could leave it stuck on "Loading the catalogue..." with nothing clickable. The pages now load whatever the Optimizer is doing.
+- **Holomem Rating:** the last answer stays when you move to another page and come back, with the song and team you picked. In "one team for every song", the strip shows the five members and the title names the leader.
+- **Member Power-Up Bonus:** when a search raises your cards' levels ("My cards, upgraded", "Maxed account"), the line in the team's Unit Score Details is underlined; hovering says how much the search's levels raise the rate and about what the line is with your cards as they are.
+
+## 0.2.4 (2026-11-12)
+- **Event Song Score: sort by Expected or Max.** Options has a Sort by control on the Event Song Score goal; every team of a one-song search now carries its Max (every Active fires) and its Max Event Song Score, and sorting by Max ranks and shows them by it (not for Highlight, a random pool with no single best run).
+- **Click a team's card for its full detail.** In the Optimizer (Score, Event and Holomem Rating), clicking any of a team's six cards opens the same card screen as Collection: its level, Bloom and Limit Break as the search scored them beside your own, its skills, Outfit Skill, stats and event bonus; the arrows step through the six cards.
+
+## 0.2.3 (2026-11-12)
+- **Score pace, redesigned.** Clicking a bar of the Score distribution now shows a clean curve: each Special's score in one row above it, the grades at its left edge, and under it a strip that shows, stretch by stretch between Specials, what those runs gained or lost against an average run. The lane's title says the gap at the end and the stretch that decided it; hovering gives the gap, the 8-in-10 band and that stretch's gain at any moment. With no bar picked, the strip shows where runs spread apart.
+
+## 0.2.2 (2026-11-12)
+- **Fix (update now):** in 0.2.1 a team's details in the Optimizer (Unit Score, Skill uptime, the Holomem Board plan) could stay loading after a search. They load again.
+- Skill uptime: nothing runs past the right edge any more (the last Active chances, the song's end time, the Score pace's last figures), and a Special's badge no longer covers the Active chances under it.
+
+## 0.2.1 (2026-11-12)
+- **Holomem Rating, a new goal in the Optimizer.** Climb one holomem's high-score ranking: your rating on her (your three best songs of hers, each worth its highest score / 5,000, rounded up), your rank and the next reward border, and the songs that count for her, each at its hardest chart up to the level you Full Combo. Two searches, with her leading (a play counts for the leader): **a team per song**, ranked by Max (every Active fires: the ranking keeps your best run) or by Expected, with the rating each song would reach and what it adds to your top three; or **one team for every song**, ranked by the rating it leaves, on one board setup for every song or a setup per song. Refresh reads your records, the songs you own and your rank on every holomem.
+- The score headers keep their figures in fixed places from the first paint, and every-song rows no longer show an empty Max slot.
+- A refresh on a fresh install creates the folders it writes into.
+
 ## 0.2.0 (2026-11-11)
 Every update since 0.1.45 together, on a renewed code base; the first seven points are new since 0.1.62.
 - **Safer by default (update now).** The local server answers only its own pages: every request must name it as 127.0.0.1 or localhost, every change needs the page's own session key, and the scripts it loads from a CDN are checked against their hashes. Uninstalling removes only what the install put there, never a folder it did not create; the installer that runs updates is replaced with every update; the collection editor saves only a collection the app can read, and never empties one; the refresh writes its files whole.

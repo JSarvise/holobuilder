@@ -420,14 +420,14 @@ def fetch_region(
 ) -> list[dict]:
     import account_snapshot as asnap  # noqa: PLC0415  (network deps only when fetching)
 
-    host, credential = asnap.load_credential(account)
+    # The user's own account reads only its own few rows (its rank and Event Pt), back to back on
+    # one connection as the game client does; the guests' reads keep the 1 s pace.
+    pace = 0.0 if account == "main" else PACE_S
+    host, _credential = asnap.load_credential(account)
     if not host.startswith(region + "."):
         raise RuntimeError(f"account {account!r} lives on {host}, not region {region!r}")
-    ident = asnap.client_headers(account)
-    mv = asnap.fetch_master_version(host, ident)
-    time.sleep(PACE_S)
-    token = asnap.login(host, credential, ident, mv)
-    time.sleep(PACE_S)
+    host, ident, mv, token = asnap.session(account)
+    time.sleep(pace)
     try:
         blob = _grpc(asnap, host, "/rpc.api.Event/ListEventInfo", b"", token, ident, mv)
     except RuntimeError as exc:
@@ -446,7 +446,7 @@ def fetch_region(
         # the user's own Event Pt of every event still listed (until its exchange closes), for
         # the event history: once the event leaves the list nothing serves it again
         for eid in sorted({ch["event_id"] for ch in listed if ch.get("event_id")}):
-            time.sleep(PACE_S)
+            time.sleep(pace)
             try:
                 pts = parse_top_points(_grpc(asnap, host, RPC_TOP, request_body(eid), token, ident, mv))
             except RuntimeError as exc:
@@ -472,7 +472,7 @@ def fetch_region(
         for kind, rpc, music_id in kinds_for(ch, songs):
             if kind in done:
                 continue
-            time.sleep(PACE_S)
+            time.sleep(pace)
             try:
                 res = parse_ranking_result(
                     _grpc(asnap, host, rpc, request_body(ch["chapter_id"], music_id), token, ident, mv)

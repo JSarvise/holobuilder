@@ -80,12 +80,10 @@ def items_from_userdata(body: bytes) -> list[dict]:
 
 
 def live() -> list[dict]:
-    """One `Master/Get`, one `Auth/Login`, one `User/Get`. Nothing else."""
-    host, credential = snap.load_credential("main")
-    ident = snap.client_headers("main")
-    master_version = snap.fetch_master_version(host, ident)
-    token = snap.login(host, credential, ident, master_version)
-    return items_from_userdata(snap.fetch_userdata(host, token, ident, master_version))
+    """The items of the account's `User/Get`: the refresh's shared copy, else one `Master/Get`,
+    one `Auth/Login` and one `User/Get`. Nothing else."""
+    host, ident, master_version, token = snap.session("main")
+    return items_from_userdata(snap.userdata(host, token, ident, master_version))
 
 
 def write(items: list[dict], source: str) -> None:

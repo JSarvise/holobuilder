@@ -557,6 +557,7 @@ class Api:
         names = {
             "account": "reading your cards and boards…",
             "inventory": "reading your items…",
+            "holomem_rating": "reading your Holomem Rating…",
             "board": "building your Holomem Boards…",
             "board_export": "laying out the boards…",
         }

@@ -69,6 +69,10 @@ LENS_SEARCH = True
 RANKING = 50  # teams served, best first (a true top N)
 ROWS = 8  # per-leader rows (each leader's best), the secondary view
 HINTS = 20  # pairs kept per (song, filters) as the next request's seeds
+# merged (Holomem Rating) searches: the rows served, and the teams re-planned song by song
+# within the materials when each song keeps its own board (each costs one plan per song)
+MERGED_ROWS = 5
+MERGED_REPLAN_TEAMS = 8
 # In general (no song): the search ranks by the mean over this many charts
 # (`two_stage.chart_sample`); the best GENERAL_RESCORE teams are then scored on every chart and
 # only those full means are served
@@ -592,6 +596,8 @@ class Engine:
         assumptions: Assumptions | None = None,
         levels: tuple[int, int] | None = None,
         play: tuple[str, bool] = ("mobile", False),
+        chart_keys: tuple[str, ...] | None = None,
+        board_cast: frozenset | None = None,
     ) -> None:
         self.basis = basis
         self.play = tuple(play)  # type: ignore[assignment]
@@ -600,6 +606,12 @@ class Engine:
         # holodori.best's "any song" level range: every chart of ANY difficulty whose level
         # is in it (In general only; `difficulty` then only names the leaf's nominal chart)
         self.levels = tuple(levels) if levels else None
+        # a fixed list of charts (`"<music>/<DIFFICULTY>"`, any difficulty), indexed by those
+        # keys: the songs one Holomem Rating team is searched for (`search_merged`)
+        self.chart_keys = tuple(chart_keys) if chart_keys else None
+        # one board for all of them, planned for this cast (`RefineContext.board_cast`);
+        # None: each chart on the boards of its own singer context (`board_per_chart`)
+        self.board_cast = board_cast
         t0 = time.perf_counter()
         built = (
             build_inputs(assumptions, self.difficulty)
@@ -608,7 +620,14 @@ class Engine:
         )
         self.mf = members_first
         path = leaf_inputs.charts_path(self.difficulty)
-        if self.levels:
+        if self.chart_keys:
+            library = leaf_inputs.chart_library(leaf_inputs.charts_path("HARD"))  # charts_all.json
+            missing = [k for k in self.chart_keys if k not in library.charts]
+            if missing:
+                raise KeyError(f"no chart on disk for {', '.join(missing)}")
+            self.charts = tuple(library.charts[k] for k in self.chart_keys)
+            self.index = {k: i for i, k in enumerate(self.chart_keys)}
+        elif self.levels:
             lo, hi = self.levels
             library = leaf_inputs.chart_library(leaf_inputs.charts_path("HARD"))  # charts_all.json
             self.charts = tuple(
@@ -630,7 +649,10 @@ class Engine:
         self.reps = list(built["reps"])
         self.by_id = built["by_id"]
         ctx = dataclasses.replace(
-            with_play(built["ctx"], self.play), charts=tuple(self.charts), board_per_chart=True
+            with_play(built["ctx"], self.play),
+            charts=tuple(self.charts),
+            board_per_chart=board_cast is None,
+            board_cast=board_cast,
         )
         self.workers = workers or default_workers()
         # the server's one set of workers (`shared_pool`): an engine adds its context to
@@ -666,6 +688,9 @@ class Engine:
         # shown on a song and for every row off a song (`SHOWN_ROWS`)
         first = materials_plan.first_opts(opts)
         singers = set(self.charts[self.index[song]].singers or ()) if song in self.index else set()
+        # an engine on a list of charts indexes them "<music>/<DIFFICULTY>": the planner takes
+        # the music id
+        song = song.split("/", 1)[0] if song else song
 
         def sings(r):
             return "chr-" + leaders[r[1]].id.split("-")[1] in singers
@@ -986,9 +1011,19 @@ class Engine:
         top: int = RANKING,
         seed: int = 20261016,
         assumptions: Assumptions | None = None,
+        objective: str = "expected",
     ) -> dict:
         """`assumptions`: this search's (default the engine's); they may differ from the
-        engine's only in what `Assumptions.engine_key` leaves out."""
+        engine's only in what `Assumptions.engine_key` leaves out.
+
+        `objective` "max" (one song): the search ranks every team by its Max, the run score
+        if every ACTIVE fires, on the plain develop (no activation refinement: it chooses the
+        nodes for the expectation); the rows come sorted by Max, each with its expectation
+        on the same board. A high-score ranking keeps a player's best run, which a team with
+        more chance-driven skills reaches more often than its expectation says."""
+        if objective not in ("expected", "max"):
+            raise ValueError(f"unknown objective {objective!r}")
+        by_max = objective == "max"
         a = self.assumptions if assumptions is None else assumptions
         if (a is None) != (self.assumptions is None) or (
             a is not None and a.engine_key() != self.assumptions.engine_key()  # type: ignore[union-attr]
@@ -997,6 +1032,8 @@ class Engine:
         replan = a is not None and a.replan
         filters = filters or Filters()
         general = not song
+        if general and by_max:
+            raise ValueError("the Max objective ranks one song")
         if general:
             chart = None
             chart_indices = self.general_sample(emit=emit, cancel=cancel)
@@ -1032,7 +1069,7 @@ class Engine:
         lpos = {c.id: k for k, c in enumerate(leaders)}
         # the plan's options too: a search seeded by another option's teams would not be
         # the one that option gets on an engine of its own
-        hint_key = (song, filters.key(), a.key() if a is not None else None)
+        hint_key = (song, filters.key(), a.key() if a is not None else None) + (("max",) if by_max else ())
         # the song's singers lead with every proposed set (`joint_search`'s `always`): the
         # screen learns each set under its best leader, so a singer whose teams rank a few
         # % lower would be scored on a handful of sets and her own best sets never proposed
@@ -1055,7 +1092,7 @@ class Engine:
         # team that only shines with fewer frequency nodes out of the teams it plans (m0342:
         # a #1 0.85 % higher, the same #1 on four other songs, the same time). Boards as they
         # are have no count to choose
-        lens = LENS_SEARCH and not general and (a is None or a.boards != "as_is")
+        lens = LENS_SEARCH and not general and (a is None or a.boards != "as_is") and not by_max
 
         # a lens search re-planned within the materials keeps each team's plain value too, for
         # the plain order's pick (`LENS_UNION`)
@@ -1066,6 +1103,8 @@ class Engine:
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
             teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for li, s in pairs]
+            if by_max:
+                return self.pool.batch_score(teams, chart_indices=chart_indices, ceiling=True)
             if plain_of is not None:
                 both = self.pool.batch_score(
                     teams,
@@ -1219,7 +1258,11 @@ class Engine:
             else:
                 # the refinement: the best teams with their activation nodes chosen jointly; no
                 # activation refinement on a board that is not the one served (`as_is` above)
-                chosen = [] if as_is else self._count_funnel(ranking, leaders, pool, chart_indices, lens=lens)
+                chosen = (
+                    []
+                    if as_is or by_max
+                    else self._count_funnel(ranking, leaders, pool, chart_indices, lens=lens)
+                )
                 teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in chosen]
                 refined = (
                     self.pool.batch_score(teams, chart_indices=chart_indices, refine_activation=True)
@@ -1237,7 +1280,7 @@ class Engine:
                     ranking, plain_order = self._screen_for_replan(
                         ranking, leaders, pool, chart_indices, also=plain_order
                     )
-                elif replan:
+                elif replan and not by_max:
                     ranking = self._screen_for_replan(ranking, leaders, pool, chart_indices)
         t_refine = time.perf_counter() - t0 - search_seconds
         better = {(li, s): max(float(v), plain) for (plain, li, s), v in zip(chosen, refined)}
@@ -1326,6 +1369,24 @@ class Engine:
             self._ceilings(
                 served, leaders, pool, chart_indices, on_refined, planned_boards, cancel, replan, known
             )
+        if by_max and served:
+            if not replan:
+                # the search's values are the Max; each row's expectation on the same board
+                for row, e in zip(
+                    served,
+                    self.pool.batch_score(
+                        [
+                            Team(
+                                leader=leaders[lpos[r["leader"]]],
+                                members=tuple(pool[position[m]] for m in r["members"]),
+                            )
+                            for r in served
+                        ],
+                        chart_indices=chart_indices,
+                    ),
+                ):
+                    row["best"] = float(e)
+            served.sort(key=lambda t: -(t["song_max"] if t["song_max"] is not None else t["best"]))
         t_ceiling = time.perf_counter() - t_ceiling
         # each leader's best team, with its next sets as alternatives
         by_leader: dict[str, list[dict]]
@@ -1345,7 +1406,7 @@ class Engine:
                 for t in ts[1:5]
             ]
             rows.append(head)
-        rows.sort(key=lambda t: -t["best"])
+        rows.sort(key=lambda t: -((t["song_max"] or t["best"]) if by_max else t["best"]))
         self.hints[hint_key] = [
             (leaders[li].id, tuple(pool[i].id for i in s)) for _v, li, s in ranking[:HINTS]
         ]
@@ -1390,6 +1451,8 @@ class Engine:
                 if general and self.levels
                 else f"mean score over every {self.difficulty} chart, {per_song}"
                 if general
+                else f"Max (every Active fires) on this song's {self.difficulty} chart"
+                if by_max
                 else f"expected score on this song's {self.difficulty} chart"
             ),
             "method": (
@@ -1406,6 +1469,8 @@ class Engine:
                 "(no cache); the best teams re-scored with the activation refinement"
             ),
             "on_demand": True,
+            # only a search by Max says so: the answer by the expectation is unchanged
+            **({"ranked_by": objective} if by_max else {}),
             "play": {"platform": self.play[0], "auto": self.play[1]},
             "singers": sorted(singers),
             "singer_type": getattr(chart, "singer_type", None),
@@ -1430,6 +1495,232 @@ class Engine:
             "rows": rows[:ROWS],
             "ranking": served[:top],
             "ranking_size": len(served),
+        }
+
+    # ------------------------------------------------------------ merged (Holomem Rating)
+    def search_merged(
+        self,
+        filters: Filters | None = None,
+        *,
+        current: Mapping[str, int] | None = None,
+        objective: str = "max",
+        emit: Callable[[dict], None] | None = None,
+        cancel: threading.Event | None = None,
+        top: int = MERGED_ROWS,
+        seed: int = 20261016,
+        assumptions: Assumptions | None = None,
+    ) -> dict:
+        """ONE team for every chart of this engine (`chart_keys`: one chart per song), ranked
+        by the holomem's rating once each song is played with it (`rating.merged_value`: her
+        best three songs, each at `ceil(score / 5000)`, kept above `current`'s records; the
+        mean score breaks a tie). `objective` "max" rates each chart by its Max (every ACTIVE
+        fires), "expected" by its expectation.
+
+        Boards: as the engine plans them (one board for every song with `board_cast`, else
+        each song on its own) or, within the materials, re-planned: one plan for every song
+        with `board_cast`, else one plan per song for the best MERGED_REPLAN_TEAMS teams."""
+        from hbuilder.domain import rating  # noqa: PLC0415
+        from hbuilder.domain.team import Team  # noqa: PLC0415
+
+        if not self.chart_keys:
+            raise ValueError("a merged search needs an engine on a list of charts")
+        if objective not in ("expected", "max"):
+            raise ValueError(f"unknown objective {objective!r}")
+        a = self.assumptions if assumptions is None else assumptions
+        if (a is None) != (self.assumptions is None) or (
+            a is not None and a.engine_key() != self.assumptions.engine_key()  # type: ignore[union-attr]
+        ):
+            raise ValueError("these assumptions are scored on another engine")
+        by_max = objective == "max"
+        replan = a is not None and a.replan
+        filters = filters or Filters()
+        chart_indices = tuple(range(len(self.charts)))
+        music_ids = [c.music_id for c in self.charts]
+        current = dict(current or {})
+        pool, usable = candidates(self.reps, filters)
+        position = {c.id: k for k, c in enumerate(pool)}
+        missing = [c for c in filters.require if c not in position]
+        if missing:
+            raise KeyError(f"required cards not in this pool: {missing}")
+        require = [position[c] for c in filters.require]
+        leaders = [
+            c
+            for c in usable
+            if (not filters.leader_card or c.id == filters.leader_card)
+            and (not filters.leader_member or c.member == filters.leader_member)
+        ]
+        if not leaders:
+            raise KeyError("no card in the pool matches the leader filter")
+        allowed = None
+        if filters.no_leader_overlap:
+
+            def allowed(li, s, leaders=leaders, pool=pool):
+                return all(pool[i].member != leaders[li].member for i in s)
+
+        lpos = {c.id: k for k, c in enumerate(leaders)}
+
+        def team_of(li, s):
+            return Team(leader=leaders[li], members=tuple(pool[i] for i in s))
+
+        def value(scores):
+            return rating.merged_value(scores, music_ids, current)
+
+        def score_pairs(pairs):
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            per = self.pool.batch_score_per_chart(
+                [team_of(li, s) for li, s in pairs], chart_indices, ceiling=by_max
+            )
+            return [value(p) for p in per]
+
+        hint_key = ("merged", self.chart_keys, filters.key(), a.key() if a is not None else None, objective)
+        seeds = [
+            (lpos[l], tuple(sorted(position[m] for m in ms)))
+            for l, ms in self.hints.get(hint_key, ())
+            if l in lpos and all(m in position for m in ms)
+        ]
+        t0 = time.perf_counter()
+        with self.lock:
+            found = joint_search.search(
+                pool,
+                leaders,
+                score_pairs,
+                gate_of=self.mf.gate_of,
+                require=require,
+                allowed=allowed,
+                seeds=seeds,
+                seed=seed,
+                on_round=SearchRounds(emit, 1),
+                tilt_of=outfit_tilt(pool),
+            )
+            ranking = found["ranking"]
+            if not ranking:
+                raise KeyError("no legal team satisfies the filters")
+            search_seconds = time.perf_counter() - t0
+            # (leader index, set) -> the board each chart is served on: None (planned by the
+            # engine), one (team board state, bench) for every chart, or one per chart
+            boards: dict[tuple, list] = {}
+            failed: list[str] = []
+            t_replan = time.perf_counter()
+            if replan:
+                if emit:
+                    emit({"type": "progress", "stage": "refine", "evaluated": 0, "sub": "materials"})
+                head = ranking[:MERGED_REPLAN_TEAMS] if self.board_cast is None else ranking
+                if self.board_cast is not None:
+                    # one plan for every song: planned for one of the songs of the cast every
+                    # chart shares (so the singer's own nodes are valued; with no song the
+                    # plan ignores them) and judged on all of them
+                    scope = getattr(self.board_cast, "scope", "")
+                    rep = next(
+                        (k for k, c in zip(self.chart_keys, self.charts) if scope and c.singer_type == scope),
+                        self.chart_keys[0],
+                    )
+                    _out, failed, _opt, planned = self._within_materials(
+                        a, head, leaders, pool, rep, chart_indices, cancel
+                    )
+                    for key, board in planned.items():
+                        boards[key] = [board] * len(self.charts)
+                else:
+                    # each song re-planned on its own, for the best teams
+                    per_chart: dict[tuple, list] = {}
+                    for k, chart_key in enumerate(self.chart_keys):
+                        if cancel is not None and cancel.is_set():
+                            raise Cancelled()
+                        if emit:
+                            emit(
+                                {
+                                    "type": "progress",
+                                    "stage": "refine",
+                                    "sub": "materials",
+                                    "done": k,
+                                    "total": len(self.chart_keys),
+                                }
+                            )
+                        _out, why, _opt, planned = self._within_materials(
+                            a, head, leaders, pool, chart_key, (k,), cancel
+                        )
+                        failed += why
+                        for key, board in planned.items():
+                            per_chart.setdefault(key, [None] * len(self.charts))[k] = board
+                    boards = {key: bs for key, bs in per_chart.items() if all(b is not None for b in bs)}
+                if not boards:
+                    raise KeyError("no team could be planned within your materials: " + "; ".join(failed[:3]))
+                cands = [(li, s) for _v, li, s in ranking if (li, s) in boards]
+            else:
+                cands = [(li, s) for _v, li, s in ranking[: max(top, MERGED_ROWS) * 3]]
+            t_replan = time.perf_counter() - t_replan
+
+            # every candidate's per-chart expectation and Max, each on the board it is served on
+            def per_chart_scores(ceiling: bool) -> list[list[float]]:
+                if not replan:
+                    return self.pool.batch_score_per_chart(
+                        [team_of(li, s) for li, s in cands], chart_indices, ceiling=ceiling
+                    )
+                out: list[list[float]] = []
+                for li, s in cands:
+                    row = []
+                    for k, board in enumerate(boards[(li, s)]):
+                        row += self.pool.batch_score_per_chart(
+                            [team_of(li, s)], (k,), ceiling=ceiling, planned=[board]
+                        )[0]
+                    out.append(row)
+                return out
+
+            expected = per_chart_scores(False)
+            maxima = per_chart_scores(True)
+        ranked = sorted(
+            range(len(cands)),
+            key=lambda k: (-value(maxima[k] if by_max else expected[k]), cands[k][0], cands[k][1]),
+        )
+        self.hints[hint_key] = [
+            (leaders[cands[k][0]].id, tuple(pool[i].id for i in cands[k][1])) for k in ranked[:HINTS]
+        ]
+        rows = []
+        for k in ranked[:top]:
+            li, s = cands[k]
+            rated = maxima[k] if by_max else expected[k]
+            v = value(rated)
+            rows.append(
+                {
+                    "leader": leaders[li].id,
+                    "leader_name": f"{leaders[li].member} / {leaders[li].costume_name}",
+                    "members": [pool[i].id for i in s],
+                    "member_names": [pool[i].member for i in s],
+                    "rating": rating.merged_rating(v),
+                    "best": sum(expected[k]) / len(expected[k]),
+                    "song_max": sum(maxima[k]) / len(maxima[k]),
+                    "charts": [
+                        {
+                            "key": self.chart_keys[j],
+                            "expected": float(expected[k][j]),
+                            "max": float(maxima[k][j]),
+                            "rating": rating.song_rating(rated[j]),
+                        }
+                        for j in range(len(self.charts))
+                    ],
+                    "board_state": (
+                        [b[0] if b is not None else None for b in boards[(li, s)]] if replan else None
+                    ),
+                }
+            )
+        return {
+            "scope": "merged",
+            "charts": list(self.chart_keys),
+            "ranked_by": objective,
+            "one_board": self.board_cast is not None,
+            "basis_id": self.basis,
+            "basis": (a.describe() if a is not None else leaf_inputs.basis_text(self.basis)),
+            "assumptions": dataclasses.asdict(a) if a else None,
+            "notes": a.notes() if a else [],
+            "play": {"platform": self.play[0], "auto": self.play[1]},
+            "filters": dataclasses.asdict(filters),
+            "materials_failed": failed,
+            "leaders": len(leaders),
+            "legal_sets": found["stats"].get("legal_sets"),
+            "exact_evals": found["stats"].get("exact_evals"),
+            "seconds": round(time.perf_counter() - t0, 2),
+            "timings": {"search": round(search_seconds, 2), "replan": round(t_replan, 2)},
+            "rows": rows,
         }
 
 
@@ -1510,6 +1801,8 @@ def engine(
     assumptions: Assumptions | None = None,
     levels: tuple[int, int] | None = None,
     play: tuple[str, bool] = ("mobile", False),
+    chart_keys: tuple[str, ...] | None = None,
+    board_cast: frozenset | None = None,
 ) -> Engine:
     """The live engine of (basis, difficulty[, assumptions]), rebuilt when the
     inputs' key moved (`current_key()` -> today's key, or None when it cannot
@@ -1524,6 +1817,8 @@ def engine(
         assumptions.engine_key() if assumptions is not None else None,
         tuple(levels) if levels else None,
         tuple(play),
+        tuple(chart_keys) if chart_keys else None,
+        (tuple(sorted(board_cast)), getattr(board_cast, "scope", "")) if board_cast is not None else None,
     )
     with _ENGINES_LOCK:
         held = _ENGINES.pop(slot, None)
@@ -1537,7 +1832,14 @@ def engine(
                 oldest = next(iter(_ENGINES))
                 _ENGINES.pop(oldest).close()
             held = Engine(
-                basis, difficulty, workers=workers, assumptions=assumptions, levels=levels, play=play
+                basis,
+                difficulty,
+                workers=workers,
+                assumptions=assumptions,
+                levels=levels,
+                play=play,
+                chart_keys=chart_keys,
+                board_cast=board_cast,
             )
         _ENGINES[slot] = held  # re-inserted last: most recently used
         return held.acquire()

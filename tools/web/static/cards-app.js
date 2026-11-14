@@ -5,7 +5,8 @@
 // unlisted cards) written ONLY by Save, through the existing POST /api/collection.
 // Data: GET /api/collection (cards + bounds), GET /api/event (bonus cards; optional).
 
-import { esc, KINDS, KIND_LABEL, sentence, slotAt, SKILL_FACETS } from "/cards-skills.js";
+import { esc, KINDS, KIND_LABEL, SKILL_FACETS } from "/cards-skills.js";
+import { heroHTML, genTags, valueRow, skillsHTML as skillsBlock, statsHTML as statsBlock, eventHTML as eventBlock, eventOf as evOf, eventIndex } from "/hb-carddetail.js";
 import { doc, fetchCollection, adopt, discard, valuesOf, setCard, clearCard, entryOf, player, touch, save, fingerprint, isTrial, setTrial } from "/cards-doc.js";
 
 const byId = id => document.getElementById(id);
@@ -51,15 +52,7 @@ function lowKinds(card, bloom) {
   return KINDS.filter(k => st[k] != null && bloom < st[k] && ((card.skills || {})[k] || (card.skill_ladder || {})[k]));
 }
 
-function eventOf(card) {
-  const ev = S.event;
-  if (!ev) return null;
-  const hit = ev.byCard[card.id];
-  if (hit) return { permil: hit.live, song: hit.song, holomemOnly: false };
-  const h = ev.byChr[chrOf(card.id)];
-  if (h && !card.owned) return { permil: h, song: 0, holomemOnly: true };
-  return null;
-}
+const eventOf = card => evOf(card, S.event);
 
 // ---------------------------------------------------------------- facets (panel)
 const FACETS = [
@@ -305,70 +298,24 @@ function step(dir) {
   }
 }
 
-function skillsHTML(c, bloom) {
-  const rows = KINDS.map(k => {
-    const { slot, level, step: st } = slotAt(c, k, bloom, steps());
-    if (!slot) return "";
-    const low = level === 1;
-    return `<div class="dr-sk${low ? " low" : ""}"><div class="dr-skh"><span>${KIND_LABEL[k]}</span>
-      <em class="${low ? "lv1" : ""}">Lv ${level}${low ? ` · Lv 2 at Bloom ${st}` : ""}</em></div><p>${sentence(slot, genLabel)}</p></div>`;
-  });
-  if (c.costume_skill)
-    rows.push(`<div class="dr-sk outfit"><div class="dr-skh"><span>${KIND_LABEL.OUTFIT}</span><em>when this card leads</em></div><p>${sentence(c.costume_skill, genLabel)}</p></div>`);
-  const body = rows.join("");
-  return body || `<p class="cd-empty">No skill data for this card.</p>`;
-}
-
-function statsHTML(c) {
-  if (!c.stats) return `<p class="cd-empty">No stats on file for this card (restart the server if it predates this page).</p>`;
-  const tot = total(c);
-  return `<div class="dr-stats">${STATS.map(([k, lab]) => {
-    const val = c.stats[k];
-    const w = S.statMax[k] ? (val / S.statMax[k]) * 100 : 0;
-    return `<div class="dr-stat ${k}"><span>${lab}</span><b class="num">${fmt(val)}</b><i style="--w:${w.toFixed(1)}%"></i></div>`;
-  }).join("")}<div class="dr-stat tot"><span>Total</span><b class="num">${fmt(tot)}</b></div></div>
-  <p class="dr-fine">The card fully raised (max level, Limit Break and Bloom), as the catalogue carries it. Not this card at its current level.</p>`;
-}
-
-function eventHTML(c) {
-  const ev = eventOf(c);
-  if (!S.event) return "";
-  if (!ev) return `<div class="dr-ev none"><span>${esc(S.event.title || "Current event")}</span><p>No Event Bonus.</p></div>`;
-  return `<div class="dr-ev"><span>${esc(S.event.title || "Current event")}</span>
-    <p><b class="eb">${pctOf(ev.permil)}</b> ${ev.holomemOnly ? "holomem Bonus (Bloom adds more once owned)" : "Event Bonus to Event Pt"}${
-      ev.song ? ` · <b class="eb">${pctOf(ev.song)}</b> Song Score Bonus on the event song` : ""}</p>
-    <a class="cd-linkbtn" href="/event">Open the event</a></div>`;
-}
-
-function valueRow(label, val, max, diskVal, pending) {
-  const shown = pending ? `<b class="pend">default</b>` : `<b class="num">${val == null ? F.NA : val}</b>`;
-  return `<div class="dr-val"><span>${label}</span>${shown}<small>${max != null ? `of ${max}` : ""}${diskVal !== undefined ? ` · on disk ${diskVal ?? F.NA}` : ""}</small></div>`;
-}
+function skillsHTML(c, bloom) { return skillsBlock(c, bloom, { steps: steps(), genLabel }); }
+function statsHTML(c) { return statsBlock(c, S.statMax); }
+function eventHTML(c) { return eventBlock(c, S.event); }
 
 function drawDrawer() {
   const c = S.byId[S.open];
   if (!c) return;
   const v = valuesOf(c);
   const e = entryOf(c.id) || {};
-  const r = rarOf(c);
   const bloomShown = S.preview !== null ? S.preview : v.bloom;
   const caps = c.level_caps_by_limit_break || [];
-  const gens = (c.generations || []).map(g => `<span class="dr-tag">${esc(genLabel(g))}</span>`).join("");
+  const gens = genTags(c, genLabel);
   const showVals = c.owned || v.typed;
   const capFor = lb => (lb != null && caps[lb] != null ? caps[lb] : c.level_cap);
   const diff = f => (v.changed && c[f] !== v[f] ? c[f] : undefined);
 
   byId("drbody").innerHTML = `
-    <div class="dr-hero">
-      <div class="dr-face">${faceOf(c, { ...v, bloom: bloomShown }, 600)}</div>
-      <div class="dr-id">
-        <p class="dr-kick"><span class="dr-stars">${"★".repeat(r)}</span><img src="${elIcon(c.type)}" alt="">${esc(c.type)}</p>
-        <h2 id="dr-title" class="dr-title">${esc(c.member)}</h2>
-        <p class="dr-mem">${esc(c.costume_name || "")}</p>
-        ${c.title ? `<p class="dr-ctitle">${esc(c.title)}</p>` : ""}
-        <div class="dr-tags">${gens}<span class="dr-tag ${c.owned || isTrial(c.id) ? "own" : "no"}">${c.owned ? "Owned" : isTrial(c.id) ? "Trying as owned" : "Not owned"}</span></div>
-      </div>
-    </div>
+    ${heroHTML(c, faceOf(c, { ...v, bloom: bloomShown }, 600), `${gens}<span class="dr-tag ${c.owned || isTrial(c.id) ? "own" : "no"}">${c.owned ? "Owned" : isTrial(c.id) ? "Trying as owned" : "Not owned"}</span>`)}
 
     <section class="dr-sec"><h3>${c.owned ? "On your account" : "Not owned"}</h3>
       ${showVals ? `<div class="dr-vals">
@@ -595,15 +542,7 @@ async function loadEvent() {
   try {
     const r = await fetch("/api/event");
     if (!r.ok) return;
-    const d = await r.json();
-    if (!d || d.available === false || !d.live) return;
-    const byCard = {};
-    for (const c of [...(d.live.cards || []), ...(d.owned_bonus_cards || [])]) {
-      byCard[c.id] = { live: c.live_permil ?? c.permil ?? 0, song: c.song_permil || 0 };
-    }
-    const byChr = {};
-    for (const h of d.live.holomems || []) byChr[h.character_id] = h.permil;
-    S.event = { title: (d.event || {}).title || "", byCard, byChr };
+    S.event = eventIndex(await r.json());
   } catch (_) { /* no event: the page works without it */ }
 }
 

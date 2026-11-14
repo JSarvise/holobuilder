@@ -1,7 +1,7 @@
 // Optimizer page, goals "Event Points" and "Event Song Score": the event search job
 // (POST /api/event/run, SSE /events/<id>, POST /cancel/<id>; contract in tools/web/EVENT-API.md).
 // Every number is the server's: Event Pt, live score, Event Bonus, the bound.
-import { byId, esc, fmt, dec, sgn, pct, info, AC, INK, thumb, getJSON, postJSON, toast, reveal, normCard, outfitText, stash, unstash, withState, loadStates } from "/opt-util.js";
+import { byId, esc, fmt, dec, sgn, gap, pct, info, AC, INK, thumb, getJSON, postJSON, toast, reveal, normCard, outfitText, stash, unstash, withState, loadStates, cardHook } from "/opt-util.js";
 import { unitPanel, runPanel, timelinePanel, wireTimeline, boardPanel, matchLine, leaderColumn, wakeFigure, wirePlan } from "/opt-detail.js";
 import { score } from "/hb-grade.js";
 import { list as rankList } from "/hb-rank.js";
@@ -18,7 +18,7 @@ let multiTimer = 0;
 const STAGES = { build: "Loading your account", score_search: "Searching by score",
   event_search: "Searching by the event objective", bound: "Checking that nothing beats it",
   replan: "Re-planning the best teams' boards", refine: "Choosing the activation nodes for this song",
-  detail: "Reading the best teams' boards" };
+  ceiling: "Every team's best run (Max)", detail: "Reading the best teams' boards" };
 const HL_STAGES = { build: "Loading your account and the Highlight pool",
   event_search: "Searching by Event Points on a sample of the pool", rescore: "Scoring the best teams on every song of the pool",
   refine: "Choosing the activation nodes per song" };
@@ -167,7 +167,8 @@ export async function runEvent(ctx, { certify = false } = {}) {
   const hl = isHighlight(S.song);
   let order = hl ? ["build", "event_search", "rescore", ...(!A || A.boards !== "as_is" ? ["refine"] : [])]
     : certify && !replan ? ["build", "score_search", "event_search", "bound"]
-    : ["build", "event_search", ...(replan ? ["replan"] : !A || A.boards !== "as_is" ? ["refine"] : []), "detail"];
+    : ["build", "event_search", ...(replan ? ["replan"] : !A || A.boards !== "as_is" ? ["refine"] : []),
+      ...(S.goal === "event_song" ? ["ceiling"] : []), "detail"];
   progress(ctx, order, "build", "");
   // the end of this search, once (an answer, an error, or Cancel): a stale stream is ignored
   const done = (answered = false) => {
@@ -208,12 +209,18 @@ export async function runEvent(ctx, { certify = false } = {}) {
 /* ------------------------------------------------------------------ results */
 // The same layout as the Score view (opt-score.js): the ranked teams on the left (hb-rank.js),
 // the selected team on the right with the same tiles, card strip, outfit and detail panels.
-function headline(S, r) { return isEP(S) ? r.event_points : (r.event_song_score ?? r.objective); }
+// Event Song Score sorted by Max (the Options' Sort by): every row reads its Max Event Song Score,
+// the score if every Active fires, when the server served one for every row (one song, not Highlight)
+const evMax = (S, rows) => !isEP(S) && S.evsort === "max" && !isHighlight(S.song)
+  && rows.length > 0 && rows.every(r => typeof r.event_song_score_max === "number");
+function headline(S, r, max = false) { return isEP(S) ? r.event_points : max ? r.event_song_score_max : (r.event_song_score ?? r.objective); }
 const headFmt = (S, v) => isEP(S) ? `<span class="n o-num">${fmt(v)}</span>` : score(v);
 function render(ctx, L) {
   const S = ctx.S, res = L.res, rows = (res.rows || []).slice(0, S.evtop);
+  const byMax = evMax(S, rows);
+  if (byMax) rows.sort((a, b) => b.event_song_score_max - a.event_song_score_max);
   if (!rows.length) { ctx.out().innerHTML = `<div class="o-error">The search returned no team.</div>`; return; }
-  const c = { ctx, res, rows, S };
+  const c = { ctx, res, rows, S, byMax };
   loadStates(rows.flatMap(r => [r.leader.id, ...r.members.map(m => m.id)]), isMaxed(S) ? MAXED_LEVERS : eventAssumptions(S))
     .then(changed => { if (changed && live === L) render(ctx, L); });
   if (sel >= rows.length) sel = 0;
@@ -221,7 +228,7 @@ function render(ctx, L) {
   const ep = isEP(S);
   ctx.out().innerHTML = `<div class="o-split">
     <aside class="dlg o-setlist" aria-label="Ranked teams">
-      <div class="dlg-h"><h2>Search results</h2><span class="r">${rows.length} teams · ${ep ? "Event Pt per Live" : "Event Song Score"}</span></div>
+      <div class="dlg-h"><h2>Search results</h2><span class="r">${rows.length} teams · ${ep ? "Event Pt per Live" : byMax ? "Event Song Score · Max" : "Event Song Score"}</span></div>
       <div class="o-listctl" role="group" aria-label="List view">
         <button class="chip" type="button" data-diffmode aria-pressed="${diffMode}" title="Outline the cards that differ from #1">Diff vs #1</button></div>
       <div class="o-list" id="o-list">${listHTML(c)}</div>
@@ -265,8 +272,8 @@ async function fillMulti(c, r, i) {
     if (asked === multiScore + "|" + ownScore) out.textContent = fmt(d.event_points);
   } catch (e) { out.textContent = "—"; toast(e.message); }
 }
-function listHTML({ S, rows }) {
-  return rankList(rows.map(r => ({ score: headline(S, r), max: null,
+function listHTML({ S, rows, byMax }) {
+  return rankList(rows.map(r => ({ score: headline(S, r, byMax), max: null,
     leader: { id: r.leader.id, name: r.leader.member, outfit: r.leader.costume_name || "" },
     cards: [r.leader.id, ...r.members.map(m => m.id)] })),
   { selected: sel, diff: diffMode, thumb: id => thumb(id), format: v => headFmt(S, v) });
@@ -289,19 +296,19 @@ function select(c, i) {
   if (multiScore) fillMulti(c, c.rows[i], i);
 }
 /* the row as a .hbteam file: the detail's own request (the song open in a Highlight row) */
-function exportTeam({ ctx, S, rows }, i, btn) {
+function exportTeam({ ctx, S, rows, byMax }, i, btn) {
   const r = rows[i], song = ctx.song ? ctx.song() : null, det = details.get(keyOf(r));
   if (!det || !det.body) return toast("Wait for the team's details to load, then export");
   const shown = { song: isHighlight(S.song) ? `Highlight (detail on ${det.song})` : song ? song.title : S.song,
-    mode: isEP(S) ? "Event Pt" : "Event Song Score", rank: i + 1, headline: headline(S, r),
+    mode: isEP(S) ? "Event Pt" : byMax ? "Event Song Score (Max)" : "Event Song Score", rank: i + 1, headline: headline(S, r, byMax),
     score: r.score ?? null, boosts: S.boosts, holopass: !!S.holopass };
   return exportFile(det.body, shown, null, btn);
 }
-function copy({ ctx, S, rows }, i) {
+function copy({ ctx, S, rows, byMax }, i) {
   const r = rows[i], song = ctx.song ? ctx.song() : null;
   const name = m => `${m.costume_name || m.id} (${m.member || ""})`;
   const order = r.member_order && r.member_order.length === 5 ? r.member_order.map(id => r.members.find(m => m.id === id)).filter(Boolean) : r.members;
-  const txt = [`${isHighlight(S.song) ? "Highlight" : song ? song.title : S.song} ·${isEP(S) ? "Event Pt" : "Event Song Score"} team #${i + 1} · ${fmt(headline(S, r))}`,
+  const txt = [`${isHighlight(S.song) ? "Highlight" : song ? song.title : S.song} ·${isEP(S) ? "Event Pt" : byMax ? "Event Song Score (Max)" : "Event Song Score"} team #${i + 1} · ${fmt(headline(S, r, byMax))}`,
     `Leader: ${name(r.leader)}`, ...order.map((m, k) => `${k + 1}. ${name(m)}`)].join("\n");
   navigator.clipboard?.writeText(txt).then(() => toast("Team copied"), () => toast("Couldn't copy"));
 }
@@ -310,29 +317,39 @@ function perf(c, k, S, lead, slot) {
   const bonus = isEP(S) ? card.live_permil : card.song_permil;
   const tag = lead ? `<span class="xb">Leader · no ${isEP(S) ? "Event Bonus" : "Song Score Bonus"}</span>`
     : `<span class="xb">${bonus ? `<span class="eb">${pct(bonus)}</span> ${isEP(S) ? "EB" : "Song Score Bonus"}` : `Lv ${card.level ?? "?"}${card.bloom ? ` · Bloom ${card.bloom}` : ""}`}</span>`;
-  return `<figure class="o-perf" style="--i:${k}">
+  return `<figure class="o-perf" style="--i:${k}" ${cardHook(card)}>
     ${window.HBCard.face(card, { lead, roleText: "Leader", w: 400 })}
     <figcaption><span class="slot" aria-label="${slot ? "Slot " + slot : ""}">${slot || ""}</span><b>${esc(card.costume_name || card.id)}</b><span class="mb">${esc(card.member)}</span>${tag}</figcaption>
   </figure>`;
 }
 const keyOf = r => r.leader.id + "|" + r.members.map(m => m.id).sort().join(",");
-function block({ ctx, S, res, rows }, r, i) {
-  const ep = isEP(S), v = headline(S, r);
+function block({ ctx, S, res, rows, byMax }, r, i) {
+  const ep = isEP(S), v = headline(S, r, byMax);
   const det = details.get(keyOf(r)) || {};
   const delta = rows.length < 2 ? "" : i === 0
-    ? `${sgn((v / headline(S, rows[1]) - 1) * 100)} over #2`
-    : `${sgn((v / headline(S, rows[0]) - 1) * 100)} vs #1`;
+    ? `${gap((v / headline(S, rows[1], byMax) - 1) * 100)} over #2`
+    : `${gap((v / headline(S, rows[0], byMax) - 1) * 100)} vs #1`;
   // Highlight (res.highlight): one score is the MEAN over the pool, L is a 170 s song's; the
   // detail below is the team on ONE pool song, chosen in the row (as In general on Score)
   const hl = res.highlight || null, nPool = hl ? (hl.pool || []).length : 0;
   const onPool = !!hl && det.song === HL_POOL;
   const lenPct = res.length_permil != null ? `+${Math.round((res.length_permil - 1000) / 10)}%` : null;
-  const unit = r.score_bonus && r.score_bonus.unit_score != null ? r.score_bonus.unit_score : r.unit_score;
+  // a row past the ones the job developed gets these from its own detail (the same board)
+  const own = !hl && det.fig ? det.fig : null;
+  const unit = r.score_bonus && r.score_bonus.unit_score != null ? r.score_bonus.unit_score : r.unit_score
+    ?? (own && own.score_bonus && own.score_bonus.unit_score != null ? own.score_bonus.unit_score : own && own.panel ? own.panel.unit_score : null);
+  const rmax = r.song_max ?? (own ? own.song_max : null);
   const tile = (lbl, val, small) => `<div class="stat-tile"><div><span class="lbl">${lbl}</span>${val}<small>${small || ""}</small></div></div>`;
   const side = [tile("Live score", score(r.score), hl ? `mean over ${nPool} song${nPool === 1 ? "" : "s"}` : "this team's board"),
     tile(ep ? "Event Bonus" : "Song Score Bonus", `<span class="n o-num eb">${pct(ep ? r.live_permil : r.song_permil)}</span>`, ep ? "the five members" : "one card is enough; no stacking")];
-  if (r.song_max != null) side.push(tile(`Max ${info("max")}`, score(r.song_max), "every Active fires"));
-  if (unit != null) side.push(tile(`Unit Score ${info("grade")}`, score(unit), "this team's board"));
+  // Max and Unit Score keep their slots while the row's detail fills them in (a skeleton), so the
+  // grid does not move; a Highlight row's pool has no single run, so no Max
+  const pend = `<span class="o-sk" style="width:150px;height:26px;margin-top:6px"></span>`;
+  const none = (lbl, why) => `<div class="stat-tile none"><div><span class="lbl">${lbl}</span><span class="n">—</span><small>${why}</small></div></div>`;
+  side.push(rmax != null ? tile(`Max ${info("max")}`, score(rmax), "every Active fires")
+    : hl ? none(`Max ${info("max")}`, "a pool has no single run") : tile(`Max ${info("max")}`, det.err ? `<span class="n">—</span>` : pend, "every Active fires"));
+  side.push(unit != null ? tile(`Unit Score ${info("grade")}`, score(unit), "this team's board")
+    : tile(`Unit Score ${info("grade")}`, det.err ? `<span class="n">—</span>` : pend, "this team's board"));
   if (ep && lenPct) side.push(hl ? tile("Highlight Bonus", `<span class="n o-num">${lenPct}</span>`, "in place of the song length bonus")
     : tile("Song length bonus", `<span class="n o-num">${lenPct}</span>`, "estimate"));
   // Multi Live: the player types the room's MULTI SCORE and their own score (empty: this
@@ -354,7 +371,7 @@ function block({ ctx, S, res, rows }, r, i) {
         <button class="btn small" type="button" data-export="${i}" title="Save this team as a .hbteam file: the row, its numbers and the account data its score uses, so it can be replayed and checked"><svg class="i s"><use href="#i-down"/></svg>Export</button></div>
     </div>`;
   const tiles = `<div class="o-tiles">
-      <div class="stat-tile prime"><div><span class="lbl">${ep ? `Event Pt per Live · ${S.boosts} Live Boost${S.boosts > 1 ? "s" : ""} (×${AC[S.boosts - 1]})${S.holopass ? " · HoloPass" : ""}` : "Event Song Score"} ${info(ep ? "ev_points" : "ev_song")}</span>${headFmt(S, v)}<small>${delta}</small></div></div>
+      <div class="stat-tile prime"><div><span class="lbl">${ep ? `Event Pt per Live · ${S.boosts} Live Boost${S.boosts > 1 ? "s" : ""} (×${AC[S.boosts - 1]})${S.holopass ? " · HoloPass" : ""}` : byMax ? "Event Song Score · Max" : "Event Song Score"} ${info(ep ? "ev_points" : byMax ? "max" : "ev_song")}</span>${headFmt(S, v)}<small>${byMax ? `every Active fires · Expected ${fmt(r.event_song_score)}${delta ? " · " + delta : ""}` : delta}</small></div></div>
       <div class="o-sidetiles">${side.join("")}</div>
     </div>`;
   // slot order: the row's member_order (or its detail's), never the server's listing order

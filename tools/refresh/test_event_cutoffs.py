@@ -185,6 +185,15 @@ class _FakeSnap:
         self.calls.append("Auth/Login")
         return "tok"
 
+    def session(self, account):
+        if account == "main" and self.shared:
+            return self.host, [], "mv", "shared-tok"
+        host, cred = self.load_credential(account)
+        mv = self.fetch_master_version(host, [])
+        return host, [], mv, self.login(host, cred, [], mv)
+
+    shared = False
+
     def guest_home_login(self, account, host, token, ident, mv):
         assert account != "main"
         self.calls.append(f"Home/Login:{account}")

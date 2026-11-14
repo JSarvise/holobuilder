@@ -52,7 +52,7 @@ model, formula by formula: [How a team is scored](docs/score-model.md).
 | Access | Google sign-in, approved by hand | none |
 | Game data and pictures | downloaded from the holobuilder server | built from your game and the game's servers |
 | Runs on | Windows | Windows and Linux |
-| Updates | automatic | `git pull`, then `refresh.cmd` (`refresh.sh` on Linux) |
+| Updates | automatic | `update.cmd` (`update.sh` on Linux): the newest version, then a refresh |
 
 In both cases the optimizer runs on your PC and your account is read straight from the game.
 

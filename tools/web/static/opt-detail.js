@@ -4,7 +4,7 @@
 // `det.fig` is the row's ONE number set, from the route that rebuilds the row's own
 // board (opt-score.js / opt-event.js fill it); `det.cur` is the same team on the boards
 // as they are (/api/compare captured).
-import { byId, esc, fmt, dec, sgn, info, INK, thumb, place, NOTES } from "/opt-util.js";
+import { byId, esc, fmt, dec, sgn, info, INK, thumb, place, NOTES, cardHook } from "/opt-util.js";
 import { badge as rankBadge, score, rankOf, unitRows, songRows, loadRanks } from "/hb-grade.js";
 import { render as renderTimeline, setPace } from "/hb-timeline.js";
 import { mount as mountFigure } from "/hb-live2d.js";
@@ -20,7 +20,7 @@ export function leaderColumn(L, { note = "", outfit = "" } = {}) {
   const gens = ((window.HB_GENS && window.HB_GENS.by[chr]) || []).filter(g => g.reg !== null);
   const tags = gens.map(g => `<span class="o-lgen" style="--g1:${g.c};--g2:${g.c2}">${esc(g.n)}</span>`).join("");
   return `<aside class="o-lead" aria-label="Leader">
-    <div class="o-fig" data-figure="${esc(L.id || "")}">
+    <div class="o-fig" data-figure="${esc(L.id || "")}" ${cardHook(L)}>
       <img class="o-fig-art" src="/cardart/vert/${encodeURIComponent(L.id || "")}?w=600" alt="" loading="lazy">
       <div class="o-lead-id"><div class="o-lgens">${tags}</div><b>${esc(L.member || L.id || "")}</b>
         <small>${esc(L.costume_name || "")}</small></div>
@@ -40,6 +40,20 @@ const unitBadge = v => { const g = rankOf(v, unitRows()); return g ? rankBadge(g
 /* ------------------------------------------------------------ the deck screen's figures */
 const POWER = [["member_parameter", "Member Parameter", "--t-member"], ["outfit", "Outfit Skill", "--t-leader"], ["board", "Holomem Board Bonus", "--t-board"],
   ["passive", "Passive Skill", "--t-passive"], ["memory", "Memory Bonus", "--t-memory"], ["power_up", "Member Power-Up Bonus", "--t-powerup"]];
+// the Member Power-Up Bonus counts EVERY card of the collection: a search that levels the cards up
+// ("My cards, upgraded", "Maxed account") scores a higher rate than the account's own. `{own,
+// assumed}` in permyriad (/api/meta), set by the page; null when the search uses the account as is
+let powerUp = null;
+export function setPowerUpNote(note) { powerUp = note && note.assumed > note.own ? note : null; }
+function powerUpLabel(lab, value) {
+  if (!powerUp) return lab;
+  const p = v => (v / 100).toFixed(2) + "%";
+  const now = value != null ? Math.round(value * powerUp.own / powerUp.assumed) : null;
+  const tip = `${p(powerUp.assumed)} here, against your account's ${p(powerUp.own)} (+${((powerUp.assumed - powerUp.own) / 100).toFixed(2)} points): `
+    + "this bonus counts the level of every card in your collection, and this search raises your cards' levels. "
+    + (now != null ? `With your cards as they are, this line is about ${fmt(now)} (the game's deck screen shows that).` : "");
+  return `<span class="o-pu" title="${esc(tip)}">${lab}</span>`;
+}
 const BONUS_INK = { active: "--t-active", outfit: "--t-leader", passive: "--t-passive", board: "--t-board", special: "--t-special" };
 // the deck screen's Unit Score: the Score Bonus split's own (score_bonus.unit_score), else the panel's
 export const deckUnit = f => f && f.score_bonus && f.score_bonus.unit_score != null ? f.score_bonus.unit_score
@@ -121,7 +135,7 @@ export function unitPanel(T, det) {
         <div class="o-sbar" role="img" aria-label="Overall Power split">${POWER.map(([k, lab, c]) =>
           `<i style="--seg:var(${c});width:${((P[k] || 0) / total * 100).toFixed(2)}%" data-tip="${esc(lab)}|${fmt(P[k])}|${dec((P[k] || 0) / total * 100, 1)}% of Overall Power"></i>`).join("")}</div>
         <ul class="o-legend">${POWER.map(([k, lab, c]) =>
-          `<li style="--seg:var(${c})"><i></i><span>${lab}</span><span class="num">${fmt(P[k])}</span></li>`).join("")}</ul>
+          `<li style="--seg:var(${c})"><i></i><span>${k === "power_up" ? powerUpLabel(lab, P[k]) : lab}</span><span class="num">${fmt(P[k])}</span></li>`).join("")}</ul>
       </div>
       ${bonusTerm(f)}
     </div>

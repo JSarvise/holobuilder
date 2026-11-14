@@ -727,3 +727,105 @@ def test_the_certified_bound_keeps_the_pins(objective):
     for r in found["rows"]:
         assert pin in r["members"]
         assert all(cards[j].member != r["leader"].member for j in r["members"])
+
+
+# --- every served row's Max (Event Song Score, sort by Max) -------------------
+def test_row_ceilings_score_each_row_on_its_served_board(monkeypatch):
+    import hbuilder.domain.team as team_mod
+
+    monkeypatch.setattr(team_mod, "Team", lambda leader, members: (leader, members))
+    reps = [SimpleNamespace(id=f"c{i}") for i in range(10)]
+    leader = SimpleNamespace(id="L")
+    rows = [
+        dict(leader=leader, members=(0, 1, 2, 3, 4), score=2.0, refined=True),
+        dict(leader=leader, members=(5, 6, 7, 8, 9), score=1.0),
+        dict(leader=leader, members=(0, 1, 2, 3, 5), score=0.5),
+    ]
+    seen = {}
+
+    class Pool:
+        def batch_ceiling(self, teams, chart_indices, refine, planned):
+            seen.update(charts=list(chart_indices), refine=list(refine), planned=list(planned))
+            return [10.0 * (k + 1) for k in range(len(teams))]
+
+    # developed boards: every row, at the refinement level it was served at
+    em.row_ceilings(rows, reps, Pool(), None)
+    assert seen == {"charts": [0], "refine": [1, 0, 0], "planned": [None, None, None]}
+    assert [r["song_max"] for r in rows] == [10.0, 20.0, 30.0]
+    # re-planned boards: each row on its own plan; a row without one keeps what it had
+    for r in rows:
+        r.pop("song_max")
+    plan = ({"chr-1": {}}, {})
+    em.row_ceilings(rows, reps, Pool(), {id(rows[1]): plan})
+    assert seen["planned"] == [plan] and seen["refine"] == [0]
+    assert "song_max" not in rows[0] and rows[1]["song_max"] == 10.0 and "song_max" not in rows[2]
+
+
+def test_row_payload_serves_the_max_event_song_score():
+    cards = _pool()
+    bonus = _bonus(len(cards))
+    members = (2, 3, 4, 6, 8)
+    base = {
+        "leader": cards[0],
+        "members": members,
+        "score": 1_000_000.0,
+        "live_permil": 0,
+        "song_permil": 100,
+        "objective": 0.0,
+        "source": "event_search",
+    }
+    kw = dict(
+        reps=cards,
+        bonus_of=lambda c: bonus[cards.index(c)],
+        card_state=lambda _i: {},
+        boosts=3,
+        length_permil=1480,
+        holopass=False,
+    )
+    out = em.row_payload(1, dict(base, song_max=1_234_567.6), **kw)
+    assert out["song_max"] == 1_234_567.6
+    assert out["event_song_score_max"] == mar.event_song_score(1_234_568, 100) == 1_358_025
+    assert out["event_song_score"] == 1_100_000  # the expected one unchanged
+    plain = em.row_payload(1, base, **kw)
+    assert "song_max" not in plain and "event_song_score_max" not in plain
+
+
+@pytest.mark.parametrize("refined", [False, True])
+def test_every_served_row_max_is_the_ceiling_on_its_board(refined):
+    """On a real leaf: each row's Max is at least its expectation on the same board, and its
+    Event Song Score is marathon's formula on it."""
+    import dataclasses
+
+    from test_parallel_refine import _context
+
+    from hbuilder.solver.parallel_refine import RefinePool
+
+    ctx, teams = _context()
+    with RefinePool(dataclasses.replace(ctx, refine_activation=False), workers=1) as pool:
+        reps = list(ctx.cards)
+        at = {c.id: k for k, c in enumerate(reps)}
+        rows = [
+            {
+                "leader": t.leader,
+                "members": tuple(at[m.id] for m in t.members),
+                "refined": refined,
+                "song_permil": 150,
+            }
+            for t in teams[:3]
+        ]
+        expected = pool.batch_score(teams[:3], refine_activation=refined)
+        em.row_ceilings(rows, reps, pool, None)
+    for r, e in zip(rows, expected):
+        assert r["song_max"] >= e
+        out = em.row_payload(
+            1,
+            dict(r, score=e, live_permil=0, objective=0.0, source="event_search"),
+            reps=reps,
+            bonus_of=lambda _c: (0, 0),
+            card_state=lambda _i: {},
+            boosts=1,
+            length_permil=None,
+            holopass=False,
+        )
+        assert out["event_song_score_max"] == mar.event_song_score(round(r["song_max"]), 150)
+        assert out["event_song_score_max"] >= out["event_song_score"]

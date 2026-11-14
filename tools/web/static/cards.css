@@ -98,61 +98,7 @@ body.drawer-open main{padding-right:460px}
 .cd-drawer.on{transform:none;opacity:1}
 .cd-drawer[hidden]{display:none}
 .dr-top{display:flex;gap:6px;justify-content:flex-end;padding:12px 14px 0}
-.dr-nav,.dr-x{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:var(--ink-2);background:var(--sheet-2);border:2px solid var(--line-2)}
-.dr-nav:hover,.dr-x:hover{color:var(--ink);border-color:var(--rim)}
-.dr-nav .ico,.dr-x .ico{width:14px;height:14px}
-.dr-nav .ico{transform:rotate(90deg)}          /* ui_999_ico_arrow points up */
-.dr-nav .ico.prev{transform:rotate(-90deg)}
-.dr-x{margin-left:6px}
 .dr-body{flex:1;overflow:auto;padding:4px 22px 28px}
-.dr-hero{display:grid;grid-template-columns:150px minmax(0,1fr);gap:18px;align-items:end;padding-bottom:16px}
-.dr-face .gc{width:150px}
-.dr-kick{display:flex;align-items:center;gap:6px;margin:0 0 6px;font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
-.dr-kick img{width:18px;height:18px}
-.dr-stars{color:var(--grade-a);letter-spacing:-.05em;margin-right:4px}
-.dr-title{font:800 20px/1.15 var(--f-ui);margin:0;overflow-wrap:anywhere}
-.dr-mem{margin:4px 0 0;font:800 13.5px/1.3 var(--f-ui);color:var(--ink-2)}
-.dr-ctitle{margin:2px 0 0;font:700 12px/1.3 var(--f-ui);color:var(--ink-3)}
-.dr-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.dr-tag{display:inline-block;font:800 11px/1 var(--f-ui);padding:5px 10px;border-radius:var(--r-pill);background:var(--sheet-2);color:var(--ink-2)}
-.dr-tag.own{color:var(--good)}
-.dr-tag.no{color:var(--ink-2)}
-.dr-sec{padding:16px 0;border-top:1px solid var(--line)}
-.dr-sec h3{margin:0 0 10px;font:800 15px/1.2 var(--f-ui);color:var(--ink)}
-/* values as stat tiles split by a rule, skills as rows: no boxes inside the drawer (IDENTITY §3) */
-.dr-vals{display:grid;grid-template-columns:repeat(3, minmax(0,1fr))}
-.dr-val{display:grid;gap:2px;align-content:start;padding:2px 14px}
-.dr-val:first-child{padding-left:0}
-.dr-val + .dr-val{border-left:1px solid var(--line)}
-.dr-val span{font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
-.dr-val b{font:800 20px/1.1 var(--f-num)}
-.dr-val b.pend{font:800 13.5px/1.5 var(--f-ui);color:var(--sky)}
-.dr-val small{font:700 12px/1.3 var(--f-ui);color:var(--ink-3)}
-.dr-fine{margin:8px 0 0;font:700 12px/1.4 var(--f-ui);color:var(--ink-3)}
-.dr-fine.chg{color:var(--sky)}
-.dr-sk{padding:10px 0}
-.dr-sk + .dr-sk{border-top:1px solid var(--line)}
-.dr-skh{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px}
-.dr-skh span{font:800 13.5px/1.3 var(--f-ui)}
-.dr-skh em{font-style:normal;font:800 12px/1.3 var(--f-num);color:var(--ink-3)}
-.dr-skh em.lv1{color:var(--warn)}
-.dr-sk p{margin:0;font:700 13.5px/1.5 var(--f-ui);color:var(--ink-2)}
-.dr-sk p b{color:var(--ink);font-weight:800}
-.sk-ico{display:inline-block;width:15px;height:15px;vertical-align:-3px;margin-right:2px}
-.dr-stats{display:grid;gap:8px}
-.dr-stat{display:grid;grid-template-columns:96px minmax(0,1fr) auto;align-items:center;gap:10px;font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
-.dr-stat b{order:3;font-size:13.5px;color:var(--ink)}
-.dr-stat i{order:2;height:6px;border-radius:99px;background:var(--line);position:relative;overflow:hidden}
-.dr-stat i::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--w);border-radius:inherit;background:var(--sc,var(--sky))}
-.dr-stat.performance{--sc:var(--st-pf)} .dr-stat.technique{--sc:var(--st-te)} .dr-stat.sense{--sc:var(--st-se)}
-.dr-stat.tot{grid-template-columns:96px minmax(0,1fr);padding-top:6px;border-top:1px solid var(--line)}
-.dr-stat.tot b{order:0;text-align:right}
-.dr-ev{padding-left:14px;border-left:3px solid var(--eb)}
-.dr-ev.none{border-left-color:var(--line-2)}
-.dr-ev span{font:700 12px/1.3 var(--f-ui);color:var(--ink-2)}
-.dr-ev p{margin:4px 0 6px;font:700 13.5px/1.5 var(--f-ui);color:var(--ink-2)}
-.dr-ev.none p{margin-bottom:0}
-.dr-ev .cd-linkbtn{margin:0;font-size:12px}
 .dr-form{display:grid;grid-template-columns:repeat(3, minmax(0,1fr));gap:8px}
 .dr-form label{display:grid;gap:5px}
 .dr-form span{font:800 12px/1.3 var(--f-ui);color:var(--ink-2)}

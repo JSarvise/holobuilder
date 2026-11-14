@@ -45,11 +45,13 @@ without it. `--dry-run-adds` writes nothing.
 from __future__ import annotations
 
 import argparse
+import atexit
 import datetime as _dt
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -482,7 +484,39 @@ EXIT_NO_KEYS = 4  # the game client's build constants are not on this PC: nothin
 
 # The steps that talk to the game's API, whose messages are sealed with the client's payload
 # seed (game_keys.py). The CDN downloads and the local builds do not need it.
-API_STEPS = ("master_index", "account", "inventory", "event_cutoffs")
+API_STEPS = ("master_index", "account", "inventory", "holomem_rating", "event_cutoffs")
+
+
+# The steps that read the user's own account. A run of two or more logs in once for all of them
+# (`open_shared_session`): each login ends the account's previous session, and every step logging
+# in on its own repeated Master/Get, Auth/Login and the ~1 MB User/Get.
+SESSION_STEPS = ("account", "inventory", "holomem_rating", "event_cutoffs")
+
+
+def open_shared_session(account: str) -> tuple[dict[str, str], Path | None]:
+    """One Master/Get, Auth/Login and User/Get for this run's account steps -> (the variables
+    their processes get, the temporary file holding the User/Get). The token stays in memory and
+    in those processes' environment only; the file is deleted when the run ends. ({}, None) when
+    the login cannot be made here: each step then logs in on its own and reports its own error."""
+    if account != "main":
+        return {}, None
+    try:
+        import account_snapshot as A  # noqa: PLC0415
+
+        host, ident, mv, token = A.session("main")
+        blob = A.fetch_userdata(host, token, ident, mv)
+    except Exception as exc:  # noqa: BLE001 -- the steps say what is wrong, each in its own words
+        print(f"\nshared login not made ({type(exc).__name__}); each account step logs in on its own")
+        return {}, None
+    fd, name = tempfile.mkstemp(prefix="hb-userdata-", suffix=".bin")
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(blob)
+    path = Path(name)
+    atexit.register(path.unlink, missing_ok=True)
+    print("\nshared login: one Auth/Login and one User/Get for the account steps of this run")
+    env = dict(zip(A.SESSION_ENV, (host, token, mv), strict=True))
+    env[A.SESSION_USERDATA_ENV] = name
+    return env, path
 
 
 def missing_keys(step_names) -> bool:
@@ -1116,6 +1150,11 @@ def main(argv: list[str] | None = None) -> int:
     results: list[tuple[str, str, list[str]]] = []  # name, verdict, delta lines
     failed: list[str] = []
 
+    session_env: dict[str, str] = {}
+    session_file: Path | None = None
+    if sum(1 for s in STEPS if s.name in SESSION_STEPS and selected(s)[0]) >= 2:
+        session_env, session_file = open_shared_session(args.account)
+
     for step in STEPS:
         ok, why = selected(step)
         print()
@@ -1127,6 +1166,8 @@ def main(argv: list[str] | None = None) -> int:
 
         before = {key: probes[key]() for key in step.probes}
         cmd, env, cwd = step.build(args)
+        if step.name in SESSION_STEPS and session_env:
+            env = {**env, **session_env}
         # A step whose working directory is absent (the `master` repo not cloned here) is
         # skipped like a deselected one: a missing cwd would raise and end the whole refresh.
         if not Path(cwd).is_dir():
@@ -1169,6 +1210,9 @@ def main(argv: list[str] | None = None) -> int:
         for line in deltas:
             print(f"       ~ {line}")
         results.append((step.name, verdict, deltas))
+
+    if session_file is not None:
+        session_file.unlink(missing_ok=True)
 
     # ---- the append-only files may only have grown ---------------------
     print()

@@ -36,7 +36,9 @@ export function list(rows, opts = {}) {
   const one = (r, i) => {
     const sel = opts.selected === i;
     const b = i && r.pmf && top.pmf ? beats(r.pmf, top.pmf) : null;
-    const delta = i ? `${((r.score / top.score - 1) * 100).toFixed(1)}% vs #1` : "best";
+    // two decimals where one would read 0.0 % (close teams differ by a few hundredths)
+    const d = (r.score / top.score - 1) * 100;
+    const delta = i ? `${d === 0 ? "±0" : (d < 0 ? "−" : "+") + Math.abs(d).toFixed(Math.abs(d) < 0.05 ? 2 : 1)}% vs #1` : "best";
     const spread = r.p10 != null && r.p90 != null
       ? `<span class="rk-spread" title="p10 ${r.p10.toLocaleString("en-US")} – p90 ${r.p90.toLocaleString("en-US")}"><i class="iqr" style="left:${X(r.p10)};width:calc(${X(r.p90)} - ${X(r.p10)})"></i>${r.p50 != null ? `<i class="med" style="left:${X(r.p50)}"></i>` : ""}<i class="exp" style="left:${X(r.score)}"></i>${r.max != null ? `<i class="max" style="left:${X(r.max)}"></i>` : ""}</span>`
       : `<span class="rk-spread none" title="spread not served for this row"><i class="exp" style="left:${X(r.score)}"></i></span>`;

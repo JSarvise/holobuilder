@@ -3,7 +3,11 @@ an account or the network."""
 
 from __future__ import annotations
 
+import argparse
+import json
+import shutil
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -205,8 +209,12 @@ def test_start_and_check_refuse_unknown_options():
         run_local.main(["check", "--whatever"])
 
 
+LAUNCHERS = ("setup", "refresh", "start", "update")
+
+
 def test_the_launchers_call_the_helper_from_their_own_folder():
-    for name, sub in (("setup.cmd", "setup"), ("refresh.cmd", "refresh"), ("start.cmd", "start")):
+    for sub in LAUNCHERS:
+        name = f"{sub}.cmd"
         raw = (ROOT / name).read_bytes()
         text = raw.decode("ascii")  # cmd reads them in the OEM code page
         assert 'cd /d "%~dp0"' in text  # any clone folder, any working directory
@@ -214,8 +222,21 @@ def test_the_launchers_call_the_helper_from_their_own_folder():
         assert "goto" not in text.lower() and "\n:" not in text  # no labels: LF-only copies still run
 
 
+def test_the_update_launchers_stop_reading_themselves_before_the_pull():
+    # a pull can rewrite the launcher that runs it: cmd reads a (...) block whole before running
+    # it and bash stops reading at exec, so the lines still to run cannot shift under them
+    cmd = (ROOT / "update.cmd").read_bytes().decode("ascii")
+    block = cmd[cmd.index('(\r\n  ".venv') :]
+    assert "run_local.py update %*" in block and block.rstrip().endswith(")")
+    assert "!ERRORLEVEL!" in block and "EnableDelayedExpansion" in cmd  # %ERRORLEVEL% expands too early
+    assert "exec .venv/bin/python -u tools/local/run_local.py update" in (ROOT / "update.sh").read_text(
+        "ascii"
+    )
+
+
 def test_the_shell_launchers_mirror_the_cmd_ones():
-    for name, sub in (("setup.sh", "setup"), ("refresh.sh", "refresh"), ("start.sh", "start")):
+    for sub in LAUNCHERS:
+        name = f"{sub}.sh"
         raw = (ROOT / name).read_bytes()
         assert b"\r" not in raw  # bash reads a CR as part of the line
         text = raw.decode("ascii")
@@ -325,3 +346,134 @@ def test_venv_python_per_platform(tmp_path):
 
     assert paths.venv_python(tmp_path, "win32") == tmp_path / "Scripts" / "python.exe"
     assert paths.venv_python(tmp_path, "linux") == tmp_path / "bin" / "python"
+
+
+# ---------------------------------------------------------------- update
+CATALOGUE = run_local.CATALOGUE  # the clone's catalogue, relative to its folder
+
+
+def _card(n: int, name: str = "") -> dict:
+    return {"id": f"card-{n:05d}", "name": name or f"card {n}"}
+
+
+def _catalogue(*cards: dict) -> bytes:
+    doc = {"cards": list(cards), "schema_version": 1}
+    return (json.dumps(doc, indent=2) + "\n").replace("\n", "\r\n").encode()
+
+
+def test_only_added_cards_accepts_whole_new_cards_and_nothing_else():
+    before = json.loads(_catalogue(_card(1), _card(2)))
+    assert run_local.only_added_cards(before, json.loads(_catalogue(_card(1), _card(2), _card(3))))
+    assert run_local.only_added_cards(before, before)
+    assert not run_local.only_added_cards(before, json.loads(_catalogue(_card(1, "fixed"), _card(2))))
+    assert not run_local.only_added_cards(before, json.loads(_catalogue(_card(2), _card(3))))  # one gone
+    assert not run_local.only_added_cards(before, {**before, "schema_version": 2})
+    assert not run_local.only_added_cards(before, [])
+
+
+def _git(repo: Path, *args: str) -> str:
+    out = subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return out.stdout.strip()
+
+
+def _commit(repo: Path, files: dict[str, bytes], message: str) -> None:
+    for rel, body in files.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_bytes(body)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", message)
+
+
+@pytest.fixture
+def clone(tmp_path):
+    """(GitHub's repository, a clone of it): the clone as a user has it after a refresh added
+    card 3 to the catalogue."""
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    upstream, mine = tmp_path / "github", tmp_path / "mine"
+    upstream.mkdir()
+    _git(upstream, "init", "-q")
+    (upstream / ".gitattributes").write_bytes(b"* -text\n")  # bytes as written, whatever core.autocrlf says
+    _commit(upstream, {CATALOGUE: _catalogue(_card(1), _card(2)), "code.py": b"v1\n"}, "0.1")
+    _git(tmp_path, "clone", "-q", str(upstream), str(mine))
+    (mine / CATALOGUE).write_bytes(_catalogue(_card(1), _card(2), _card(3)))
+    return upstream, mine
+
+
+def _update(mine: Path, no_refresh: bool = False) -> tuple[int, list[str]]:
+    steps: list[str] = []
+
+    def run(cmd: list[str]) -> int:
+        steps.append(cmd[-1])
+        return 0
+
+    code = run_local.update(argparse.Namespace(no_refresh=no_refresh), repo=mine, run=run)
+    return code, steps
+
+
+def test_update_puts_the_refreshs_cards_aside_when_the_new_version_changes_the_catalogue(clone):
+    upstream, mine = clone
+    newer = _catalogue(_card(1), _card(2, "hand corrected"), _card(3), _card(4))
+    _commit(upstream, {CATALOGUE: newer, "code.py": b"v2\n"}, "0.2")
+    code, steps = _update(mine)
+    assert code == 0 and steps == ["refresh"]
+    assert _git(mine, "rev-parse", "HEAD") == _git(upstream, "rev-parse", "HEAD")
+    assert (mine / CATALOGUE).read_bytes() == newer  # the refresh adds back what it lacks
+    backup = mine / run_local.paths.DUMPS_REL / run_local.CATALOGUE_BACKUP
+    assert json.loads(backup.read_bytes())["cards"][-1] == _card(3)
+
+
+def test_update_keeps_the_refreshs_cards_when_the_new_version_leaves_the_catalogue_alone(clone):
+    upstream, mine = clone
+    _commit(upstream, {"code.py": b"v2\n"}, "0.2")
+    assert _update(mine) == (0, ["refresh"])
+    assert (mine / "code.py").read_bytes() == b"v2\n"
+    assert json.loads((mine / CATALOGUE).read_bytes())["cards"][-1] == _card(3)
+    assert not (mine / run_local.paths.DUMPS_REL / run_local.CATALOGUE_BACKUP).exists()
+
+
+@pytest.mark.parametrize("edit", ["code", "catalogue"])
+def test_update_never_touches_a_change_of_the_users_own(clone, edit):
+    upstream, mine = clone
+    _commit(upstream, {CATALOGUE: _catalogue(_card(1), _card(2), _card(4)), "code.py": b"v2\n"}, "0.2")
+    if edit == "code":
+        (mine / "code.py").write_bytes(b"my own change\n")
+        mine_before = (mine / "code.py").read_bytes()
+    else:
+        (mine / CATALOGUE).write_bytes(_catalogue(_card(1, "my fix"), _card(2)))
+        mine_before = (mine / CATALOGUE).read_bytes()
+    head = _git(mine, "rev-parse", "HEAD")
+    assert _update(mine) == (1, [])
+    assert _git(mine, "rev-parse", "HEAD") == head
+    path = mine / ("code.py" if edit == "code" else CATALOGUE)
+    assert path.read_bytes() == mine_before
+
+
+def test_update_runs_setup_when_the_packages_change_and_refresh_is_optional(clone):
+    upstream, mine = clone
+    _commit(upstream, {"requirements.txt": b"numpy\n"}, "0.2")
+    assert _update(mine, no_refresh=True) == (0, ["setup"])
+
+
+def test_update_with_nothing_new_still_refreshes(clone):
+    _, mine = clone
+    assert _update(mine) == (0, ["refresh"])
+    assert _update(mine, no_refresh=True) == (0, [])
+
+
+def test_update_needs_a_git_clone(tmp_path):
+    assert _update(tmp_path) == (1, [])
+
+
+def test_main_routes_update(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(run_local, "update", lambda args: seen.update(no_refresh=args.no_refresh) or 0)
+    assert run_local.main(["update", "--no-refresh"]) == 0 and seen == {"no_refresh": True}
+    with pytest.raises(SystemExit):
+        run_local.main(["update", "--skip", "chibi"])
