@@ -29,7 +29,7 @@ import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from hbuilder.domain.board import (
     SONG_ALL_CAP_PERMIL,
@@ -2447,7 +2447,8 @@ def _pos_to_node(model: Mapping[str, Sequence[int]]) -> dict[tuple[int, int], st
     if hit is None or hit[0] is not model:
         if len(_POS_TO_NODE) > 256:
             _POS_TO_NODE.clear()
-        hit = _POS_TO_NODE[id(model)] = (model, {tuple(p): n for n, p in model.items()})
+        table = cast("dict[tuple[int, int], str]", {tuple(p): n for n, p in model.items()})
+        hit = _POS_TO_NODE[id(model)] = (model, table)
     return hit[1]
 
 
