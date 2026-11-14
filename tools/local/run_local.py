@@ -75,7 +75,7 @@ PACKAGES = (
     ("PIL", "pillow"),
     ("requests", "requests"),
 )
-KERNELS = ("notewalk", "connect", "surrogate", "cdvar")
+KERNELS = ("notewalk", "connect", "surrogate", "cdvar", "jointmatch")
 WINLIBS = "winget install BrechtSanders.WinLibs.POSIX.UCRT"
 WINDOWS = sys.platform == "win32"
 # The oldest Python holobuilder runs on (pyproject.toml's requires-python): the compiled board

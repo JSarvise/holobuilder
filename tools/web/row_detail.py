@@ -371,14 +371,31 @@ from hbuilder.solver.parallel_refine import board_from_state  # noqa: E402,F401
 def _bench_slots(ctx, team, sockets) -> dict | None:
     """`{chr: {socket: card}}` the plan gives every off-team board whose sockets it
     re-chose (`RefineContext.socket_bench` with `bench_sockets`), or None when the
-    bench keeps the account's cards."""
-    if not getattr(ctx, "socket_bench", False) or not getattr(ctx, "bench_sockets", None):
+    bench keeps the account's cards.
+
+    A row whose Connect cards were dealt together with the bench's
+    (`RefineContext.joint_connect`, its `sockets` then name bench sockets too) re-chose only
+    the bench sockets that reach this team: every other one keeps its card unless the deal
+    moved that card elsewhere, so the map is the whole bench with each card once."""
+    bench = getattr(ctx, "bench_sockets", None)
+    if not bench:
         return None
     team_chrs = {_chr(c) for c in (team.leader, *team.members)}
-    out: dict = {c: {} for c in ctx.bench_sockets if c not in team_chrs}
+    socket_bench = getattr(ctx, "socket_bench", False)
+    joint = not socket_bench and any(p.chr not in team_chrs for p in sockets)
+    if not socket_bench and not joint:
+        return None
+    out: dict = {c: {} for c in bench if c not in team_chrs}
     for p in sockets:
         if p.chr in out:
             out[p.chr][p.socket] = p.card
+    if joint:
+        used = {p.card for p in sockets}
+        for chr_id in sorted(out):
+            for socket, card in sorted((bench.get(chr_id) or {}).items()):
+                if card and socket not in out[chr_id] and card not in used:
+                    out[chr_id][socket] = card
+                    used.add(card)
     return out
 
 

@@ -320,6 +320,33 @@ class PlanCache:
                 self.store_hits += 1
                 self.plans[key] = plan
                 return plan
+        values = self.node_values_for_key(key, card, node_effect_ids=node_effect_ids, skilltree=skilltree)
+        plan = optimize_board(
+            tree,
+            budget,
+            values,
+            player_level=self.player_level,
+            prefer=(self.prefer or {}).get(_chr_of(card), frozenset()),
+        )
+        self.plans[key] = plan
+        if self.store is not None:
+            self.store.put(key, plan)  # type: ignore[attr-defined]
+        return plan
+
+    def node_values_for_key(
+        self,
+        key: tuple,
+        card: Card,
+        *,
+        node_effect_ids: Mapping[str, list[str]],
+        skilltree: Mapping | None,
+    ) -> dict[str, float]:
+        """The node values the plan of `key` (a `plan_for` key, its `NO_GROUPING` variant
+        included) is made with, at this cache's nominal context. `card` is the card the key
+        names: the member card for `member` / `leader+member`, the leader's for `leader`, any
+        card of the character for `bench`. A pure function of the key and the context."""
+        role = key[1]
+        no_grouping = key[-1] == NO_GROUPING
         chr_id = _chr_of(card)
         model_id = (model_for_character(skilltree, chr_id) or "") if skilltree else ""
         reached = self._reached_for(card, role)
@@ -359,17 +386,7 @@ class PlanCache:
             )
         if no_grouping:
             values = {n: (NO_GROUPING_VALUE if n in GROUPING_GREEN_NODES else v) for n, v in values.items()}
-        plan = optimize_board(
-            tree,
-            budget,
-            values,
-            player_level=self.player_level,
-            prefer=(self.prefer or {}).get(chr_id, frozenset()),
-        )
-        self.plans[key] = plan
-        if self.store is not None:
-            self.store.put(key, plan)  # type: ignore[attr-defined]
-        return plan
+        return values
 
     # -- the assembled cache ------------------------------------------------
     def _sync_sources(self, node_effect_ids, skilltree, connect_cards) -> None:
@@ -430,23 +447,29 @@ class PlanCache:
         entry = _held(self._benches, key)
         if entry is not None and entry[0] is bench_characters:
             return entry
-        rows_held = self._bench_rows
         boards: dict[str, CharacterBoard] = {}
         digests: dict[str, BoardDigest] = {}
         for name, rows in bench_characters.items():
-            hit = rows_held.get((name, id(rows)))
-            if hit is None or hit[0] is not rows:
-                parsed = board_from_mapping({"characters": {name: list(rows)}})
-                board = parsed.characters[name]
-                # the digest the parse's own model built for this very board
-                digest = parsed._digests.get(name)
-                if digest is None or digest.board is not board:
-                    digest = BoardDigest(board)
-                while len(rows_held) >= _BENCH_ROWS_MAX:
-                    del rows_held[next(iter(rows_held))]
-                hit = rows_held[(name, id(rows))] = (rows, board, digest)
-            boards[name], digests[name] = hit[1], hit[2]
+            boards[name], digests[name] = self.bench_board(name, rows)
         return _hold(self._benches, key, [bench_characters, boards, digests, None])
+
+    def bench_board(self, name: str, rows: Sequence[Mapping]) -> tuple[CharacterBoard, BoardDigest]:
+        """One bench board and its digest, parsed as `board_from_mapping` parses it, ONCE per
+        rows LIST (`_bench_rows`): a list shared by several benches (`_rows_under`) is one
+        board, whose digest memoises its stat terms per card for all of them."""
+        rows_held = self._bench_rows
+        hit = rows_held.get((name, id(rows)))
+        if hit is None or hit[0] is not rows:
+            parsed = board_from_mapping({"characters": {name: list(rows)}})
+            board = parsed.characters[name]
+            # the digest the parse's own model built for this very board
+            digest = parsed._digests.get(name)
+            if digest is None or digest.board is not board:
+                digest = BoardDigest(board)
+            while len(rows_held) >= _BENCH_ROWS_MAX:
+                del rows_held[next(iter(rows_held))]
+            hit = rows_held[(name, id(rows))] = (rows, board, digest)
+        return hit[1], hit[2]
 
     def bench_boards(
         self, bench_characters: Mapping[str, Sequence[Mapping]] | None
@@ -1473,11 +1496,45 @@ CONNECT_KERNEL_ENV = "HBUILDER_CONNECT_KERNEL"
 # the team-wide Connect matching under the song bonus's cap exactly as
 # `board_model_from_plan` runs it in Python. Called as `kernel(inputs, members,
 # overall_power=, bonus_permil=, k_constant=, active_pool_rate=, song_scope=,
-# yellows=, bench=, cap=, rounds=, incumbent=, tie_factor=, tie_first=, checks=)`;
+# yellows=, bench=, cap=, rounds=, incumbent=, tie_factor=, tie_first=, checks=, held=)`
+# (`held`: the cards out of every group, as each plan's `_held_view`);
 # it returns the MATCHED `ConnectTriple`s, or `None` to decline. It must never
 # return an approximation.
 BOARD_KERNEL: Callable | None = None
 BOARD_KERNEL_ENV = "HBUILDER_BOARD_KERNEL"
+
+# The seam for the joint deal's matching (`joint_bench`): a class with
+# `joint_matching.JointMatching`'s constructor and `assignment_after` and the same floats
+# (`tools/web/kernel/jointmatch.py`'s `CJointMatching`), injected the same way; the Python
+# class otherwise.
+JOINT_MATCHING: type | None = None
+JOINT_MATCHING_ENV = "HBUILDER_JOINT_MATCHING"
+
+# The seam for the COMPILED joint deal of one team (`tools/web/kernel/connect.py`'s `joint`):
+# `_joint_assignment` with the team's node values computed there, on a `JointBench` whose
+# matching that library built. Called as `kernel(inputs, members, jb=, overall_power=,
+# bonus_permil=, k_constant=, active_pool_rate=, song_scope=, yellows=, cap=, rounds=,
+# incumbent=, tie_factor=)`; returns the matched `ConnectTriple`s or `None` to decline.
+JOINT_KERNEL: Callable | None = None
+JOINT_KERNEL_ENV = "HBUILDER_JOINT_KERNEL"
+
+
+def _joint_kernel() -> Callable | None:
+    """The injected joint deal kernel, found like `_connect_kernel`."""
+    return JOINT_KERNEL if JOINT_KERNEL is not None else _env_kernel(JOINT_KERNEL_ENV)
+
+
+def _joint_matching_class() -> type:
+    """The injected joint matching class, found like `_connect_kernel`, else the Python one."""
+    if JOINT_MATCHING is not None:
+        return JOINT_MATCHING
+    injected = _env_kernel(JOINT_MATCHING_ENV)
+    if injected is not None:
+        return injected  # type: ignore[return-value]
+    from hbuilder.domain.joint_matching import JointMatching  # noqa: PLC0415
+
+    return JointMatching
+
 
 # env variable -> (its value, the kernel it names or None), and file -> its module: the
 # seams that name one file share one module and its packing caches
@@ -1664,6 +1721,7 @@ def board_model_from_plan(
     fixed_slots: Mapping[str, Mapping[str, str]] | None = None,
     socket_bench: bool = False,
     bench_sockets: Mapping[str, Mapping[str, str | None]] | None = None,
+    joint: bool = False,
 ) -> BoardModel:
     """Turn a plan into a real `BoardModel` so it can be RE-SCORED exactly: the
     per-node valuation is a linearisation, and only scoring the assembled board
@@ -1710,8 +1768,47 @@ def board_model_from_plan(
     `socket_bench` those cards leave the team's pool (`held_bench_cards`); with it
     EVERY unlocked bench socket joins the matching (`_bench_socket_rows`), so empty
     bench sockets can be filled too. `socket_bench` disables the plan-cache fast
-    path (its bench boards are shared across teams)."""
+    path (its bench boards are shared across teams).
+
+    `joint` (with `bench_sockets` and the song's cast): the team's Connect cards and the whole
+    bench's in one matching, each card in one place. On the plan cache the bench's side is
+    solved once per song, valued at the cache's nominal context (`joint_bench`), and each team
+    re-solves its own boards' rows (`_board_model_joint`); without it, `socket_bench`. With no
+    cast (one board for several songs) the bench keeps its cards (`held_bench_cards`)."""
     members = tuple(members)
+    cast = sings if isinstance(sings, (set, frozenset)) else None
+    if (
+        joint
+        and fixed_slots is None
+        and connect_cards is not None
+        and bench_sockets is not None
+        and cast is not None
+    ):
+        if plan_cache is not None and bench_characters is not None:
+            roster = {"chr-" + card.id.split("-")[1]: card.member for card in (*members, leader)}
+            if name_by_chr:
+                roster = {**dict(name_by_chr), **roster}
+            return _board_model_joint(
+                plan,
+                leader,
+                members,
+                skilltree,
+                node_effect_ids,
+                roster,
+                overall_power=overall_power,
+                bonus_permil=bonus_permil,
+                k_constant=k_constant,
+                active_pool_rate=active_pool_rate,
+                connect_cards=connect_cards,
+                placements_out=placements_out,
+                bench_characters=bench_characters,
+                bench_sockets=bench_sockets,
+                sings=sings,
+                cache=plan_cache,
+                cast=cast,
+                incumbent=_incumbent_of(bench_sockets),
+            )
+        socket_bench = True
     if fixed_slots is not None or socket_bench:
         plan_cache = None
     names: dict[str, str] = {"chr-" + card.id.split("-")[1]: card.member for card in (*members, leader)}
@@ -1734,12 +1831,7 @@ def board_model_from_plan(
         )
     )
     # the account's own placements: on a tie a card stays where it is
-    incumbent = {
-        (chr_id, socket): card
-        for chr_id, slots in (bench_sockets or {}).items()
-        for socket, card in (slots or {}).items()
-        if card
-    }
+    incumbent = _incumbent_of(bench_sockets)
     if (
         plan_cache is not None
         and cast is not None
@@ -2222,7 +2314,7 @@ def _board_model_by_kernel(
     straight to `_yellow_capped_assignment`, with no cap checks before.
 
     It follows the Python exactly: the cards `held` on off-team sockets are out of every
-    group (`_held_view`), and the account's placements (`incumbent`) win ties in every
+    group (`_held_view`; the kernel takes the whole plans and `held`), and the account's placements (`incumbent`) win ties in every
     matching of the capped path, but in the first matching only when the cards are named
     (`tie_first`), as the plan cache's matching applies them."""
     if not name_by_chr or any(
@@ -2262,7 +2354,7 @@ def _board_model_by_kernel(
         inputs.append(
             (
                 chr_id,
-                _held_view(asm, held) if held else asm,
+                asm,
                 recipes,
                 is_leader,
                 member_by_chr.get(chr_id, card) if is_leader else card,
@@ -2288,6 +2380,7 @@ def _board_model_by_kernel(
         # the Python flow the plan takes: the fast path's checks for a plan the cache made,
         # the plain path (`_yellow_capped_assignment` at once) for one it did not
         checks=bool(plan.plan_keys),
+        held=held,
     )
     if matched is None:
         return None
@@ -2302,4 +2395,614 @@ def _board_model_by_kernel(
         )
     return BoardModel(
         characters=chars, name_by_chr=dict(names), _digests=digests, _base=cache.bench_base(bench_characters)
+    )
+
+
+# ---------------------------------------------------------------------------
+# The team's and the bench's Connect cards in one matching, the bench's side solved once a song
+# ---------------------------------------------------------------------------
+@dataclass
+class JointBench:
+    """The bench's half of one song's joint Connect matching (`board_model_from_plan(joint=)`),
+    the same for every team of the song.
+
+    `rows`: every (character, socket) of the roster's boards, sorted; `groups`: the Connect
+    cards as `(shape offsets, permil, id-sorted cards)`, one column each, ordered by their
+    cards. Each board is valued as a bench board (`bench_node_values`: what reaches a team from
+    it, the song's yellows included) at the plan cache's NOMINAL context, so the bench's side
+    does not depend on the team; its nodes are its `bench_characters` entry and its unlocked
+    sockets (`bench_sockets`). `matching`: the bench alone, solved (`JointMatching`), each
+    socket's own card winning a tie; `mults`: the Connect multipliers it gives each board;
+    `bench`: `bench_characters` with those multipliers (a board whose multipliers do not change
+    keeps its own rows list), the song's bench."""
+
+    rows: tuple[tuple[str, str], ...]
+    row_of: dict[tuple[str, str], int]
+    groups: tuple[tuple[tuple[tuple[int, int], ...], int, tuple[str, ...]], ...]
+    col_of: dict[tuple[str, ...], int]  # a group's cards -> its column
+    sockets: dict[str, tuple[str, ...]]  # each board's sockets, sorted
+    positions: dict[str, Mapping[str, Sequence[int]]]
+    pos_to_node: dict[str, dict[tuple[int, int], str]]
+    selected: dict[str, frozenset[str]]
+    values: dict[str, Mapping[str, float]]
+    yellows: dict[str, dict[str, float]]
+    triples: dict[int, list]
+    matching: object  # JointMatching
+    mults: dict[str, dict[str, float]]
+    bench: dict[str, list]
+    names: dict[str, str]
+    incumbent: dict[tuple[str, str], str]  # (chr, socket) -> the card the bench holds there
+
+
+_JOINT_BENCHES: dict = {}
+
+# id(board model) -> (the model, its `(x, y) -> node` map): the same for every song's bench, so
+# held once (94 songs x 54 boards of ~154 positions were ~65 MB a worker)
+_POS_TO_NODE: dict = {}
+
+
+def _pos_to_node(model: Mapping[str, Sequence[int]]) -> dict[tuple[int, int], str]:
+    """A board model's node at each position (read-only)."""
+    hit = _POS_TO_NODE.get(id(model))
+    if hit is None or hit[0] is not model:
+        if len(_POS_TO_NODE) > 256:
+            _POS_TO_NODE.clear()
+        hit = _POS_TO_NODE[id(model)] = (model, {tuple(p): n for n, p in model.items()})
+    return hit[1]
+
+
+# One bench board's side of a song's joint matching -- its nodes, values (`bench_node_values`),
+# paying yellows and socket rows -- per inputs, board and what of the song reaches an off-team
+# board: whether it has a cast, its scope and whether this holomem sings (`bench_node_values` and
+# `bench_yellow_pays` read the cast through nothing else). The songs of a library share them: 94
+# songs build ~3 per board instead of 94. Read-only to every `JointBench` that holds them.
+_JOINT_BOARD_SIDES: dict = {}
+_JOINT_BOARD_SIDES_MAX = 8192
+
+# id(bench_sockets) -> (bench_sockets, its incumbents): one dict per sockets mapping, so what the
+# kernels remember per incumbents object (`connect.py`'s tie flags) serves every team
+_INCUMBENTS: dict = {}
+
+
+def _incumbent_of(bench_sockets: Mapping | None) -> dict[tuple[str, str], str]:
+    """`(chr, socket) -> card` for every socket `bench_sockets` fills (read-only)."""
+    if not bench_sockets:
+        return {}
+    hit = _INCUMBENTS.get(id(bench_sockets))
+    if hit is None or hit[0] is not bench_sockets:
+        if len(_INCUMBENTS) > 64:
+            _INCUMBENTS.clear()
+        hit = _INCUMBENTS[id(bench_sockets)] = (
+            bench_sockets,
+            {
+                (chr_id, socket): card
+                for chr_id, slots in bench_sockets.items()
+                for socket, card in (slots or {}).items()
+                if card
+            },
+        )
+    return hit[1]
+
+
+# A bench board's rows under a deal's Connect multipliers, ONE list per content:
+# `(id(its rows), multipliers in row order) -> (the rows, the rows under them)`. Most songs
+# deal a bench board the same multipliers (maxed EXPERT: 216 contents among 94 songs x 54
+# boards), and `PlanCache.bench_board` parses a board once per LIST, its digest memoising the
+# board's stat terms per card: one list per content is one parse and one set of memos for
+# every song and every team, instead of one per song (~20x the memory and cold walks).
+_ROWS_UNDER: dict = {}
+_ROWS_UNDER_MAX = 8192
+
+
+def _rows_under(entries: Sequence[Mapping], cmult: Mapping[str, float]) -> list:
+    """`entries` (a bench board's rows) with each node's `connect_multiplier` set to its
+    multiplier in `cmult` (1.0 when absent), the same list object for the same content:
+    `entries` itself when every multiplier is the one it already has."""
+    mults = tuple([cmult.get(str(e.get("node")), 1.0) for e in entries])
+    if all(float(e.get("connect_multiplier") or 1.0) == m for e, m in zip(entries, mults)):
+        return entries  # type: ignore[return-value]
+    key = (id(entries), mults)
+    hit = _ROWS_UNDER.get(key)
+    if hit is None or hit[0] is not entries:
+        if len(_ROWS_UNDER) >= _ROWS_UNDER_MAX:
+            _ROWS_UNDER.clear()
+        rows = [dict(e, connect_multiplier=m) for e, m in zip(entries, mults)]
+        hit = _ROWS_UNDER[key] = (entries, rows)
+    return hit[1]
+
+
+# The joint matching's layout: its rows (every board's sockets), its columns (the Connect card
+# groups) and each board's sockets. It depends on the roster and the cards, not on the song, so
+# every song's `JointBench` holds the SAME objects, and what the compiled deal derives from them
+# (`connect.py`: a team plan's entries by row and column) is derived once for all songs.
+_JOINT_LAYOUTS: dict = {}
+
+
+def _joint_layout(rows: tuple, groups: tuple, sockets: dict) -> tuple:
+    """`(rows, row_of, groups, col_of, sockets)`, one object of each per layout."""
+    key = (rows, groups, tuple(sorted(sockets.items())))
+    hit = _JOINT_LAYOUTS.get(key)
+    if hit is None:
+        if len(_JOINT_LAYOUTS) >= 16:
+            _JOINT_LAYOUTS.clear()
+        hit = _JOINT_LAYOUTS[key] = (
+            rows,
+            {r: i for i, r in enumerate(rows)},
+            groups,
+            {g[2]: j for j, g in enumerate(groups)},
+            sockets,
+        )
+    return hit
+
+
+def _joint_socket_rows(
+    positions: Mapping[str, Sequence[int]],
+    pos_to_node: Mapping[tuple[int, int], str],
+    groups: Sequence[tuple[tuple[tuple[int, int], ...], int, tuple[str, ...]]],
+    chr_id: str,
+    selected: AbstractSet[str],
+    values: Mapping[str, float],
+    incumbent: Mapping[tuple[str, str], str],
+) -> dict[str, tuple[list[float], list]]:
+    """`{socket: (weights per group, triples per group)}` of one board: a socket other than the
+    free root only when bought (`selected`), each group's gain the summed values of the bought
+    nodes its shape covers there (`_team_connect_assignment`'s), the socket's own card's group
+    raised by `INCUMBENT_TIE` (`_connect_assignment_exact`'s). A triple is None where the gain
+    is not positive."""
+    out = {}
+    for socket in sorted(s for s in positions if s.startswith("S")):
+        weights = [0.0] * len(groups)
+        triples: list = [None] * len(groups)
+        if socket == "S-001" or socket in selected:
+            sx, sy = positions[socket]
+            own = incumbent.get((chr_id, socket))
+            for j, (offsets, permil, card_ids) in enumerate(groups):
+                covered = []
+                for dx, dy in offsets:
+                    node = pos_to_node.get((sx + dx, sy + dy))
+                    if node and node in selected:
+                        covered.append(node)
+                gain = 0.0
+                for node in covered:
+                    gain += values.get(node, 0.0) * permil / 1000.0
+                if gain > 0:
+                    triples[j] = (gain, chr_id, socket, permil, tuple(covered), card_ids)
+                    weights[j] = gain * (1.0 + INCUMBENT_TIE) if own in card_ids else gain
+        out[socket] = (weights, triples)
+    return out
+
+
+def joint_bench(
+    cache: PlanCache,
+    bench_characters: Mapping[str, Sequence[Mapping]],
+    bench_sockets: Mapping[str, Mapping[str, str | None]],
+    connect_cards: Mapping[str, tuple[Sequence[Sequence[int]], int]],
+    names: Mapping[str, str],
+    cast: AbstractSet[str],
+    *,
+    skilltree: Mapping,
+    node_effect_ids: Mapping[str, list[str]],
+) -> JointBench:
+    """The `JointBench` of a song (`cast`, a `SongCast`), built once per (cache, bench,
+    sockets, cards, roster, cast) and remembered."""
+    key = (
+        id(cache),
+        id(bench_characters),
+        id(bench_sockets),
+        id(connect_cards),
+        id(skilltree),
+        id(node_effect_ids),
+        frozenset(names.items()),
+        cast,
+        getattr(cast, "scope", None),
+    )
+    hit = _held(_JOINT_BENCHES, key)
+    if hit is not None and hit[0] is cache and hit[1] is bench_characters and hit[2] is bench_sockets:
+        return hit[3]
+    grouped: dict[tuple, list[str]] = {}
+    for card_id, (offsets, permil) in connect_cards.items():
+        grouped.setdefault((tuple(tuple(o) for o in offsets), permil), []).append(card_id)
+    groups = tuple(
+        sorted(
+            ((offsets, permil, tuple(sorted(ids))) for (offsets, permil), ids in grouped.items()),
+            key=lambda g: g[2],
+        )
+    )
+    incumbent = {
+        (chr_id, socket): card
+        for chr_id, slots in bench_sockets.items()
+        for socket, card in (slots or {}).items()
+        if card
+    }
+    models = skilltree.get("models", {}) or {}
+    positions: dict[str, Mapping[str, Sequence[int]]] = {}
+    pos_to_node: dict[str, dict[tuple[int, int], str]] = {}
+    selected: dict[str, frozenset[str]] = {}
+    values: dict[str, Mapping[str, float]] = {}
+    yellows: dict[str, dict[str, float]] = {}
+    rows: list[tuple[str, str]] = []
+    weights: list[list[float]] = []
+    triples: dict[int, list] = {}
+    for chr_id in sorted(names):
+        model = models.get(model_for_character(skilltree, chr_id) or "", {})
+        if "S-001" not in model:
+            continue
+        positions[chr_id] = model
+        pos_to_node[chr_id] = _pos_to_node(model)
+        # what reaches this board from the song: whether it has a cast, its scope, whether she sings
+        side_key = (
+            id(cache),
+            id(bench_characters),
+            id(bench_sockets),
+            id(connect_cards),
+            id(skilltree),
+            id(node_effect_ids),
+            chr_id,
+            names[chr_id],
+            bool(cast),
+            getattr(cast, "scope", None),
+            chr_id in cast,
+        )
+        side = _JOINT_BOARD_SIDES.get(side_key)
+        if (
+            side is None
+            or side[0] is not cache
+            or side[1] is not bench_characters
+            or side[2] is not bench_sockets
+        ):
+            entries = bench_characters.get(names[chr_id]) or ()
+            open_sockets = {"S-001", *(s for s in (bench_sockets.get(chr_id) or {}) if s in model)}
+            board_nodes = frozenset(e["node"] for e in entries if e.get("node")) | open_sockets
+            board_values = bench_node_values(
+                node_effect_ids,
+                member_cards=cache.nominal_members,
+                bonus_permil=cache.bonus_permil,
+                overall_power=cache.overall_power,
+                k_constant=cache.k_constant,
+                skilltree={"nodes": skilltree["nodes"]},
+                model_id="",
+                own_chr=chr_id,
+                cast=cast,
+            )
+            board_yellows = {
+                n: p
+                for n in plan_node_order(board_nodes)
+                if (p := _yellow_permil(skilltree, n, chr_id, cast, node_effect_ids))
+            }
+            board_rows = _joint_socket_rows(
+                model, pos_to_node[chr_id], groups, chr_id, board_nodes, board_values, incumbent
+            )
+            if len(_JOINT_BOARD_SIDES) >= _JOINT_BOARD_SIDES_MAX:
+                _JOINT_BOARD_SIDES.clear()
+            side = _JOINT_BOARD_SIDES[side_key] = (
+                cache,
+                bench_characters,
+                bench_sockets,
+                (board_nodes, board_values, board_yellows, board_rows),
+            )
+        selected[chr_id], values[chr_id], yellows[chr_id], board_rows = side[3]
+        for _socket, (w, t) in board_rows.items():
+            triples[len(rows)] = t
+            rows.append((chr_id, _socket))
+            weights.append(w)
+    matching = _joint_matching_class()(weights, [len(g[2]) for g in groups])
+    mults, _placed = _placements_from_matched(
+        [triples[i][j] for i, j in matching.assignment().items()], name_cards=False
+    )
+    chr_of_name = {n: c for c, n in names.items()}
+    bench: dict[str, list] = {}
+    for name, entries in bench_characters.items():
+        bench_chr = chr_of_name.get(name)
+        cmult = mults.get(bench_chr, {}) if bench_chr is not None and bench_chr in positions else None
+        bench[name] = entries if cmult is None else _rows_under(entries, cmult)  # type: ignore[assignment]
+    shared_rows, row_of, groups, col_of, sockets = _joint_layout(
+        tuple(rows),
+        groups,
+        {c: tuple(sorted(s for s in model if s.startswith("S"))) for c, model in positions.items()},
+    )
+    jb = JointBench(
+        rows=shared_rows,
+        row_of=row_of,
+        groups=groups,
+        col_of=col_of,
+        sockets=sockets,
+        positions=positions,
+        pos_to_node=pos_to_node,
+        selected=selected,
+        values=values,
+        yellows=yellows,
+        triples=triples,
+        matching=matching,
+        mults=mults,
+        bench=bench,
+        names=dict(names),
+        incumbent=incumbent,
+    )
+    _hold(_JOINT_BENCHES, key, (cache, bench_characters, bench_sockets, jb))
+    return jb
+
+
+def _entry_rows(
+    jb: JointBench,
+    chr_id: str,
+    entries,
+    values: Mapping[str, float],
+    incumbent: Mapping[tuple[str, str], str],
+    scale: float | None = None,
+    yellow: AbstractSet[str] = frozenset(),
+) -> dict[str, tuple[list[float], list]]:
+    """`_joint_socket_rows` of a team board from its plan's socket entries
+    (`AssembledPlan.entries`: the covered nodes of each eligible socket and group, in shape
+    order), the same gains; with `scale`, its `yellow` nodes' values scaled."""
+    width = len(jb.groups)
+    rows: dict[str, tuple[list[float], list]] = {
+        s: ([0.0] * width, [None] * width) for s in jb.sockets[chr_id]
+    }
+    for socket, permil, covered, card_ids in entries:
+        gain = 0.0
+        for node in covered:
+            v = values.get(node, 0.0)
+            if scale is not None and node in yellow:
+                v = v * scale
+            gain += v * permil / 1000.0
+        if gain > 0:
+            j = jb.col_of[card_ids]
+            weights, triples = rows[socket]
+            triples[j] = (gain, chr_id, socket, permil, covered, card_ids)
+            weights[j] = gain * (1.0 + INCUMBENT_TIE) if incumbent.get((chr_id, socket)) in card_ids else gain
+    return rows
+
+
+def _joint_assignment(
+    jb: JointBench,
+    team_rows: Mapping[str, tuple[frozenset, Mapping[str, float], tuple]],
+    incumbent: Mapping[tuple[str, str], str],
+    *,
+    cast,
+    skilltree: Mapping,
+    node_effect_ids: Mapping[str, list[str]],
+    rounds: int = CAPPED_ROUNDS,
+) -> list:
+    """The matched triples of a team (`team_rows`: `{chr: (its board's nodes, their values,
+    its plan's socket entries)}`) dealt with `jb`'s bench: the team's boards' socket rows replace
+    their holomems' bench rows and the bench's matching is re-solved; under the song bonus's
+    per-song cap when the yellows it pays exceed it, as `_yellow_capped_assignment` applies it
+    (the room, the yellow lift, the bisection on the yellow scale, the matching worth most with
+    its yellow lift capped)."""
+    selected = dict(jb.selected)
+    values: dict[str, Mapping[str, float]] = dict(jb.values)
+    yellow = {c: y for c, y in jb.yellows.items() if c not in team_rows and y}
+    for chr_id, (nodes, vals, _entries) in team_rows.items():
+        selected[chr_id], values[chr_id] = nodes, vals
+        if paying := {
+            n: p
+            for n in plan_node_order(nodes)
+            if (p := _yellow_permil(skilltree, n, chr_id, cast, node_effect_ids))
+        }:
+            yellow[chr_id] = paying
+
+    def solve(scale: float | None) -> list:
+        changes, trip = {}, {}
+        for chr_id in sorted(set(team_rows) | (set(yellow) if scale is not None else set())):
+            if chr_id not in jb.positions:
+                continue
+            ys = yellow.get(chr_id, {}) if scale is not None else {}
+            if chr_id in team_rows:
+                rows = _entry_rows(
+                    jb, chr_id, team_rows[chr_id][2], values[chr_id], incumbent, scale, frozenset(ys)
+                )
+            else:
+                vals = values[chr_id]
+                if ys:
+                    vals = {n: (v * scale if n in ys else v) for n, v in vals.items()}  # type: ignore[operator]
+                rows = _joint_socket_rows(
+                    jb.positions[chr_id],
+                    jb.pos_to_node[chr_id],
+                    jb.groups,
+                    chr_id,
+                    selected[chr_id],
+                    vals,
+                    incumbent,
+                )
+            for socket, (w, t) in rows.items():
+                i = jb.row_of[(chr_id, socket)]
+                changes[i], trip[i] = w, t
+        assigned = jb.matching.assignment_after(changes)  # type: ignore[attr-defined]
+        return [(trip[i] if i in trip else jb.triples[i])[j] for i, j in assigned.items()]
+
+    def mults_of(matched: list) -> dict[str, dict[str, float]]:
+        return _placements_from_matched(matched, name_cards=False)[0]
+
+    room: float = SONG_ALL_CAP_PERMIL
+    for paying_rows in yellow.values():
+        room -= sum(paying_rows.values())
+    result = solve(None)
+    if not yellow:
+        return result
+    room = max(room, 0.0)
+
+    def lift_of(mults) -> float:
+        return sum(
+            (mults.get(c, {}).get(n, 1.0) - 1.0) * p
+            for c, paying_rows in yellow.items()
+            for n, p in paying_rows.items()
+        )
+
+    def worth(mults) -> float:
+        other = paid = 0.0
+        for chr_id in sorted(mults):
+            ys = yellow.get(chr_id, ())
+            for n, m in mults[chr_id].items():
+                if n in selected[chr_id]:
+                    if n in ys:
+                        paid += (m - 1.0) * values[chr_id].get(n, 0.0)
+                    else:
+                        other += (m - 1.0) * values[chr_id].get(n, 0.0)
+        lift = lift_of(mults)
+        return other + (paid if lift <= room + 1e-9 else paid * room / lift)
+
+    mults = mults_of(result)
+    lift = lift_of(mults)
+    if lift <= room + 1e-9:
+        return result
+    best, best_key = result, (worth(mults), -lift)
+    low, high = 0.0, 1.0
+    scale = room / lift
+    for _ in range(rounds):
+        candidate = solve(scale)
+        c_mults = mults_of(candidate)
+        c_lift = lift_of(c_mults)
+        key = (worth(c_mults), -c_lift)
+        if key[0] > best_key[0] + 1e-9 or (key[0] >= best_key[0] - 1e-9 and key[1] > best_key[1]):
+            best, best_key = candidate, key
+        if c_lift > room + 1e-9:
+            high = scale
+        else:
+            low = scale
+        if high - low < 1e-3:
+            break
+        scale = (low + high) / 2.0
+    return best
+
+
+def _board_model_joint(
+    plan: TeamBoardPlan,
+    leader: Card,
+    members: tuple[Card, ...],
+    skilltree: Mapping,
+    node_effect_ids: Mapping[str, list[str]],
+    names: dict[str, str],
+    *,
+    overall_power: float,
+    bonus_permil: float,
+    k_constant: float,
+    active_pool_rate: float,
+    connect_cards,
+    placements_out,
+    bench_characters,
+    bench_sockets,
+    sings,
+    cache: PlanCache,
+    cast,
+    incumbent: Mapping,
+) -> BoardModel:
+    """`board_model_from_plan(joint=True)` on the plan cache: the team's boards valued at the
+    team's linearisation point (as the cached matching values them), its Connect cards dealt in
+    one matching with the whole bench's (`joint_bench`, `_joint_assignment`); the team's boards
+    under their multipliers and the song's bench (`JointBench.bench`) with each board the deal
+    changed rebuilt, over the song bench's cached boards and base. `placements_out` gets every
+    socket the deal fills, team and bench."""
+    jb = joint_bench(
+        cache,
+        bench_characters,
+        bench_sockets,
+        connect_cards,
+        names,
+        cast,
+        skilltree=skilltree,
+        node_effect_ids=node_effect_ids,
+    )
+    seen: set[str] = set()
+    ctx: list[tuple[Card, str, AssembledPlan, tuple]] = []
+    inputs: list[ConnectInput] = []
+    yellows = []
+    member_by_chr = {"chr-" + m.id.split("-")[1]: m for m in members}
+    song_scope = song_scope_of(sings)
+    for card, is_leader in [(leader, True), *[(m, False) for m in members]]:
+        chr_id = "chr-" + card.id.split("-")[1]
+        if chr_id in seen:
+            continue
+        cplan = plan.per_character.get(card.id)
+        if cplan is None:
+            continue
+        seen.add(chr_id)
+        key = plan.plan_keys.get(card.id) or selected_plan_key(chr_id, cplan.selected)
+        asm = cache.assembled_for(
+            key,
+            cplan,
+            chr_id,
+            skilltree=skilltree,
+            node_effect_ids=node_effect_ids,
+            connect_cards=connect_cards,
+        )
+        recipes = cache.needed_recipes(key, asm, chr_id, node_effect_ids, skilltree)
+        ctx.append((card, chr_id, asm, key))
+        inputs.append(
+            (
+                chr_id,
+                asm,
+                recipes,
+                is_leader,
+                member_by_chr.get(chr_id, card) if is_leader else card,
+                singer_weight_for(sings, chr_id, is_leader),
+            )
+        )
+        yellows.append(_paying_yellows(cplan.selected, chr_id, cast, skilltree, node_effect_ids))
+    kernel = _joint_kernel()
+    matched = (
+        kernel(
+            inputs,
+            members,
+            jb=jb,
+            overall_power=overall_power,
+            bonus_permil=bonus_permil,
+            k_constant=k_constant,
+            active_pool_rate=active_pool_rate,
+            song_scope=song_scope,
+            yellows=yellows,
+            cap=SONG_ALL_CAP_PERMIL,
+            rounds=CAPPED_ROUNDS,
+            incumbent=incumbent,
+            tie_factor=1.0 + INCUMBENT_TIE,
+        )
+        if kernel is not None
+        else None
+    )
+    if matched is None:
+        team_rows = {
+            chr_id: (
+                frozenset(plan.per_character[card.id].selected),
+                node_values_from_recipes(
+                    recipes,
+                    is_leader=is_leader,
+                    own_card=own,
+                    member_cards=members,
+                    bonus_permil=bonus_permil,
+                    overall_power=overall_power,
+                    k_constant=k_constant,
+                    active_pool_rate=active_pool_rate,
+                    singer_weight=weight,
+                    song_scope=song_scope,
+                ),
+                asm.entries,
+            )
+            for (card, _c, _a, _k), (chr_id, asm, recipes, is_leader, own, weight) in zip(ctx, inputs)
+        }
+        matched = _joint_assignment(
+            jb, team_rows, incumbent, cast=cast, skilltree=skilltree, node_effect_ids=node_effect_ids
+        )
+    mults_by_chr, placements = _placements_from_matched(
+        matched, name_cards=placements_out is not None, incumbent=incumbent
+    )
+    if placements_out is not None:
+        placements_out.extend(placements)
+    chars: dict[str, CharacterBoard] = dict(cache.bench_boards(jb.bench))
+    digests: dict[str, BoardDigest] = dict(cache.bench_digests(jb.bench))
+    team_chrs = {chr_id for _card, chr_id, _asm, _key in ctx}
+    for chr_id, name in jb.names.items():
+        if chr_id in team_chrs or name not in jb.bench:
+            continue
+        cmult = mults_by_chr.get(chr_id, {})
+        if cmult == jb.mults.get(chr_id, {}):
+            continue
+        # one board per content for every song and team (`_rows_under`)
+        chars[name], digests[name] = cache.bench_board(
+            name, _rows_under(bench_characters.get(name) or (), cmult)
+        )
+    for card, chr_id, asm, key in ctx:
+        chars[card.member], digests[card.member] = cache.team_board(
+            key, card.member, asm, mults_by_chr.get(chr_id, {})
+        )
+    return BoardModel(
+        characters=chars, name_by_chr=dict(names), _digests=digests, _base=cache.bench_base(jb.bench)
     )

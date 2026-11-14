@@ -124,6 +124,7 @@ def optimize_board(
     player_level: int | None = None,
     owned: frozenset[str] = frozenset(),
     prefer: AbstractSet[str] = frozenset(),
+    forbid: AbstractSet[str] = frozenset(),
 ) -> BoardPlan:
     """Greedy path-bundling knapsack. Starts from the root (and any `owned`
     nodes, free), and buys the best value/cost bundle each step until the budget
@@ -131,14 +132,15 @@ def optimize_board(
 
     `prefer`: nodes the account already has, on a plan made from scratch. Between two
     bundles of the same value per point the one holding more of them is bought, and the
-    points left at the end keep as many of them as they pay for (`keep_preferred`)."""
-    buyable = _available(tree, player_level)
+    points left at the end keep as many of them as they pay for (`keep_preferred`).
+    `forbid`: nodes never bought, neither for their value nor as a path to another."""
+    buyable = _available(tree, player_level) - set(forbid)
     costs = {nid: tree.nodes[nid].cost for nid in tree.nodes}
     selected: set[str] = {ROOT_NODE} | {n for n in owned if n in tree.nodes}
     spent = tree.cost_of(selected - {ROOT_NODE})
     value = sum(node_value.get(n, 0.0) for n in selected)
     steps: list[frozenset[str]] = []
-    preferred = frozenset(prefer)
+    preferred = frozenset(prefer) - frozenset(forbid)
 
     while True:
         bundles = _cheapest_bundles(tree, frozenset(selected), buyable, costs)

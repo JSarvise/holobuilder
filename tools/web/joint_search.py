@@ -9,10 +9,10 @@ and no hand-written proxy, so a new card or song needs nothing:
 * the SET screen (`kernel/surrogate.py`) learns `log V(S)`, the value of a member set S
   under its best leader found so far, and ranks every legal set in C;
 * the LEADER model learns, per leader L, `log score(L, S) = theta_S + a_L +
-  b_L * fires(gate_L, S) + c_L * holds(L, S)` (theta_S a per-set effect, so only the
-  leaders' RELATIVE order is learned). On m0342 it picks the true best leader of 82 % of
-  sets, losing 0.24 % at p90 when wrong: too coarse to rank TEAMS, so it only chooses
-  which leaders a set is exact-scored with.
+  b_L * fires(gate_L, S) + c_L * holds(L, S) + d_L * leans(L, S)` (theta_S a per-set
+  effect, so only the leaders' RELATIVE order is learned; `leans` is how far the set's
+  members lean towards the stat the leader's outfit raises, see `LeaderModel`). It is too
+  coarse to rank TEAMS, so it only chooses which leaders a set is exact-scored with.
 
 Rounds: the screen proposes `step` unseen sets; each is exact-scored under its `k` best
 leaders by the model (plus the `always_k` best of the `always` leaders, the song's singers);
@@ -66,16 +66,62 @@ REGION_MARGIN = 0.025
 # paired (two members that pay only together, e.g. Fubuki and Matsuri)
 REGION_PAIR_MOVES = 10
 
+# LEADER CLASSES (when the caller passes `tilt_of`). The leaders whose outfits lean the same
+# way (one class per stat an outfit raises, one for the outfits that favour no stat) value
+# the member sets alike, and each class has its own best sets. The search follows the best
+# teams found, so a class whose best set is not yet among them would be left where it stood:
+# its region is then reached only by chance, and a search with the leader pinned to one of
+# its cards finds a better team than the unpinned one. So every class is searched as a search
+# pinned to it would be:
+# * the set screen is fitted on each set's value NET of its leaders' effect (the leader
+#   model's per-set term), so the scores under every leader teach it the same thing, and it
+#   learns each card's class as a kind;
+# * a card is worth more to one class than to another beyond what the tilt says (a member
+#   whose own skill raises performance pays most under an outfit that raises performance
+#   again), so each class has its OWN card weights on top: a ridge fit (CLASS_RIDGE) of what
+#   the screen leaves unexplained of the scores under that class's leaders;
+# * every round proposes the same number of unseen sets for EACH class (the round's `step`
+#   and its `diverse` share, split between the classes), the screen's best once the class's
+#   tilt (at its mean lean coefficient) and its own card weights are added, each exact-scored
+#   under the leaders the model ranks best for it;
+# * the best CLASS_NEIGHBOURS teams of every class are climbed in every round and its best in
+#   the final climb (their one-card swaps under their leader, its set under every leader of
+#   the class), however far below the best team the class stands;
+# * the rounds go on until no class within CLASS_MARGIN of the best team has changed its best
+#   for `stable_rounds` rounds.
+CLASS_RIDGE = 4.0
+CLASS_SWEEPS = 4
+CLASS_NEIGHBOURS = 2
+CLASS_MARGIN = 0.03
+
 # (leader index, ascending member index 5-tuple)
 Pair = tuple[int, tuple[int, ...]]
 ScorePairs = Callable[[list[Pair]], Sequence[float]]
 
 
+# The ridge on a leader's lean coefficient `d`, in the lean's own units: a set's lean moves
+# ~0.05 between random sets, so its squares over the ~20 sets a leader is first scored on add
+# up to ~0.04, and a ridge of that size pulls a leader's own estimate about a third of the way
+# to the mean of the leaning leaders
+LEAN_RIDGE = 0.02
+
+
 class LeaderModel:
-    """Per-leader `a_L + b_L * fired + c_L * holds` with a per-set effect,
+    """Per-leader `a_L + b_L * fired + c_L * holds + d_L * leans` with a per-set effect,
     fitted by alternating least squares. `b`, `c` are shrunk towards the mean
     of the leaders that share their gate kind, so a leader with few gate-firing
     samples borrows from the others instead of guessing.
+
+    `leans(L, S)`: an outfit that raises ONE stat is worth more on the sets strong in that
+    stat (+80 % performance adds ~10 % more to a performance set than to a technique one),
+    so the best leader of a set depends on what its members are made of. `lean_of(leader)`
+    gives the per-card weights of that (pool order; None for an outfit that favours no
+    stat); a set's lean is their sum over its members while the outfit applies (no gate, or
+    the gate fires). `d` is shrunk towards the mean of the leaning leaders (`LEAN_RIDGE`).
+    Without it the model ranks the leaders the same on every set but for gates, and the
+    sets of the stat its best-ranked leaders do not raise are never scored under a leader
+    that suits them: the set screen then learns them as weak and their region is not
+    searched.
 
     The fit and the ranking run on numpy arrays with the arithmetic of the plain
     loops they replace, in the same order, so every coefficient is the same float:
@@ -85,7 +131,11 @@ class LeaderModel:
     change the answer."""
 
     def __init__(
-        self, cards: Sequence, leaders: Sequence, gate_of: Callable[[Any], tuple | None] | None
+        self,
+        cards: Sequence,
+        leaders: Sequence,
+        gate_of: Callable[[Any], tuple | None] | None,
+        lean_of: Callable[[Any], Sequence[float] | None] | None = None,
     ) -> None:
         self.cards = list(cards)
         self.leaders = list(leaders)
@@ -93,7 +143,16 @@ class LeaderModel:
         self.a = [0.0] * len(self.leaders)
         self.b = [0.0] * len(self.leaders)
         self.c = [0.0] * len(self.leaders)
+        self.d = [0.0] * len(self.leaders)
         self._fired: dict[tuple[int, tuple[int, ...]], float] = {}
+        leans = [lean_of(l) if lean_of is not None else None for l in self.leaders]
+        self.lean: list[tuple[float, ...] | None] = [
+            tuple(float(v) for v in t) if t is not None else None for t in leans
+        ]
+        self._leans = any(t is not None for t in self.lean)
+        self._lean = np.array(
+            [t if t is not None else [0.0] * len(self.cards) for t in self.lean], dtype=float
+        ).reshape(len(self.leaders), len(self.cards))
         # the distinct gates, and each leader's (-1: none): a set's gates fire once each
         self._gate_list = list(dict.fromkeys(g for g in self.gates if g is not None))
         index = {g: k for k, g in enumerate(self._gate_list)}
@@ -113,6 +172,7 @@ class LeaderModel:
         self._an = np.array(self.a, dtype=float)
         self._bn = np.array(self.b, dtype=float)
         self._cn = np.array(self.c, dtype=float)
+        self._dn = np.array(self.d, dtype=float)
 
     def features(self, li: int, s: tuple[int, ...]) -> tuple[float, float]:
         key = (li, s)
@@ -124,9 +184,25 @@ class LeaderModel:
         holds = 1.0 if any(self.cards[i].member == self.leaders[li].member for i in s) else 0.0
         return fired, holds
 
+    def leans(self, li: int, s: tuple[int, ...]) -> float:
+        """How far `s` leans towards leader `li`'s outfit: the leader's per-card weights
+        added over the members in `s`'s order, 0.0 for a leader with none or whose gate
+        `s` does not fire."""
+        weights = self.lean[li]
+        if weights is None:
+            return 0.0
+        if self.gates[li] is not None and not self.features(li, s)[0]:
+            return 0.0
+        lean = 0.0
+        for i in s:
+            lean += weights[i]
+        return lean
+
     def predict(self, li: int, s: tuple[int, ...]) -> float:
         fired, holds = self.features(li, s)
-        return self.a[li] + self.b[li] * fired + self.c[li] * holds
+        if not self._leans:
+            return self.a[li] + self.b[li] * fired + self.c[li] * holds
+        return self.a[li] + self.b[li] * fired + self.c[li] * holds + self.d[li] * self.leans(li, s)
 
     def fit(self, scored: dict[Pair, float], sweeps: int = 6, lam: float = 2.0) -> None:
         by_set: dict[tuple[int, ...], list[tuple[int, float]]] = {}
@@ -137,7 +213,7 @@ class LeaderModel:
         by_set = {s: rows for s, rows in by_set.items() if len(rows) >= 2}
         if not by_set:
             return
-        rows_li, rows_y, rows_f, rows_h, lens = [], [], [], [], []
+        rows_li, rows_y, rows_f, rows_h, rows_x, lens = [], [], [], [], [], []
         for s, rows in by_set.items():
             lens.append(len(rows))
             for li, y in rows:
@@ -146,10 +222,12 @@ class LeaderModel:
                 rows_y.append(y)
                 rows_f.append(f)
                 rows_h.append(h)
+                rows_x.append(self.leans(li, s) if self._leans else 0.0)
         li_ = np.array(rows_li, dtype=np.intp)
         y = np.array(rows_y, dtype=float)  # type: ignore[assignment]
         f = np.array(rows_f, dtype=float)  # type: ignore[assignment]
         h = np.array(rows_h, dtype=float)  # type: ignore[assignment]
+        x = np.array(rows_x, dtype=float)
         lens_ = np.array(lens, dtype=np.intp)
         starts = np.concatenate(([0], np.cumsum(lens_)[:-1])).astype(np.intp)
         group = np.repeat(np.arange(len(lens_)), lens_)
@@ -160,19 +238,40 @@ class LeaderModel:
         sf = np.bincount(li_, weights=f, minlength=n)
         sh = np.bincount(li_, weights=h, minlength=n)
         sfh = np.bincount(li_, weights=f * h, minlength=n)
+        sx = np.bincount(li_, weights=x, minlength=n)
+        sfx = np.bincount(li_, weights=f * x, minlength=n)
+        shx = np.bincount(li_, weights=h * x, minlength=n)
+        sxx = np.bincount(li_, weights=x * x, minlength=n)
         gated = [g is not None for g in self.gates]
+        leaning = [t is not None for t in self.lean]
         for _ in range(sweeps):
             # leader parameters given theta: 3x3 normal equations per leader, ridge on b, c
+            # (4x4 with the lean, ridge on d too, for a leader whose outfit leans)
             r = y - theta[group]
             b0 = np.bincount(li_, weights=r, minlength=n)
             b1 = np.bincount(li_, weights=f * r, minlength=n)
             b2 = np.bincount(li_, weights=h * r, minlength=n)
+            b3 = np.bincount(li_, weights=x * r, minlength=n)
             prior_b = _mean([self.b[li] for li in range(n) if gated[li]])
             prior_c = _mean(self.c)
+            prior_d = _mean([self.d[li] for li in range(n) if leaning[li]])
             for li in range(n):
                 if cnt[li] == 0:
                     continue
                 n0, n1, n2, n12 = float(cnt[li]), float(sf[li]), float(sh[li]), float(sfh[li])
+                if leaning[li]:
+                    n3, n13, n23, n33 = float(sx[li]), float(sfx[li]), float(shx[li]), float(sxx[li])
+                    sol4 = _solve(
+                        [
+                            [n0, n1, n2, n3, float(b0[li])],
+                            [n1, n1 + lam, n12, n13, float(b1[li]) + lam * (prior_b if gated[li] else 0.0)],
+                            [n2, n12, n2 + lam, n23, float(b2[li]) + lam * prior_c],
+                            [n3, n13, n23, n33 + LEAN_RIDGE, float(b3[li]) + LEAN_RIDGE * prior_d],
+                        ]
+                    )
+                    if sol4 is not None:
+                        self.a[li], self.b[li], self.c[li], self.d[li] = sol4
+                    continue
                 A = [n0, n1, n2, n1, n1, n12, n2, n12, n2]
                 B = [float(b0[li]), float(b1[li]), float(b2[li])]
                 A[4] += lam
@@ -185,6 +284,8 @@ class LeaderModel:
             # theta given the leaders
             self._arrays()
             pred = self._an[li_] + self._bn[li_] * f + self._cn[li_] * h
+            if self._leans:
+                pred = pred + self._dn[li_] * x
             theta = _grouped_pysum(y - pred, starts, lens_) / lens_
         # identifiability: centre a on its mean (only differences matter)
         mean_a = _mean(self.a)
@@ -199,6 +300,14 @@ class LeaderModel:
         present[[self._card_name[i] for i in s]] = 1.0
         h = present[self._leader_name]
         pred = self._an + self._bn * f + self._cn * h
+        if self._leans:
+            # each leader's weights added over the members in the set's order (`leans`),
+            # kept where the outfit applies: no gate, or its gate fires
+            lean = np.zeros(len(self.leaders), dtype=float)
+            for i in s:
+                lean = lean + self._lean[:, i]
+            lean = np.where((self._gate_of < 0) | (f > 0), lean, 0.0)
+            pred = pred + self._dn * lean
         return np.argsort(-pred, kind="stable").tolist()
 
 
@@ -236,6 +345,23 @@ def _best(scored: dict, ok, n: int) -> list[tuple[float, int, tuple[int, ...]]]:
 def _mean(xs) -> float:
     xs = list(xs)
     return sum(xs) / len(xs) if xs else 0.0
+
+
+def _solve(rows):
+    """The solution of a small linear system given as its augmented rows `[A | B]`, by
+    Gauss-Jordan elimination with partial pivoting (as `_solve3`); None when singular."""
+    m = [list(row) for row in rows]
+    size = len(m)
+    for c in range(size):
+        p = max(range(c, size), key=lambda r: abs(m[r][c]))
+        if abs(m[p][c]) < 1e-12:
+            return None
+        m[c], m[p] = m[p], m[c]
+        for r in range(size):
+            if r != c:
+                f = m[r][c] / m[c][c]
+                m[r] = [a - f * b for a, b in zip(m[r], m[c])]
+    return [m[i][size] / m[i][i] for i in range(size)]
 
 
 def _solve3(A, B):
@@ -339,8 +465,9 @@ def search(
     the leader, pass only the allowed leaders.
 
     `tilt_of(leader)`: the per-card log weights (pool order) its outfit adds to
-    a set's value, or None. With it every leader REGION is seeded and the ones
-    near the best climbed (see REGION_*), in place of the gate repair.
+    a set's value, or None. With it the leader model ranks each set's leaders by
+    how the set leans too (`LeaderModel`), and every leader REGION is seeded and
+    the ones near the best climbed (see REGION_*), in place of the gate repair.
 
     Returns `{"ranking": [(score, leader index, set)] best first (every scored
     ALLOWED pair), "rounds": [...], "stats": {...}}`."""
@@ -348,10 +475,27 @@ def search(
     leaders = list(leaders)
     holomems = [c.member for c in cards]
     rng = random.Random(seed)
-    screen = surrogate.Screen(cards)
-    model = LeaderModel(cards, leaders, gate_of)
+    # the leader classes: a leader's class is its tilt (None: an outfit that favours no stat),
+    # a card's is the class whose tilt weighs it most
+    class_of: list = []
+    groups: list[int | None] | None = None
+    if tilt_of is not None:
+        for leader in leaders:
+            tilt = tilt_of(leader)
+            class_of.append(tuple(tilt) if tilt is not None else None)
+        tilts = list(dict.fromkeys(c for c in class_of if c is not None))
+        if tilts:
+            groups = [max(range(len(tilts)), key=lambda k: (tilts[k][i], -k)) for i in range(len(cards))]
+    class_members: dict = {}
+    for li, key in enumerate(class_of):
+        class_members.setdefault(key, []).append(li)
+    screen = surrogate.Screen(cards, groups=groups)
+    model = LeaderModel(cards, leaders, gate_of, lean_of=tilt_of)
     scored: dict[Pair, float] = {}
     best_of_set: dict[tuple[int, ...], float] = {}
+    # each scored set's leaders, and the sets each class has scored (class tracks)
+    leaders_of_set: dict[tuple[int, ...], list[int]] = {}
+    seen_of_class: dict = {key: set() for key in class_members}
     started = time.perf_counter()
     rounds: list[dict] = []
     always = list(dict.fromkeys(always))
@@ -381,6 +525,9 @@ def search(
                 scored[p] = v
                 if v > best_of_set.get(p[1], float("-inf")):
                     best_of_set[p[1]] = v
+                if class_of:
+                    leaders_of_set.setdefault(p[1], []).append(p[0])
+                    seen_of_class[class_of[p[0]]].add(p[1])
         return time.perf_counter() - t0
 
     def top(n: int) -> list[tuple[float, int, tuple[int, ...]]]:
@@ -395,6 +542,84 @@ def search(
         # singer has 1-3 cards; dropping them altogether can lose a singer-led best team
         sing = [li for li in ranked if li in always_set][:always_k]
         return list(dict.fromkeys(ranked[:k] + sing))
+
+    def class_best(count: int = 1) -> list[tuple[float, int, tuple[int, ...]]]:
+        """The best `count` allowed teams of each leader class, best first (see LEADER
+        CLASSES)."""
+        own: dict = {key: [] for key in class_members}
+        for (li, s), v in scored.items():
+            rows = own[class_of[li]]
+            row = (-v, li, s)
+            if (len(rows) < count or row < rows[-1]) and ok(li, s):
+                rows.append(row)
+                rows.sort()
+                del rows[count:]
+        return [(-nv, li, s) for nv, li, s in sorted(row for rows in own.values() for row in rows)]
+
+    def net_values() -> tuple[list, list]:
+        """Every scored set and its log value net of its leaders' effect: the mean, over the
+        leaders it was scored under, of `log score - (the leader model's leader terms)`."""
+        sets, values = [], []
+        for s, lis in leaders_of_set.items():
+            net = [math.log(scored[(li, s)]) - model.predict(li, s) for li in lis if scored[(li, s)] > 0]
+            if net:
+                sets.append(s)
+                values.append(sum(net) / len(net))
+        return sets, values
+
+    def class_weights() -> dict:
+        """Each class's own card weights: a ridge fit, by coordinate descent in card order,
+        of `log score - leader terms - the screen's prediction` over the pairs scored under
+        the class's leaders."""
+        sets = list(leaders_of_set)
+        row = {s: k for k, s in enumerate(sets)}
+        predicted = screen.predict_many(sets)
+        out: dict = {}
+        for key, members in class_members.items():
+            mine = set(members)
+            rows_s, rows_r = [], []
+            for s, lis in leaders_of_set.items():
+                for li in lis:
+                    if li in mine and scored[(li, s)] > 0:
+                        rows_s.append(s)
+                        rows_r.append(math.log(scored[(li, s)]) - model.predict(li, s) - predicted[row[s]])
+            weights = np.zeros(len(cards))
+            if rows_s:
+                res = np.array(rows_r, dtype=float)
+                holds = np.array(rows_s, dtype=np.intp)
+                where = [np.nonzero((holds == i).any(axis=1))[0] for i in range(len(cards))]
+                for _ in range(CLASS_SWEEPS):
+                    for i, at in enumerate(where):
+                        if len(at):
+                            new = (float(res[at].sum()) + len(at) * weights[i]) / (len(at) + CLASS_RIDGE)
+                            res[at] -= new - weights[i]
+                            weights[i] = new
+            out[key] = weights
+        return out
+
+    def class_proposals() -> tuple[list[tuple[int, ...]], int]:
+        """The round's unseen sets, as many for each class, the classes in turn so a set two
+        classes propose is listed once; and how many legal sets there are."""
+        out: dict = {}
+        legal_sets = 0
+        own = class_weights()
+        each = max(1, step * (100 + diverse) // (100 * len(class_members)))
+        for key, members in class_members.items():
+            bias = [float(w) for w in own[key]]
+            if key is not None:
+                lean = _mean([model.d[li] for li in members])
+                bias = [b + lean * w for b, w in zip(bias, key)]
+            got, _pred, legal_sets = screen.best(each, seen_of_class[key], card_bias=bias)
+            out.update(dict.fromkeys(got))
+        return list(out), legal_sets
+
+    def take_class_climb(teams) -> float:
+        """One step of each class's climb: its best team's one-card swaps under its leader,
+        and its set under every leader of the class."""
+        if not teams:
+            return 0.0
+        spent = take([(lj, s) for _v, li, s in teams for lj in class_members[class_of[li]] if ok(lj, s)])
+        return spent + _take_neighbours(teams, holomems, take, scored, ok)
 
     # --- round 0: a random sample, every leader seen on `leader_samples` sets
     random_sets = two_stage.random_legal_sets(holomems, initial_sets, rng)
@@ -445,14 +670,22 @@ def search(
             stop = "deadline"
             break
         t0 = time.perf_counter()
-        sets = [s for s, v in best_of_set.items() if v > 0]
-        screen.fit(sets, [math.log(best_of_set[s]) for s in sets])
+        if class_of:
+            model.fit(scored)
+            screen.fit(*net_values())
+        else:
+            sets = [s for s, v in best_of_set.items() if v > 0]
+            screen.fit(sets, [math.log(best_of_set[s]) for s in sets])
         for i in require:
             screen._card[i] += REQUIRE_BIAS
-        model.fit(scored)
+        if not class_of:
+            model.fit(scored)
         fit_seconds = time.perf_counter() - t0
         t0 = time.perf_counter()
-        proposed, _pred, legal = screen.best(step * (1 + diverse_pool), best_of_set.keys())
+        if class_of:
+            proposed, legal = class_proposals()
+        else:
+            proposed, _pred, legal = screen.best(step * (1 + diverse_pool), best_of_set.keys())
         scan_seconds = time.perf_counter() - t0
         if not proposed:
             stop = "exhausted"
@@ -463,7 +696,7 @@ def search(
         # scoring the other). So part of each round goes to the best-predicted sets
         # sharing at most `diverse_overlap` members with each of the current best sets
         # (a cheap build-around net).
-        head, tail = proposed[:step], proposed[step:]
+        head, tail = (proposed, []) if class_of else (proposed[:step], proposed[step:])
         if diverse and tail:
             anchors = [set(s) for s in dict.fromkeys(s for _v, _li, s in top(3 * diverse_anchors))][
                 :diverse_anchors
@@ -476,7 +709,14 @@ def search(
         )
         if neighbours:
             exact_seconds += _take_neighbours(top(neighbours), holomems, take, scored, ok)
+            if class_of:
+                exact_seconds += take_class_climb(class_best(CLASS_NEIGHBOURS))
         now = [(li, s) for _v, li, s in top(stable_top)]
+        if class_of:
+            # ... and the best team of every class near the best: a class still improving
+            # keeps the rounds going
+            floor = (1.0 - CLASS_MARGIN) * (top(1) or [(0.0,)])[0][0]  # type: ignore[list-item]
+            now += [(li, s) for v, li, s in class_best() if v >= floor]
         changed = now != leaders_top
         leaders_top = now
         unchanged = 0 if changed else unchanged + 1
@@ -618,15 +858,18 @@ def search(
         before = None
         for climbed in range(1, climb_rounds + 1):
             regional = region_contenders()
-            starts = top(neighbours) + (regional if region_of else contenders())
+            classes = class_best() if class_of else []
+            starts = top(neighbours) + (regional if region_of else contenders()) + classes
             now = [(li, s) for _v, li, s in starts]
             if now == before:
                 break
             before = now
             region_climbs = max(region_climbs, len(regional))
             polish_seconds += _take_neighbours(starts, holomems, take, scored, ok)
-            if regional:
-                polish_seconds += _take_paired_swaps(regional, REGION_PAIR_MOVES, holomems, take, scored, ok)
+            polish_seconds += take_class_climb(classes)
+            paired = list(dict.fromkeys(regional + classes))
+            if paired:
+                polish_seconds += _take_paired_swaps(paired, REGION_PAIR_MOVES, holomems, take, scored, ok)
             polish_seconds += polish_new()
             if not region_of:
                 polish_seconds += repair_gates(
@@ -649,7 +892,12 @@ def search(
             "neighbours": neighbours,
             "climb_rounds": climbed,
             **(
-                {"regions": len(set(region_of)), "region_seeds": seeded, "region_climbs": region_climbs}
+                {
+                    "regions": len(set(region_of)),
+                    "region_seeds": seeded,
+                    "region_climbs": region_climbs,
+                    "classes": len(class_members),
+                }
                 if region_of
                 else {}
             ),

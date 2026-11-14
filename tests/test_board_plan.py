@@ -780,6 +780,20 @@ def test_a_song_cast_carries_its_scope_to_the_bench_yellows():
     assert back == group and back.scope == "group"
 
 
+def test_an_empty_cast_pays_the_all_yellows_only_on_a_song_with_no_singers():
+    """A song with no singers (a whole-roster song) pays every board's `all` yellows (the
+    scorer's pooled `all` bucket); an EMPTY cast that names a scope is a song whose singers
+    are not in it (several charts keyed by the team's own singers, none of them singing):
+    the song pays its own scope, so no bench `all` yellow reaches it and none is held."""
+    from hbuilder.domain.board_plan import SongCast, bench_yellow_pays
+
+    assert bench_yellow_pays("all", "chr-00003", frozenset())
+    assert bench_yellow_pays("all", "chr-00003", SongCast((), ""))
+    for scope in ("solo", "group"):
+        assert not bench_yellow_pays("all", "chr-00003", SongCast((), scope))
+        assert not bench_yellow_pays(scope, "chr-00003", SongCast((), scope))
+
+
 def test_blue_of_a_leader_only_card_reaches_nobody_but_a_member_card_reaches_itself():
     members = _five_members()
     leader = make_card("card-lead-5-uniq-0000-00", member="Lead", stats=_STATS)

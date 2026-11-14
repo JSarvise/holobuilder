@@ -329,9 +329,10 @@ def maxed_account_bench(
     board-off. Deterministic: the placement depends on the nominal
     roster only through the greens' Unit-Score deltas, and a team that later
     develops one of these characters REPLACES its bench entry (its own sockets
-    are then re-assigned from the full pool exactly as the account scenario
-    does, i.e. a card may be socketed on the bench and on the team — the same
-    convention `board.json` + `connect_cards_for("account")` already have).
+    are then re-assigned from the full pool). `state_out`'s slots are what the
+    bench's sockets hold: the leaf passes them as its `bench_sockets`
+    (`leaf_inputs._with_maxed_bench`), so a team's matching does not take a card a
+    bench board keeps lifting, as on an account.
     The multipliers are then resolved by `build_board.build(level=2)`, the same
     converter that writes `board.json`, so the mapping is byte-compatible."""
     import dataclasses  # noqa: PLC0415
@@ -339,6 +340,7 @@ def maxed_account_bench(
     import build_board  # noqa: PLC0415
 
     from hbuilder.domain.board_plan import (  # noqa: PLC0415
+        SongCast,
         _team_connect_assignment,
         bench_node_values,
         model_for_character,
@@ -358,12 +360,12 @@ def maxed_account_bench(
     ds = deck_screen_unit_score(bd)
     state = maxed_account_board_state(skilltree, points, node_master=node_master)
     per_char = {}
+    per_char_yellow = {}
     for chr_id, entry in state.items():
         model_id = model_for_character(skilltree, chr_id) or ""
         if not model_id:
             continue
-        values = bench_node_values(
-            effects,
+        common = dict(
             member_cards=team.members,
             bonus_permil=ds.score_bonus_permil,
             overall_power=ds.overall_power,
@@ -372,8 +374,29 @@ def maxed_account_bench(
             model_id="",
             own_chr=chr_id,
         )
-        per_char[chr_id] = (skilltree["models"][model_id], frozenset(entry["nodes"]), values)
+        greens = bench_node_values(effects, **common)
+        # her own song yellows (solo and group), for the second pass below
+        solo = bench_node_values(effects, cast=SongCast(frozenset({chr_id}), "solo"), **common)
+        group = bench_node_values(effects, cast=SongCast(frozenset({chr_id}), "group"), **common)
+        yellows = {
+            node: (solo.get(node, value) - value) + (group.get(node, value) - value)
+            for node, value in greens.items()
+        }
+        model = skilltree["models"][model_id]
+        per_char[chr_id] = (model, frozenset(entry["nodes"]), greens)
+        per_char_yellow[chr_id] = (model, frozenset(entry["nodes"]), yellows)
     _mults, placements = _team_connect_assignment(per_char, connect_cards)
+    # SECOND PASS, with the cards no green socket took, onto the sockets still empty: each
+    # singer's own song yellows. A solo song's bonus comes from her board alone and her
+    # yellow-only socket (S-004) holds no green node, so the green pass leaves it empty and her
+    # solo bonus at 75 of the 100 cap; one card there reaches the cap. Done after the greens
+    # and only with what they left, it cannot move a card any green socket holds (one pass
+    # over both, however weighted, traded green cards for yellows).
+    taken = {p.card for p in placements}
+    filled = {(p.chr, p.socket) for p in placements}
+    spare = {card: v for card, v in connect_cards.items() if card not in taken}
+    _m2, extra = _team_connect_assignment(per_char_yellow, spare)
+    placements = [*placements, *(p for p in extra if (p.chr, p.socket) not in filled)]
     for p in placements:
         state[p.chr]["slots"][p.socket] = p.card
     if state_out is not None:

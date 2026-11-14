@@ -18,6 +18,7 @@ A new card or song is data and needs no rebuild:
 from __future__ import annotations
 
 import dataclasses
+import math
 import sys
 import threading
 import time
@@ -36,7 +37,7 @@ import two_stage  # noqa: E402
 
 from hbuilder.solver import members_first  # noqa: E402
 from hbuilder.solver.parallel import default_workers  # noqa: E402
-from hbuilder.solver.parallel_refine import COUNTS, COUNTS_BOTH, RefinePool, SharedPool  # noqa: E402
+from hbuilder.solver.parallel_refine import COUNTS, COUNTS_BOTH, SEARCH, RefinePool, SharedPool  # noqa: E402
 
 if TYPE_CHECKING:
     from hbuilder.domain.card import Card
@@ -107,6 +108,15 @@ SETTLE_PAIR_MOVES = 20
 SAMPLE_TRAIN = 300
 SAMPLE_SEED = 20261022
 GENERAL_RESCORE = 200
+# ... and, whatever their place among those, the best LEADER_RESCORE teams of every leader whose
+# best team is within LEADER_RESCORE_MARGIN of the sample's best. The sample orders one
+# leader's own teams 0.2-0.6 % off the mean over every chart: a leader's best team by every
+# chart stood 5th to 9th among her own by the sample (four leaders, three seeds), and below
+# the sample's best 200 once the teams of two or three leaders fill them. A search with the
+# leader pinned re-scores her best 200; this keeps the head of each leader's list in the
+# unpinned search too
+LEADER_RESCORE = 12
+LEADER_RESCORE_MARGIN = 0.02
 # In general with planned boards, the best this many re-scored teams are scored again on every
 # chart with the members' activation-frequency node counts chosen per chart
 # (`parallel_refine.ChartCounts`), and they are the ranking served. Choosing counts per song
@@ -118,6 +128,17 @@ GENERAL_COUNTS_HEAD = 50
 # teams with counts chosen sit as deep as #96 by the plain mean, all within the funnel's best 26
 GENERAL_COUNTS_FUNNEL = 200
 GENERAL_COUNTS_SAMPLE = 24
+# In general the search scores a team on a chart SAMPLE, and a leader's score moves with the
+# songs her holomem sings: a leader whose songs the sample holds scores more on it, against the
+# mean over every chart, than one whose songs it leaves out (up to 1.7 % between two leaders on
+# 16 of 185 charts, several times the gap between the best teams), so the search would settle
+# on the leaders the sample happens to favour. That bias is the leader's own: the log of a
+# team's full mean over its sample mean is a leader term plus a member-set term to within
+# 0.04 % (268 teams). So each leader's sample scores are scaled by her factor, measured once
+# per engine and sample on LEADER_REFERENCE random member sets scored under every leader on
+# the sample and on every chart (`Engine.leader_factors`). Only what the search ranks by
+# changes: every served number is a mean over every chart
+LEADER_REFERENCE = 3
 # In general the joint search seeds every leader region (`joint_search.search`'s `tilt_of`):
 # an outfit that raises one stat leans its leader's best sets towards the members strong in
 # that stat. A card's tilt is its share of the stat around the even third, at the log gain
@@ -166,6 +187,29 @@ def replan_pick(
     head = list(range(min(n, len(ranked))))
     more = [k for k in range(len(head), len(ranked)) if sings(ranked[k])][:extra]
     return head + more
+
+
+def leader_heads(
+    ranking: Sequence[tuple[float, int, tuple[int, ...]]],
+    per_leader: int = LEADER_RESCORE,
+    margin: float = LEADER_RESCORE_MARGIN,
+) -> list[tuple[int, tuple[int, ...]]]:
+    """The best `per_leader` (leader index, set) pairs of every leader whose best team is within
+    `margin` of the best of `ranking` ((value, leader index, set), best first), in ranking
+    order."""
+    if not ranking:
+        return []
+    floor = (1.0 - margin) * ranking[0][0]
+    taken: dict[int, int] = {}
+    out = []
+    for value, li, s in ranking:
+        count = taken.get(li, 0)
+        if count == 0 and value < floor:
+            taken[li] = per_leader  # her best team is too far: none of hers
+        elif count < per_leader:
+            taken[li] = count + 1
+            out.append((li, s))
+    return out
 
 
 def outfit_tilt(pool: Sequence[Card]) -> Callable[[object], tuple[float, ...] | None]:
@@ -670,6 +714,7 @@ class Engine:
         self._sample: tuple[int, ...] | None = None
         self._wide: tuple[int, ...] = ()
         self._counts_charts: tuple[int, ...] | None = None  # `_counts_funnel`'s sample
+        self._leader_factors: dict[tuple[int, ...], dict[str, float]] = {}
 
     def _within_materials(
         self, a, ranking, leaders, pool, song, chart_indices, cancel, progress=None, also=None
@@ -985,7 +1030,7 @@ class Engine:
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
             with self.lock:
-                scores += self.pool.batch_score_per_chart(teams[at : at + step])
+                scores += self.pool.batch_score_per_chart(teams[at : at + step], refine_activation=SEARCH)
             if emit:
                 emit(
                     {
@@ -999,6 +1044,43 @@ class Engine:
         wide = tuple(two_stage.fitted_chart_sample(scores, max(GENERAL_WIDE, FITTED_SAMPLE)))
         self._wide, self._sample = wide, wide[:FITTED_SAMPLE]
         return self._sample
+
+    def leader_factors(
+        self, chart_indices: Sequence[int], *, cancel: threading.Event | None = None
+    ) -> dict[str, float]:
+        """`{leader card id: factor}` for the chart sample `chart_indices`: how the leader's
+        mean over every chart relates to her mean over the sample, against the average
+        leader (see LEADER_REFERENCE). Measured once per engine and sample; empty when the
+        sample is every chart."""
+        key = tuple(chart_indices)
+        if len(set(key)) >= len(self.charts):
+            return {}
+        got = self._leader_factors.get(key)
+        if got is not None:
+            return got
+        import random  # noqa: PLC0415
+
+        from hbuilder.domain.team import Team  # noqa: PLC0415
+
+        rng = random.Random(SAMPLE_SEED + 1)
+        sets = two_stage.random_legal_sets([c.member for c in self.reps], LEADER_REFERENCE, rng)
+        teams = [
+            Team(leader=leader, members=tuple(self.reps[i] for i in s)) for leader in self.reps for s in sets
+        ]
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+        with self.lock:
+            full = self.pool.batch_score(teams, chart_indices=None, refine_activation=SEARCH)  # type: ignore[arg-type]
+            part = self.pool.batch_score(teams, chart_indices=key, refine_activation=SEARCH)  # type: ignore[arg-type]
+        logs: dict[str, list[float]] = {}
+        for team, f, p in zip(teams, full, part):
+            if f > 0 and p > 0:
+                logs.setdefault(team.leader.id, []).append(math.log(float(f) / float(p)))
+        means = {lid: sum(v) / len(v) for lid, v in logs.items() if len(v) == len(sets)}
+        centre = sum(means.values()) / len(means) if means else 0.0
+        factors = {lid: math.exp(m - centre) for lid, m in means.items()}
+        self._leader_factors[key] = factors
+        return factors
 
     # ------------------------------------------------------------------ search
     def search(
@@ -1113,10 +1195,24 @@ class Engine:
                 )
                 plain_of.update(zip(pairs, (float(p) for p, _b in both)))
                 return [float(b) for _p, b in both]
-            return self.pool.batch_score(
-                teams, chart_indices=chart_indices, refine_activation="lens" if lens else None
+            # several charts (In general): the search only orders, on the cheap value (SEARCH)
+            values = self.pool.batch_score(
+                teams,
+                chart_indices=chart_indices,
+                refine_activation="lens" if lens else SEARCH if general else None,  # type: ignore[arg-type]
             )
+            if factors:
+                values = [float(v) * factors.get(leaders[li].id, 1.0) for v, (li, _s) in zip(values, pairs)]
+            return values
 
+        # In general each leader's sample scores are scaled by her own factor (LEADER_REFERENCE);
+        # one leader needs none
+        factors: dict[str, float] = {}
+        wide_factors: dict[str, float] = {}
+        if general and len(leaders) > 1:
+            factors = self.leader_factors(chart_indices, cancel=cancel)
+            if len(self._wide) > len(chart_indices):
+                wide_factors = self.leader_factors(self._wide, cancel=cancel)
         # In general on the two-tier (fitted) sample the answer merges GENERAL_STARTS searches
         starts = GENERAL_STARTS if general and len(self._wide) > len(chart_indices) else 1
         on_round = SearchRounds(emit, starts)
@@ -1182,7 +1278,17 @@ class Engine:
                         teams = [
                             Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for li, s in pairs
                         ]
-                        return self.pool.batch_score(teams, chart_indices=wide)
+                        values = self.pool.batch_score(
+                            teams,
+                            chart_indices=wide,
+                            refine_activation=SEARCH,  # type: ignore[arg-type]
+                        )
+                        if wide_factors:
+                            values = [
+                                float(v) * wide_factors.get(leaders[li].id, 1.0)
+                                for v, (li, _s) in zip(values, pairs)
+                            ]
+                        return values
 
                     climbed = joint_search.climb(
                         pool,
@@ -1201,6 +1307,7 @@ class Engine:
                     dict.fromkeys(
                         [(li, s) for _v, li, s in climbed["ranking"][:CLIMB_RESCORE]]
                         + [(li, s) for _v, li, s in ranking[:GENERAL_RESCORE]]
+                        + (leader_heads(ranking) if len(leaders) > 1 else [])
                     )
                 )
                 # every chart: the samples only chose the candidates; the served

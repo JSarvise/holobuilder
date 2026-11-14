@@ -57,6 +57,36 @@ def test_the_kernel_sums_floats_as_the_builtin_sum_does():
     assert str(connect.py_sum([-0.0])) == "0.0"  # the int 0 start: 0 + -0.0 is +0.0
 
 
+@pytest.fixture
+def _own_group_ids(monkeypatch):
+    """`connect`'s card group numbering emptied for one test, and the library's ranks handed
+    back for the numbering it had once the test is over."""
+    monkeypatch.setattr(connect, "_col_id", {})
+    monkeypatch.setattr(connect, "_packs", {})
+    monkeypatch.setattr(connect, "_joint_cols", {})
+    monkeypatch.setattr(connect, "_col_generation", [0])
+    yield
+    monkeypatch.undo()
+    connect._push_ranks()
+
+
+def test_card_group_ids_stay_put_and_start_again_past_the_librarys_ranks(_own_group_ids, monkeypatch):
+    """A packed plan names its card groups by id: a new group gets the next id and the others
+    keep theirs (ranks follow tuple order, in the library); past COL_IDS groups the numbering
+    starts again from the groups of the plan at hand, and the generation says so."""
+    connect.load()
+    monkeypatch.setattr(connect, "COL_IDS", 4)
+    connect._packs[1] = ("a plan",)
+    connect._register_groups([("card-b",), ("card-a",)])
+    assert connect._col_id == {("card-a",): 0, ("card-b",): 1}
+    connect._register_groups([("card-0",), ("card-a",)])
+    assert connect._col_id == {("card-a",): 0, ("card-b",): 1, ("card-0",): 2}
+    assert connect._packs == {1: ("a plan",)} and connect._col_generation == [0]
+    connect._register_groups([("card-c",), ("card-d",), ("card-a",)])
+    assert connect._col_id == {("card-a",): 0, ("card-c",): 1, ("card-d",): 2}
+    assert connect._packs == {} and connect._col_generation == [1]
+
+
 # ---------------------------------------------------------------------------
 # real teams on real charts (skipped without the recon dumps)
 # ---------------------------------------------------------------------------
@@ -68,9 +98,16 @@ class Counting:
         self.bound = {0: 0, 1: 0, 2: 0, 3: 0}  # the check that bound: none / before / after / no checks
         self.path = {0: 0, 1: 0, 2: 0}  # 0 uncapped, 1 capped first kept, 2 scaled kept
         self.incumbent = self.capped_incumbent = 0  # calls with the account's placements
+        # calls with cards held on off-team sockets, and of those the ones where a group loses
+        # its first card (its column moves among the others)
+        self.held = self.held_first = 0
 
     def __call__(self, *args, **kwargs):
         self.calls += 1
+        held = kwargs.get("held") or frozenset()
+        if held:
+            self.held += 1
+            self.held_first += any(e[3][0] in held for i in args[0] for e in i[1].entries)
         out = connect.assemble(*args, **kwargs)
         if out is None:
             self.declined += 1
@@ -91,9 +128,12 @@ def _built(basis: str):
     try:
         import leaf_inputs
 
-        return leaf_inputs.leaf_inputs(basis, "EXPERT")
+        built = leaf_inputs.leaf_inputs(basis, "EXPERT")
     except Exception as exc:  # noqa: BLE001 - no dumps on this machine
         pytest.skip(f"the {basis} leaf inputs are not available here: {exc!r}")
+    # the board kernel's own path: the maxed leaf deals its cards with the bench in every
+    # assembly (`RefineContext.joint_connect`, `test_joint_kernel.py`), which this kernel does not
+    return dict(built, ctx=dataclasses.replace(built["ctx"], joint_connect=False))
 
 
 @pytest.fixture(scope="module")
@@ -107,20 +147,6 @@ def account():
     if not built["ctx"].bench_sockets:
         pytest.skip("the account's boards hold no Connect cards here")
     return built
-
-
-@pytest.fixture
-def held_views(monkeypatch):
-    """How many plans the kernel saw with cards held on off-team sockets taken out."""
-    seen = {"views": 0}
-    view = bp._held_view
-
-    def counting(asm, held):
-        seen["views"] += 1
-        return view(asm, held)
-
-    monkeypatch.setattr(bp, "_held_view", counting)
-    return seen
 
 
 def _charts(count: int, seed: int):
@@ -174,9 +200,7 @@ def _per_chart(ctx, teams, kernel):
 
 @pytest.mark.parametrize("cap", [None, 25.0], ids=["the game's cap", "cap 25"])
 @pytest.mark.parametrize("basis", ["maxed", "account"])
-def test_the_leaf_scores_real_teams_identically_with_the_board_kernel(
-    request, monkeypatch, held_views, basis, cap
-):
+def test_the_leaf_scores_real_teams_identically_with_the_board_kernel(request, monkeypatch, basis, cap):
     """The leaf on 20 teams, maxed and with the account's own cards and boards (cards held on
     off-team sockets, the account's placements winning ties): one search per song (the song's whole cast, so off-team
     singers' yellows count) on five charts, and one search over ten charts (one board per
@@ -199,10 +223,10 @@ def test_the_leaf_scores_real_teams_identically_with_the_board_kernel(
         assert counting.calls - before >= len(teams), [c.music_id for c in charts]
     assert counting.declined == 0, vars(counting)
     if basis == "account":
-        # every call carried the account's placements, the capped ones too, and plans with
-        # held cards taken out reached the kernel
+        # every call carried the account's placements, the capped ones too, and cards held on
+        # off-team sockets reached the kernel, some the first card of their group
         assert counting.incumbent == counting.calls and counting.capped_incumbent > 0, vars(counting)
-        assert held_views["views"] > 0
+        assert counting.held > 0 and counting.held_first > 0, vars(counting)
     if cap is None:
         assert counting.bound[1] + counting.bound[2] > 0 and counting.bound[0] > 0, vars(counting)
         if basis == "maxed":
@@ -282,6 +306,7 @@ def test_the_assembled_boards_and_their_sockets_are_the_pythons(request, monkeyp
                 compared += 1
     assert counting.declined == 0 and counting.calls == compared, vars(counting)
     assert counting.path[2] > 0 and counting.bound[1] > 0, vars(counting)
+    assert counting.held_first > 0, vars(counting)
     if basis == "account":
         assert counting.incumbent == compared, vars(counting)
 

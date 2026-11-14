@@ -103,7 +103,7 @@ static double extra_delta(Ctx *ctx, const Segs *sg, const double *prefix, double
 static double walk_runs(Work *wk, int note_count, const double *prefix, double constant,
                         double bias, uint64_t always_mask, int nrng, const int32_t *rng,
                         int nslot, const int32_t *slot_bit, const int32_t *slot_member,
-                        const int32_t *slot_cover) {
+                        const int32_t *slot_cover, const uint8_t *allowed) {
     Ctx *ctx = &wk->ctx;
     Segs *sg = &wk->sg;
     Ev *ev = wk->ev;
@@ -176,17 +176,20 @@ static double walk_runs(Work *wk, int note_count, const double *prefix, double c
         }
     int p[SLOTS] = {0, 1, 2, 3, 4};
     double best = 0.0; int have = 0;
-    for (;;) {
-        double total = fixed;
-        for (int s = 0; s < SLOTS; s++) total += delta[p[s]][s];
-        for (int s = 0; s < SLOTS; s++) for (int t = s + 1; t < SLOTS; t++) total += pairc[p[s]][s][p[t]][t];
-        if (!have || total > best) { best = total; have = 1; }
+    /* `allowed` (NULL: every order): one outcome of a recipients tie, as in notewalk.c */
+    for (int index = 0;; index++) {
+        if (!allowed || allowed[index]) {
+            double total = fixed;
+            for (int s = 0; s < SLOTS; s++) total += delta[p[s]][s];
+            for (int s = 0; s < SLOTS; s++) for (int t = s + 1; t < SLOTS; t++) total += pairc[p[s]][s][p[t]][t];
+            if (!have || total > best) { best = total; have = 1; }
+        }
         int i = SLOTS - 2; while (i >= 0 && p[i] > p[i + 1]) i--; if (i < 0) break;
         int j = SLOTS - 1; while (p[j] < p[i]) j--;
         int t = p[i]; p[i] = p[j]; p[j] = t;
         for (int a = i + 1, b = SLOTS - 1; a < b; a++, b--) { t = p[a]; p[a] = p[b]; p[b] = t; }
     }
-    return best;
+    return have ? best : NAN;
 }
 
 /* Field layouts of the flat arrays the binding (cdvar.py) packs:
@@ -213,7 +216,7 @@ double hd_cdvar(int note_count, const double *times, const double *prefix, doubl
                 const int32_t *rider_host, const double *rider_q,
                 int nhost, const int32_t *host_i, const double *host_d,
                 int norder, const int32_t *order, int ncostume, const int32_t *costume,
-                int nvar, const double *cd, double *out) {
+                int nvar, const double *cd, double *out, const uint8_t *allowed) {
     Work *wk = (Work *)malloc(sizeof(Work));
     if (wk == NULL) { for (int v = 0; v < nvar; v++) out[v] = NAN; return 1.0; }
     int32_t *rng = wk->rng;
@@ -358,7 +361,7 @@ double hd_cdvar(int note_count, const double *times, const double *prefix, doubl
         memset(ctxp->full, 0, sizeof ctxp->full);
         ctxp->used = 0;
         out[v] = walk_runs(wk, note_count, prefix, constant, bias, always_mask, nr, rng,
-                           nslot, slot_bit, slot_member, slot_cover);
+                           nslot, slot_bit, slot_member, slot_cover, allowed);
     }
     free(wk);
     return ok_all ? 0.0 : 1.0;

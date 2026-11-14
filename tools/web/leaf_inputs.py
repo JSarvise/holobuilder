@@ -727,13 +727,22 @@ MAXED_NOMINAL_TEAM = (
 )
 
 
-_MAXED_BENCH: dict = {}  # inputs key -> (bench characters, bench as a board state)
+# inputs key -> (bench characters, bench as a board state, cards by id, its sockets)
+_MAXED_BENCH: dict = {}
 
 
 def _with_maxed_bench(built: dict) -> dict:
     """`built` with `ctx.bench_characters` = the maxed bench, every holomem at max level
-    (built once per inputs: ~seconds, one exact socket assignment over 54 boards)."""
+    (built once per inputs: ~seconds, one exact socket assignment over 54 boards), and
+    `ctx.bench_sockets` = what its sockets hold (`board_plan.bench_sockets_from_state`):
+    a card the bench keeps on a board that reaches the team leaves the team's pool
+    (`board_plan.held_bench_cards`), so every card counts in one place, as on an account.
+    The rows served (refined, or with their counts chosen per chart) also try their Connect
+    cards dealt together with the bench's (`RefineContext.joint_connect`): the bench is the
+    same for every song, and a song or a team may want a bench card on another board."""
     import precompute_optimisations as pc  # noqa: PLC0415
+
+    from hbuilder.domain.board_plan import bench_sockets_from_state  # noqa: PLC0415
 
     ctx = built["ctx"]
     points = maxed_budget()
@@ -749,8 +758,16 @@ def _with_maxed_bench(built: dict) -> dict:
             state_out=state,
         )
         _MAXED_BENCH.clear()
-        hit = _MAXED_BENCH[key] = (bench, state, {c.id: c for c in ctx.cards})
-    return {**built, "ctx": dataclasses.replace(ctx, bench_characters=hit[0])}
+        hit = _MAXED_BENCH[key] = (
+            bench,
+            state,
+            {c.id: c for c in ctx.cards},
+            bench_sockets_from_state(state),
+        )
+    return {
+        **built,
+        "ctx": dataclasses.replace(ctx, bench_characters=hit[0], bench_sockets=hit[3], joint_connect=True),
+    }
 
 
 def maxed_bench_state(difficulty: str = DEFAULT_DIFFICULTY) -> dict:
@@ -780,7 +797,7 @@ def maxed_bench_targets(team: Sequence[str] = (), difficulty: str = DEFAULT_DIFF
     from hbuilder.domain.board import BoardError, _reaches, parse_effect_id  # noqa: PLC0415
 
     state = maxed_bench_state(difficulty)
-    bench, _state, by_id = next(iter(_MAXED_BENCH.values()))
+    bench, _state, by_id, _sockets = next(iter(_MAXED_BENCH.values()))
     cards = [by_id[c] for c in team if c in by_id]
     team_chrs = {"chr-" + c.split("-")[1] for c in team}
     skilltree = json.loads(SKILLTREE_PATH.read_text(encoding="utf-8"))

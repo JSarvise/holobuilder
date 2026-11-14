@@ -78,6 +78,7 @@ def load() -> ctypes.CDLL:
                 ctypes.c_int,
                 _F64,
                 _F64,
+                ctypes.POINTER(ctypes.c_uint8),
             ]
             _lib = lib
     return _lib
@@ -151,6 +152,9 @@ def screen(spec: dict) -> list[float] | None:
         count,
         _doubles(spec["cd"]),
         out,
+        None
+        if spec.get("allowed") is None
+        else (ctypes.c_uint8 * 120)(*(1 if a else 0 for a in spec["allowed"])),
     )
     values = list(out[:count])
     if any(math.isnan(v) for v in values):

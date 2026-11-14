@@ -175,17 +175,19 @@ def test_bench_is_54_boards_at_max_level_with_level_2_sockets():
         assert wanted <= nodes <= set(skilltree["models"][member["model"]]), name
         assert sum(costs.get(n, 0) for n in nodes) <= scenario.points, name
         assert any(r.get("connect_multiplier", 1) > 1 for r in rows), f"{name}: no socket reached a node"
-    assert scenario.bench_sockets == 54, scenario.bench_sockets
+    # one green socket per board, and each singer's yellow-only socket (her own song yellows
+    # take the cards the greens leave, in a second pass (`precompute.maxed_account_bench`)
+    assert scenario.bench_sockets == 104, scenario.bench_sockets
     # the account bonuses of the scenario, not the account's own
     # every poster the game has and the roster's power-up ceiling: both move as cards ship
-    assert cfg.account.posters == 43
-    assert cfg.account.power_up_permyriad == 1254
-    assert scenario.bonuses.posters == 43 and scenario.bonuses.power_up_permyriad == 1254
+    assert cfg.account.posters == 48
+    assert cfg.account.power_up_permyriad == 1294
+    assert scenario.bonuses.posters == 48 and scenario.bonuses.power_up_permyriad == 1294
     # the "current" board of this basis is the bench as a BoardModel
     assert scenario.board_model is not None
     assert len(scenario.board_model.characters) == 54
     # the catalogue-wide, level-2 Connect pool
-    assert len(scenario.connect_cards) == 150  # every 4★/5★ of the 204 (204 - 54 three-stars)
+    assert len(scenario.connect_cards) == 155  # every 4★/5★ of the 209 (209 - 54 three-stars)
     # cached per process: a second build at the same cfg IS the same object
     _c2, _cfg2, _b2, again = basis.apply_basis(
         *load_inputs(config.CARDS_PATH, config.OWNED_PATH)[:3], "maxed-account"
@@ -325,3 +327,22 @@ def test_compare_default_budget_is_the_max_level_points_and_captured_is_the_benc
     # a maxed bench as the board scores well above board-off
     a = cap["teams"][0]
     assert a["panel"]["unit_score"] > a["score"]["unit_score_board_off"] * 1.2, a["score"]
+
+
+@pytest.mark.skipif(
+    not _dumps_present(), reason="gitignored dumps/ absent (skilltree, master, charts, poster)"
+)
+def test_the_bench_singers_yellows_hold_a_connect_card():
+    """A solo song's bonus comes from its singer's board alone, and her yellow-only socket holds
+    no green node: the bench's Connect assignment gives her yellows a card (a tie-break below
+    every green), so an off-team singer reaches the solo cap. With greens alone 13 of the 54
+    boards had any yellow multiplied."""
+    *_rest, scenario = basis.apply_basis(
+        *load_inputs(config.CARDS_PATH, config.OWNED_PATH)[:3], "maxed-account"
+    )
+    lifted = [
+        name
+        for name, rows in scenario.bench.items()
+        if any(str(r["node"]).startswith("Y-") and r.get("connect_multiplier", 1) > 1 for r in rows)
+    ]
+    assert len(lifted) >= 50, len(lifted)

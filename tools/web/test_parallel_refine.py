@@ -89,16 +89,26 @@ def test_pool_that_cannot_start_falls_back_to_serial(monkeypatch):
     assert notes and "failed to start" in notes[0]
 
 
+# A budget the plans cannot fill (an account's levels): the points a dropped frequency
+# node frees can buy what the plan left out (`board_refine.respend_freed_points`)
+TIGHT_BUDGET = 120
+
+
 @pytest.mark.parametrize("use_cache", [False, True])
-@pytest.mark.parametrize("refine", [False, True])
-def test_develop_team_board_scores_to_the_leaf_float(use_cache, refine):
+@pytest.mark.parametrize("refine", [False, True, 2])
+@pytest.mark.parametrize("budget", [453, TIGHT_BUDGET])
+def test_develop_team_board_scores_to_the_leaf_float(use_cache, refine, budget):
     """`develop_team` (the DETAIL path: board, plan, sockets) must be the board
     behind `evaluate`'s float, or the detail view shows another number than the
-    row it explains."""
+    row it explains -- on a tight budget too, where the refinement spends the
+    points it frees."""
     from hbuilder.domain.song_rank import score_team_on_chart
     from hbuilder.solver.parallel_refine import develop_team, evaluate, new_plan_cache
 
+    if refine == 2 and (budget != TIGHT_BUDGET or not use_cache):
+        pytest.skip("the count search is slow: once, cached, where it spends the freed points")
     ctx, teams = _context()
+    ctx = dataclasses.replace(ctx, flat_budget=budget)
     team = teams[0]
     if use_cache:
         ctx = dataclasses.replace(
@@ -566,10 +576,12 @@ def test_counts_chosen_per_chart_are_scores_of_real_boards_never_below_the_plain
         pytest.skip("no chart of these teams gains from a frequency count drop")
 
 
-def test_develop_team_with_counts_is_the_board_the_leaf_scores_the_chart_on():
+@pytest.mark.parametrize("budget", [453, TIGHT_BUDGET])
+def test_develop_team_with_counts_is_the_board_the_leaf_scores_the_chart_on(budget):
     """A row served with its frequency counts chosen per chart opens its detail on a song
     with `refine="counts"`: `develop_team` then returns the board `evaluate` scores that one
-    chart on in that mode (the plain develop's when no count drop scores higher)."""
+    chart on in that mode (the plain develop's when no count drop scores higher; on a tight
+    budget, the one with the freed points spent again when that scores higher)."""
     from hbuilder.domain.song_rank import score_team_on_chart
     from hbuilder.solver import parallel_refine as pr
 
@@ -577,7 +589,7 @@ def test_develop_team_with_counts_is_the_board_the_leaf_scores_the_chart_on():
     charts = _sung_charts(teams)
     moved = 0
     for chart in charts[:3]:
-        ctx = _per_chart_context([chart], teams[0])
+        ctx = dataclasses.replace(_per_chart_context([chart], teams[0]), flat_budget=budget)
         with RefinePool(ctx, workers=1) as pool:
             cache = pr.new_plan_cache(ctx, pool._by_id)
             for team in teams:
@@ -599,6 +611,116 @@ def test_develop_team_with_counts_is_the_board_the_leaf_scores_the_chart_on():
                 moved += leaf > plain
     if not moved:
         pytest.skip("no chart of these teams gains from a frequency count drop")
+
+
+def test_counts_spend_the_freed_points_on_a_tight_budget_and_never_score_lower():
+    """With points the plans cannot fill, the points a dropped frequency node frees are spent
+    again (`ChartCounts` with the plan values): each chart's served score is the counts
+    chooser's without them or higher; a board served with them holds the counts' own nodes
+    plus nodes bought with the freed points, never a frequency node, connected and within the
+    budget; and some chart of these teams gains."""
+    from hbuilder.domain.board_plan import SongCast
+    from hbuilder.domain.board_refine import cooldown_node_ids, plan_values
+    from hbuilder.domain.song import overall_power_for
+    from hbuilder.solver import parallel_refine as pr
+
+    _ctx, teams = _context()
+    charts = _sung_charts(teams)
+    ctx = dataclasses.replace(_per_chart_context(charts, teams[0]), flat_budget=TIGHT_BUDGET)
+    family = cooldown_node_ids(ctx.skilltree)
+    gained = 0
+    with RefinePool(ctx, workers=1) as pool:
+        cache = pr.new_plan_cache(ctx, pool._by_id)
+        for team in teams:
+            ids = (team.leader.id, tuple(m.id for m in team.members))
+            counted = pr.evaluate(
+                ctx,
+                pool._by_id,
+                pool._tree_for,
+                pool._budget_for,
+                (*ids, None, pr.COUNTS),
+                plan_cache=cache,
+                per_chart=True,
+            )
+            cards = {x.id: x for x in (team.leader, *team.members)}
+            on_team = frozenset("chr-" + c.id.split("-")[1] for c in (team.leader, *team.members))
+            for chart, c in zip(charts, counted):
+                cast = SongCast(on_team & frozenset(chart.singers or ()), chart.singer_type)
+                plan, board, assemble = pr._planned_board(
+                    ctx, team, pool._tree_for, pool._budget_for, cache, cast
+                )
+                cfg = dataclasses.replace(ctx.cfg, board=board)
+                power_of = lambda cfg_b: overall_power_for(tuple(team.members), team.leader, cfg_b)  # noqa: B023, E731
+                kw = dict(
+                    tree_for=pool._tree_for,
+                    budget_for=pool._budget_for,
+                    skilltree=ctx.skilltree,
+                    power_of=power_of,
+                )
+                unspent = pr.ChartCounts(team, cfg, plan, assemble, **kw)
+                respent = pr.ChartCounts(
+                    team,
+                    cfg,
+                    plan,
+                    assemble,
+                    values_for=plan_values(plan, cards, cache, ctx.node_effect_ids, ctx.skilltree),
+                    player_level=pr.player_level(ctx.cfg),
+                    **kw,
+                )
+                plain, served, combo, flag = respent.choose(chart)
+                assert served == c
+                assert served >= unspent.choose(chart)[1] >= plain
+                if not flag:
+                    continue
+                gained += served > unspent.choose(chart)[1]
+                for card_id, before in respent.plan_at(combo).per_character.items():
+                    after = respent.plan_at(combo, True).per_character[card_id].selected
+                    added = after - before.selected
+                    assert before.selected <= after and not (added & family)
+                    tree = pool._tree_for(cards[card_id])
+                    assert tree.reachable(after) == after
+                    assert tree.cost_of(after - {"S-001"}) <= TIGHT_BUDGET
+    if not gained:
+        pytest.skip("no chart of these teams gains from spending the freed points")
+
+
+def test_the_refinement_spends_the_points_it_frees_and_never_scores_lower(monkeypatch):
+    """On a tight budget the activation refinement (levels 1 and 2) spends again the points
+    it freed: each team's refined score is at least the one with them left unspent, and
+    some team gains."""
+    from hbuilder.domain import board_refine
+    from hbuilder.solver import parallel_refine as pr
+
+    ctx, teams = _context()
+    team0 = teams[0]
+    ctx = dataclasses.replace(
+        ctx,
+        flat_budget=TIGHT_BUDGET,
+        use_plan_cache=True,
+        plan_cache_seed=(team0.leader.id, tuple(m.id for m in team0.members)),
+    )
+    real = board_refine.respend_freed_points
+    gained = 0
+    with RefinePool(ctx, workers=1) as pool:
+        for level in (1, 2):
+            # the count search is slow: one team at level 2
+            for team in teams if level == 1 else teams[:1]:
+                ids = (team.leader.id, tuple(m.id for m in team.members), None, level)
+                values = []
+                for respend in (False, True):
+                    monkeypatch.setattr(
+                        board_refine,
+                        "respend_freed_points",
+                        real if respend else (lambda start, plan, *a, **k: (plan, [])),
+                    )
+                    cache = pr.new_plan_cache(ctx, pool._by_id)
+                    values.append(
+                        pr.evaluate(ctx, pool._by_id, pool._tree_for, pool._budget_for, ids, plan_cache=cache)
+                    )
+                assert values[1] >= values[0]
+                gained += values[1] > values[0]
+    if not gained:
+        pytest.skip("no team gains from spending the freed points")
 
 
 def test_the_count_axes_are_the_ones_the_level_two_refinement_tries():

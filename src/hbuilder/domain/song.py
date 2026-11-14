@@ -35,10 +35,10 @@ import sys
 from bisect import bisect_left
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hbuilder.domain import targets
-from hbuilder.domain.card import Card, SlotRider
+from hbuilder.domain.card import Card, EffectTarget, SlotRider
 from hbuilder.domain.collection import member_power_up
 from hbuilder.domain.gates import (
     ResolvedSkill,
@@ -194,13 +194,19 @@ def _active_windows(
     `tools/refresh/chart_timeline.py`): windows are half-open `[start, end)`, so
     clamping would push the song's last note, the one with the highest combo
     multiplier, out of a window that covers it."""
+    return _lattice_windows(*_active_lattice(resolved, cfg), song_seconds)
+
+
+def _active_lattice(resolved: ResolvedSkill, cfg: ScoringConfig) -> tuple[float, float]:
+    """`(interval, duration)` of an ACTIVE's cooldown lattice (`_active_windows`): no chart
+    moves either."""
     # the board's Act.CD nodes (`uptime_for`) add to the hand-supplied reduction, as
     # in `scoring._active_occupancy`, so the two scorers agree on the interval
     board_cooldown = cfg.board.uptime_for(resolved.member)[1] if cfg.board is not None else 0.0
     reduction = cfg.active_cooldown_reduction.get(resolved.member, 0.0) + board_cooldown
     interval = float(resolved.skill.interval) / (1.0 + reduction)  # type: ignore[arg-type]
     duration = float(resolved.skill.duration)  # type: ignore[arg-type]
-    return _lattice_windows(interval, duration, song_seconds)
+    return interval, duration
 
 
 # `(interval, duration, song_seconds) -> the windows`, one tuple OBJECT per
@@ -339,32 +345,18 @@ def _combo_split(
     would grant it from the first check, so the combo is re-read at each check here.
     AUTO keeps the static premise (the combo never accumulates there). The two parts
     never share a note (a skill's windows do not overlap)."""
-    override = resolved.skill.override
-    condition = getattr(override, "condition", None)
-    if (
-        cfg.song_auto
-        or cfg.run_state.combo <= 0  # a premise of no combo at all, as AUTO
-        or resolved.skill.kind != "ACTIVE"
-        or not term.windows
-        or getattr(condition, "kind", None) != "run_state"
-        or condition.target != "combo"  # type: ignore[union-attr]
-        or not is_known(override.magnitude)  # type: ignore[attr-defined]
-    ):
+    rule = _combo_override(resolved, cfg) if term.windows else None
+    if rule is None:
         return [term]
-    base, high = (
-        float(resolved.skill.magnitude),  # type: ignore[arg-type]
-        max(float(override.magnitude), float(resolved.skill.magnitude)),  # type: ignore[attr-defined, arg-type]
-    )
-    applied = high if (resolved.override_gate is not None and resolved.override_gate.fired) else base
-    if applied <= 0.0 or high == base:
-        return [term]
+    high, base, applied, condition = rule
 
     def reached(start: float) -> bool:
         combo = bisect_left(times, start)
-        return combo <= condition.count if condition.operator == "lte" else combo >= condition.count  # type: ignore[union-attr]
+        return combo <= condition.count if condition.operator == "lte" else combo >= condition.count
 
-    hit = tuple(w for w in term.windows if reached(w[0]))
-    miss = tuple(w for w in term.windows if not reached(w[0]))
+    windows = term.windows or ()
+    hit = tuple(w for w in windows if reached(w[0]))
+    miss = tuple(w for w in windows if not reached(w[0]))
     out = []
     if hit:
         out.append(dataclasses.replace(term, magnitude=term.magnitude * high / applied, windows=hit))
@@ -373,12 +365,48 @@ def _combo_split(
     return out
 
 
+def _combo_override(resolved: ResolvedSkill, cfg: ScoringConfig) -> tuple[float, float, float, Any] | None:
+    """`(high, base, applied, its condition)` of an ACTIVE whose override is COMBO-gated, as
+    `_combo_split` splits it (the magnitudes the checks reached and missed take, over the one
+    the term carries); None for any other skill, or under AUTO / a no-combo premise."""
+    override = resolved.skill.override
+    condition = getattr(override, "condition", None)
+    if (
+        cfg.song_auto
+        or cfg.run_state.combo <= 0  # a premise of no combo at all, as AUTO
+        or resolved.skill.kind != "ACTIVE"
+        or getattr(condition, "kind", None) != "run_state"
+        or condition.target != "combo"  # type: ignore[union-attr]
+        or not is_known(override.magnitude)  # type: ignore[attr-defined]
+    ):
+        return None
+    base, high = (
+        float(resolved.skill.magnitude),  # type: ignore[arg-type]
+        max(float(override.magnitude), float(resolved.skill.magnitude)),  # type: ignore[attr-defined, arg-type]
+    )
+    applied = high if (resolved.override_gate is not None and resolved.override_gate.fired) else base
+    if applied <= 0.0 or high == base:
+        return None
+    return high, base, applied, condition
+
+
 def _rider_gate_at(resolved: ResolvedSkill, combo: int, cfg: ScoringConfig) -> bool:
     """Whether a SPECIAL's rider fires at a cue reached with `combo` notes behind
     it: a COMBO gate against the chart's own count there (full-combo premise), any
     other gate as resolved for the run (`gates`, the static run state). AUTO, or a
     premise of no combo at all, keeps the static gate for a combo gate too: the combo
     never accumulates there, as `_combo_split` reads it for an ACTIVE override."""
+    kind, count = _rider_gate(resolved, cfg)
+    if kind == "lte":
+        return combo <= count
+    if kind == "gte":
+        return combo >= count
+    return kind == "on"
+
+
+def _rider_gate(resolved: ResolvedSkill, cfg: ScoringConfig) -> tuple[str, Any]:
+    """A SPECIAL rider's gate as no chart moves it: `("lte" | "gte", count)` for a COMBO gate
+    read at each cue (`_rider_gate_at`), else `("on" | "off", None)` as resolved for the run."""
     condition = resolved.skill.rider.condition  # type: ignore[attr-defined]
     if (
         getattr(condition, "kind", None) == "run_state"
@@ -386,10 +414,8 @@ def _rider_gate_at(resolved: ResolvedSkill, combo: int, cfg: ScoringConfig) -> b
         and not cfg.song_auto
         and cfg.run_state.combo > 0
     ):
-        if condition.operator == "lte":
-            return combo <= condition.count
-        return combo >= condition.count
-    return resolved.rider_gate is None or resolved.rider_gate.fired
+        return ("lte" if condition.operator == "lte" else "gte"), condition.count
+    return ("on" if resolved.rider_gate is None or resolved.rider_gate.fired else "off"), None
 
 
 def _rider_terms(
@@ -527,6 +553,20 @@ def _rider_hosts(
     cue (`_rider_gate_at`). The k-th span is live when the host sits in slot k. Shared by
     the scorer (`_rider_terms`) and the timeline, so both say the same about when a
     rider raises the chance."""
+    out = []
+    for host in _rider_host_skills(normal_resolved):
+        duration = float(host.skill.duration)  # type: ignore[arg-type]
+        spans = [
+            (cue, cue + duration) if _rider_gate_at(host, bisect_left(times, cue), cfg) else None
+            for cue in chart.special_cues
+        ]
+        rider_rate = _as_rate(float(host.skill.rider.magnitude))  # type: ignore[attr-defined]
+        out.append((member_index_by_id[host.card_id], rider_rate, spans))
+    return out
+
+
+def _rider_host_skills(normal_resolved) -> list[ResolvedSkill]:
+    """The SPECIALs whose activation-rate rider can fire (`_rider_hosts`), in skill order."""
     hosts = []
     for resolved in normal_resolved:
         rider = resolved.skill.rider
@@ -542,15 +582,7 @@ def _rider_hosts(
         if resolved.gate is not None and not resolved.gate.fired:
             continue  # the SPECIAL itself is gated off
         hosts.append(resolved)
-    out = []
-    for host in hosts:
-        duration = float(host.skill.duration)
-        spans = [
-            (cue, cue + duration) if _rider_gate_at(host, bisect_left(times, cue), cfg) else None
-            for cue in chart.special_cues
-        ]
-        out.append((member_index_by_id[host.card_id], _as_rate(float(host.skill.rider.magnitude)), spans))
-    return out
+    return hosts
 
 
 def _ratio_at(
@@ -1019,6 +1051,47 @@ def _cooldown_screen_kernel() -> Callable | None:
     return kernel
 
 
+# THE CHART KERNEL: a leader's whole per-chart step in one compiled call -- the terms placed on
+# the chart (ACTIVE windows, combo splits, SPECIAL riders, the outfit's terms), the live masks,
+# the cover ranges and the walk -- from the team's terms with everything no chart moves
+# (`_chart_kernel_spec`), built once per board. Bit-identical to the Python it replaces; a
+# kernel that declines a team (`None`) leaves it to the Python. Same injection as the others:
+# the attribute here, `HBUILDER_CHART_KERNEL` (`<file>.py:<attribute>`) in spawned processes.
+# `False` turns it off in this process whatever the environment names (a comparison with the
+# Python path).
+CHART_KERNEL: Callable | None | bool = None
+CHART_KERNEL_ENV = "HBUILDER_CHART_KERNEL"
+_chart_kernel_state: tuple[str, Callable | None] = ("", None)
+
+
+def _chart_kernel() -> Callable | None:
+    """The injected chart kernel: the module attribute if set (`False`: none), else the one
+    the environment names (resolved once per distinct value)."""
+    global _chart_kernel_state
+    if CHART_KERNEL is not None:
+        return CHART_KERNEL or None  # type: ignore[return-value]
+    spec = os.environ.get(CHART_KERNEL_ENV, "")
+    if spec == _chart_kernel_state[0]:
+        return _chart_kernel_state[1]
+    kernel: Callable | None = None
+    if spec:
+        try:
+            import importlib.util
+
+            file_name, _, attribute = spec.rpartition(":")
+            module_spec = importlib.util.spec_from_file_location("_hbuilder_chart_kernel", file_name)
+            module = importlib.util.module_from_spec(module_spec)  # type: ignore[arg-type]
+            module_spec.loader.exec_module(module)  # type: ignore[union-attr]
+            kernel = getattr(module, attribute)
+        except Exception as exc:  # noqa: BLE001 - any failure means "use Python"
+            print(
+                f"chart kernel {spec!r} could not be loaded ({exc!r}); scoring continues on the Python path",
+                file=sys.stderr,
+            )
+    _chart_kernel_state = (spec, kernel)
+    return kernel
+
+
 # `(note_weights, perfect_sum)` per chart, platform and judgement column: functions
 # of the chart alone, which cost ~7 % of every call to rebuild. Keyed by object
 # identity with the chart kept alive in the entry, so a recycled `id()` can never
@@ -1304,7 +1377,86 @@ def _member_setup(members: tuple[Card, ...], cfg: ScoringConfig) -> tuple:
         member_score_rates,
         stat_entries,
         active_elsewhere,
+        _support_tie_outcomes(members, recipes, active_rank),
     )
+
+
+# The 120 slot orders in `itertools.permutations` order (`permutation[slot]` = the index of
+# the member in that slot), and each one's index: the walks enumerate them in this order and
+# keep the first maximum.
+_PERMUTATIONS: tuple[tuple[int, ...], ...] = tuple(itertools.permutations(range(SPECIAL_CUE_COUNT)))
+_PERMUTATION_INDEX: dict[tuple[int, ...], int] = {p: i for i, p in enumerate(_PERMUTATIONS)}
+
+
+def _support_tie_outcomes(
+    members: tuple[Card, ...],
+    recipes: list,
+    active_rank: Mapping[str, float] | None,
+) -> tuple[tuple[list, tuple[bool, ...]], ...] | None:
+    """The outcomes of a count-limited Score Support tie, or `None` when no tie binds.
+
+    A support with `count` k pays the k qualifiers with the strongest ACTIVE, and an exact
+    tie goes to the EARLIER SLOT (`scoring_models.TopNByBuffedStat`, measured 8/8 on the
+    server). The slot order is also what places each SPECIAL on its cue, and the walk takes
+    the best of the 120 orders; so when the cut falls inside a group of equal magnitudes,
+    who is paid depends on the order, and one order decides both. Each outcome is `(the
+    recipe list with that outcome's recipients, 120 flags marking the orders that give
+    it)`; the walk maximises each outcome over its own orders only. Without a tie every
+    order pays the same members and the input order of `members` decides nothing.
+
+    `active_rank` is `None` when an ACTIVE magnitude is not known; the recipients are then
+    ranked by total parameter (`targets.resolve_target_card_ids`), and so is the tie."""
+
+    def rank(card: Card) -> float:
+        if active_rank is not None:
+            return active_rank.get(card.id, 0.0)
+        return float(sum(getattr(card.stats, name) for name in STAT_NAMES))
+
+    tied = []
+    for k, (resolved, state, _index, support_targets) in enumerate(recipes):
+        if state != "applied" or support_targets is None:
+            continue
+        target = resolved.skill.target
+        if (
+            not isinstance(target, EffectTarget)
+            or not target.count
+            or target.kind not in ("type", "generation")
+        ):
+            continue
+        if target.kind == "type":
+            qualifying = [i for i, card in enumerate(members) if card.type == target.value]
+        else:
+            qualifying = [i for i, card in enumerate(members) if target.value in card.generations]
+        count = int(target.count)
+        if len(qualifying) <= count:
+            continue  # every qualifier is paid (or, under-supplied, the configured rule): no tie
+        values = sorted((rank(members[i]) for i in qualifying), reverse=True)
+        cut = values[count - 1]
+        if values[count] != cut:
+            continue
+        above = frozenset(members[i].id for i in qualifying if rank(members[i]) > cut)
+        group = [i for i in qualifying if rank(members[i]) == cut]
+        tied.append((k, resolved, above, group, count - len(above)))
+    if not tied:
+        return None
+    flags: dict[tuple, list[bool]] = {}
+    for index, permutation in enumerate(_PERMUTATIONS):
+        slot_of = [0] * SPECIAL_CUE_COUNT
+        for slot, member in enumerate(permutation):
+            slot_of[member] = slot
+        key = tuple(
+            above | frozenset(members[i].id for i in sorted(group, key=slot_of.__getitem__)[:places])
+            for _k, _resolved, above, group, places in tied
+        )
+        flags.setdefault(key, [False] * len(_PERMUTATIONS))[index] = True
+    outcomes = []
+    for key, allowed in flags.items():
+        outcome = list(recipes)
+        for (k, resolved, _above, _group, _places), paid in zip(tied, key):
+            r, state, index, _old = recipes[k]
+            outcome[k] = (r, state, index, _support_targets(resolved, paid))
+        outcomes.append((outcome, tuple(allowed)))
+    return tuple(outcomes)
 
 
 def _score_song(
@@ -1343,7 +1495,9 @@ def _score_song(
     # on with this config
     held = None if team_setup is None else team_setup.get(id(cfg))
     if held is None or held[0] is not cfg or held[1] is not members:
-        held = (cfg, members, _member_setup(members, cfg), {})
+        # (config, members, the member half, each leader's base, the chart kernel's specs,
+        # each leader's outfit skills, each (leader, cast)'s singer-conditional terms)
+        held = (cfg, members, _member_setup(members, cfg), {}, {}, {}, {})
         if team_setup is not None:
             team_setup[id(cfg)] = held
     (
@@ -1356,16 +1510,22 @@ def _score_song(
         member_score_rates,
         stat_entries,
         active_elsewhere,
+        support_outcomes,
     ) = held[2]
 
     variant_terms: dict = {}
 
-    def member_terms_for(cfg_terms: ScoringConfig, reuse: list | None = None):
+    def member_terms_for(
+        cfg_terms: ScoringConfig, reuse: list | None = None, recipes_use: list | None = None
+    ):
         """The member terms on `cfg_terms`' board, the SPECIAL riders last, and the terms
         of each recipe. `reuse`: a previous call's per-recipe terms, kept for every skill
-        that is not an ACTIVE (a cooldown moves nothing else)."""
+        that is not an ACTIVE (a cooldown moves nothing else). `recipes_use`: one outcome
+        of a recipients tie (`_support_tie_outcomes`) instead of the team's recipes."""
         per_recipe = []
-        for k, (resolved, state, index, support_targets) in enumerate(recipes):
+        for k, (resolved, state, index, support_targets) in enumerate(
+            recipes if recipes_use is None else recipes_use
+        ):
             if reuse is not None and resolved.skill.kind != "ACTIVE":
                 per_recipe.append(reuse[k])
                 continue
@@ -1391,9 +1551,15 @@ def _score_song(
     # --- the leader half ----------------------------------------------------
     # The principal, then the outfit's scored `score_support` rider
     # (`gates.resolve_leader_costume_skills`), in `score_card_set`'s order.
+    # (no chart moves them: resolved once per leader with the member half)
+    costumes_held: dict = held[5]
     leader_costumes: dict[str, tuple[ResolvedSkill, ...]] = {}
     for card in leaders:
-        costume_skills = resolve_leader_costume_skills(card, card_set_gates.aggregates, cfg.run_state)
+        costume_skills = costumes_held.get(card.id)
+        if costume_skills is None:
+            costume_skills = costumes_held[card.id] = resolve_leader_costume_skills(
+                card, card_set_gates.aggregates, cfg.run_state
+            )
         if costume_skills:
             leader_costumes[card.id] = costume_skills
 
@@ -1416,6 +1582,7 @@ def _score_song(
     member_stat_entries = stat_entries
     orderings_cache: dict = {}
     leader_bases: dict = held[3]
+    cast_terms: dict = held[6]
 
     def leader_base(leader):
         """One leader's walk without the chart: the board's three terms, the outfit's
@@ -1487,8 +1654,9 @@ def _score_song(
     # `deck_power` may be a per-leader callable (see `overall_power_for`), resolved
     # and type-checked once per leader here, never inside the note walk or the
     # 120-order loop.
-    def prepare_leader(leader):
-        """Everything of one leader's walk that no cooldown moves."""
+    def prepare_leader(leader, with_costume_terms=True):
+        """Everything of one leader's walk that no cooldown moves. `with_costume_terms`
+        False: the outfit's terms are left out (the chart kernel places them itself)."""
         if resolve_power is not None:
             raw_power = resolve_power(leader)
             if not isinstance(raw_power, OverallPower):
@@ -1506,17 +1674,26 @@ def _score_song(
         # caller's Overall Power (`leader_power`), which has no song cast
         cast_power = 0.0
         # The two terms that are functions of the SONG'S CAST rather than of the
-        # chart. Both are no-ops for a chart with no cast.
-        if cfg.board is not None and chart.singers:
+        # chart. Both are no-ops for a chart with no cast. Kept per (leader, cast, scope)
+        # with the member half: the charts a team is scored on share a few casts.
+        cast_key = (leader.id, chart.singers, chart.singer_type)
+        cast_hit = cast_terms.get(cast_key) if cfg.board is not None and chart.singers else None
+        if cast_hit is not None and cast_hit[0] is raw_power:
+            _power, board_score_rate, cast_effect_up, cast_power, cast_up = cast_hit
+            board_skill_effect_up += cast_effect_up
+            board_power += cast_power
+            cast_power += cast_up
+        elif cfg.board is not None and chart.singers:
             # `song_score_bonus` at this song's own scope supersedes the pooled
             # `all` bucket `_board_bonus` returned (pooling over-counts `solo` and
             # `group`; on `all` the two agree exactly).
             board_score_rate = cfg.board.song_score_bonus_for(chart.singers, scope=chart.singer_type)
             # ...and the conditional `skill_effect_up` joins the unconditional one:
             # the same addend in `CalcScoreUpRatio`'s parenthesis.
-            board_skill_effect_up += cfg.board.conditional_skill_effect_up_for(
+            cast_effect_up = cfg.board.conditional_skill_effect_up_for(
                 members, None if leader is None else leader.member, chart.singers
             )
+            board_skill_effect_up += cast_effect_up
             # ...and the singer-conditional STAT power (R-044/062/063: "+stat% to
             # all when this holomem sings") joins the board's Overall-Power summand,
             # since `_board_bonus`/`_terms` leave it out as conditional. It also rides
@@ -1528,15 +1705,22 @@ def _score_song(
             # On a caller's Overall Power the cast power also joins each member's
             # Member Power-Up base, as on the deck screen with this song chosen;
             # `overall_power_for` carries the bases (`OverallPower`).
+            cast_up = 0.0
             if cast_power and leader_power is not None:
-                cast_power += cast_power_up(
+                cast_up = cast_power_up(
                     raw_power, members, None if leader is None else leader.member, cfg, chart.singers
                 )
+            cast_terms[cast_key] = (raw_power, board_score_rate, cast_effect_up, cast_power, cast_up)
+            cast_power += cast_up
         # the outfit's terms on this song's axis (its length places their windows)
-        costume_terms: list[_Term] = [
-            _term_for(costume, cfg, team_rate_up, state, song_seconds, None, *extra)
-            for costume, state, extra in costume_recipes
-        ]
+        costume_terms: list[_Term] = (
+            [
+                _term_for(costume, cfg, team_rate_up, state, song_seconds, None, *extra)
+                for costume, state, extra in costume_recipes
+            ]
+            if with_costume_terms
+            else []
+        )
         return (
             leader,
             leader_power,
@@ -1549,8 +1733,17 @@ def _score_song(
             fixed_stat_sum,
         )
 
-    def walk(prepared, member_terms: list[_Term], cfg: ScoringConfig) -> SongScore:
-        """One leader's best slot order over `member_terms` (and its outfit's terms)."""
+    def walk(
+        prepared,
+        member_terms: list[_Term],
+        cfg: ScoringConfig,
+        allowed: tuple[bool, ...] | None = None,
+        rows_out: dict | None = None,
+    ) -> SongScore:
+        """One leader's best slot order over `member_terms` (and its outfit's terms).
+        `allowed`: the only orders considered (120 flags in `_PERMUTATIONS` order, one
+        outcome of a recipients tie); `None` is every order. `rows_out`: where the note rows
+        go (`note_rows` by default)."""
         (
             leader,
             leader_power,
@@ -1697,6 +1890,7 @@ def _score_song(
                     cover_range,
                     tuple(card.id for card in members),
                     cfg,
+                    **({} if allowed is None else {"allowed": allowed}),
                 )
             if kernel_result is not None:
                 best_total, best_permutation = kernel_result
@@ -1746,7 +1940,9 @@ def _score_song(
             # cost, and enumeration reproduces the walk's strict-`>` tie-break.
             best_total: float | None = None  # type: ignore[no-redef]
             best_permutation: tuple[int, ...] | None = None  # type: ignore[no-redef]
-            for permutation in itertools.permutations(range(SPECIAL_CUE_COUNT)):
+            for index, permutation in enumerate(_PERMUTATIONS):
+                if allowed is not None and not allowed[index]:
+                    continue
                 total = fixed_total
                 for slot, owner in enumerate(permutation):
                     total += delta[owner][slot]
@@ -1785,6 +1981,7 @@ def _score_song(
                     tuple(card.id for card in members),
                     cfg,
                     general=True,
+                    **({} if allowed is None else {"allowed": allowed}),
                 )
                 if kernel_result is not None:
                     best_total, best_permutation = kernel_result
@@ -1800,7 +1997,9 @@ def _score_song(
         best: SongScore | None = None
         if fixed_bits is None:
             fixed_bits = _spread_liveness()
-        for permutation in itertools.permutations(range(SPECIAL_CUE_COUNT)):
+        for index, permutation in enumerate(_PERMUTATIONS):
+            if allowed is not None and not allowed[index]:
+                continue
             # `permutation[s]` is the index (into `members`) of the card in slot
             # `s`, so `slot_of[i]` is the slot member `i` occupies.
             slot_of = [0] * SPECIAL_CUE_COUNT
@@ -1835,8 +2034,9 @@ def _score_song(
             if best is None or candidate.total_score > best.total_score:
                 best = candidate
         assert best is not None  # 120 permutations is never an empty walk
-        if note_rows is not None:
-            note_rows[leader.id] = _note_rows(
+        rows = note_rows if rows_out is None else rows_out
+        if rows is not None:
+            rows[leader.id] = _note_rows(
                 best,
                 members,
                 terms,
@@ -1855,10 +2055,55 @@ def _score_song(
             )
         return best
 
+    def walk_outcomes(prepared, terms_by_outcome: list, cfg_w: ScoringConfig) -> SongScore:
+        """`walk` once per outcome of a recipients tie, each over its own orders, and the
+        best of them; on an exact tie the earliest order in `_PERMUTATIONS`, as one walk of the
+        120 orders (each with its own recipients) keeps the first maximum. Without a tie, the
+        one walk."""
+        if support_outcomes is None:
+            return walk(prepared, terms_by_outcome[0], cfg_w)
+        best: SongScore | None = None
+        best_index = 0
+        best_rows = None
+        for (_recipes_o, allowed), terms in zip(support_outcomes, terms_by_outcome):
+            rows: dict | None = {} if note_rows is not None else None
+            score = walk(prepared, terms, cfg_w, allowed=allowed, rows_out=rows)
+            index = _PERMUTATION_INDEX[tuple(member_index_by_id[c] for c in score.member_order)]
+            if (
+                best is None
+                or score.total_score > best.total_score
+                or (score.total_score == best.total_score and index < best_index)
+            ):
+                best, best_index, best_rows = score, index, rows
+        if note_rows is not None and best_rows:
+            note_rows.update(best_rows)
+        assert best is not None  # an outcome always holds at least one order
+        return best
+
+    if cooldown_variants is None and order_totals is None and note_rows is None:
+        scored = _score_by_chart_kernel(
+            members,
+            leaders,
+            chart,
+            cfg,
+            held,
+            prepare_leader,
+            leader_base,
+            times,
+            note_weights,
+            perfect_sum,
+            music_coefficient,
+        )
+        if scored is not None:
+            return scored
+
     leader_preps = [prepare_leader(leader) for leader in leaders]
-    member_terms, per_recipe = member_terms_for(cfg)
+    outcome_recipes = [None] if support_outcomes is None else [r for r, _allowed in support_outcomes]
+    built = [member_terms_for(cfg, recipes_use=r) for r in outcome_recipes]
+    terms_by_outcome = [terms for terms, _per in built]
+    member_terms, per_recipe = built[0]
     if cooldown_variants is None:
-        return tuple(walk(prepared, member_terms, cfg) for prepared in leader_preps)
+        return tuple(walk_outcomes(prepared, terms_by_outcome, cfg) for prepared in leader_preps)
     costume_active = any(c.skill.kind == "ACTIVE" for cs in leader_costumes.values() for c in cs)
     values = None
     if cooldown_screen:
@@ -1872,23 +2117,34 @@ def _score_song(
             and cfg.stacking_model.name == "additive"
             and cfg.active_stacking_model.name == "max"
         ):
-            spec = _cooldown_screen_spec(
-                members,
-                chart,
-                cfg,
-                times,
-                note_weights,
-                perfect_sum,
-                music_coefficient,
-                recipes,
-                per_recipe,
-                team_rate_up,
-                song_seconds,
-                _rider_hosts(normal_resolved, member_index_by_id, cfg, chart, times),
-                leader_preps[0],
-                cooldown_variants,
-            )
-            values = kernel(spec) if spec is not None else None
+            # with a recipients tie, each outcome's estimate over its own orders and the best
+            # of them per variant, as the exact walk takes them
+            hosts = _rider_hosts(normal_resolved, member_index_by_id, cfg, chart, times)
+            allowed_by_outcome = [None] if support_outcomes is None else [a for _r, a in support_outcomes]
+            for recipes_o, (_terms_o, per_o), allowed_o in zip(outcome_recipes, built, allowed_by_outcome):
+                spec = _cooldown_screen_spec(
+                    members,
+                    chart,
+                    cfg,
+                    times,
+                    note_weights,
+                    perfect_sum,
+                    music_coefficient,
+                    recipes if recipes_o is None else recipes_o,
+                    per_o,
+                    team_rate_up,
+                    song_seconds,
+                    hosts,
+                    leader_preps[0],
+                    cooldown_variants,
+                )
+                if spec is not None and allowed_o is not None:
+                    spec["allowed"] = allowed_o
+                got = kernel(spec) if spec is not None else None
+                if got is None:
+                    values = None
+                    break
+                values = list(got) if values is None else [max(a, b) for a, b in zip(values, got)]
     if values is None:
         # every variant exactly (also the screen's answer when the kernel cannot give one)
         out = []
@@ -1897,14 +2153,224 @@ def _score_song(
             if active_elsewhere or costume_active:
                 out.append(_score_song(members, leaders, chart, cfg_v, deck_power=deck_power, auto=auto))
                 continue
-            terms_v, _ = member_terms_for(cfg_v, per_recipe)
-            out.append(tuple(walk(prepared, terms_v, cfg_v) for prepared in leader_preps))
+            terms_v = [
+                member_terms_for(cfg_v, per, recipes_use=r)[0] for r, (_t, per) in zip(outcome_recipes, built)
+            ]
+            out.append(tuple(walk_outcomes(prepared, terms_v, cfg_v) for prepared in leader_preps))
         if not cooldown_screen:
             return out
         values = [scores[0].total_score for scores in out]
     if cooldown_screen == "with_plain":
-        return walk(leader_preps[0], member_terms, cfg), values
+        return walk_outcomes(leader_preps[0], terms_by_outcome, cfg), values
     return values
+
+
+def _score_by_chart_kernel(
+    members: tuple[Card, ...],
+    leaders: tuple[Card, ...],
+    chart: SongChart,
+    cfg: ScoringConfig,
+    held: tuple,
+    prepare_leader: Callable,
+    leader_base: Callable,
+    times: tuple[float, ...],
+    note_weights: tuple[float, ...],
+    perfect_sum: float,
+    music_coefficient: float,
+) -> tuple[SongScore, ...] | None:
+    """`_score_song`'s answer with each leader's per-chart step in the chart kernel
+    (`CHART_KERNEL`), the team's terms built once per board (`_chart_kernel_spec`, kept in
+    `held` with the member half); None when there is no kernel, a model it does not take, or a
+    team it declines -- the caller then walks in Python, which gives the same floats. A
+    recipients tie is walked outcome by outcome over each one's own orders and the best kept,
+    the earliest order on an exact tie, as `walk_outcomes` does."""
+    kernel = _chart_kernel()
+    if (
+        kernel is None
+        or _note_walk_kernel() is None
+        or len(chart.special_cues) != SPECIAL_CUE_COUNT
+        or cfg.stacking_model.name != "additive"
+        or cfg.active_stacking_model.name != "max"
+    ):
+        return None
+    (
+        _gates,
+        normal_resolved,
+        team_rate_up,
+        _active_rank,
+        member_index_by_id,
+        recipes,
+        _member_score_rates,
+        _stat_entries,
+        _active_elsewhere,
+        support_outcomes,
+    ) = held[2]
+    specs = held[4]
+    outcomes = [(recipes, None)] if support_outcomes is None else list(support_outcomes)
+    song_seconds = times[-1]
+    out = []
+    for leader in leaders:
+        (
+            _leader,
+            leader_power,
+            cast_power,
+            board_power,
+            board_score_rate,
+            board_skill_effect_up,
+            _costume_terms,
+            score_rates,
+            fixed_stat_sum,
+        ) = prepare_leader(leader, with_costume_terms=False)
+        power = (fixed_stat_sum + board_power) if leader_power is None else leader_power + cast_power
+        # the walk's own expression, in its order
+        constant = power * SCORE_COEFFICIENT * music_coefficient / perfect_sum * (1.0 + board_score_rate)
+        best: tuple[float, tuple[int, ...]] | None = None
+        best_index = 0
+        for o, (recipes_o, allowed) in enumerate(outcomes):
+            key = (o, leader.id)
+            spec = specs.get(key, False)
+            if spec is False:
+                spec = specs[key] = _chart_kernel_spec(
+                    members,
+                    recipes_o,
+                    leader_base(leader)[1],
+                    cfg,
+                    team_rate_up,
+                    normal_resolved,
+                    member_index_by_id,
+                )
+            if spec is None:
+                return None
+            got = kernel(
+                spec,
+                times,
+                note_weights,
+                chart.special_cues,
+                song_seconds,
+                constant,
+                score_rates,
+                board_skill_effect_up,
+                allowed,
+            )
+            if got is None:
+                return None
+            index = _PERMUTATION_INDEX[got[1]]
+            if best is None or got[0] > best[0] or (got[0] == best[0] and index < best_index):
+                best, best_index = got, index
+        assert best is not None  # an outcome always holds at least one order
+        out.append(
+            SongScore(
+                leader_id=leader.id,
+                total_score=best[0],
+                member_order=tuple(members[i].id for i in best[1]),
+                deck_power=power,
+            )
+        )
+    return tuple(out)
+
+
+def _chart_kernel_spec(
+    members: tuple[Card, ...],
+    recipes: list,
+    costume_recipes: Sequence[tuple],
+    cfg: ScoringConfig,
+    team_rate_up: float,
+    normal_resolved,
+    member_index_by_id: Mapping[str, int],
+) -> tuple | None:
+    """One leader's terms as the chart kernel reads them (`CHART_KERNEL`), with everything no
+    chart moves: per term, in the walk's order (the members' recipes, then the outfit's), `(kind,
+    bucket, is_boost, owner, has recipients, recipients mask, SPECIAL member, combo gate (0 none,
+    1 at least, 2 at most), its count, a member's term, magnitude, occupancy, an ACTIVE's interval
+    or a SPECIAL's duration..., the magnitudes a combo-gated override takes on the checks reached
+    and missed)`; per term and rider host, the occupancy of the boosted extra roll (-1: none,
+    `_rider_terms`); per host `(member, gate (0 off, 1 on, 2 at least, 3 at most), count,
+    duration)`. Owners and recipients are indices into `members`; buckets are numbered in order
+    of first appearance, as `notewalk.pack_terms` numbers them. None for a team the kernel does
+    not take."""
+    index = {card.id: i for i, card in enumerate(members)}
+    gates = {"off": 0, "on": 1, "gte": 2, "lte": 3}
+    hosts = []
+    for host in _rider_host_skills(normal_resolved):
+        kind, count = _rider_gate(host, cfg)
+        if kind in ("gte", "lte") and type(count) is not int:
+            return None
+        hosts.append(
+            (
+                member_index_by_id[host.card_id],
+                _as_rate(float(host.skill.rider.magnitude)),  # type: ignore[attr-defined]
+                gates[kind],
+                count or 0,
+                float(host.skill.duration),  # type: ignore[arg-type]
+            )
+        )
+    buckets: dict = {}
+    rows: list[tuple] = []
+    rider_q: list[float] = []
+
+    def place(term: _Term, resolved: ResolvedSkill, state: str, member_term: bool) -> bool:
+        interval = duration = hit = miss = 0.0
+        combo = count = 0
+        if state != "applied":
+            kind = 1
+        elif resolved.skill.kind == "ACTIVE":
+            kind = 2
+            interval, duration = _active_lattice(resolved, cfg)
+            rule = _combo_override(resolved, cfg) if member_term else None
+            if rule is not None:
+                high, base, applied, condition = rule
+                if type(condition.count) is not int:
+                    return False
+                combo, count = (2 if condition.operator == "lte" else 1), condition.count
+                hit = term.magnitude * high / applied
+                miss = term.magnitude * base / applied
+        elif term.special_member is not None:
+            kind, duration = 3, float(term.special_duration)
+        else:
+            kind = 0
+        targets_ = term.targets
+        rows.append(
+            (
+                kind,
+                buckets.setdefault(term.bucket, len(buckets)),
+                1 if term.is_boost else 0,
+                index.get(term.owner, -1),  # type: ignore[arg-type]
+                0 if targets_ is None else 1,
+                0 if targets_ is None else sum(1 << index[c] for c in targets_ if c in index),
+                -1 if term.special_member is None else term.special_member,
+                combo,
+                count,
+                1 if member_term else 0,
+                float(term.magnitude),
+                float(term.occupancy),
+                interval,
+                duration,
+                hit,
+                miss,
+            )
+        )
+        for _member, rate, _gate, _count, _duration in hosts:
+            q = -1.0
+            if member_term and term.active_base is not None and term.occupancy > 0.0:
+                boosted = cfg.activation_rate_model.apply(term.active_base, term.active_rate + rate)
+                if not (term.occupancy >= 1.0 or boosted <= term.occupancy):
+                    q = (boosted - term.occupancy) / (1.0 - term.occupancy)
+            rider_q.append(q)
+        return True
+
+    for resolved, state, member, member_targets in recipes:
+        term = _term_for(resolved, cfg, team_rate_up, state, -1.0, member, member_targets)
+        if not place(term, resolved, state, True):
+            return None
+    for costume, state, extra in costume_recipes:
+        term = _term_for(costume, cfg, team_rate_up, state, -1.0, None, *extra)
+        if not place(term, costume, state, False):
+            return None
+    return (
+        tuple(rows),
+        tuple(rider_q),
+        tuple((member, gate, count, duration) for member, _rate, gate, count, duration in hosts),
+    )
 
 
 def _cooldown_screen_spec(
@@ -1998,23 +2464,13 @@ def _cooldown_screen_spec(
             return None
         # `_combo_split`'s rule, read once: the override's magnitude on the checks reached
         combo, count, single, hit, miss = 0, 0, float(term.magnitude), 0.0, 0.0
-        override = resolved.skill.override
-        condition = getattr(override, "condition", None)
-        if not (
-            cfg.song_auto
-            or cfg.run_state.combo <= 0
-            or getattr(condition, "kind", None) != "run_state"
-            or condition.target != "combo"  # type: ignore[union-attr]
-            or not is_known(override.magnitude)
-        ):
-            base = float(resolved.skill.magnitude)
-            high = max(float(override.magnitude), base)
-            applied = high if (resolved.override_gate is not None and resolved.override_gate.fired) else base
-            if applied > 0.0 and high != base:
-                combo = 2 if condition.operator == "lte" else 1  # type: ignore[union-attr]
-                count = int(condition.count)  # type: ignore[union-attr]
-                hit = term.magnitude * high / applied
-                miss = term.magnitude * base / applied
+        rule = _combo_override(resolved, cfg)
+        if rule is not None:
+            high, base, applied, condition = rule
+            combo = 2 if condition.operator == "lte" else 1
+            count = int(condition.count)
+            hit = term.magnitude * high / applied
+            miss = term.magnitude * base / applied
         first = len(rider_q)
         if term.active_base is not None and 0.0 < term.occupancy < 1.0:
             for h, (_member, rate, _spans) in enumerate(hosts):

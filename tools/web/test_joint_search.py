@@ -440,3 +440,114 @@ def test_search_song_with_a_many_scorer_gives_the_same_rows_in_one_call_per_roun
             w_plain(cards[0], sets),
             w_plain(cards[1], sets[:1]),
         ]
+
+
+def _class_world(count: int, seed: int):
+    """Outfits raise performance (every third card's) or technique, technique a little more, so
+    the leaders that score best on most sets raise technique. Some performance cards carry a
+    skill that raises their own performance: weak anywhere else, the best under a performance
+    outfit."""
+    rng = random.Random(seed)
+    cards = []
+    for i in range(count):
+        strong = "performance" if i % 3 == 0 else "technique"
+        stats = {s: rng.uniform(3000, 4000) + (3000 if s == strong else 0) for s in STATS}
+        own = 0.9 if strong == "performance" and rng.random() < 0.6 else 0.0
+        cards.append(
+            SimpleNamespace(
+                id=f"card-{i:03d}",
+                member=f"Chr{i}",
+                type=rng.choice(TYPES),
+                generations=frozenset(["G"]),
+                strength=rng.uniform(0.95, 1.05) * (0.965 if own else 1.0),
+                stats=SimpleNamespace(**stats, total=lambda stats=stats: sum(stats.values())),
+                outfit=(strong, 0.8 if strong == "performance" else 0.9, None),
+                own=own,
+            )
+        )
+
+    def exact(li: int, s) -> float:
+        value = 100_000.0
+        for i in s:
+            value *= cards[i].strength
+        stat, boost, _gate = cards[li].outfit
+        total = sum(cards[i].stats.total() for i in s)
+        raised = sum(
+            getattr(cards[i].stats, stat) * (1.0 + (cards[i].own if stat == "performance" else 0.0))
+            for i in s
+        )
+        return float(math.ceil(value * (1.0 + boost * raised / total)))
+
+    return cards, exact
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_every_leader_class_is_searched_in_every_round(seed):
+    # the leaders that score best overall raise technique; a search that scores each proposed set
+    # under the leaders best overall never scores a set under a performance outfit after its
+    # first sample, and the performance sets stay where the screen first put them. With the
+    # classes, every round scores new sets under the leaders of BOTH classes, as many proposed
+    # for one as for the other, and the performance class's sets under performance leaders
+    cards, exact = _class_world(30, seed)
+    marks: list[int] = []
+    calls: list = []
+
+    def score_pairs(pairs):
+        calls.append(list(pairs))
+        return [exact(li, s) for li, s in pairs]
+
+    out = joint_search.search(
+        cards,
+        cards,
+        score_pairs,
+        gate_of=lambda c: c.outfit[2],
+        tilt_of=_stat_tilt(cards),
+        seed=seed,
+        initial_sets=60,
+        step=40,
+        polish=4,
+        max_rounds=3,
+        gate_samples=0,
+        neighbours=0,
+        on_round=lambda record: marks.append(len(calls)),
+    )
+    assert out["stats"]["classes"] == 2
+    assert len(marks) >= 3  # round 0 and at least two more
+    for first, last in zip(marks, marks[1:]):
+        proposed = calls[first]  # a round's first batch is its proposals
+        by_class = {"performance": set(), "technique": set()}
+        for li, s in proposed:
+            by_class[cards[li].outfit[0]].add(s)
+        assert len(by_class["performance"]) >= 20 and len(by_class["technique"]) >= 20
+        assert last > first
+
+
+def test_a_screen_group_counts_as_a_kind_and_a_scan_bias_leaves_the_model_as_it_was():
+    import surrogate
+
+    rng = random.Random(11)
+    cards = [
+        SimpleNamespace(
+            member=f"Chr{i % 20}", type=rng.choice(TYPES), generations=frozenset([rng.choice("XYZ")])
+        )
+        for i in range(24)
+    ]
+    groups = [i % 3 if i % 4 else None for i in range(24)]
+    legal = [s for s in itertools.combinations(range(24), 5) if len({cards[i].member for i in s}) == 5]
+    sets = rng.sample(legal, 300)
+    # a set scores more with three or more cards of group 0: only the group says so
+    values = [10.0 + 0.3 * (sum(groups[i] == 0 for i in s) >= 3) + rng.uniform(-0.01, 0.01) for s in sets]
+    plain = surrogate.Screen(cards)
+    grouped = surrogate.Screen(cards, groups=groups)
+    assert grouped.fit(sets, values) < 0.5 * plain.fit(sets, values)
+    before = [grouped.predict(s) for s in sets[:40]]
+    assert max(abs(a - b) for a, b in zip(grouped.predict_many(sets[:40]), before)) < 1e-9
+    best, predicted, _legal = grouped.best(30, sets[:50])
+    assert predicted == pytest.approx([grouped.predict(s) for s in best], abs=1e-9)
+    bias = [0.5 if i == 7 else 0.0 for i in range(24)]
+    biased, biased_predicted, _legal = grouped.best(30, sets[:50], card_bias=bias)
+    assert all(7 in s for s in biased)
+    assert biased_predicted == sorted(biased_predicted, reverse=True)
+    # the bias was for that scan only
+    assert [grouped.predict(s) for s in sets[:40]] == before
+    assert grouped.best(30, sets[:50])[0] == best

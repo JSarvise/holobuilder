@@ -18,7 +18,7 @@ import sys
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from hbuilder.domain.card import Card
@@ -137,9 +137,14 @@ def set_key(indices: Sequence[int]) -> int:
 
 class Screen:
     """The model over one pool. `cards` is the pool in the order the caller's
-    index tuples refer to; only `member`, `type` and `generations` are read."""
+    index tuples refer to; only `member`, `type` and `generations` are read.
 
-    def __init__(self, cards: Iterable[Card]) -> None:
+    `groups`: one more kind per card (a small int, or None for a card in no group), counted
+    as a generation is: the model then learns what a set gains by holding 2, 3, 4 or 5 cards
+    of one group (the joint search groups the cards by the stat they are strongest in, so
+    a set of one stat is valued as such)."""
+
+    def __init__(self, cards: Iterable[Card], groups: Sequence[int | None] | None = None) -> None:
         cards = list(cards)
         count = len(cards)
         if count > MAX_CARDS:
@@ -147,18 +152,28 @@ class Screen:
         holomems = {name: i for i, name in enumerate(sorted({c.member for c in cards}))}
         types = sorted({c.type for c in cards})
         generations = sorted({g for c in cards for g in c.generations})
-        if len(types) + len(generations) > MAX_KINDS:
+        group_ids = sorted({g for g in groups if g is not None}) if groups is not None else []
+        if groups is not None and len(groups) != count:
+            raise ValueError("one group per card")
+        if len(types) + len(generations) + len(group_ids) > MAX_KINDS:
             raise ValueError("too many types + generations for the screen")
-        if any(len(c.generations) > MAX_GENS_PER_CARD for c in cards):
+        if any(
+            len(c.generations) + (groups is not None and groups[i] is not None) > MAX_GENS_PER_CARD
+            for i, c in enumerate(cards)
+        ):
             raise ValueError("a card carries more generations than the screen holds")
         kind = {t: i for i, t in enumerate(types)}
         kind.update({g: len(types) + i for i, g in enumerate(generations)})
+        group_kind = {g: len(types) + len(generations) + i for i, g in enumerate(group_ids)}
         gens: list[int] = []
-        for card in cards:
+        for i, card in enumerate(cards):
             own = sorted({kind[g] for g in card.generations})  # a repeat would count twice
+            group = groups[i] if groups is not None else None
+            if group is not None:
+                own.append(group_kind[group])
             gens.extend(own + [-1] * (MAX_GENS_PER_CARD - len(own)))
         self.count = count
-        self.kinds = len(kind)
+        self.kinds = len(kind) + len(group_kind)
         self._holomem = (ctypes.c_int32 * count)(*(holomems[c.member] for c in cards))
         self._type_of = (ctypes.c_int32 * count)(*(kind[c.type] for c in cards))
         self._gens = (ctypes.c_int32 * len(gens))(*gens)
@@ -167,6 +182,8 @@ class Screen:
         self._gate = (ctypes.c_double * (THRESHOLDS * self.kinds))()
         self._pair = (ctypes.c_double * (count * count))()
         self._model = Model(0.0, self._card, self._gate, self._pair)
+        # cards x kinds, how many times a card counts for a kind (numpy, made on first use)
+        self._kind_table: Any = None
         self.fitted = False
 
     def fit(
@@ -225,13 +242,56 @@ class Screen:
                 value += self._pair[cards[a] * self.count + cards[b]]
         return value
 
+    def predict_many(self, sets: Sequence[Sequence[int]]):
+        """`predict` of each of `sets` (ascending index 5-tuples) as a numpy array: the same
+        terms, added per kind of term, so a value can differ from `predict`'s in its last
+        bits. For fitting on the model's residuals; the scan is what ranks."""
+        import numpy as np  # noqa: PLC0415
+
+        n = self.count
+        idx = np.asarray(sets, dtype=np.intp).reshape(len(sets), 5)
+        card = np.frombuffer(self._card, dtype=np.float64)
+        pair = np.frombuffer(self._pair, dtype=np.float64)
+        gate = np.frombuffer(self._gate, dtype=np.float64).reshape(THRESHOLDS, self.kinds)
+        if self._kind_table is None:
+            table = np.zeros((n, self.kinds), dtype=np.int64)
+            for i in range(n):
+                table[i, self._type_of[i]] += 1
+                for g in range(MAX_GENS_PER_CARD):
+                    kind = self._gens[i * MAX_GENS_PER_CARD + g]
+                    if kind < 0:
+                        break
+                    table[i, kind] += 1
+            self._kind_table = table
+        value = np.full(len(idx), self._model.bias, dtype=np.float64)
+        for a in range(5):
+            value = value + card[idx[:, a]]
+        counts = self._kind_table[idx].sum(axis=1)  # sets x kinds
+        # a kind held `c` times switches on its thresholds 2..min(c, 5)
+        steps = np.concatenate((np.zeros((2, self.kinds)), np.cumsum(gate, axis=0)), axis=0)
+        value = value + steps[np.minimum(counts, 5), np.arange(self.kinds)].sum(axis=1)
+        for a in range(5):
+            for b in range(a + 1, 5):
+                value = value + pair[idx[:, a] * n + idx[:, b]]
+        return value
+
     def best(
-        self, want: int, seen: Iterable[Sequence[int]] = ()
+        self, want: int, seen: Iterable[Sequence[int]] = (), card_bias: Sequence[float] | None = None
     ) -> tuple[list[tuple[int, ...]], list[float], int]:
         """`(sets, predictions, how many legal sets exist)`: the `want` legal
         sets the model ranks highest, best first, leaving out `seen` (ascending
         index tuples). Before any `fit` the model is flat and the order is the
-        lexicographic one."""
+        lexicographic one. `card_bias`: per-card weights added to the fitted ones for
+        this scan only (the model itself is unchanged)."""
+        if card_bias is not None:
+            fitted = list(self._card)
+            for i in range(self.count):
+                self._card[i] = fitted[i] + card_bias[i]
+            try:
+                return self.best(want, seen)
+            finally:
+                for i in range(self.count):
+                    self._card[i] = fitted[i]
         keys = [set_key(s) for s in seen]
         seen_array = (ctypes.c_uint64 * max(1, len(keys)))(*keys)
         parts = scan_threads(self.count)

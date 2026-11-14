@@ -247,3 +247,33 @@ def test_row_detail_is_scored_for_the_searchs_play(web_base):
     built = row_detail._leaf_inputs("maxed", SONG, "EXPERT", None, ("pc", True))
     cfg = built["ctx"].cfg
     assert (cfg.platform, cfg.song_auto, cfg.run_state.combo) == ("pc", True, 0)
+
+
+def test_the_bench_map_of_a_row_dealt_with_the_bench_keeps_every_other_card():
+    """`_bench_slots`: with the row's Connect cards dealt together with the bench's
+    (`RefineContext.joint_connect`), the deal re-chose only the bench sockets that reach the
+    team; every other bench socket keeps its card unless the deal moved that card, so each
+    card appears once. Without bench sockets in the row's placements the bench keeps its
+    cards (None); with `socket_bench` the map is the plan's alone."""
+    from types import SimpleNamespace
+
+    from hbuilder.domain.board_plan import SocketPlacement
+
+    def card(cid):
+        return SimpleNamespace(id=f"card-{cid}-5-uniq-0001-00")
+
+    team = SimpleNamespace(leader=card("00010"), members=(card("00011"),))
+    bench = {"chr-00001": {"S-001": "cA", "S-002": "cB"}, "chr-00002": {"S-001": "cC", "S-003": None}}
+
+    def placed(chr_id, socket, card_id):
+        return SocketPlacement(chr=chr_id, socket=socket, card=card_id, multiplier=2.0, value=1.0)
+
+    dealt = [placed("chr-00010", "S-001", "cC"), placed("chr-00001", "S-001", "cD")]
+    ctx = SimpleNamespace(bench_sockets=bench, socket_bench=False)
+    assert row_detail._bench_slots(ctx, team, dealt) == {
+        "chr-00001": {"S-001": "cD", "S-002": "cB"},
+        "chr-00002": {},
+    }
+    assert row_detail._bench_slots(ctx, team, dealt[:1]) is None
+    planned = SimpleNamespace(bench_sockets=bench, socket_bench=True)
+    assert row_detail._bench_slots(planned, team, dealt) == {"chr-00001": {"S-001": "cD"}, "chr-00002": {}}

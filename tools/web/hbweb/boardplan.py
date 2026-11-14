@@ -23,17 +23,25 @@ if TYPE_CHECKING:
     from hbweb.router import Handler
 
 
-def _maxed_complete_state(precompute, team: dict, ids: list) -> dict:
+def _maxed_complete_state(precompute, team: dict, ids: list, bench_slots: dict | None = None) -> dict:
     """A maxed account: EVERY holomem's target, against the account's real boards, so the
     player sees what to unlock and what it costs. Only what scores for THIS team: per
     holomem the nodes `leaf_inputs.maxed_bench_targets(team)` names (greens that reach a
     team card, per-song yellows, a team singer's conditional reds, socketed Connect cards);
     a team holomem also its row's planned board -- the row's plan is ONE song's, the union
     covers the songs she sings (solo AND group yellows); each plus the cheapest path from
-    the account's boards and what the account already holds (a maxed account resets nothing)."""
+    the account's boards and what the account already holds (a maxed account resets nothing).
+    `bench_slots` (`{chr: {socket: card}}`, the row detail's): the bench's Connect cards as
+    the row dealt them with its own (`row_detail._bench_slots`), instead of the bench's."""
     import leaf_inputs  # noqa: PLC0415
 
     targets = leaf_inputs.maxed_bench_targets(ids)
+    for chr_id, slots in (bench_slots or {}).items():
+        if chr_id in targets and chr_id not in team and isinstance(slots, dict):
+            dealt = {str(k): str(v) for k, v in slots.items() if v}
+            # a socket the deal filled is part of the target, as the bench's own are
+            target = set(targets[chr_id]["nodes"]) - set(targets[chr_id]["slots"]) | set(dealt)
+            targets[chr_id] = {"nodes": sorted(target), "slots": dealt}
     now = precompute.board_export.build(gain=False, pool=1, scenario=basis.SCENARIO_BY_BASIS["maxed"])
     state = {}
     for ch in now.get("characters", []):
@@ -109,7 +117,10 @@ def serve_board_doc(h: Handler) -> None:
         }
         complete = bool(body.get("complete")) and basis_name == "maxed"
         if complete:
-            state = _maxed_complete_state(precompute, state, ids)
+            bench_slots = body.get("bench_slots")
+            state = _maxed_complete_state(
+                precompute, state, ids, bench_slots if isinstance(bench_slots, dict) else None
+            )
             flat_budget = basis.maxed_account_budget()
         else:
             settle_slots(
@@ -192,7 +203,7 @@ def serve_board_plan_account(h: Handler) -> None:
         state, chosen = _plan_account_state(body, planned[2], captured)
         settle_slots(state, captured, chosen, connect_groups(precompute))
         flat = basis.maxed_account_budget() if a.max_points else None
-        doc = board_doc_for(precompute, state, ids, "account", flat)
+        doc = board_doc_for(precompute, state, ids, "account", flat, assumptions=a)
         team = {"chr-" + c.split("-")[1] for c in ids}
         doc["team_chrs"] = sorted(team)
         doc["changed"] = sorted(
@@ -319,8 +330,30 @@ def _place_sockets(doc: dict, overlay: Mapping, names: Mapping) -> None:
                 sock["recommended_card_member"] = info.get("member") or ""
 
 
+def panel_connect_collection(basis_name: str, assumptions: object = None) -> tuple[dict, bool]:
+    """`(collection, maxed)` for the panel's Connect levels: the ones the score uses
+    (`precompute.connect_cards_for`). A maxed basis has every card at level 2; on the account
+    the levels follow the assumed bloom (bloom 5 = level 2, as in game), else the collection's."""
+    collection = config.read_json(config.COLLECTION_PATH) or {}
+    if basis_name in ("maxed", basis.MAXED_ACCOUNT_BASIS):
+        return collection, True
+    bloom = getattr(assumptions, "bloom", "account")
+    if bloom != "account" and collection:
+        from hbuilder.inputs import _override_collection_levels  # noqa: PLC0415
+
+        collection = _override_collection_levels(
+            collection, None, bloom, keep_higher_bloom=bool(getattr(assumptions, "keep_higher", False))
+        )
+    return collection, False
+
+
 def board_doc_for(
-    precompute: ModuleType, board_state: dict, ids: list, basis_name: str, flat_budget: int | None
+    precompute: ModuleType,
+    board_state: dict,
+    ids: list,
+    basis_name: str,
+    flat_budget: int | None,
+    assumptions: object = None,
 ) -> dict:
     """The board-export/v0 doc of the characters in `board_state` (+ `ids`' own) with that
     state overlaid as the plan (`_apply_plan`: to_buy / to_sell / optimised_nodes), its
@@ -347,11 +380,12 @@ def board_doc_for(
     doc["for_team"] = ids
     doc["plan_included"] = True
     # node values + Connect ranges/boosts (the page prints the game's numbers)
+    collection, connect_maxed = panel_connect_collection(basis_name, assumptions)
     board_values.annotate(
         doc,
         config.read_json(config.SKILLTREE_PATH) or {},
-        config.read_json(config.COLLECTION_PATH) or {},
-        maxed=basis_name == basis.MAXED_ACCOUNT_BASIS,
+        collection,
+        maxed=connect_maxed,
     )
     doc["engine"] = "given"
     doc["budget"] = "real" if flat_budget is None else flat_budget

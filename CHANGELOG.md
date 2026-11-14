@@ -2,6 +2,13 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.6 (2026-11-14)
+- **Better teams on a maxed account: every Connect card in one place.** The team's Connect cards and the bench's are now dealt together on every song, so a team can take a bench card that lifts it more, a bench singer keeps the card her song bonus wants, and no card counts twice. The #1 rises on one song (+0.17 % on EXPERT) and on the every-song average (+0.69 %); a team's details show the bench's Connect cards too.
+- **Searches that miss fewer leaders.** Every class of leader is searched (an outfit that raises one stat gets the sets it favours), each leader's song sample is weighed for her, and each leader's best team is re-scored on every song: every-song searches now find teams they used to miss (+0.2 % at levels 25-30).
+- **Score Support ties as the game breaks them:** when two members tie for a Score Support, the slot order the team plays decides (it moved 35 of 300 strong teams by up to 0.45 %).
+- **Your account: freed Board Points spent again.** When a search drops an activation-frequency node, the points it frees buy other nodes when that scores more (+0.03-0.19 %).
+- **Speed:** a song's chart is prepared in one call of the C core (one song ~15 % faster). Every-song and Highlight searches on a maxed account take about 70 s and 13 s, a little longer than 0.2.5 for the dealing above.
+
 ## 0.2.5 (2026-11-13)
 - **Running from source: `update.cmd`** (`./update.sh` on Linux) brings each new version from GitHub, runs setup when the packages changed, then refreshes. A plain `git pull` stops with "Your local changes ... would be overwritten by merge: data/cards.json" once a refresh has added cards; `update.cmd` sets those cards aside and the refresh adds them back. **This first time, update by hand** (the folder has no `update.cmd` yet): `git checkout -- data/cards.json`, `git pull`, `setup.cmd`, `refresh.cmd` ([Run it from source, Updating](docs/run-locally.md#updating)).
 - **Refresh about four times faster** (35 s to 9 s on a typical account). It signs in once instead of five times, keeps one connection to the game open, reads your own event rank without pauses, and fetches the 54 Holomem Rating reward borders four at a time. What it brings in is the same as before.

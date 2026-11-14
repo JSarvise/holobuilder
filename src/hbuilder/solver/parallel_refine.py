@@ -31,7 +31,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from multiprocessing.reduction import ForkingPickler
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from hbuilder.domain.board_optimizer import BoardPlan
 from hbuilder.domain.board_plan import (
@@ -55,7 +55,9 @@ from hbuilder.domain.board_refine import (
     develop_and_refine,
     develop_refined_team,
     optimize_and_rerank,
+    plan_values,
     plan_with_counts,
+    respend_freed_points,
 )
 from hbuilder.domain.card import Card
 from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown
@@ -159,8 +161,16 @@ class RefineContext:
     # once account-wide. ~48 extra rows a team: for short lists (the within-wallet
     # re-plan, the row detail).
     socket_bench: bool = False
-    # THE BENCH'S SOCKETS AS THEY ARE: `{chr: {unlocked socket: card or None}}` from
-    # `board_state.json` (`board_plan.board_model_from_plan`'s `bench_sockets`).
+    # EACH CARD IN ONE PLACE, DEALT WITH THE BENCH'S (needs `bench_sockets`): every board
+    # assembled for a song has the team's Connect cards and the whole bench's in one matching
+    # (`board_plan.board_model_from_plan(joint=True)`: the bench's side solved once per song on
+    # the plan cache, the team's rows re-solved per team). Several charts: each chart's board is
+    # assembled for its own cast (the plan stays the team's singer context's). One board for
+    # several songs (no cast) keeps the bench's cards where they are (`held_bench_cards`).
+    joint_connect: bool = False
+    # THE BENCH'S SOCKETS AS THEY ARE: `{chr: {unlocked socket: card or None}}`, from
+    # `board_state.json` on the account, from the maxed bench's own assignment on the maxed
+    # basis (`board_plan.board_model_from_plan`'s `bench_sockets`).
     bench_sockets: Mapping | None = None
     # A folder the plan caches of this context's worker processes share (`PlanStore`),
     # set by `RefinePool` on worker processes, so a board plan is solved once per pool
@@ -462,7 +472,9 @@ def evaluate(
     # `(the plain mean, that mean)`, what choosing the counts adds on these charts
     counts_both = len(selection) > 1 and selection[1] == COUNTS_BOTH
     counts = counts_both or (len(selection) > 1 and selection[1] == COUNTS)
-    if count_screen or lens or counts:
+    if len(selection) > 1 and selection[1] == SEARCH:
+        ctx = dataclasses.replace(ctx, refine_activation=False, joint_connect=False)
+    elif count_screen or lens or counts:
         ctx = dataclasses.replace(ctx, refine_activation=False)
     elif len(selection) > 1 and selection[1] is not None:
         ctx = dataclasses.replace(ctx, refine_activation=refine_level(selection[1]))
@@ -486,6 +498,8 @@ def evaluate(
     # the team with no board, the point every one of its boards is assembled at
     # (`_cached_board`): one for all its singer contexts
     board_off_point: list = []
+    # the team's plan per singer context, for the charts of several casts that share one
+    team_plans: dict = {}
     # the team prepared once per board for all the charts scored on it
     # (`score_song_detailed`'s `team_setup`); one chart has nothing to share
     setups: dict | None = {} if len(charts) > 1 else None
@@ -533,11 +547,11 @@ def evaluate(
         s = score_song_detailed(team.members, (team.leader,), chart, cfg, deck_power=power)
         return score_team_ceiling(team, chart, cfg, s[0].member_order) if s else 0.0
 
-    def develop(sings: bool | AbstractSet[str], charts_for=()):
+    def develop(sings: bool | AbstractSet[str], charts_for=(), assemble_cast=None):
         ctx_d = _with_singer_bench(ctx, by_id, tree_for, budget_for, plan_cache, sings)
-        return _develop(ctx_d, sings, charts_for)
+        return _develop(ctx_d, sings, charts_for, assemble_cast)
 
-    def _develop(ctx, sings, charts_for):
+    def _develop(ctx, sings, charts_for, assemble_cast=None):
         if ctx.board_state is not None:
             return board_from_state(
                 team,
@@ -590,13 +604,18 @@ def evaluate(
                 bench_characters=ctx.bench_characters,
                 name_by_chr=ctx.name_by_chr,
                 plan_cache=plan_cache,
-                sings=sings,
+                # an assembly cast plans the team's boards as `sings` does (a team holomem's plan
+                # reads only whether she sings) and assembles them for its whole cast
+                sings=sings if assemble_cast is None else assemble_cast,
                 bench_sockets=ctx.bench_sockets,
                 cooldown_counts=refine_level(ctx.refine_activation) >= 2,
                 charts_score_variants=charts_score_variants,
+                joint_connect=ctx.joint_connect,
             )[0]
         if plan_cache is not None:
-            return _cached_board(ctx, team, tree_for, budget_for, plan_cache, sings, board_off_point)
+            return _cached_board(
+                ctx, team, tree_for, budget_for, plan_cache, sings, board_off_point, assemble_cast, team_plans
+            )
         return optimize_and_rerank(
             [team],
             ctx.cfg,
@@ -610,6 +629,7 @@ def evaluate(
             sings=sings,
             bench_sockets=ctx.bench_sockets,
             player_level=player_level(ctx.cfg),
+            joint=ctx.joint_connect,
         )[0].board
 
     def expectation_and_ceiling(chart, cfg) -> tuple[float, float]:
@@ -641,24 +661,39 @@ def evaluate(
             singers = frozenset(c.singers) if len(charts) == 1 else team_chrs & frozenset(c.singers)
             return SongCast(singers, c.singer_type)
 
+        # the cast a chart's board is ASSEMBLED for: the team's singers' key, or with the bench
+        # dealt in (`joint_connect`) the chart's whole cast, whose bench yellows the deal values
+        def assembled_for(c):
+            return SongCast(frozenset(c.singers), c.singer_type) if ctx.joint_connect else key(c)
+
         # COUNTS: each planned singer context's `ChartCounts` (boards as they are have no
         # count to choose), and the members' count axes, shared by the contexts whose
         # boards agree
         choosers: dict = {}
         axes_memo: dict = {}
+        respend_memo: dict = {}
         plain_total = 0.0
         for chart in charts:
             sings = key(chart)
-            cfg_c = configs.get((sings, sings.scope))
+            cast = assembled_for(chart)
+            cfg_c = configs.get((cast, cast.scope))
             if cfg_c is None:
-                same = tuple(c for c in charts if (k := key(c)) == sings and k.scope == sings.scope)
+                same = tuple(c for c in charts if (k := assembled_for(c)) == cast and k.scope == cast.scope)
                 if counts and ctx.board_state is None:
                     ctx_d = _with_singer_bench(ctx, by_id, tree_for, budget_for, plan_cache, sings)
                     plan, board, assemble = _planned_board(
-                        ctx_d, team, tree_for, budget_for, plan_cache, sings, board_off_point
+                        ctx_d,
+                        team,
+                        tree_for,
+                        budget_for,
+                        plan_cache,
+                        sings,
+                        board_off_point,
+                        cast,
+                        team_plans,
                     )
                     cfg_c = dataclasses.replace(ctx.cfg, board=board)
-                    choosers[(sings, sings.scope)] = ChartCounts(
+                    choosers[(cast, cast.scope)] = ChartCounts(
                         team,
                         cfg_c,
                         plan,
@@ -669,10 +704,13 @@ def evaluate(
                         power_of=power_of,
                         axes_memo=axes_memo,
                         team_setup=setups,
+                        values_for=_plan_values_or_none(ctx, team, plan, plan_cache),
+                        player_level=player_level(ctx.cfg),
+                        respend_memo=respend_memo,
                     )
                 else:
-                    cfg_c = dataclasses.replace(ctx.cfg, board=develop(sings, same))
-                configs[(sings, sings.scope)] = cfg_c
+                    cfg_c = dataclasses.replace(ctx.cfg, board=develop(sings, same, cast))
+                configs[(cast, cast.scope)] = cfg_c
             if both:
                 e, c = expectation_and_ceiling(chart, cfg_c)
                 scores.append(c)
@@ -687,9 +725,9 @@ def evaluate(
                 if selection[1] == "lens_both":
                     return plain, best
                 return plain, count_screen_value(team, chart, cfg_c, plain, power_of(cfg_c))
-            chooser = choosers.get((sings, sings.scope))
+            chooser = choosers.get((cast, cast.scope))
             if chooser is not None:
-                plain_c, s, _counts = chooser.choose(chart)
+                plain_c, s, *_counts = chooser.choose(chart)
             else:
                 plain_c = s = served(chart, cfg_c)
             plain_total += plain_c
@@ -922,13 +960,13 @@ def develop_team(
             budget_for=budget_for,
             skilltree=ctx.skilltree,
             power_of=power_at,
+            values_for=_plan_values_or_none(ctx, team, plan, plan_cache),
+            player_level=player_level(ctx.cfg),
         )
-        combo = chooser.choose(chart)[2]
-        if combo is not None:
+        choice = chooser.choose(chart)
+        if choice.counts is not None:
             placements: list[SocketPlacement] = []  # type: ignore[no-redef]
-            chosen = plan_with_counts(
-                plan, chooser.axes, combo, {c.id: c for c in (team.leader, *team.members)}, tree_for
-            )
+            chosen = chooser.plan_at(choice.counts, choice.respent)
             board = assemble(chosen, placements)
             cfg_off = _board_off(ctx.cfg)
             return BoardOptimisedTeam(
@@ -972,12 +1010,23 @@ def develop_team(
             sings=sings,
             cooldown_counts=refine_level(refine) >= 2,
             charts_score_variants=charts_score_variants,
+            joint_connect=ctx.joint_connect,
             **kwargs,
         )[0]
-    return optimize_and_rerank([team], ctx.cfg, sings=sings, **kwargs)[0]
+    return optimize_and_rerank([team], ctx.cfg, sings=sings, joint=ctx.joint_connect, **kwargs)[0]
 
 
 COUNT_SCREEN_ROUNDS = 3
+
+
+def _plan_values_or_none(ctx: RefineContext, team: Team, plan: TeamBoardPlan, plan_cache: PlanCache | None):
+    """`board_refine.plan_values` of a plan the cache made (the node values each board was
+    planned with), for spending again the points a dropped frequency node frees; None
+    without the cache."""
+    if plan_cache is None or not plan.plan_keys:
+        return None
+    cards = {c.id: c for c in (team.leader, *team.members)}
+    return plan_values(plan, cards, plan_cache, ctx.node_effect_ids, ctx.skilltree)
 
 
 def _cooldown_counts(team: Team, board) -> tuple[dict, dict]:
@@ -1086,6 +1135,8 @@ def _cached_board(
     plan_cache: PlanCache,
     sings: bool,
     off_point: list | None = None,
+    assemble_cast=None,
+    plans: dict | None = None,
 ):
     """The team's developed board on the plan cache — the same three steps
     `optimize_and_rerank(plan_cache=...)` takes (board-off breakdown for the
@@ -1095,7 +1146,9 @@ def _cached_board(
     `off_point`: a list the caller keeps for ONE team. The linearisation point is the
     team scored with no board, the same for every singer context the team's boards are
     developed for, so it is computed for the first and read back for the others."""
-    return _planned_board(ctx, team, tree_for, budget_for, plan_cache, sings, off_point)[1]
+    return _planned_board(
+        ctx, team, tree_for, budget_for, plan_cache, sings, off_point, assemble_cast, plans
+    )[1]
 
 
 def _planned_board(
@@ -1106,13 +1159,20 @@ def _planned_board(
     plan_cache: PlanCache | None,
     sings,
     off_point: list | None = None,
+    assemble_cast=None,
+    plans: dict | None = None,
 ):
     """`(plan, board, assemble)` of the team's plain develop for `sings`: its
     `TeamBoardPlan`, the board assembled from it, and `assemble(another plan of the team[,
     placements out])`, which assembles that plan the same way (same linearisation point,
-    Connect cards, bench and singer context) -- a plan with some nodes moved is taken by
-    its nodes. On the plan cache the plan is the cached one (`_cached_board`'s steps);
-    without one, `optimize_and_rerank`'s. `off_point`: `_cached_board`'s."""
+    Connect cards, bench and singer context) -- a plan with some nodes moved is taken by its
+    nodes. `assemble_cast` (a `SongCast`): the boards are assembled for that cast instead
+    of `sings` (planned for `sings`), as `RefineContext.joint_connect` assembles each chart
+    of several. With `joint_connect` every board's Connect cards are dealt together with the
+    bench's. On the plan cache the plan is the cached one (`_cached_board`'s steps); without
+    one, `optimize_and_rerank`'s. `off_point`: `_cached_board`'s. `plans`: a dict the caller
+    keeps for ONE team, the plan per singer context (charts of several casts that share one
+    are assembled from one plan)."""
     cfg_off = _board_off(ctx.cfg)
     if off_point and off_point[0] is cfg_off:
         _cfg, overall_power, bonus_permil, bare_pool = off_point
@@ -1123,6 +1183,8 @@ def _planned_board(
         bare_pool = bd.active_pool / (1.0 + bd.combined_support_rate)
         if off_point is not None:
             off_point[:] = [cfg_off, overall_power, bonus_permil, bare_pool]
+
+    cast = sings if assemble_cast is None else assemble_cast
 
     def assemble(plan, placements: list | None = None):
         return board_model_from_plan(
@@ -1139,9 +1201,10 @@ def _planned_board(
             placements_out=placements,
             bench_characters=ctx.bench_characters,
             name_by_chr=ctx.name_by_chr,
-            sings=sings,
+            sings=cast,
             plan_cache=plan_cache,
             bench_sockets=ctx.bench_sockets,
+            joint=ctx.joint_connect,
         )
 
     if plan_cache is None:
@@ -1158,18 +1221,26 @@ def _planned_board(
             sings=sings,
             bench_sockets=ctx.bench_sockets,
             player_level=player_level(ctx.cfg),
+            joint=ctx.joint_connect,
         )[0]
+        if assemble_cast is not None:
+            return developed.plan, assemble(developed.plan), assemble
         return developed.plan, developed.board, assemble
-    plan = cached_team_plan(
-        team.leader,
-        team.members,
-        cache=plan_cache,
-        tree_for=tree_for,
-        budget_for=budget_for,
-        node_effect_ids=ctx.node_effect_ids,
-        skilltree=ctx.skilltree,
-        sings=sings,
-    )
+    plan_key = (sings, getattr(sings, "scope", None))
+    plan = plans.get(plan_key) if plans is not None else None
+    if plan is None:
+        plan = cached_team_plan(
+            team.leader,
+            team.members,
+            cache=plan_cache,
+            tree_for=tree_for,
+            budget_for=budget_for,
+            node_effect_ids=ctx.node_effect_ids,
+            skilltree=ctx.skilltree,
+            sings=sings,
+        )
+        if plans is not None:
+            plans[plan_key] = plan
     return plan, assemble(plan), assemble
 
 
@@ -1189,6 +1260,22 @@ def _cooldown_nodes(skilltree) -> frozenset:
 # `(plain mean, that mean)`
 COUNTS = "counts"
 COUNTS_BOTH = "counts_both"
+# SEARCH: the plain develop with the bench's Connect cards where they are
+# (`RefineContext.joint_connect` off for this evaluation): one board per singer context of
+# the team instead of one per chart cast, for the values a search over several charts only
+# ORDERS by; the rows it serves are scored with the deal
+SEARCH = "search"
+
+
+class CountsChoice(NamedTuple):
+    """`ChartCounts.choose`'s answer for one chart: the plain board's score, the score served,
+    the counts it is served at (None: the plain board's), and whether on the board with the
+    freed points spent again."""
+
+    plain: float
+    served: float
+    counts: tuple | None
+    respent: bool
 
 
 class ChartCounts:
@@ -1205,8 +1292,11 @@ class ChartCounts:
     score measured on a real board and never below the plain develop's.
 
     A member's counts are the ones its board reaches by dropping frequency nodes that
-    nothing hangs from (`board_refine.cooldown_count_axes`); a dropped node's points stay
-    unspent."""
+    nothing hangs from (`board_refine.cooldown_count_axes`). With `values_for` (the node
+    values each board was planned with, `board_refine.plan_values`) the points a dropped
+    node frees are spent again (`board_refine.respend_freed_points`, the counts kept), and
+    that board is scored too: the chart is served on whichever of the two scores higher.
+    Without it, or when nothing is left to buy (the maxed budget), they stay unspent."""
 
     def __init__(
         self,
@@ -1221,10 +1311,16 @@ class ChartCounts:
         power_of: Callable[[ScoringConfig], OverallPower | None],
         axes_memo: dict | None = None,
         team_setup: dict | None = None,
+        values_for: Callable[[str], Mapping[str, float] | None] | None = None,
+        player_level: int | None = None,
+        respend_memo: dict | None = None,
     ) -> None:
         self.team, self.cfg, self.plan = team, cfg, plan  # `cfg.board`: the plain board
-        self._assemble, self._tree_for = assemble, tree_for
+        self._assemble, self._tree_for, self._budget_for = assemble, tree_for, budget_for
         self._power_of, self._setup = power_of, team_setup
+        self._values_for, self._player_level = values_for, player_level
+        self._frozen = _cooldown_nodes(skilltree)
+        self._respend_memo = respend_memo if respend_memo is not None else {}
         self._cards = {c.id: c for c in (team.leader, *team.members)}
         members = {c.id: c for c in team.members}
         board = cfg.board
@@ -1250,7 +1346,8 @@ class ChartCounts:
             next(k for k, (count, _sel) in enumerate(states) if count == here)
             for _cid, states, here in self.axes
         )
-        self._boards: dict = {}  # counts chosen -> the config on their own board
+        # (counts chosen, freed points spent) -> the config on their own board
+        self._boards: dict = {}
 
     def _cooldowns(self, combo) -> dict:
         """`{holomem: cooldown shortening}` of the plain board with the members at `combo`."""
@@ -1261,13 +1358,48 @@ class ChartCounts:
             )
         }
 
-    def config_at(self, combo: tuple[int, ...]) -> ScoringConfig | None:
-        """The config whose board is the plan with the members at `combo`, assembled; None
-        when it cannot be."""
-        if combo not in self._boards:
-            board = self._assemble(plan_with_counts(self.plan, self.axes, combo, self._cards, self._tree_for))
-            self._boards[combo] = None if board is None else dataclasses.replace(self.cfg, board=board)
-        return self._boards[combo]
+    def _respent(self, combo: tuple[int, ...]) -> tuple[TeamBoardPlan, bool]:
+        """`(the plan with the members at combo and the freed points spent again, whether
+        anything was bought)`."""
+        plan = plan_with_counts(self.plan, self.axes, combo, self._cards, self._tree_for)
+        if self._values_for is None:
+            return plan, False
+        grown, bought = respend_freed_points(
+            self.plan,
+            plan,
+            self._cards,
+            tree_for=self._tree_for,
+            budget_for=self._budget_for,
+            values_for=self._values_for,
+            frozen=self._frozen,
+            player_level=self._player_level,
+            memo=self._respend_memo,
+        )
+        return grown, bool(bought)
+
+    def plan_at(self, combo: tuple[int, ...], respent: bool = False) -> TeamBoardPlan:
+        """The plan with the members at `combo`; `respent`: with the points the dropped
+        nodes free spent again (the same nodes when there is nothing to buy)."""
+        if respent:
+            return self._respent(combo)[0]
+        return plan_with_counts(self.plan, self.axes, combo, self._cards, self._tree_for)
+
+    def config_at(self, combo: tuple[int, ...], respent: bool = False) -> ScoringConfig | None:
+        """The config whose board is `plan_at(combo, respent)`, assembled; None when it
+        cannot be. When spending the freed points buys nothing it is `config_at(combo)`
+        itself."""
+        key = (combo, respent)
+        if key not in self._boards:
+            if respent:
+                plan, bought = self._respent(combo)
+                if not bought:
+                    self._boards[key] = self.config_at(combo)
+                    return self._boards[key]
+            else:
+                plan = self.plan_at(combo)
+            board = self._assemble(plan)
+            self._boards[key] = None if board is None else dataclasses.replace(self.cfg, board=board)
+        return self._boards[key]
 
     def _exact(self, chart, cfg) -> float:
         s = score_song_detailed(
@@ -1280,13 +1412,19 @@ class ChartCounts:
         )
         return s[0].total_score if s else 0.0
 
-    def choose(self, chart: SongChart) -> tuple[float, float, tuple | None]:
-        """`(plain score, score served, the counts it is served at)` on `chart`; the counts
-        are None when the plain board is kept."""
+    def choose(self, chart: SongChart) -> CountsChoice:
+        """The counts and the board `chart` is served on (`CountsChoice`); the counts are None
+        (and `respent` False) when the plain board's are kept. The board served is
+        `config_at(counts, respent)`."""
+        return CountsChoice(*self._choose_counts(chart))
+
+    def _choose_counts(self, chart: SongChart) -> tuple[float, float, tuple | None, bool]:
+        """`(plain score, score served, the counts it is served at, whether on the board
+        with the freed points spent again)` on `chart`, the bench's cards where they are."""
         team, cfg = self.team, self.cfg
         if not self.axes:
             plain = self._exact(chart, cfg)
-            return plain, plain, None
+            return plain, plain, None, False
         power = self._power_of(cfg)
         current = list(self.start)
         plain = best = 0.0
@@ -1316,10 +1454,16 @@ class ChartCounts:
             current[moves[top][0]] = moves[top][1]
         combo = tuple(current)
         if combo == self.start:
-            return plain, plain, None
+            return plain, plain, None, False
         cfg_v = self.config_at(combo)
         exact = self._exact(chart, cfg_v) if cfg_v is not None else plain
-        return (plain, exact, combo) if exact > plain else (plain, plain, None)
+        respent = False
+        cfg_r = self.config_at(combo, True)
+        if cfg_r is not cfg_v and cfg_r is not None:
+            exact_r = self._exact(chart, cfg_r)
+            if exact_r > exact:
+                exact, respent = exact_r, True
+        return (plain, exact, combo, respent) if exact > plain else (plain, plain, None, False)
 
 
 def _chunksize(count: int, workers: int) -> int:
@@ -1915,18 +2059,20 @@ class RefinePool:
         *,
         ceiling: bool = False,
         planned: Sequence[tuple | None] | None = None,
+        refine_activation: str | None = None,
     ) -> list[list[float]]:
         """Each team's score on EVERY chart of the context (or on `chart_indices`), in chart
         order (their mean is `batch_score(teams)`'s float). One list per team, in order.
         `ceiling`: each chart's all-fire score instead. `planned[k]`: the `(team board state,
-        bench)` team k is scored on (a re-plan within the materials), None to develop it."""
-        if chart_indices is None and not ceiling and planned is None:
+        bench)` team k is scored on (a re-plan within the materials), None to develop it.
+        `refine_activation`: `batch_score`'s, None or SEARCH."""
+        if chart_indices is None and not ceiling and planned is None and refine_activation is None:
             items: list[tuple] = [(t.leader.id, tuple(m.id for m in t.members)) for t in teams]
         else:
             chosen = None if chart_indices is None else tuple(chart_indices)
             boards = list(planned) if planned is not None else [None] * len(teams)
             items = [
-                (t.leader.id, tuple(m.id for m in t.members), chosen, None, ceiling, board)
+                (t.leader.id, tuple(m.id for m in t.members), chosen, refine_activation, ceiling, board)
                 for t, board in zip(teams, boards)
             ]
         if not items:

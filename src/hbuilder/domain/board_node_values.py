@@ -656,14 +656,17 @@ def bench_yellow_pays(scope: str | None, chr_id: str, cast: AbstractSet[str] | N
     """Whether an OFF-TEAM board's yellow of `scope` reaches this song's score
     (`BoardModel.song_score_bonus_for`): the song's own cast pays the yellows of the
     song's scope whoever is on the team; a song with no cast (a whole-roster song, or
-    the song-agnostic score) pays every board's `all` yellows. A plain set says who
+    the song-agnostic score) pays every board's `all` yellows. An empty `SongCast` that
+    names a solo or group scope is not such a song: it is a song whose singers it leaves
+    out (several charts keyed by the team's own singers, none of whom sings this one),
+    which pays its own scope only, so no bench yellow is counted. A plain set says who
     sings but not the scope, so it accepts either solo or group (a `SongCast` says
     which). `cast` None: not known (a leader flag was passed instead), so no bench
     yellow is counted."""
     if scope is None or cast is None:
         return False
     if not cast:
-        return scope == "all"
+        return scope == "all" and getattr(cast, "scope", "") in ("", "all")
     if chr_id not in cast:
         return False
     song_scope = getattr(cast, "scope", "")

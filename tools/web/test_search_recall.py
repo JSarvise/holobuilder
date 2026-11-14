@@ -1,13 +1,19 @@
-"""In general on a maxed account, on the real catalogue and charts: the served #1 scores at least
-what a known strong team scores on the same charts.
+"""In general on a maxed account, on the real catalogue and charts: the unpinned search serves at
+least what known strong teams score on the same charts, and at least what the same search serves
+with the leader pinned.
 
-The team is Noel / Soleil Kiss leading Fubuki, Matsuri, Flare, Noel and Anya. Its outfit gives
-+135 % performance only with 2+ Gen 3 members, so its best sets are performance-heavy sets holding a
-Gen 3 pair, a region the leaders that rank best elsewhere value less. The served team may be
-another one; it may not score less. Both numbers are the same leaf (`RefinePool.batch_score` on
-every chart of the engine), so the comparison is exact.
+The known teams are the best ones of three leaders whose regions an unpinned search once left
+out: Noel / Soleil Kiss (+135 % performance with 2+ Gen 3 members), Miko / Radiance Smile on the
+same five members, and La+ / Sweet & Spicy on another set. They lean to performance while the
+leaders that score best on a chart sample raise technique or sense, and Fubuki and Matsuri pay
+only together. The served team may be another one; it may not score less. Every number is the
+value the engine serves a row at (the better of its plain mean over every chart and its mean with
+the frequency node counts chosen per chart), so the comparison is exact.
 
-Each case is a full search on the engine's worker pool (a few minutes), so the module is marked
+A search with the leader pinned to one card explores that leader's teams alone: whatever it
+serves is a team the unpinned search could have served, so the unpinned #1 may not be below it.
+
+Each case is several full searches on the engine's worker pool (minutes), so the module is marked
 `recall` and deselected by default:
 
     python -m pytest tools/web/test_search_recall.py -m recall
@@ -40,14 +46,38 @@ pytestmark = [
     ),
 ]
 
-LEADER = "card-00022-5-uniq-0063-00"  # Shirogane Noel / Soleil Kiss
-MEMBERS = (
-    "card-00006-5-uniq-0007-00",
-    "card-00007-5-uniq-0008-00",
-    "card-00021-5-uniq-0017-00",
-    "card-00022-5-uniq-0063-00",
-    "card-03005-5-uniq-0084-00",
+NOEL_SET = (
+    "card-00006-5-uniq-0007-00",  # Fubuki / Golden Petal Dew
+    "card-00007-5-uniq-0008-00",  # Matsuri / Sweet Deception
+    "card-00021-5-uniq-0017-00",  # Flare / Azure Ribbon Chic
+    "card-00022-5-uniq-0063-00",  # Noel / Soleil Kiss
+    "card-03005-5-uniq-0084-00",  # Anya / Tribal Oasis
 )
+LAPLUS_SET = (
+    "card-00006-5-uniq-0007-00",  # Fubuki / Golden Petal Dew
+    "card-00007-5-uniq-0008-00",  # Matsuri / Sweet Deception
+    "card-00032-5-uniq-0026-00",  # Botan / WH Lion Vanguard
+    "card-03003-5-uniq-0115-00",  # Iofifteen / Sunlit Daydream
+    "card-06005-5-uniq-0061-00",  # Hajime / Sweet Badass Style
+)
+NOEL = "card-00022-5-uniq-0063-00"  # Shirogane Noel / Soleil Kiss
+MIKO = "card-00015-5-uniq-0067-00"  # Sakura Miko / Radiance Smile
+LAPLUS = "card-00035-5-uniq-0082-00"  # La+ Darknesss / Sweet & Spicy
+KNOWN = {
+    "Noel / Soleil Kiss": (NOEL, NOEL_SET),
+    "Miko / Radiance Smile": (MIKO, NOEL_SET),
+    "La+ / Sweet & Spicy": (LAPLUS, LAPLUS_SET),
+}
+# the leaders pinned: the three above, and the best technique, sense and gated-performance ones
+PINNED = (
+    LAPLUS,
+    MIKO,
+    NOEL,
+    "card-00017-5-uniq-0077-00",  # Inugami Korone / Stripe Strike
+    "card-00018-5-uniq-0068-00",  # Hoshimachi Suisei / Melody of the Tides
+    "card-04014-5-uniq-0094-00",  # Koseki Bijou / Glittering Gem
+)
+CASES = pytest.mark.parametrize("levels", [None, (25, 30)], ids=["every EXPERT chart", "levels 25-30"])
 
 
 @pytest.fixture
@@ -70,21 +100,55 @@ def kernels(monkeypatch):
     connect.enable()
 
 
-@pytest.mark.parametrize("levels", [None, (25, 30)], ids=["every EXPERT chart", "levels 25-30"])
-def test_in_general_maxed_serves_at_least_noel_soleil_kiss(kernels, levels):
+def served_value(eng, team) -> float:
+    """What the engine serves `team` at: the better of its plain mean over every chart and its
+    mean with the frequency node counts chosen per chart."""
+    plain = float(eng.pool.batch_score([team])[0])
+    counted = float(eng.pool.batch_score([team], refine_activation=ondemand.COUNTS)[0])
+    return max(plain, counted)
+
+
+@CASES
+def test_in_general_maxed_serves_at_least_the_known_teams(kernels, levels):
     from hbuilder.domain.team import Team
 
     eng = ondemand.Engine("maxed", "EXPERT", levels=levels)
     try:
         by_id = {c.id: c for c in eng.reps}
-        if LEADER not in by_id or not all(m in by_id for m in MEMBERS):
-            pytest.skip("the catalogue no longer holds the reference team")
-        reference = Team(leader=by_id[LEADER], members=tuple(by_id[m] for m in MEMBERS))
-        reference_value = eng.pool.batch_score([reference])[0]
+        known = {
+            name: Team(leader=by_id[leader], members=tuple(by_id[m] for m in members))
+            for name, (leader, members) in KNOWN.items()
+            if leader in by_id and all(m in by_id for m in members)
+        }
+        if not known:
+            pytest.skip("the catalogue no longer holds the reference teams")
+        values = {name: served_value(eng, team) for name, team in known.items()}
         served = eng.search(None)["ranking"][0]
     finally:
         eng.close()
-    assert served["best"] >= reference_value, (
-        f"served {served['leader_name']} + {served['member_names']} {served['best']:,.0f} "
-        f"< Noel / Soleil Kiss {reference_value:,.0f}"
+    below = {name: v for name, v in values.items() if served["best"] < v}
+    assert not below, (
+        f"served {served['leader_name']} + {served['member_names']} {served['best']:,.0f} < "
+        + ", ".join(f"{name} {v:,.0f}" for name, v in below.items())
+    )
+
+
+@CASES
+def test_no_pinned_leader_beats_the_unpinned_search(kernels, levels):
+    eng = ondemand.Engine("maxed", "EXPERT", levels=levels)
+    try:
+        ids = {c.id for c in eng.reps}
+        plain = eng.search(None)["ranking"][0]
+        pinned = {}
+        for leader in PINNED:
+            if leader not in ids:
+                continue
+            eng.hints.clear()
+            row = eng.search(None, ondemand.Filters(leader_card=leader))["ranking"][0]
+            pinned[row["leader_name"]] = row["best"]
+    finally:
+        eng.close()
+    above = {name: v for name, v in pinned.items() if v > plain["best"]}
+    assert not above, f"unpinned #1 {plain['leader_name']} {plain['best']:,.0f} < pinned " + ", ".join(
+        f"{name} {v:,.0f}" for name, v in above.items()
     )

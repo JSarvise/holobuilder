@@ -31,6 +31,10 @@
 #include <stdint.h>
 #include <string.h>
 
+/* the dynamic Hungarian matching of `joint_matching.JointMatching` (`hd_jm_*`), and
+   `hd_joint` below on it: one library, so a bench matching built here is solved here */
+#include "jointmatch.c"
+
 #define MAX_CHARS 8
 #define MAX_MEMBERS 8
 #define MAX_NODES 512     /* valued nodes per character */
@@ -38,7 +42,7 @@
 #define MAX_ROWS 64       /* (character, socket) pairs with a positive placement */
 #define MAX_COLS 96       /* distinct (shape, permil) card groups in play */
 #define SOCKETS 64        /* socket codes per character */
-#define COL_IDS 2048      /* global card-group ranks */
+#define COL_IDS 2048      /* global card-group ids (each group's rank: `g_col_rank`) */
 #define MAX_TRIPLES (MAX_CHARS * MAX_ENTRIES)
 
 enum { K_STAT = 0, K_RATE = 1, K_SONG = 2, K_SKILL_EFFECT_UP = 3, K_UPTIME = 4, K_OTHER = 5 };
@@ -181,6 +185,23 @@ typedef struct {
 
 static Answer g_ans[2];
 
+/* A plan's entries name their card group by a STABLE id (`connect.py`'s `_col_id`, ids only
+ * added); `g_col_rank[id]` is that group's rank among every group seen, in card-tuple order --
+ * the column order `_connect_assignment_exact` sorts into. A new group changes the ranks here
+ * (`hd_set_col_rank`), never a packed plan. */
+static int32_t g_col_rank[COL_IDS];
+
+void hd_set_col_rank(const int32_t *ranks, int n) {
+    for (int k = 0; k < COL_IDS; k++) g_col_rank[k] = k < n ? ranks[k] : -1;
+}
+
+/* One `hd_assemble` call with cards held on off-team sockets (`board_plan.held_bench_cards`):
+ * `g_call_cap[id]` the cards a group keeps once they are out, `g_call_rank[id]` its rank among
+ * the call's groups by what it keeps (the Python matches each plan's view without them,
+ * `_held_view`: a group with no card left has no entry, the others are columns in the order of
+ * their remaining cards). NULL: every card, the global ranks. */
+static const int32_t *g_call_rank = NULL, *g_call_cap = NULL;
+
 /* `_connect_assignment_exact` over the current gains: `g_values`, the paying yellows times
  * `scale` when `scaled`. A placement whose (character, socket) would keep its own card
  * (`tie[c][e]` nonzero; `tie` NULL: no incumbents) weighs `gain * tie_factor`
@@ -206,6 +227,9 @@ static int solve(const uint8_t *const *tie, double tie_factor, int scaled, doubl
         const uint8_t *ties = tie != NULL ? tie[c] : NULL;
         for (int e = 0; e < p->n_entries; e++) {
             const Entry *en = &p->entries[e];
+            if (en->col < 0 || en->col >= COL_IDS) return -1;
+            int cap = g_call_cap != NULL ? g_call_cap[en->col] : en->cap;
+            if (cap <= 0) continue;  /* every card of its group held */
             double gain = 0.0;
             for (int k = 0; k < en->cov_count; k++) {
                 int idx = p->cov[en->cov_start + k];
@@ -215,12 +239,13 @@ static int solve(const uint8_t *const *tie, double tie_factor, int scaled, doubl
             }
             if (gain > 0) {
                 if (en->socket < 0 || en->socket >= SOCKETS) return -1;
-                if (en->col < 0 || en->col >= COL_IDS) return -1;
+                int cr = g_call_rank != NULL ? g_call_rank[en->col] : g_col_rank[en->col];
+                if (cr < 0 || cr >= COL_IDS) return -1;
                 int rk = g_rank[c] * SOCKETS + en->socket;
                 row_of[rk] = 1;
-                col_of[en->col] = 1;
-                col_cap[en->col] = en->cap;
-                t_char[nt] = c; t_entry[nt] = e; t_row[nt] = rk; t_col[nt] = en->col;
+                col_of[cr] = 1;
+                col_cap[cr] = cap;
+                t_char[nt] = c; t_entry[nt] = e; t_row[nt] = rk; t_col[nt] = cr;
                 t_gain[nt] = gain;
                 t_weight[nt] = (ties != NULL && ties[e]) ? gain * tie_factor : gain;
                 nt++;
@@ -345,6 +370,7 @@ int hd_connect(int n_chars, const Plan *plans, const int32_t *char_rank,
                int song_mask, int nm, const double *stats, const uint64_t *gen,
                double dp, double db, double dy, double apr,
                int32_t *out_char, int32_t *out_entry, double *out_gain) {
+    g_call_rank = g_call_cap = NULL;
     if (values_for(n_chars, plans, char_rank, is_leader, own, singer_weight, song_mask, nm,
                    stats, gen, dp, db, dy, apr) < 0)
         return -1;
@@ -495,7 +521,36 @@ static double worth(const Yel *yels, const Answer *a, double room) {
  * limit. out_info: [0] the path (0: no cap binds, 1: capped, its first matching kept, 2:
  * capped, a scaled matching kept), [1] the matchings solved, [2] the check that bound (0 none,
  * 1 before the matching, 2 after it, 3 no checks). */
+static int assemble_body(int n_chars, const Plan *plans, const Yel *yels, const int32_t *char_rank,
+                const int32_t *team_code, const int32_t *is_leader, const int32_t *own,
+                const double *singer_weight, int song_mask, int nm, const double *stats,
+                const uint64_t *gen, double dp, double db, double dy, double apr,
+                int nb, const int32_t *bench_who, const double *bench_val,
+                double cap, int rounds, const uint8_t *const *tie, double tie_factor, int tie_first,
+                int checks, int32_t *out_char, int32_t *out_entry, double *out_gain,
+                int32_t *out_info);
+
+/* `call_rank` / `call_cap` (both or neither): the call's view with the held cards out
+ * (`g_call_rank`); NULL for every card. */
 int hd_assemble(int n_chars, const Plan *plans, const Yel *yels, const int32_t *char_rank,
+                const int32_t *team_code, const int32_t *is_leader, const int32_t *own,
+                const double *singer_weight, int song_mask, int nm, const double *stats,
+                const uint64_t *gen, double dp, double db, double dy, double apr,
+                int nb, const int32_t *bench_who, const double *bench_val,
+                double cap, int rounds, const uint8_t *const *tie, double tie_factor, int tie_first,
+                int checks, int32_t *out_char, int32_t *out_entry, double *out_gain,
+                int32_t *out_info, const int32_t *call_rank, const int32_t *call_cap) {
+    g_call_rank = call_cap != NULL ? call_rank : NULL;
+    g_call_cap = call_rank != NULL ? call_cap : NULL;
+    int chosen = assemble_body(n_chars, plans, yels, char_rank, team_code, is_leader, own,
+                               singer_weight, song_mask, nm, stats, gen, dp, db, dy, apr, nb,
+                               bench_who, bench_val, cap, rounds, tie, tie_factor, tie_first,
+                               checks, out_char, out_entry, out_gain, out_info);
+    g_call_rank = g_call_cap = NULL;
+    return chosen;
+}
+
+static int assemble_body(int n_chars, const Plan *plans, const Yel *yels, const int32_t *char_rank,
                 const int32_t *team_code, const int32_t *is_leader, const int32_t *own,
                 const double *singer_weight, int song_mask, int nm, const double *stats,
                 const uint64_t *gen, double dp, double db, double dy, double apr,
@@ -571,4 +626,367 @@ int hd_assemble(int n_chars, const Plan *plans, const Yel *yels, const int32_t *
         scale = (low + high) / 2.0;
     }
     return emit(best, out_char, out_entry, out_gain);
+}
+
+/* ------------------------------------------------- the team and the bench in one matching */
+
+/* `board_plan._joint_assignment` for one team, in C: the team's socket rows (valued here, as
+ * `node_values_from_recipes`, the gains `_entry_rows` takes) replace their holomems' rows in the
+ * song's bench matching (`bench`, a `JointMatching` solved once per song) and the matching is
+ * re-solved (`hd_jm_solve`); when the yellows the song pays exceed the cap, the bisection on
+ * the yellow scale of `_yellow_capped_assignment`, the bench's yellow boards' rows re-solved
+ * too, keeping the matching worth most with its yellow lift capped.
+ *
+ * Team side: `plans` etc. as `hd_assemble`; `sock_row[c * SOCKETS + code]` the matching row of
+ * character c's socket (-1: none), its rows in the matching's order; `col_map[id]` the
+ * column of a card group (`connect.py`'s stable group ids); `tie[c][e]` nonzero when entry e's socket keeps
+ * its own card (`INCUMBENT_TIE`); `yels[c]` the paying yellows in `plan_node_order`, `team_order`
+ * the characters in the Python's team order (yellow lift), `team_code[c]` their codes.
+ * Bench side, every (row, column) whose shape covers a valued node: `be_start[row]`,
+ * `be_count[row]` into `be_col`, `be_permil`, `be_tie`, `be_cov_start`, `be_cov_count` (node ids
+ * into `be_cov`); `bn_value[id]` its value, `bn_pay[id]` its paying permil (0: not a paying
+ * yellow); `row_code[row]` the row's board code. The bench's yellow boards in the Python's
+ * order: `by_code[k]`, their nodes `by_node[by_start[k] .. + by_count[k]]` in node order.
+ *
+ * Writes the matched (row, column) pairs, rows ascending, with each pair's gain at the scale of
+ * the matching kept (the triple's gain, as the Python's re-solve builds it), and returns how
+ * many; `out_scale[0]` that scale (-1: unscaled). -1 on a size limit or a bad input. */
+
+#define JT_ROWS 64          /* team socket rows */
+#define JT_NODES 4096       /* bench node ids */
+#define JT_PAIRS 512        /* matched pairs of one answer */
+
+typedef struct {
+    int n;
+    int32_t row[JT_PAIRS], col[JT_PAIRS];
+} JAns;
+
+static JM *g_jt_scratch;
+static double g_bmult[JT_NODES];
+static double g_tmult[MAX_CHARS][MAX_NODES];
+
+/* One team row's weights over every column (`_entry_rows`, `scale` < 0: unscaled). */
+static void jt_team_weights(int c, int socket, const Plan *p, const int32_t *col_map, int m,
+                            const uint8_t *const *tie, double tie_factor, double scale,
+                            double *w) {
+    for (int j = 0; j < m; j++) w[j] = 0.0;
+    for (int e = 0; e < p->n_entries; e++) {
+        const Entry *en = &p->entries[e];
+        if (en->socket != socket) continue;
+        int j = (en->col >= 0 && en->col < COL_IDS) ? col_map[en->col] : -1;
+        if (j < 0 || j >= m) continue;
+        double gain = 0.0;
+        for (int q = 0; q < en->cov_count; q++) {
+            int i = p->cov[en->cov_start + q];
+            double v = i >= 0 ? g_values[c][i] : 0.0;
+            if (scale >= 0.0 && i >= 0 && g_paying[c][i]) v = v * scale;
+            gain += v * en->permil / 1000.0;
+        }
+        if (gain > 0) w[j] = (tie != NULL && tie[c] != NULL && tie[c][e]) ? gain * tie_factor : gain;
+    }
+}
+
+/* One bench row's weights (`_joint_socket_rows` with the board's yellows scaled). */
+static void jt_bench_weights(int r, int m, const int32_t *be_start, const int32_t *be_count,
+                             const int32_t *be_col, const double *be_permil, const uint8_t *be_tie,
+                             const int32_t *be_cov_start, const int32_t *be_cov_count,
+                             const int32_t *be_cov, const double *bn_value, const double *bn_pay,
+                             double tie_factor, double scale, double *w) {
+    for (int j = 0; j < m; j++) w[j] = 0.0;
+    for (int k = be_start[r]; k < be_start[r] + be_count[r]; k++) {
+        double gain = 0.0;
+        for (int q = 0; q < be_cov_count[k]; q++) {
+            int id = be_cov[be_cov_start[k] + q];
+            double v = bn_value[id];
+            if (bn_pay[id] != 0.0) v = v * scale;
+            gain += v * be_permil[k] / 1000.0;
+        }
+        if (gain > 0) w[be_col[k]] = be_tie[k] ? gain * tie_factor : gain;
+    }
+}
+
+/* The kept answer's pairs and their gains: a team row's from its entry (`_entry_rows`), a bench
+   row's from its covered nodes (`_joint_socket_rows`); scaled when `scale` >= 0 on a team board's
+   paying yellows and on the rows of a bench yellow board not on the team, as the re-solve that
+   produced the answer built them. */
+static int jt_emit(const JAns *a, double scale, int n_chars, const Plan *plans, const int32_t *col_map,
+                   const int32_t *team_row_char, const int32_t *team_row_sock, int n_by,
+                   const int32_t *by_code, const int32_t *by_count, const int32_t *team_code,
+                   const int32_t *row_code, const int32_t *be_start, const int32_t *be_count,
+                   const int32_t *be_col, const double *be_permil, const int32_t *be_cov_start,
+                   const int32_t *be_cov_count, const int32_t *be_cov, const double *bn_value,
+                   const double *bn_pay, int32_t *out_row, int32_t *out_col, double *out_gain) {
+    for (int t = 0; t < a->n; t++) {
+        int r = a->row[t], j = a->col[t], c = team_row_char[r];
+        double gain = 0.0;
+        if (c >= 0) {
+            const Plan *p = &plans[c];
+            for (int e = 0; e < p->n_entries; e++) {
+                const Entry *en = &p->entries[e];
+                if (en->socket != team_row_sock[r] || col_map[en->col] != j) continue;
+                for (int q = 0; q < en->cov_count; q++) {
+                    int i = p->cov[en->cov_start + q];
+                    double v = i >= 0 ? g_values[c][i] : 0.0;
+                    if (scale >= 0.0 && i >= 0 && g_paying[c][i]) v = v * scale;
+                    gain += v * en->permil / 1000.0;
+                }
+            }
+        } else {
+            int scaled = 0;
+            if (scale >= 0.0) {
+                for (int b = 0; b < n_by; b++) {
+                    if (by_code[b] != row_code[r] || by_count[b] == 0) continue;
+                    int on_team = 0;
+                    for (int q = 0; q < n_chars; q++)
+                        if (team_code[q] == by_code[b]) { on_team = 1; break; }
+                    if (!on_team) scaled = 1;
+                }
+            }
+            for (int k = be_start[r]; k < be_start[r] + be_count[r]; k++) {
+                if (be_col[k] != j) continue;
+                for (int q = 0; q < be_cov_count[k]; q++) {
+                    int id = be_cov[be_cov_start[k] + q];
+                    double v = bn_value[id];
+                    if (scaled && bn_pay[id] != 0.0) v = v * scale;
+                    gain += v * be_permil[k] / 1000.0;
+                }
+            }
+        }
+        out_row[t] = r;
+        out_col[t] = j;
+        out_gain[t] = gain;
+    }
+    return a->n;
+}
+
+int hd_joint(int n_chars, const Plan *plans, const int32_t *char_rank, const int32_t *is_leader,
+             const int32_t *own, const double *singer_weight, int song_mask, int nm,
+             const double *stats, const uint64_t *gen, double dp, double db, double dy, double apr,
+             const int32_t *sock_row, const int32_t *col_map, const uint8_t *const *tie,
+             double tie_factor, const Yel *yels, const int32_t *team_code,
+             const JM *bench, const int32_t *be_start, const int32_t *be_count,
+             const int32_t *be_col, const double *be_permil, const uint8_t *be_tie,
+             const int32_t *be_cov_start, const int32_t *be_cov_count, const int32_t *be_cov,
+             int n_bn, const double *bn_value, const double *bn_pay, const int32_t *row_code,
+             int n_by, const int32_t *by_code, const int32_t *by_start, const int32_t *by_count,
+             const int32_t *by_node, double cap, int rounds, int32_t *out_row, int32_t *out_col,
+             double *out_gain, double *out_scale) {
+    static int32_t ch_rows[JT_ROWS + 1024];
+    static double ch_w[(JT_ROWS + 1024) * JM_MAX_COLS];
+    static JAns ans[2];
+    static double terms[JT_NODES + MAX_CHARS * MAX_NODES];
+    static int32_t team_row_char[1024], team_row_sock[1024];
+    const int m = bench->m, R = bench->n;
+    out_scale[0] = -1.0;
+    if (n_bn > JT_NODES || R > 1024 || m + 1 > JM_MAX_COLS) return -1;
+    if (values_for(n_chars, plans, char_rank, is_leader, own, singer_weight, song_mask, nm,
+                   stats, gen, dp, db, dy, apr) < 0)
+        return -1;
+    for (int c = 0; c < n_chars; c++) {
+        if (yels[c].n_pay > MAX_NODES) return -1;
+        for (int k = 0; k < yels[c].n_pay; k++) {
+            int i = yels[c].pay_idx[k];
+            if (i >= plans[c].n_nodes) return -1;
+            if (i >= 0) g_paying[c][i] = 1;
+        }
+    }
+    for (int r = 0; r < R; r++) team_row_char[r] = -1;
+    for (int c = 0; c < n_chars; c++)
+        for (int s = 0; s < SOCKETS; s++) {
+            int r = sock_row[c * SOCKETS + s];
+            if (r < 0) continue;
+            if (r >= R) return -1;
+            team_row_char[r] = c;
+            team_row_sock[r] = s;
+        }
+    /* the bench's yellow boards not on the team, and whether any board pays a yellow */
+    int any_yellow = 0;
+    double room = cap;
+    for (int k = 0; k < n_by; k++) {
+        int on_team = 0;
+        for (int c = 0; c < n_chars; c++)
+            if (team_code[c] == by_code[k]) { on_team = 1; break; }
+        if (on_team || by_count[k] == 0) continue;
+        any_yellow = 1;
+        int n = 0;
+        for (int q = 0; q < by_count[k]; q++) terms[n++] = bn_pay[by_node[by_start[k] + q]];
+        room -= hd_py_sum(terms, n);
+    }
+    for (int c = 0; c < n_chars; c++)
+        if (yels[c].n_pay > 0) { any_yellow = 1; room -= yels[c].pay_sum; }
+
+    if (g_jt_scratch == NULL || g_jt_scratch->n != bench->n || g_jt_scratch->m != bench->m
+        || g_jt_scratch->rows != bench->rows) {
+        if (g_jt_scratch) hd_jm_free(g_jt_scratch);
+        g_jt_scratch = NULL;
+    }
+
+    /* one matching: the team rows (and with `scale` >= 0 the bench's yellow boards' rows) */
+    #define JT_SOLVE(SCALE, A)                                                                   \
+    do {                                                                                         \
+        int k = 0;                                                                               \
+        for (int r = 0; r < R; r++) {                                                            \
+            int c = team_row_char[r], yb = 0;                                                    \
+            if (c < 0 && (SCALE) >= 0.0) {                                                       \
+                for (int b = 0; b < n_by; b++) {                                                 \
+                    if (by_code[b] != row_code[r] || by_count[b] == 0) continue;                 \
+                    int on_team = 0;                                                             \
+                    for (int t = 0; t < n_chars; t++)                                            \
+                        if (team_code[t] == by_code[b]) { on_team = 1; break; }                  \
+                    if (!on_team) yb = 1;                                                        \
+                }                                                                                \
+            }                                                                                    \
+            if (c < 0 && !yb) continue;                                                          \
+            ch_rows[k] = r;                                                                      \
+            if (c >= 0)                                                                          \
+                jt_team_weights(c, team_row_sock[r], &plans[c], col_map, m, tie, tie_factor,     \
+                                (SCALE), ch_w + (size_t)k * m);                                  \
+            else                                                                                 \
+                jt_bench_weights(r, m, be_start, be_count, be_col, be_permil, be_tie,            \
+                                 be_cov_start, be_cov_count, be_cov, bn_value, bn_pay,           \
+                                 tie_factor, (SCALE), ch_w + (size_t)k * m);                     \
+            k++;                                                                                 \
+        }                                                                                        \
+        JM *out = hd_jm_solve(bench, g_jt_scratch, k, ch_rows, ch_w);                            \
+        if (out == NULL) return -1;                                                              \
+        g_jt_scratch = out;                                                                      \
+        (A)->n = hd_jm_assignment(out, (A)->row, (A)->col);                                      \
+        if ((A)->n > JT_PAIRS) return -1;                                                        \
+    } while (0)
+
+    JAns *best = &ans[0], *cand = &ans[1];
+    JT_SOLVE(-1.0, best);
+    if (!any_yellow) {
+        return jt_emit(best, out_scale[0], n_chars, plans, col_map, team_row_char, team_row_sock, n_by, by_code,
+                       by_count, team_code, row_code, be_start, be_count, be_col, be_permil, be_cov_start,
+                       be_cov_count, be_cov, bn_value, bn_pay, out_row, out_col, out_gain);
+    }
+    if (0.0 > room) room = 0.0;
+
+    /* the multipliers an answer gives: team nodes per character, bench nodes per id */
+    #define JT_MULTS(A)                                                                          \
+    do {                                                                                         \
+        for (int c = 0; c < n_chars; c++)                                                        \
+            for (int i = 0; i < plans[c].n_nodes; i++) g_tmult[c][i] = 1.0;                      \
+        for (int id = 0; id < n_bn; id++) g_bmult[id] = 1.0;                                     \
+        for (int t = 0; t < (A)->n; t++) {                                                       \
+            int r = (A)->row[t], j = (A)->col[t], c = team_row_char[r];                          \
+            if (c >= 0) {                                                                        \
+                const Plan *p = &plans[c];                                                       \
+                for (int e = 0; e < p->n_entries; e++) {                                         \
+                    const Entry *en = &p->entries[e];                                            \
+                    if (en->socket != team_row_sock[r] || col_map[en->col] != j) continue;      \
+                    double mu = 1.0 + en->permil / 1000.0;                                       \
+                    for (int q = 0; q < en->cov_count; q++) {                                    \
+                        int i = p->cov[en->cov_start + q];                                       \
+                        if (i >= 0 && mu > g_tmult[c][i]) g_tmult[c][i] = mu;                    \
+                    }                                                                            \
+                }                                                                                \
+            } else {                                                                             \
+                for (int k2 = be_start[r]; k2 < be_start[r] + be_count[r]; k2++) {               \
+                    if (be_col[k2] != j) continue;                                               \
+                    double mu = 1.0 + be_permil[k2] / 1000.0;                                    \
+                    for (int q = 0; q < be_cov_count[k2]; q++) {                                 \
+                        int id = be_cov[be_cov_start[k2] + q];                                   \
+                        if (mu > g_bmult[id]) g_bmult[id] = mu;                                  \
+                    }                                                                            \
+                }                                                                                \
+            }                                                                                    \
+        }                                                                                        \
+    } while (0)
+
+    /* `lift_of`: bench yellow boards in order, then the team in its order */
+    #define JT_LIFT(OUT)                                                                         \
+    do {                                                                                         \
+        int n = 0;                                                                               \
+        for (int b = 0; b < n_by; b++) {                                                         \
+            int on_team = 0;                                                                     \
+            for (int t = 0; t < n_chars; t++)                                                    \
+                if (team_code[t] == by_code[b]) { on_team = 1; break; }                          \
+            if (on_team) continue;                                                               \
+            for (int q = 0; q < by_count[b]; q++) {                                              \
+                int id = by_node[by_start[b] + q];                                               \
+                terms[n++] = (g_bmult[id] - 1.0) * bn_pay[id];                                   \
+            }                                                                                    \
+        }                                                                                        \
+        for (int c = 0; c < n_chars; c++) {                                                      \
+            const Yel *y = &yels[c];                                                             \
+            for (int q = 0; q < y->n_pay; q++) {                                                 \
+                int i = y->pay_idx[q];                                                           \
+                double mu = i >= 0 ? g_tmult[c][i] : 1.0;                                        \
+                terms[n++] = (mu - 1.0) * y->pay_p[q];                                           \
+            }                                                                                    \
+        }                                                                                        \
+        (OUT) = hd_py_sum(terms, n);                                                             \
+    } while (0)
+
+    /* `worth`: the matched nodes in row order, the yellow part capped at the room */
+    #define JT_WORTH(A, LIFT, OUT)                                                               \
+    do {                                                                                         \
+        double other = 0.0, paid = 0.0;                                                          \
+        for (int t = 0; t < (A)->n; t++) {                                                       \
+            int r = (A)->row[t], j = (A)->col[t], c = team_row_char[r];                          \
+            if (c >= 0) {                                                                        \
+                const Plan *p = &plans[c];                                                       \
+                for (int e = 0; e < p->n_entries; e++) {                                         \
+                    const Entry *en = &p->entries[e];                                            \
+                    if (en->socket != team_row_sock[r] || col_map[en->col] != j) continue;      \
+                    for (int q = 0; q < en->cov_count; q++) {                                    \
+                        int i = p->cov[en->cov_start + q];                                       \
+                        if (i < 0) continue;                                                     \
+                        double mu = g_tmult[c][i];                                               \
+                        if (g_paying[c][i]) paid += (mu - 1.0) * g_values[c][i];                 \
+                        else other += (mu - 1.0) * g_values[c][i];                               \
+                    }                                                                            \
+                }                                                                                \
+            } else {                                                                             \
+                for (int k2 = be_start[r]; k2 < be_start[r] + be_count[r]; k2++) {               \
+                    if (be_col[k2] != j) continue;                                               \
+                    for (int q = 0; q < be_cov_count[k2]; q++) {                                 \
+                        int id = be_cov[be_cov_start[k2] + q];                                   \
+                        double mu = g_bmult[id];                                                 \
+                        if (bn_pay[id] != 0.0) paid += (mu - 1.0) * bn_value[id];                \
+                        else other += (mu - 1.0) * bn_value[id];                                 \
+                    }                                                                            \
+                }                                                                                \
+            }                                                                                    \
+        }                                                                                        \
+        (OUT) = other + ((LIFT) <= room + 1e-9 ? paid : paid * room / (LIFT));                   \
+    } while (0)
+
+    double lift;
+    JT_MULTS(best);
+    JT_LIFT(lift);
+    if (lift <= room + 1e-9) {
+        return jt_emit(best, out_scale[0], n_chars, plans, col_map, team_row_char, team_row_sock, n_by, by_code,
+                       by_count, team_code, row_code, be_start, be_count, be_col, be_permil, be_cov_start,
+                       be_cov_count, be_cov, bn_value, bn_pay, out_row, out_col, out_gain);
+    }
+    double best_worth;
+    JT_WORTH(best, lift, best_worth);
+    double best_neg = -lift, low = 0.0, high = 1.0, scale = room / lift;
+    for (int rd = 0; rd < rounds; rd++) {
+        JT_SOLVE(scale, cand);
+        double c_lift, k0;
+        JT_MULTS(cand);
+        JT_LIFT(c_lift);
+        JT_WORTH(cand, c_lift, k0);
+        double k1 = -c_lift;
+        if (k0 > best_worth + 1e-9 || (k0 >= best_worth - 1e-9 && k1 > best_neg)) {
+            JAns *t = best; best = cand; cand = t;
+            best_worth = k0; best_neg = k1;
+            out_scale[0] = scale;
+        }
+        if (c_lift > room + 1e-9) high = scale;
+        else low = scale;
+        if (high - low < 1e-3) break;
+        scale = (low + high) / 2.0;
+    }
+    return jt_emit(best, out_scale[0], n_chars, plans, col_map, team_row_char, team_row_sock, n_by, by_code,
+                   by_count, team_code, row_code, be_start, be_count, be_col, be_permil, be_cov_start,
+                   be_cov_count, be_cov, bn_value, bn_pay, out_row, out_col, out_gain);
+    #undef JT_SOLVE
+    #undef JT_MULTS
+    #undef JT_LIFT
+    #undef JT_WORTH
 }

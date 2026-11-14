@@ -81,7 +81,8 @@ leader second) and `parallel_refine.py` (the exact per-song score across worker 
   `compare_view.py`: Compare. (Some routes keep older page names: Compare is `/versus`,
   Collection `/cards`, Gacha `/pulls`, Holomem Board `/holoboard`, Park `/parkview`.)
 - `kernel/`: the C kernels (`notewalk.c` the note walk, `cdvar.c` cooldown variants, `connect.c`
-  Connect sockets and board assembly, `surrogate.c` the screen), compiled on first use by
+  Connect sockets and board assembly, `jointmatch.c` the team and bench Connect matching re-solved
+  per team, `surrogate.c` the screen), compiled on first use by
   `cbuild.py` as `.dll` on Windows and `.so` on Linux.
 - `hbweb/`: the HTTP server (standard library). `router.py` maps each request to a feature module
   (`search`, `event`, `board`, `boardplan`, `collection`, `songs`, `gacha`, `park`, `inventory`,

@@ -1427,7 +1427,12 @@ def run_account_search(
         sampled = [hl_sample is not None]
 
         def batch(teams):
-            return pool.batch_score(teams, chart_indices=hl_sample if sampled[0] else None)
+            # on the sample the search only orders (SEARCH); every chart: the served score
+            if sampled[0]:
+                from hbuilder.solver.parallel_refine import SEARCH  # noqa: PLC0415
+
+                return pool.batch_score(teams, chart_indices=hl_sample, refine_activation=SEARCH)  # type: ignore[arg-type]
+            return pool.batch_score(teams, chart_indices=None)
 
         def score(leader, sets):
             check()

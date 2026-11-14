@@ -20,7 +20,13 @@ from hbuilder.domain.board_node_values import (
     optimize_team_boards,
     singer_weight_for,
 )
-from hbuilder.domain.board_optimizer import BoardPlan, _available, _cheapest_bundles, keep_preferred
+from hbuilder.domain.board_optimizer import (
+    BoardPlan,
+    _available,
+    _cheapest_bundles,
+    keep_preferred,
+    optimize_board,
+)
 from hbuilder.domain.board_plan import (
     PlanCache,
     SocketPlacement,
@@ -72,6 +78,7 @@ def optimize_and_rerank(
     bench_sockets: Mapping[str, Mapping[str, str | None]] | None = None,
     player_level: int | None = None,
     prefer: Mapping[str, frozenset[str]] | None = None,
+    joint: bool = False,
 ) -> list[BoardOptimisedTeam]:
     """The bounded JOINT team+board pass: board-optimise every team and RE-RANK by
     the board-optimised Unit Score, highest first. `player_level`: the account's, which
@@ -88,7 +95,8 @@ def optimize_and_rerank(
     leaders on one song. `plan_cache`, when given, takes every plan from
     `cached_team_plan` instead of re-planning per team (`optimize_team_boards`).
     Either way the ASSEMBLED board is re-scored (`board_model_from_plan`) for the
-    exact optimised Unit Score; the plan's `total_gain` is only a linearised sum."""
+    exact optimised Unit Score; the plan's `total_gain` is only a linearised sum. `joint`:
+    each team's Connect cards dealt together with the bench's (`board_model_from_plan`)."""
     cfg_off = replace(cfg, board=None)
     rows: list[BoardOptimisedTeam] = []
     for team in teams:
@@ -147,6 +155,7 @@ def optimize_and_rerank(
             sings=leader_sings,
             plan_cache=plan_cache,
             bench_sockets=bench_sockets,
+            joint=joint,
         )
         opt_us = deck_screen_unit_score(score_with_breakdown(team, replace(cfg_off, board=board))).unit_score
         rows.append(
@@ -478,6 +487,100 @@ def refine_activation_nodes(
     return plan, best, moves
 
 
+def respend_freed_points(
+    start: TeamBoardPlan,
+    plan: TeamBoardPlan,
+    cards_by_id: Mapping[str, Card],
+    *,
+    tree_for: Callable[[Card], SkillTree | None],
+    budget_for: Callable[[Card], int],
+    values_for: Callable[[str], Mapping[str, float] | None],
+    frozen: frozenset[str],
+    player_level: int | None = None,
+    memo: dict | None = None,
+) -> tuple[TeamBoardPlan, list[str]]:
+    """`plan` (a refinement of `start`) with the points its moves freed spent again.
+
+    Dropping a frequency node frees its points, and on a board the plan could not fill
+    (the account's levels) they can buy what the plan left out for want of points. Each
+    board the refinement changed is grown by the greedy planner (`optimize_board`) from
+    itself (`owned`), with the values its plan was made with (`values_for(card id)`, None:
+    left as it is); the `frozen` nodes it does not hold are never bought, not even as a
+    path, so the frequency counts the refinement chose stay. A board with every node of
+    value already bought (the maxed budget) buys nothing.
+
+    `memo` (a dict the caller keeps): a board's growth is a function of its own nodes and
+    of its plan key, so the boards one team tries for several charts grow once. Returns `(plan, one change per
+    board grown)`; `plan` itself when nothing is bought. The caller scores the result: a
+    linear value is not the score."""
+    per = dict(plan.per_character)
+    changes: list[str] = []
+    for card_id, p in plan.per_character.items():
+        p0 = start.per_character.get(card_id)
+        if p0 is None or p0.selected == p.selected:
+            continue
+        # the values follow the start's plan key (role, singer context)
+        key = (card_id, p.selected, start.plan_keys.get(card_id))
+        grown = memo.get(key) if memo is not None else None
+        if grown is None:
+            grown = p
+            card = cards_by_id.get(card_id)
+            tree = tree_for(card) if card is not None else None
+            values = values_for(card_id) if tree is not None else None
+            # nothing of value left to buy (every board on the maxed budget): no bundle can gain
+            if values is not None and any(
+                v > 0.0 for n, v in values.items() if n not in p.selected and n not in frozen
+            ):
+                budget = budget_for(card)  # type: ignore[arg-type]
+                if tree.cost_of(p.selected - {ROOT_NODE}) < budget:  # type: ignore[union-attr]
+                    bought = optimize_board(
+                        tree,  # type: ignore[arg-type]
+                        budget,
+                        values,
+                        player_level=player_level,
+                        owned=frozenset(p.selected),
+                        forbid=frozen - p.selected,
+                    )
+                    if bought.selected != p.selected:
+                        grown = BoardPlan(
+                            selected=bought.selected,
+                            spent=bought.spent,
+                            value=p.value,
+                            steps=(*p.steps, *bought.steps),
+                        )
+            if memo is not None:
+                memo[key] = grown
+        if grown is not p:
+            per[card_id] = grown
+            changes.append(f"{card_id} re-spent +{' +'.join(sorted(grown.selected - p.selected))}")
+    if not changes:
+        return plan, []
+    return replace(plan, per_character=per, plan_keys={}), changes
+
+
+def plan_values(
+    plan: TeamBoardPlan,
+    cards_by_id: Mapping[str, Card],
+    plan_cache: PlanCache,
+    node_effect_ids: Mapping[str, list[str]],
+    skilltree: Mapping | None,
+) -> Callable[[str], Mapping[str, float] | None]:
+    """`card id -> the node values its board in `plan` (a plan the cache made, with its
+    `plan_keys`) was planned with`, None for a board the cache did not plan."""
+
+    def values_for(card_id: str) -> Mapping[str, float] | None:
+        key = plan.plan_keys.get(card_id)
+        if key is None:
+            return None
+        # a member / leader+member key names its own card; a leader key names none
+        card = cards_by_id.get(key[4]) if key[4] else cards_by_id.get(card_id)
+        if card is None:
+            return None
+        return plan_cache.node_values_for_key(key, card, node_effect_ids=node_effect_ids, skilltree=skilltree)
+
+    return values_for
+
+
 def _keep_preferred_plan(
     plan: TeamBoardPlan,
     cards: Mapping[str, Card],
@@ -525,6 +628,7 @@ def develop_refined_team(
     player_level: int | None = None,
     bench_sockets: Mapping[str, Mapping[str, str | None]] | None = None,
     cooldown_counts: bool = False,
+    joint_connect: bool = False,
     charts_score_variants: Callable[[BoardModel, Sequence[Mapping[str, float]]], Sequence[float]]
     | None = None,
     prefer: Mapping[str, frozenset[str]] | None = None,
@@ -532,9 +636,14 @@ def develop_refined_team(
     """`optimize_and_rerank`'s develop for ONE team, then `refine_activation_nodes`
     on `charts_score(board)` (the caller's real objective, e.g. the song score on one
     chart or the sum over a few) and, with `cooldown_counts`, `refine_cooldown_counts`
-    (up to ~1,000 scorings, so for a few finalists). `prefer`: `{chr: nodes the account
-    has}`: the develop keeps them where it costs nothing (`optimize_board`), and the points
-    the refinement leaves keep them too when that scores no lower (`keep_preferred`).
+    (up to ~1,000 scorings, so for a few finalists). `joint_connect` (with `bench_sockets` and
+    a cast): every board it assembles has its Connect cards dealt together with the bench's
+    (`board_model_from_plan(joint=True)`). On the plan cache, the points the
+    refinement freed are then spent again with the values the boards were planned with
+    (`respend_freed_points`, the frequency counts kept), when that scores higher. `prefer`:
+    `{chr: nodes the account has}`: the develop keeps them where it costs nothing
+    (`optimize_board`), and the points the refinement leaves keep them too when that scores
+    no lower (`keep_preferred`).
 
     `charts_score_variants(board, [{holomem: cooldown shortening}, ...])`, when given,
     is `charts_score(board.with_cooldowns(v))` for every `v` at once
@@ -560,6 +669,7 @@ def develop_refined_team(
         sings=sings,
         bench_sockets=bench_sockets,
         prefer=prefer,
+        joint=joint_connect,
     )[0]
 
     def assemble(plan: TeamBoardPlan, placements: list | None = None) -> BoardModel | None:
@@ -586,6 +696,7 @@ def develop_refined_team(
             # a refined plan carries no `plan_keys` (`refine_activation_nodes`): the
             # compiled assembly takes it by its nodes, the Python's plain path otherwise
             plan_cache=plan_cache,
+            joint=joint_connect,
         )
 
     cards = {c.id: c for c in (team.leader, *team.members)}
@@ -630,6 +741,22 @@ def develop_refined_team(
             screen=screen if base is not None else None,
         )
         moves = moves + changes
+    if moves and plan_cache is not None and start.plan.plan_keys:
+        respent, bought = respend_freed_points(
+            start.plan,
+            plan,
+            cards,
+            tree_for=tree_for,
+            budget_for=budget_for,
+            values_for=plan_values(start.plan, cards, plan_cache, node_effect_ids, skilltree),
+            frozen=cooldown_node_ids(skilltree),
+            player_level=player_level,
+        )
+        if bought:
+            respent_value = charts_score(assemble(respent))  # type: ignore[arg-type]
+            if respent_value > value:
+                plan, value = respent, respent_value
+                moves = [*moves, *bought]
     if prefer:
         # the points the refinement leaves keep the account's own nodes too, but not its
         # activation nodes: the refinement chose those on the real score and takes one off

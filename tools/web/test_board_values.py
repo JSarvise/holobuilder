@@ -149,3 +149,20 @@ def test_every_real_connect_card_has_a_shape_and_a_base_permil():
     for info in cards.values():
         assert info["cells"] and info["permil"] == info["permil_levels"][0]
         assert len(info["permil_levels"]) == 2 and info["permil_levels"][1] - info["permil_levels"][0] == 500
+
+
+def test_the_panel_shows_connect_at_the_level_the_score_uses(monkeypatch):
+    """Maxed bases show every Connect card at level 2; on the account an assumed bloom 5 lifts
+    the panel's levels as it lifts the score's (`precompute.connect_cards_for(assume_bloom=)`)."""
+    from types import SimpleNamespace
+
+    from hbweb import boardplan
+
+    real = {"cards": {"card-00001-5-uniq-0001-00": {"bloom": 0}}}
+    monkeypatch.setattr(boardplan.config, "read_json", lambda path: real)
+    assert boardplan.panel_connect_collection("maxed") == (real, True)
+    assert boardplan.panel_connect_collection("maxed-account")[1] is True
+    assert boardplan.panel_connect_collection("account") == (real, False)
+    lifted, maxed = boardplan.panel_connect_collection("account", SimpleNamespace(bloom=5, keep_higher=False))
+    assert maxed is False
+    assert lifted["cards"]["card-00001-5-uniq-0001-00"]["bloom"] == 5

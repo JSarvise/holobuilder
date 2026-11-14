@@ -179,8 +179,11 @@ double hd_walk(int note_count, const double *note_weights, const uint64_t *fixed
                const double *score_rates, int nrates, double skill_effect_up,
                int nspecial, const int32_t *special_bit, const int32_t *special_member,
                const int32_t *cover, int32_t *best_perm, double *base_scratch,
-               uint64_t *extra_scratch) {
-    /* on the stack, ~13 KB: the web server scores in THREADS with the GIL released; a
+               uint64_t *extra_scratch, const uint8_t *allowed) {
+    /* `allowed` (NULL: every order) marks the orders to consider by their index in
+     * itertools.permutations(range(5)) order: the orders consistent with one outcome of a
+     * count-limited recipients tie (`song._support_tie_outcomes`). NAN if it allows none.
+     * The memo is on the stack, ~13 KB: the web server scores in THREADS with the GIL released; a
      * `static` memo here would be shared by them, and concurrent /api/row-detail
      * requests would mix teams' scores */
     Ctx ctx;
@@ -234,10 +237,12 @@ double hd_walk(int note_count, const double *note_weights, const uint64_t *fixed
     /* itertools.permutations(range(5)) order, strict `>` keeps the first maximum */
     int p[SLOTS] = {0, 1, 2, 3, 4};
     double best = 0.0; int have = 0;
-    for (;;) {
-        double total = fixed_total;
-        for (int slot = 0; slot < SLOTS; slot++) total += delta[p[slot]][slot];
-        if (!have || total > best) { best = total; have = 1; for (int s = 0; s < SLOTS; s++) best_perm[s] = p[s]; }
+    for (int index = 0;; index++) {
+        if (!allowed || allowed[index]) {
+            double total = fixed_total;
+            for (int slot = 0; slot < SLOTS; slot++) total += delta[p[slot]][slot];
+            if (!have || total > best) { best = total; have = 1; for (int s = 0; s < SLOTS; s++) best_perm[s] = p[s]; }
+        }
         int i = SLOTS - 2;
         while (i >= 0 && p[i] > p[i + 1]) i--;
         if (i < 0) break;
@@ -246,7 +251,7 @@ double hd_walk(int note_count, const double *note_weights, const uint64_t *fixed
         int t = p[i]; p[i] = p[j]; p[j] = t;
         for (int a = i + 1, b = SLOTS - 1; a < b; a++, b--) { t = p[a]; p[a] = p[b]; p[b] = t; }
     }
-    return best;
+    return have ? best : NAN;
 }
 
 /* The COUPLED case, exactly: a note reachable from two slots by two different members'
@@ -261,7 +266,7 @@ double hd_walk_general(int note_count, const double *note_weights, const uint64_
                        const double *score_rates, int nrates, double skill_effect_up,
                        int nspecial, const int32_t *special_bit, const int32_t *special_member,
                        const int32_t *cover, int32_t *best_perm, double *base_scratch,
-                       uint64_t *extra_scratch) {
+                       uint64_t *extra_scratch, const uint8_t *allowed) {
     Ctx ctx;
     ctx.terms = terms; ctx.nterms = nterms;
     ctx.score_rates = score_rates; ctx.nrates = nrates;
@@ -286,7 +291,8 @@ double hd_walk_general(int note_count, const double *note_weights, const uint64_
 
     int p[SLOTS] = {0, 1, 2, 3, 4};
     double best = 0.0; int have = 0;
-    for (;;) {
+    for (int index = 0;; index++) {
+        if (allowed && !allowed[index]) goto next_order;
         int slot_of[SLOTS];
         for (int slot = 0; slot < SLOTS; slot++) slot_of[p[slot]] = slot;
         double total = fixed_total;
@@ -308,6 +314,7 @@ double hd_walk_general(int note_count, const double *note_weights, const uint64_
             }
         }
         if (!have || total > best) { best = total; have = 1; for (int s = 0; s < SLOTS; s++) best_perm[s] = p[s]; }
+    next_order:;
         int i = SLOTS - 2;
         while (i >= 0 && p[i] > p[i + 1]) i--;
         if (i < 0) break;
@@ -316,5 +323,275 @@ double hd_walk_general(int note_count, const double *note_weights, const uint64_
         int t = p[i]; p[i] = p[j]; p[j] = t;
         for (int a = i + 1, b = SLOTS - 1; a < b; a++, b--) { t = p[a]; p[a] = p[b]; p[b] = t; }
     }
-    return best;
+    return have ? best : NAN;
+}
+
+/* ------------------------------------------------------------------------------------------
+ * ONE CALL PER (TEAM, CHART): the per-chart preparation of `song._score_song` and the walk.
+ *
+ * The team arrives as TEMPLATES, its terms with everything no chart moves (bucket, magnitude,
+ * occupancy, recipients, an ACTIVE's interval and duration, a COMBO-gated override's two
+ * magnitudes, each SPECIAL rider's boosted occupancy on it), built once per board in Python
+ * (`song._chart_kernel_spec`). Here, on one chart, as the Python does it and in its order:
+ *   - each ACTIVE's windows on its cooldown lattice (`song._lattice_windows`), split by the
+ *     chart's combo at each check when its override is combo-gated (`song._combo_split`);
+ *   - the SPECIAL activation-rate riders on the windows their host's slot covers
+ *     (`song._rider_hosts`, `song._rider_terms`), the leader's outfit terms last;
+ *   - the live masks, the SPECIAL cover ranges, the coupling test, and the walk itself
+ *     (`hd_walk` / `hd_walk_general`).
+ * Returns 0 with the total and the winning order; 1 when the team needs the Python walk (more
+ * terms than the masks hold, two riders that can share a check, more windows than this holds);
+ * 2 when `allowed` admits no order. Bit-identical to the Python (`test_notewalk.py`).
+ */
+
+#define CK_TI 11      /* ints per template */
+#define CK_TD 6       /* doubles per template */
+#define CK_HI 3       /* ints per rider host */
+#define CK_MAX_WIN 2048
+
+enum { K_ALWAYS = 0, K_NEVER = 1, K_ACTIVE = 2, K_SPECIAL = 3, K_RIDER = 4 };
+
+typedef struct {
+    int kind;                 /* K_ALWAYS, K_NEVER (no window), K_ACTIVE (windows), K_SPECIAL, K_RIDER */
+    int tmpl;                 /* its template: bucket, recipients, rider occupancies */
+    int member;               /* a SPECIAL's member, a rider's host */
+    int w0, wn;               /* windows [w0, w0 + wn) of the window buffer */
+    int rider_base;           /* a rider's ACTIVE term (index among the member terms) */
+    double sdur;              /* a SPECIAL's duration */
+    double magnitude, occupancy;
+    int cov_ok[SLOTS];        /* a rider: live when its host sits in this slot */
+    double cov_s[SLOTS], cov_e[SLOTS];
+} Prep;
+
+/* Python's bisect.bisect_left on an ascending double array */
+static int bisect_left_d(const double *a, int n, double x) {
+    int lo = 0, hi = n;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (a[mid] < x) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+}
+
+/* `song._lattice_windows`: check k at k * interval for k = 1, 2, ... while <= song_seconds */
+static int lattice(double interval, double duration, double song_seconds,
+                   double *ws, double *we, int at, int cap) {
+    int n = 0;
+    for (long k = 1; (double)k * interval <= song_seconds; k++) {
+        if (at + n >= cap) return -1;
+        double start = (double)k * interval;
+        ws[at + n] = start;
+        we[at + n] = start + duration;
+        n++;
+    }
+    return n;
+}
+
+int hd_score_chart(int nt, const int32_t *ti, const double *td, const double *rq,
+                   int nh, const int32_t *hi, const double *hd,
+                   int note_count, const double *times, const double *note_weights,
+                   const double *cues, double song_seconds, double constant,
+                   const double *score_rates, int nrates, double skill_effect_up,
+                   const uint8_t *allowed, double *base_scratch, uint64_t *extra_scratch,
+                   uint64_t *bits, double *out_total, int32_t *out_perm) {
+    /* on the stack: the server walks in threads with the GIL released */
+    double ws[CK_MAX_WIN], we[CK_MAX_WIN];
+    Prep p[MAX_TERMS];
+    int np = 0, nw = 0;
+
+    /* 1. the member terms, in recipe order, each ACTIVE split by the combo it is reached at */
+    for (int t = 0; t < nt; t++) {
+        const int32_t *a = ti + t * CK_TI;
+        const double *d = td + t * CK_TD;
+        if (!a[9]) continue; /* the outfit's terms come last */
+        int kind = a[0];
+        if (kind == K_ACTIVE) {
+            int wn = lattice(d[2], d[3], song_seconds, ws, we, nw, CK_MAX_WIN);
+            if (wn < 0) return 1;
+            if (a[7] && wn > 0) {
+                /* `_combo_split`: the checks the chart's combo has reached first, then the rest */
+                int w0 = nw;
+                double hs[256], he[256], ms[256], me[256];
+                int nhit = 0, nmiss = 0;
+                if (wn > 256) return 1;
+                for (int w = 0; w < wn; w++) {
+                    int combo = bisect_left_d(times, note_count, ws[w0 + w]);
+                    int reached = a[7] == 2 ? combo <= a[8] : combo >= a[8];
+                    if (reached) { hs[nhit] = ws[w0 + w]; he[nhit] = we[w0 + w]; nhit++; }
+                    else { ms[nmiss] = ws[w0 + w]; me[nmiss] = we[w0 + w]; nmiss++; }
+                }
+                for (int w = 0; w < nhit; w++) { ws[w0 + w] = hs[w]; we[w0 + w] = he[w]; }
+                for (int w = 0; w < nmiss; w++) { ws[w0 + nhit + w] = ms[w]; we[w0 + nhit + w] = me[w]; }
+                if (nhit) {
+                    if (np >= MAX_TERMS) return 1;
+                    Prep *q = &p[np++];
+                    q->kind = K_ACTIVE; q->tmpl = t; q->member = -1; q->rider_base = -1; q->sdur = 0.0;
+                    q->w0 = w0; q->wn = nhit; q->magnitude = d[4]; q->occupancy = d[1];
+                }
+                if (nmiss) {
+                    if (np >= MAX_TERMS) return 1;
+                    Prep *q = &p[np++];
+                    q->kind = K_ACTIVE; q->tmpl = t; q->member = -1; q->rider_base = -1; q->sdur = 0.0;
+                    q->w0 = w0 + nhit; q->wn = nmiss; q->magnitude = d[5]; q->occupancy = d[1];
+                }
+                nw += wn;
+                continue;
+            }
+            if (np >= MAX_TERMS) return 1;
+            Prep *q = &p[np++];
+            q->kind = wn > 0 ? K_ACTIVE : K_NEVER; q->tmpl = t; q->member = -1; q->rider_base = -1;
+            q->sdur = 0.0; q->w0 = nw; q->wn = wn; q->magnitude = d[0]; q->occupancy = d[1];
+            nw += wn;
+            continue;
+        }
+        if (np >= MAX_TERMS) return 1;
+        Prep *q = &p[np++];
+        q->kind = kind; q->tmpl = t; q->member = kind == K_SPECIAL ? a[6] : -1; q->rider_base = -1;
+        q->sdur = kind == K_SPECIAL ? d[3] : 0.0; q->w0 = 0; q->wn = 0;
+        q->magnitude = d[0]; q->occupancy = d[1];
+    }
+    int nmember = np;
+
+    /* 2. the riders: per host (its SPECIAL's span per cue, its gate read at each cue), per
+     *    member term it boosts, one term per k-th window its slots cover */
+    for (int h = 0; h < nh; h++) {
+        const int32_t *b = hi + h * CK_HI;
+        double dur = hd[h];
+        int ok[SLOTS]; double ss[SLOTS], se[SLOTS];
+        for (int s = 0; s < SLOTS; s++) {
+            int on;
+            if (b[1] == 2 || b[1] == 3) {
+                int combo = bisect_left_d(times, note_count, cues[s]);
+                on = b[1] == 3 ? combo <= b[2] : combo >= b[2];
+            } else on = b[1] == 1;
+            ok[s] = on; ss[s] = cues[s]; se[s] = cues[s] + dur;
+        }
+        for (int base = 0; base < nmember; base++) {
+            const Prep *m = &p[base];
+            double occ = rq[m->tmpl * (nh > 0 ? nh : 1) + h];
+            if (m->kind != K_ACTIVE || m->wn == 0 || !(occ >= 0.0)) continue;
+            int idx[SLOTS][256], cnt[SLOTS], most = 0;
+            if (m->wn > 256) return 1;
+            for (int s = 0; s < SLOTS; s++) {
+                cnt[s] = 0;
+                if (!ok[s]) continue;
+                for (int w = 0; w < m->wn; w++) {
+                    double st = ws[m->w0 + w];
+                    if (ss[s] <= st && st < se[s]) idx[s][cnt[s]++] = m->w0 + w;
+                }
+                if (cnt[s] > most) most = cnt[s];
+            }
+            for (int k = 0; k < most; k++) {
+                if (np >= MAX_TERMS) return 1;
+                Prep *q = &p[np++];
+                q->kind = K_RIDER; q->tmpl = m->tmpl; q->member = b[0]; q->rider_base = base;
+                q->sdur = 0.0; q->w0 = 0; q->wn = 0; q->magnitude = m->magnitude; q->occupancy = occ;
+                for (int s = 0; s < SLOTS; s++) {
+                    q->cov_ok[s] = k < cnt[s];
+                    q->cov_s[s] = k < cnt[s] ? ws[idx[s][k]] : 0.0;
+                    q->cov_e[s] = k < cnt[s] ? we[idx[s][k]] : 0.0;
+                }
+            }
+        }
+    }
+
+    /* 3. the leader's outfit terms */
+    for (int t = 0; t < nt; t++) {
+        const int32_t *a = ti + t * CK_TI;
+        const double *d = td + t * CK_TD;
+        if (a[9]) continue;
+        if (np >= MAX_TERMS) return 1;
+        Prep *q = &p[np++];
+        q->tmpl = t; q->member = -1; q->rider_base = -1; q->sdur = 0.0; q->w0 = nw; q->wn = 0;
+        q->magnitude = d[0]; q->occupancy = d[1];
+        if (a[0] == K_ACTIVE) {
+            int wn = lattice(d[2], d[3], song_seconds, ws, we, nw, CK_MAX_WIN);
+            if (wn < 0) return 1;
+            q->wn = wn; nw += wn;
+            q->kind = wn > 0 ? K_ACTIVE : K_NEVER;
+        } else if (a[0] == K_SPECIAL) {
+            return 1; /* an outfit has no slot (the Python raises) */
+        } else q->kind = a[0];
+    }
+
+    /* `song._riders_share_a_check`: two riders of one ACTIVE term, on different hosts, on the
+     * same window in two different slots -- the walk below knows no `_strongest_riders` */
+    for (int i = 0; i < np; i++) {
+        if (p[i].kind != K_RIDER) continue;
+        for (int j = i + 1; j < np; j++) {
+            if (p[j].kind != K_RIDER || p[j].rider_base != p[i].rider_base || p[j].member == p[i].member) continue;
+            for (int sa = 0; sa < SLOTS; sa++) {
+                if (!p[i].cov_ok[sa]) continue;
+                for (int sb = 0; sb < SLOTS; sb++)
+                    if (sb != sa && p[j].cov_ok[sb] && p[j].cov_s[sb] == p[i].cov_s[sa]
+                        && p[j].cov_e[sb] == p[i].cov_e[sa])
+                        return 1;
+            }
+        }
+    }
+
+    /* the terms as the walk reads them, the live masks and the SPECIAL cover ranges */
+    Term terms[MAX_TERMS];
+    uint64_t always = 0;
+    int32_t special_bit[MAX_TERMS], special_member[MAX_TERMS], cover[MAX_TERMS * SLOTS * 2];
+    int nspecial = 0;
+    for (int i = 0; i < np; i++) {
+        const int32_t *a = ti + p[i].tmpl * CK_TI;
+        Term *o = &terms[i];
+        o->bucket = a[1]; o->is_boost = a[2]; o->owner = a[3];
+        o->has_target = a[4]; o->target_mask = (uint32_t)a[5]; o->pad_ = 0;
+        o->magnitude = p[i].magnitude; o->occupancy = p[i].occupancy;
+        if (p[i].kind == K_ALWAYS) always |= 1ull << i;
+    }
+    for (int i = 0; i < note_count; i++) bits[i] = always;
+    for (int i = 0; i < np; i++) {
+        if (p[i].kind == K_ACTIVE) {
+            uint64_t mask = 1ull << i;
+            for (int w = 0; w < p[i].wn; w++) {
+                int lo = bisect_left_d(times, note_count, ws[p[i].w0 + w]);
+                int hi_ = bisect_left_d(times, note_count, we[p[i].w0 + w]);
+                for (int k = lo; k < hi_; k++) bits[k] |= mask;
+            }
+        } else if (p[i].kind == K_SPECIAL || p[i].kind == K_RIDER) {
+            int32_t *c = cover + nspecial * SLOTS * 2;
+            for (int s = 0; s < SLOTS; s++) {
+                if (p[i].kind == K_SPECIAL) {
+                    c[2 * s] = bisect_left_d(times, note_count, cues[s]);
+                    c[2 * s + 1] = bisect_left_d(times, note_count, cues[s] + p[i].sdur);
+                } else if (p[i].cov_ok[s]) {
+                    c[2 * s] = bisect_left_d(times, note_count, p[i].cov_s[s]);
+                    c[2 * s + 1] = bisect_left_d(times, note_count, p[i].cov_e[s]);
+                } else { c[2 * s] = 0; c[2 * s + 1] = 0; }
+            }
+            special_bit[nspecial] = i;
+            special_member[nspecial] = p[i].member;
+            nspecial++;
+        }
+    }
+
+    /* coupled: a note reachable from two different slots by two different members */
+    int coupled = 0;
+    for (int x = 0; x < nspecial && !coupled; x++)
+        for (int sx = 0; sx < SLOTS && !coupled; sx++) {
+            int lx = cover[(x * SLOTS + sx) * 2], hx = cover[(x * SLOTS + sx) * 2 + 1];
+            if (lx >= hx) continue;
+            for (int y = 0; y < nspecial && !coupled; y++)
+                for (int sy = 0; sy < SLOTS; sy++) {
+                    if (y == x && sy <= sx) continue;
+                    if (y < x) continue;
+                    int ly = cover[(y * SLOTS + sy) * 2], hy = cover[(y * SLOTS + sy) * 2 + 1];
+                    if (ly >= hy) continue;
+                    if (sx != sy && special_member[x] != special_member[y] && lx < hy && ly < hx) {
+                        coupled = 1;
+                        break;
+                    }
+                }
+        }
+
+    double total = (coupled ? hd_walk_general : hd_walk)(
+        note_count, note_weights, bits, constant, terms, np, score_rates, nrates, skill_effect_up,
+        nspecial, special_bit, special_member, cover, out_perm, base_scratch, extra_scratch, allowed);
+    if (total != total) return 2;
+    *out_total = total;
+    return 0;
 }

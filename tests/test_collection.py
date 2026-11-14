@@ -805,8 +805,8 @@ def test_the_member_power_up_ceiling_is_derived_from_the_roster_not_typed():
     basis = _basis()
     reachable = max_member_power_up_permyriad(basis)
 
-    # 1254 on a 204-card roster (1230 on 201, 1158 on 192: +8 for each new 5★ card).
-    assert reachable == 1254
+    # 1294 on a 209-card roster (1254 on 204, 1230 on 201, 1158 on 192: +8 for each new 5★ card).
+    assert reachable == 1294
     assert reachable < MEMBER_POWER_UP_CAP_PERMYRIAD == 5000
 
     # Derived, not typed: recomputing it by hand from the ladders must agree.

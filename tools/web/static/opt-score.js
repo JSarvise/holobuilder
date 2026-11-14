@@ -512,11 +512,12 @@ function boardDoc(ctxT, T, i, det, bs, cards) {
       .finally(() => { if ((det.song || S.song || null) === song) { det.acctLoading = false; repaint(ctxT, T, i); } });
   }
   // a maxed account: EVERY holomem's target is its complete board (the team's sockets its row's,
-  // the bench's the exact assignment the score used), shown against the account's REAL boards --
-  // what the user would have to unlock; measured against a max-level holomem's points
+  // the bench's the exact assignment the score used, or the row's own deal of them), shown against
+  // the account's REAL boards -- what the user would have to unlock; measured against a max-level
+  // holomem's points
   if (basisOf(S) === "maxed") {
     det.acctLoading = true;
-    return postJSON("/api/board-doc", { board_state: bs, cards, basis: "maxed", budget: "max", complete: true })
+    return postJSON("/api/board-doc", { board_state: bs, cards, basis: "maxed", budget: "max", complete: true, bench_slots: (det.fig || {}).bench_slots || null })
       .then(d => { det.acct = det.doc = d; det.acctErr = det.docErr = null; })
       .catch(e => { det.acctErr = det.docErr = e.message; })
       .finally(() => { det.acctLoading = false; });

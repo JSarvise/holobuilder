@@ -181,6 +181,8 @@ def test_the_whole_song_score_is_bit_identical_with_the_kernel_injected():
         return out
 
     try:
+        # the walk alone: the chart kernel (which walks without this adapter) off
+        song.CHART_KERNEL = False
         for music_id in ("m0334", "m0321", "m0129"):
             chart = charts.get(music_id, "EXPERT")
             if chart is None:
@@ -197,9 +199,61 @@ def test_the_whole_song_score_is_bit_identical_with_the_kernel_injected():
                 used += 1
     finally:
         song.NOTE_WALK_KERNEL = None
+        song.CHART_KERNEL = None
     assert used >= 240
     # The kernel must actually have run, not declined its way to a pass.
     assert seen["calls"] > used and seen["declined"] == 0, seen
+
+
+def test_the_chart_kernel_is_bit_identical_to_the_python_per_chart_step():
+    """The chart kernel (`score_chart`: the terms placed on the chart, the riders, the masks,
+    the cover ranges and the walk in one call) against the Python per-chart step with the walk
+    compiled: every leader's total, slot order and power equal, on real cards, the real board
+    and charts of every kind of song; it must have run on the teams, not declined them, and
+    met the shapes that matter (SPECIAL riders, combo-gated overrides, recipients ties)."""
+    from hbuilder.domain import song
+
+    cfg, cards, charts = _real_inputs()
+    rng = random.Random(20261114)
+    seen = {"calls": 0, "declined": 0}
+
+    def counting(*args, **kwargs):
+        seen["calls"] += 1
+        out = notewalk.score_chart(*args, **kwargs)
+        seen["declined"] += out is None
+        return out
+
+    shapes = {"riders": 0, "combo": 0, "ties": 0}
+    used = 0
+    music_ids = sorted(charts.music_ids)
+    try:
+        song.NOTE_WALK_KERNEL = notewalk.walk
+        for music_id in rng.sample(music_ids, 12):
+            chart = charts.get(music_id, "EXPERT")
+            if chart is None:
+                continue
+            for _ in range(40):
+                members, leaders = _random_team(rng, cards)
+                song.CHART_KERNEL = False
+                expected = song.score_song_detailed(members, leaders, chart, cfg)
+                song.CHART_KERNEL = counting
+                held: dict = {}
+                got = song.score_song_detailed(members, leaders, chart, cfg, team_setup=held)
+                assert [(g.total_score, g.member_order, g.deck_power) for g in got] == [
+                    (e.total_score, e.member_order, e.deck_power) for e in expected
+                ], (music_id, [c.id for c in members], [c.id for c in leaders])
+                used += 1
+                setup = next(iter(held.values()))
+                rows = [row for spec in setup[4].values() if spec for row in spec[0]]
+                shapes["riders"] += any(spec and spec[2] for spec in setup[4].values())
+                shapes["combo"] += any(row[7] for row in rows)
+                shapes["ties"] += setup[2][-1] is not None
+    finally:
+        song.NOTE_WALK_KERNEL = None
+        song.CHART_KERNEL = None
+    assert used >= 400
+    assert seen["calls"] >= used and seen["declined"] <= seen["calls"] // 50, seen
+    assert all(shapes.values()), shapes
 
 
 def test_a_spawned_worker_picks_the_kernel_up_from_the_environment():
@@ -225,6 +279,12 @@ def test_a_spawned_worker_picks_the_kernel_up_from_the_environment():
     out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
     assert "KERNEL None None" in out.stdout and "could not be loaded" in out.stderr, (out.stdout, out.stderr)
 
+    # the chart kernel, the same way (`enable` sets both)
+    code = "from hbuilder.domain import song; k = song._chart_kernel(); print('CHART', None if k is None else k.__name__)"
+    env[song.CHART_KERNEL_ENV] = f"{HERE / 'notewalk.py'}:score_chart"
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    assert "CHART score_chart" in out.stdout, (out.stdout, out.stderr)
+
 
 def test_threads_walking_the_same_chart_at_once_get_the_serial_scores():
     """The web server scores in threads, and the walk runs with the GIL released
@@ -241,20 +301,24 @@ def test_threads_walking_the_same_chart_at_once_get_the_serial_scores():
         pytest.skip("m0334 EXPERT is not in the library")
     rng = random.Random(23)
     teams = [_random_team(rng, cards) for _ in range(24)]
-    try:
-        song.NOTE_WALK_KERNEL = notewalk.walk
-        serial = [song.score_song_detailed(m, l, chart, cfg)[0].total_score for m, l in teams]
-        got: dict[tuple[int, int], float] = {}
+    # the walk alone, then the chart kernel (its windows and terms on the stack)
+    for chart_kernel in (False, notewalk.score_chart):
+        try:
+            song.NOTE_WALK_KERNEL = notewalk.walk
+            song.CHART_KERNEL = chart_kernel
+            serial = [song.score_song_detailed(m, l, chart, cfg)[0].total_score for m, l in teams]
+            got: dict[tuple[int, int], float] = {}
 
-        def run(worker: int) -> None:
-            for k, (m, l) in enumerate(teams):
-                got[(worker, k)] = song.score_song_detailed(m, l, chart, cfg)[0].total_score
+            def run(worker: int, got: dict = got) -> None:
+                for k, (m, l) in enumerate(teams):
+                    got[(worker, k)] = song.score_song_detailed(m, l, chart, cfg)[0].total_score
 
-        threads = [threading.Thread(target=run, args=(w,)) for w in range(6)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-    finally:
-        song.NOTE_WALK_KERNEL = None
-    assert all(got[(w, k)] == serial[k] for w in range(6) for k in range(len(teams)))
+            threads = [threading.Thread(target=run, args=(w,)) for w in range(6)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        finally:
+            song.NOTE_WALK_KERNEL = None
+            song.CHART_KERNEL = None
+        assert all(got[(w, k)] == serial[k] for w in range(6) for k in range(len(teams))), chart_kernel

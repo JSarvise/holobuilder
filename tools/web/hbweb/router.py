@@ -316,6 +316,11 @@ def _enable_kernels() -> None:
     import cdvar  # noqa: PLC0415
 
     cdvar.enable()
+    # ...and the joint Connect deal's matching (`board_plan.JOINT_MATCHING`): a song's bench
+    # solved once, each team's boards re-solved in it
+    import jointmatch  # noqa: PLC0415
+
+    jointmatch.enable()
 
 
 def _start_cutoffs_poller() -> None:

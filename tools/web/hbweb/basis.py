@@ -162,7 +162,7 @@ class MaxedAccountScenario:
     connect_cards: dict | None  # `connect_cards_for("maxed-account")`
     board_model: Any  # BoardModel of the bench (the "current" board)
     literal: str  # the scenario literal the collection line hashes
-    bench_sockets: int  # sockets the exact assignment filled (54 expected)
+    bench_sockets: int  # sockets the exact assignment filled (104: a green one per board, then yellows)
     report: tuple[str, ...]  # build_board's report + problems (diagnostics)
     points: int  # every holomem's board points (`maxed_account_budget`)
 

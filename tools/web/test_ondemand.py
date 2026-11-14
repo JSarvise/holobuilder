@@ -199,7 +199,8 @@ def _fake_engine(n_cards: int = 14, n_charts: int = 9):
                     out.append((plain, plain + 6))  # (plain, the counts chosen per chart)
                     continue
                 # the search's lens adds 3, the refinement 5, its level 2 (every frequency
-                # count) 8, the counts chosen per chart (In general) 6
+                # count) 8, the counts chosen per chart (In general) 6; SEARCH (a multi-chart
+                # search's value, the bench's cards where they are) is the plain develop here
                 out.append(
                     plain
                     + (
@@ -209,6 +210,8 @@ def _fake_engine(n_cards: int = 14, n_charts: int = 9):
                         if refine_activation == "lens"
                         else 6
                         if refine_activation == "counts"
+                        else 0
+                        if refine_activation == "search"
                         else 5
                         if refine_activation
                         else 0
@@ -224,7 +227,7 @@ def _fake_engine(n_cards: int = 14, n_charts: int = 9):
             calls.append((len(teams), "ceiling"))
             return [v * 1.05 for v in self.batch_score(teams, chart_indices)]
 
-        def batch_score_per_chart(self, teams):
+        def batch_score_per_chart(self, teams, refine_activation=None):
             calls.append((len(teams), "per_chart"))
             return [
                 [sum(m.w for m in t.members) * 1000 * (1 + 0.01 * k) for k in range(n_charts)] for t in teams
@@ -238,6 +241,7 @@ def _fake_engine(n_cards: int = 14, n_charts: int = 9):
     eng.pool, eng.lock, eng.hints = Pool(), threading.Lock(), {}
     eng.started_seconds, eng.closed, eng.key = 0.0, False, "k"
     eng._sample, eng._wide, eng._counts_charts = None, (), None
+    eng._leader_factors = {}
     return eng, calls
 
 
@@ -676,3 +680,20 @@ def test_the_counts_funnel_takes_the_teams_the_counts_lift_most(monkeypatch):
     monkeypatch.setattr(ondemand, "GENERAL_COUNTS_SAMPLE", 9)
     assert ondemand.Engine._counts_funnel(eng, ranking, leaders, pool) == ranking[:3]
     assert len(asked) == 1
+
+
+def test_leader_heads_keeps_the_head_of_every_leader_near_the_best():
+    # leader 0 fills the best places; leader 1's best team is 1 % below the best, leader 2's 5 %:
+    # leader 1's best three go to the re-score wherever they stand, none of leader 2's
+    ranking = (
+        [(1000.0 - k, 0, (k,)) for k in range(6)]
+        + [(990.0 - k, 1, (10 + k,)) for k in range(5)]
+        + [(950.0 - k, 2, (20 + k,)) for k in range(5)]
+    )
+    ranking.sort(key=lambda r: -r[0])
+    heads = ondemand.leader_heads(ranking, per_leader=3, margin=0.02)
+    assert heads == [(0, (0,)), (0, (1,)), (0, (2,)), (1, (10,)), (1, (11,)), (1, (12,))]
+    assert ondemand.leader_heads([]) == []
+    # a leader whose best team is outside the margin is left out even when a later team of
+    # another leader is inside it
+    assert all(li != 2 for li, _s in ondemand.leader_heads(ranking, per_leader=5, margin=0.045))

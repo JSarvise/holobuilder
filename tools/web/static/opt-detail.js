@@ -289,8 +289,8 @@ function groups(ids, nodeById, name) {
   }
   return by;
 }
-// the bench's root sockets the plan chose together with the team's: a card
-// is used once account-wide, so a card the team takes leaves its bench socket for another
+// the bench's sockets the plan chose together with the team's: a card is used once
+// account-wide, so a card the team takes leaves its bench socket for another
 function benchSocketsHTML(f, doc, cardOf) {
   const list = (f && f.bench_sockets) || [];
   if (!list.length) return "";
@@ -299,7 +299,7 @@ function benchSocketsHTML(f, doc, cardOf) {
     const c = cardOf(p.card);
     return `<li><span>${esc(p.holomem || nameOf(p.chr))}</span><span>${esc(c ? `${c.member} / ${c.costume_name || c.id}` : p.card)}</span><span class="num">×${dec(p.multiplier, 2)}</span></li>`;
   }).join("");
-  return `<details class="o-benchsock"><summary>Bench Connect cards: ${list.length} root sockets (S-001) <small>chosen with the team's, each card used once</small></summary><ul>${rows}</ul></details>`;
+  return `<details class="o-benchsock"><summary>Bench Connect cards: ${list.length} socket${list.length === 1 ? "" : "s"} <small>dealt with the team's, each card used once</small></summary><ul>${rows}</ul></details>`;
 }
 export function boardPanel(T, det, wallet, isOpen, cardOf) {
   // the WHOLE account's plan (/api/board-plan-account) when served, else the team's six boards

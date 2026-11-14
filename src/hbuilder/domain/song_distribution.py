@@ -51,6 +51,7 @@ from hbuilder.domain.song import (
     _chart_weights,
     _combo_split,
     _dominated_riders,
+    _member_setup,
     _ratio_at,
     _rider_terms,
     _support_state,
@@ -253,6 +254,10 @@ class _Sweep:
         by_id = {card.id: card for card in members}
         if sorted(member_order) != sorted(by_id):
             raise ValueError(f"member_order {list(member_order)} is not a permutation of the members")
+        if _member_setup(members, cfg)[-1] is not None:
+            # a count-limited support tie goes to the earlier slot: the row's own order decides
+            # who is paid (`song._support_tie_outcomes`), so the terms are built in that order
+            members = tuple(by_id[card_id] for card_id in member_order)
         times = tuple(note.time for note in chart.notes)
         terms, score_rates, board_score_rate, skill_effect_up = _terms(members, leader, chart, cfg)
         note_weights, perfect_sum = _chart_weights(chart, cfg.platform, cfg.song_auto)
