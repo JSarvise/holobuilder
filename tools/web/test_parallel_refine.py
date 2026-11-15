@@ -735,9 +735,10 @@ def test_counts_are_the_best_screened_of_every_combination_of_member_counts(monk
                 held = counts._every_combo()
                 assert list(held[0]) == space and list(held[1]) == [counts._cooldowns(c) for c in space]
                 # choosers that give the members the same counts and shortenings share them
-                assert all(
-                    v is held or v[0] != held[0] or v[1] != held[1] for v in memo.values()
-                ) and held in memo.values()
+                assert (
+                    all(v is held or v[0] != held[0] or v[1] != held[1] for v in memo.values())
+                    and held in memo.values()
+                )
                 est = screen_song_cooldown_variants(
                     team.members,
                     team.leader,
