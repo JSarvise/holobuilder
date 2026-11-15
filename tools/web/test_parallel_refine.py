@@ -555,7 +555,7 @@ def _per_chart_context(charts, team):
     )
 
 
-def test_counts_chosen_per_chart_are_scores_of_real_boards_never_below_the_plain_ones():
+def test_counts_chosen_per_chart_are_scores_of_real_boards_never_below_the_plain_ones(monkeypatch):
     """`evaluate` with COUNTS: each chart's score with the members' activation-frequency
     node counts chosen for that chart. Every such score is the exact score of a board that
     is the plain develop's with frequency nodes dropped (nothing else moved), or the plain
@@ -565,6 +565,9 @@ def test_counts_chosen_per_chart_are_scores_of_real_boards_never_below_the_plain
     from hbuilder.domain.song import overall_power_for, score_song_detailed
     from hbuilder.solver import parallel_refine as pr
 
+    # the greedy rounds: these properties hold for any choice of counts, and without the C
+    # screen (`cdvar`) every combination of a full screen is scored exactly (minutes)
+    monkeypatch.setattr(pr, "COUNT_SCREEN_ALL", 0)
     _ctx, teams = _context()
     charts = _sung_charts(teams)
     ctx = _per_chart_context(charts, teams[0])
@@ -630,7 +633,7 @@ def test_counts_chosen_per_chart_are_scores_of_real_boards_never_below_the_plain
 
 
 @pytest.mark.parametrize("budget", [453, TIGHT_BUDGET])
-def test_develop_team_with_counts_is_the_board_the_leaf_scores_the_chart_on(budget):
+def test_develop_team_with_counts_is_the_board_the_leaf_scores_the_chart_on(budget, monkeypatch):
     """A row served with its frequency counts chosen per chart opens its detail on a song
     with `refine="counts"`: `develop_team` then returns the board `evaluate` scores that one
     chart on in that mode (the plain develop's when no count drop scores higher; on a tight
@@ -638,6 +641,9 @@ def test_develop_team_with_counts_is_the_board_the_leaf_scores_the_chart_on(budg
     from hbuilder.domain.song_rank import score_team_on_chart
     from hbuilder.solver import parallel_refine as pr
 
+    # the greedy rounds: these properties hold for any choice of counts, and without the C
+    # screen (`cdvar`) every combination of a full screen is scored exactly (minutes)
+    monkeypatch.setattr(pr, "COUNT_SCREEN_ALL", 0)
     _ctx, teams = _context()
     charts = _sung_charts(teams)
     moved = 0
@@ -666,7 +672,87 @@ def test_develop_team_with_counts_is_the_board_the_leaf_scores_the_chart_on(budg
         pytest.skip("no chart of these teams gains from a frequency count drop")
 
 
-def test_counts_spend_the_freed_points_on_a_tight_budget_and_never_score_lower():
+def test_counts_are_the_best_screened_of_every_combination_of_member_counts(monkeypatch):
+    """`ChartCounts` screens EVERY combination of the members' counts (up to COUNT_SCREEN_ALL)
+    and verifies the best one: the counts a chart is served at are the combination with the
+    highest estimate over the whole space; with none served (the plain board kept), that
+    combination is the plain board's or scores no higher than it exactly. On the C screen,
+    as the server runs it (without it every combination is scored exactly: minutes)."""
+    import itertools
+    import shutil
+
+    if shutil.which("gcc") is None:
+        pytest.skip("no gcc to build the cooldown screen")
+    import sys
+    from pathlib import Path
+
+    kernel = str(Path(__file__).resolve().parent / "kernel")
+    if kernel not in sys.path:
+        sys.path.insert(0, kernel)
+    import cdvar
+
+    from hbuilder.domain import song as song_mod
+
+    cdvar.load()
+    monkeypatch.setattr(song_mod, "COOLDOWN_SCREEN_KERNEL", cdvar.screen)
+
+    from hbuilder.domain.board_plan import SongCast
+    from hbuilder.domain.song import overall_power_for, screen_song_cooldown_variants
+    from hbuilder.solver import parallel_refine as pr
+
+    _ctx, teams = _context()
+    charts = _sung_charts(teams)
+    ctx = _per_chart_context(charts, teams[0])
+    checked = moved = 0
+    with RefinePool(ctx, workers=1) as pool:
+        cache = pr.new_plan_cache(ctx, pool._by_id)
+        for team in teams:
+            on_team = frozenset("chr-" + c.id.split("-")[1] for c in (team.leader, *team.members))
+            for chart in charts:
+                cast = SongCast(on_team & frozenset(chart.singers or ()), chart.singer_type)
+                plan, board, assemble = pr._planned_board(
+                    ctx, team, pool._tree_for, pool._budget_for, cache, cast
+                )
+                cfg = dataclasses.replace(ctx.cfg, board=board)
+                power_of = lambda cfg_b: overall_power_for(tuple(team.members), team.leader, cfg_b)  # noqa: B023, E731
+                counts = pr.ChartCounts(
+                    team,
+                    cfg,
+                    plan,
+                    assemble,
+                    tree_for=pool._tree_for,
+                    budget_for=pool._budget_for,
+                    skilltree=ctx.skilltree,
+                    power_of=power_of,
+                )
+                if not counts.axes:
+                    continue
+                space = list(itertools.product(*(range(k + 1) for k in counts.start)))
+                assert len(space) <= pr.COUNT_SCREEN_ALL
+                est = screen_song_cooldown_variants(
+                    team.members,
+                    team.leader,
+                    chart,
+                    cfg,
+                    [counts._cooldowns(c) for c in space],
+                    deck_power=power_of(cfg),
+                )
+                best = space[max(range(len(est)), key=lambda i: (est[i], -i))]
+                plain, served, combo, _respent = counts.choose(chart)
+                if combo is None:
+                    assert served == plain
+                    if best != counts.start and counts.config_at(best) is not None:
+                        assert counts._exact(chart, counts.config_at(best)) <= plain
+                else:
+                    assert combo == best and served > plain
+                    moved += 1
+                checked += 1
+    assert checked
+    if not moved:
+        pytest.skip("no chart of these teams gains from a frequency count drop")
+
+
+def test_counts_spend_the_freed_points_on_a_tight_budget_and_never_score_lower(monkeypatch):
     """With points the plans cannot fill, the points a dropped frequency node frees are spent
     again (`ChartCounts` with the plan values): each chart's served score is the counts
     chooser's without them or higher; a board served with them holds the counts' own nodes
@@ -677,6 +763,9 @@ def test_counts_spend_the_freed_points_on_a_tight_budget_and_never_score_lower()
     from hbuilder.domain.song import overall_power_for
     from hbuilder.solver import parallel_refine as pr
 
+    # the greedy rounds: these properties hold for any choice of counts, and without the C
+    # screen (`cdvar`) every combination of a full screen is scored exactly (minutes)
+    monkeypatch.setattr(pr, "COUNT_SCREEN_ALL", 0)
     _ctx, teams = _context()
     charts = _sung_charts(teams)
     ctx = dataclasses.replace(_per_chart_context(charts, teams[0]), flat_budget=TIGHT_BUDGET)

@@ -49,8 +49,7 @@ def load() -> ctypes.CDLL:
     with _lock:
         if _lib is None:
             lib = ctypes.CDLL(str(build()))
-            lib.hd_cdvar.restype = ctypes.c_double
-            lib.hd_cdvar.argtypes = [
+            argtypes: list = [
                 ctypes.c_int,
                 _F64,
                 _F64,
@@ -80,6 +79,12 @@ def load() -> ctypes.CDLL:
                 _F64,
                 ctypes.POINTER(ctypes.c_uint8),
             ]
+            # `hd_cdvar`: one term layout and one memo for every variant; `hd_cdvar_each`:
+            # each variant's own layout, the reference the first is held to bit for bit
+            lib.hd_cdvar.restype = ctypes.c_double
+            lib.hd_cdvar.argtypes = argtypes
+            lib.hd_cdvar_each.restype = ctypes.c_double
+            lib.hd_cdvar_each.argtypes = argtypes
             _lib = lib
     return _lib
 
@@ -119,12 +124,21 @@ def _doubles(values):
 def screen(spec: dict) -> list[float] | None:
     """One estimated total per variant of `spec` (`song._cooldown_screen_spec`), or None when
     the kernel declines one of them (more terms than it holds)."""
-    lib = load()
+    return _run(load().hd_cdvar, spec)
+
+
+def screen_each(spec: dict) -> list[float] | None:
+    """`screen` with each variant's own term layout and memo (`hd_cdvar_each`): the same
+    doubles, slower; what `screen` is tested against."""
+    return _run(load().hd_cdvar_each, spec)
+
+
+def _run(fn, spec: dict) -> list[float] | None:
     times, prefix = _chart_arrays(spec["times"], spec["note_weights"])
     count = spec["variants"]
     out = (ctypes.c_double * max(1, count))()
     rates = spec["score_rates"]
-    lib.hd_cdvar(
+    fn(
         len(spec["times"]),
         times,
         prefix,

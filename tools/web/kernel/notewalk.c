@@ -25,7 +25,12 @@
 
 #define MAX_TERMS 64
 #define SLOTS 5
-#define MEMO 4096 /* power of two; a team has ~100-1000 distinct live sets */
+/* the memo of `combined`: 2^MEMO_BITS slots; a team has ~100-1000 distinct live sets on one
+ * board. A file that includes this one may ask for more (cdvar.c: one memo for every variant) */
+#ifndef MEMO_BITS
+#define MEMO_BITS 12
+#endif
+#define MEMO (1 << MEMO_BITS)
 
 typedef struct {
     int32_t bucket;      /* first-appearance order decides the summation order */
@@ -140,7 +145,7 @@ typedef struct {
 /* `_combined(live)`: stacking_model.combine([*score_rates, ratio]) under the
  * additive model, i.e. Python's sum() over that list. Memoised per call. */
 static double combined(Ctx *c, uint64_t live) {
-    uint32_t h = (uint32_t)((live * 0x9E3779B97F4A7C15ull) >> 52) & (MEMO - 1);
+    uint32_t h = (uint32_t)((live * 0x9E3779B97F4A7C15ull) >> (64 - MEMO_BITS)) & (MEMO - 1);
     while (c->full[h]) {
         if (c->keys[h] == live) return c->vals[h];
         h = (h + 1) & (MEMO - 1);

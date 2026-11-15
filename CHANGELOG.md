@@ -2,6 +2,10 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.8 (2026-11-15)
+- **Better teams in "In general".** For each song, every combination of the members' activation-frequency node counts is now tried (before, a few rounds of the best single change) and the best one is checked on its real board. The best teams score about 0.17 % more on average (up to 0.36 %), none less, and some move up the list (one from #13 to #7). An "In general" search on a maxed account takes about 80 s instead of 70.
+- **Faster song and Highlight searches** (about 10 %): the cooldown screen reuses its work across the combinations it tries; the answers are the same.
+
 ## 0.2.7 (2026-11-14)
 - **Fix: Holomem Rating, "One team for every song" on one Holomem Board setup.** A team's details planned a board of the shown song's own, so on every song but one they read 2.5 to 6.8 % above the team's row, with another slot order. They now show the team on its one board, as the row was scored: the same Expected Score, Max, Unit Score, slot order and board plan on every song.
 - **Fix: Holomem Rating, switching songs.** When the same team was found for two songs, picking the other song showed the first song's details for a moment, with a false warning that the details differ from the row (by up to about 5 %). The details now load for the song picked.

@@ -118,6 +118,50 @@ def test_the_screen_is_within_a_hundredth_of_a_percent_and_picks_the_same_varian
     assert kernel_used and all(kernel_used)
 
 
+@pytest.mark.parametrize("song", ["m0001", "m0342", "m0155"])
+def test_one_layout_for_every_variant_gives_each_variants_own_doubles(leaf, song):
+    """`hd_cdvar` numbers the terms once for every variant and keeps one memo of the pool
+    across them; `hd_cdvar_each` numbers each variant's terms as the scorer emits them and
+    empties the memo between variants. Every total must be the same double, on the
+    single-member drops the search's lens screens and on every combination of the members'
+    counts (`ChartCounts`' full screen: hundreds of variants, the memo emptied as it fills)."""
+    import itertools
+
+    import cdvar
+
+    from hbuilder.domain import song as song_mod
+    from hbuilder.solver import parallel_refine as pr
+
+    assert cdvar.enable()
+    specs = []
+    real = song_mod._cooldown_screen_spec
+
+    def spy(*a, **k):
+        spec = real(*a, **k)
+        if spec is not None:
+            specs.append(spec)
+        return spec
+
+    song_mod._cooldown_screen_spec = spy
+    try:
+        for team, chart, cfg, power, variants in _cases(leaf, song, 6, 13):
+            unit, have = pr._cooldown_counts(team, cfg.board)
+            every = [
+                {h: unit[h] * c for h, c in zip(have, combo)}
+                for combo in itertools.product(*(range(have[h] + 1) for h in have))
+            ]
+            for vs in (variants, every):
+                song_mod.screen_song_cooldown_variants(
+                    team.members, team.leader, chart, cfg, vs, deck_power=power
+                )
+    finally:
+        song_mod._cooldown_screen_spec = real
+    assert specs and any(s["variants"] >= 64 for s in specs)
+    for spec in specs:
+        shared, each = cdvar.screen(spec), cdvar.screen_each(spec)
+        assert shared is not None and shared == each
+
+
 def test_without_a_kernel_the_screen_is_the_exact_totals(leaf, monkeypatch):
     from hbuilder.domain import song as song_mod
 
