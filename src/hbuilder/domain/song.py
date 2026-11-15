@@ -2373,6 +2373,30 @@ def _chart_kernel_spec(
     )
 
 
+# `_variant_cooldowns`' last answers. A frequency-count chooser screens ONE tuple of variants
+# on chart after chart (`parallel_refine.ChartCounts`: up to 1,024 variants, every chart of a
+# team); the key is that tuple's identity (held in the entry, so the id is never reused) and
+# everything else the list reads
+_VARIANT_COOLDOWNS: dict[tuple, tuple] = {}
+_VARIANT_COOLDOWNS_HELD = 16
+
+
+def _variant_cooldowns(
+    variants: tuple[Mapping[str, float], ...], holomems: tuple[str, ...], base: tuple[float, ...]
+) -> tuple[float, ...]:
+    """Each variant's cooldown shortening of each member, flat (`[variant][member]`): the
+    variant's own, else the board's (`base`), as the cooldown-screen kernel reads them."""
+    key = (id(variants), holomems, base)
+    hit = _VARIANT_COOLDOWNS.get(key)
+    if hit is not None and hit[0] is variants:
+        return hit[1]
+    cd = tuple(float(variant.get(h, b)) for variant in variants for h, b in zip(holomems, base))
+    if len(_VARIANT_COOLDOWNS) >= _VARIANT_COOLDOWNS_HELD:
+        _VARIANT_COOLDOWNS.clear()
+    _VARIANT_COOLDOWNS[key] = (variants, cd)
+    return cd
+
+
 def _cooldown_screen_spec(
     members,
     chart,
@@ -2506,10 +2530,11 @@ def _cooldown_screen_spec(
         if at is None:
             return None
         costume.append(at)
-    base_cd = [cfg.board.uptime_for(card.member)[1] for card in members]
-    cd: list[float] = []
-    for variant in variants:
-        cd.extend(float(variant.get(card.member, base_cd[j])) for j, card in enumerate(members))
+    cd = _variant_cooldowns(
+        variants,
+        tuple(card.member for card in members),
+        tuple(cfg.board.uptime_for(card.member)[1] for card in members),
+    )
     return {
         "times": times,
         "note_weights": note_weights,

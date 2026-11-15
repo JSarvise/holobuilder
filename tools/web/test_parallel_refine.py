@@ -708,6 +708,8 @@ def test_counts_are_the_best_screened_of_every_combination_of_member_counts(monk
         cache = pr.new_plan_cache(ctx, pool._by_id)
         for team in teams:
             on_team = frozenset("chr-" + c.id.split("-")[1] for c in (team.leader, *team.members))
+            # one memo of the combinations for all the team's choosers, as `evaluate` keeps it
+            memo: dict = {}
             for chart in charts:
                 cast = SongCast(on_team & frozenset(chart.singers or ()), chart.singer_type)
                 plan, board, assemble = pr._planned_board(
@@ -724,11 +726,18 @@ def test_counts_are_the_best_screened_of_every_combination_of_member_counts(monk
                     budget_for=pool._budget_for,
                     skilltree=ctx.skilltree,
                     power_of=power_of,
+                    variants_memo=memo,
                 )
                 if not counts.axes:
                     continue
                 space = list(itertools.product(*(range(k + 1) for k in counts.start)))
                 assert len(space) <= pr.COUNT_SCREEN_ALL
+                held = counts._every_combo()
+                assert list(held[0]) == space and list(held[1]) == [counts._cooldowns(c) for c in space]
+                # choosers that give the members the same counts and shortenings share them
+                assert all(
+                    v is held or v[0] != held[0] or v[1] != held[1] for v in memo.values()
+                ) and held in memo.values()
                 est = screen_song_cooldown_variants(
                     team.members,
                     team.leader,
@@ -896,3 +905,126 @@ def test_the_count_axes_are_the_ones_the_level_two_refinement_tries():
                 for count, nodes in states:
                     assert nodes <= selected
                     assert full[card_id][0][count] == nodes
+
+
+def test_a_part_of_the_charts_scores_each_as_the_whole_evaluation_does(monkeypatch):
+    """`evaluate(part=...)`: only those charts of the evaluation are scored, each with what the
+    whole evaluation decides from ALL its charts (each chart's singer context, its counts
+    chooser), so each value is the whole per-chart list's at that position, at any split and
+    in any order -- one chart alone included (scored alone it would be keyed by its whole
+    cast). COUNTS_BOTH per chart is each chart's `(plain, served)`."""
+    from hbuilder.solver import parallel_refine as pr
+
+    # the greedy rounds: the property holds for any choice of counts (minutes without the C screen)
+    monkeypatch.setattr(pr, "COUNT_SCREEN_ALL", 0)
+    _ctx, teams = _context()
+    charts = _sung_charts(teams)
+    ctx = _per_chart_context(charts, teams[0])
+    n = len(charts)
+    splits = [[k] for k in range(n)] + [list(range(0, n, 2)), list(range(n - 1, -1, -2)), list(range(n))]
+    with RefinePool(ctx, workers=1) as pool:
+        for team in teams:
+            ids = (team.leader.id, tuple(m.id for m in team.members))
+            wholes = {}
+            for mode in (pr.COUNTS, None):
+                # a fresh plan cache per evaluation: nothing carried over from the whole one
+                whole = wholes[mode] = pr.evaluate(
+                    ctx,
+                    pool._by_id,
+                    pool._tree_for,
+                    pool._budget_for,
+                    (*ids, None, mode),
+                    plan_cache=pr.new_plan_cache(ctx, pool._by_id),
+                    per_chart=True,
+                )
+                for part in splits:
+                    got = pr.evaluate(
+                        ctx,
+                        pool._by_id,
+                        pool._tree_for,
+                        pool._budget_for,
+                        (*ids, None, mode),
+                        plan_cache=pr.new_plan_cache(ctx, pool._by_id),
+                        per_chart=True,
+                        part=tuple(part),
+                    )
+                    assert got == [whole[k] for k in part]
+            both = pr.evaluate(
+                ctx,
+                pool._by_id,
+                pool._tree_for,
+                pool._budget_for,
+                (*ids, None, pr.COUNTS_BOTH),
+                plan_cache=pr.new_plan_cache(ctx, pool._by_id),
+                per_chart=True,
+            )
+            plain = pr.evaluate(
+                ctx,
+                pool._by_id,
+                pool._tree_for,
+                pool._budget_for,
+                ids,
+                plan_cache=pr.new_plan_cache(ctx, pool._by_id),
+                per_chart=True,
+            )
+            assert plain == wholes[None]
+            assert both == list(zip(plain, wholes[pr.COUNTS]))
+    with pytest.raises(ValueError):
+        pr.evaluate(
+            dataclasses.replace(ctx, board_per_chart=False),
+            pool._by_id,
+            pool._tree_for,
+            pool._budget_for,
+            (*ids, None, None),
+            per_chart=True,
+            part=(0,),
+        )
+
+
+def test_the_counts_batch_in_parts_gives_the_whole_evaluations_floats(monkeypatch):
+    """`RefinePool.batch_counts`: the COUNTS batch cut into parts of each team's charts across
+    the workers, each team's mean added back in chart order, is `batch_score(COUNTS)`'s float
+    for every team, in order; `both`, COUNTS_BOTH's pair; and the per-chart lists are the
+    whole evaluations'. Values `known` from an earlier batch on some of the charts (the funnel's
+    sample) are used as they are, and the floats do not move. On the C screen in every
+    process, as the server runs it (a patched COUNT_SCREEN_ALL would not reach the workers)."""
+    import shutil
+    import sys
+    from pathlib import Path
+
+    if shutil.which("gcc") is None:
+        pytest.skip("no gcc to build the cooldown screen")
+    kernel = str(Path(__file__).resolve().parent / "kernel")
+    if kernel not in sys.path:
+        sys.path.insert(0, kernel)
+    import cdvar
+
+    from hbuilder.domain import song as song_mod
+    from hbuilder.solver import parallel_refine as pr
+
+    cdvar.load()
+    monkeypatch.setattr(song_mod, "COOLDOWN_SCREEN_KERNEL", cdvar.screen)
+    monkeypatch.setenv(song_mod.COOLDOWN_SCREEN_KERNEL_ENV, f"{Path(cdvar.__file__).resolve()}:screen")
+    # parts of one chart, so every team is spread over the workers (a parent-side setting)
+    monkeypatch.setattr(pr, "COUNT_PART_MIN", 1)
+    _ctx, teams = _context()
+    charts = _sung_charts(teams)
+    ctx = _per_chart_context(charts, teams[0])
+    sample = (4, 1, 2) if len(charts) > 4 else (2, 0)
+    with RefinePool(ctx, workers=1) as one, RefinePool(ctx, workers=2) as pool:
+        means = one.batch_score(teams, refine_activation=pr.COUNTS)
+        pairs = one.batch_score(teams, refine_activation=pr.COUNTS_BOTH)
+        per_chart = one.batch_counts_per_chart(teams)
+        for p in (one, pool):
+            assert p.batch_counts(teams) == means
+            assert p.batch_counts(teams, both=True) == pairs
+            assert p.batch_counts_per_chart(teams) == per_chart
+            on_sample = p.batch_counts_per_chart(teams, sample, both=True)
+            assert [[s for _plain, s in v] for v in on_sample] == [[v[k] for k in sample] for v in per_chart]
+            known = [dict(zip(sample, (s for _plain, s in v))) for v in on_sample]
+            assert p.batch_counts(teams, known=known) == means
+            # the sample's own means, from its per-chart pairs, are COUNTS_BOTH's on it
+            assert [
+                (pr.chart_mean([plain for plain, _s in v]), pr.chart_mean([s for _plain, s in v]))
+                for v in on_sample
+            ] == one.batch_score(teams, chart_indices=sample, refine_activation=pr.COUNTS_BOTH)

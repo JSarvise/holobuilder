@@ -2,6 +2,9 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.9 (2026-11-15)
+- **Faster "In general" on a maxed account:** about 10 s less (about 12 %), close to its time before 0.2.8's combination search. Each team's songs are now spread over every worker instead of one team a worker, the songs the team list already scored are not scored again, and the C core screens the frequency-count combinations about 1.5 times faster. The answers are the same, to the last digit.
+
 ## 0.2.8 (2026-11-15)
 - **Better teams in "In general".** For each song, every combination of the members' activation-frequency node counts is now tried (before, a few rounds of the best single change) and the best one is checked on its real board. The best teams score about 0.17 % more on average (up to 0.36 %), none less, and some move up the list (one from #13 to #7). An "In general" search on a maxed account takes about 80 s instead of 70.
 - **Faster song and Highlight searches** (about 10 %): the cooldown screen reuses its work across the combinations it tries; the answers are the same.

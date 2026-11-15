@@ -117,6 +117,25 @@ def _ints(values):
     return (ctypes.c_int32 * max(1, len(values)))(*values)
 
 
+# the variants' cooldowns as a C array, keyed by the identity of the tuple `song` hands (one
+# tuple for every chart a frequency-count chooser screens; held in the entry, so an id is never
+# reused; a tuple never changes, so the array stays its copy). The kernel only reads it.
+_cooldowns_cache: dict[int, tuple] = {}
+_COOLDOWNS_HELD = 16
+
+
+def _cooldowns(cd):
+    if type(cd) is not tuple:
+        return _doubles(cd)
+    hit = _cooldowns_cache.get(id(cd))
+    if hit is None or hit[0] is not cd:
+        hit = (cd, _doubles(cd))
+        if len(_cooldowns_cache) >= _COOLDOWNS_HELD:
+            _cooldowns_cache.clear()
+        _cooldowns_cache[id(cd)] = hit
+    return hit[1]
+
+
 def _doubles(values):
     return (ctypes.c_double * max(1, len(values)))(*values)
 
@@ -164,7 +183,7 @@ def _run(fn, spec: dict) -> list[float] | None:
         len(spec["costume"]),
         _ints(spec["costume"]),
         count,
-        _doubles(spec["cd"]),
+        _cooldowns(spec["cd"]),
         out,
         None
         if spec.get("allowed") is None

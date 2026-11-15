@@ -58,6 +58,7 @@ typedef struct {
     Segs sg;
     /* per note index: whether some window starts or ends there, and the bits it flips */
     uint8_t mark[MAX_NOTES + 1];
+    uint64_t marks[MAX_NOTES / 64 + 1]; /* `mark` as bits (the fast walk) */
     uint64_t flip[MAX_NOTES + 1];
     int32_t rng[3 * MAX_RANGES];
     double win_start[MAX_WIN], win_end[MAX_WIN];
@@ -113,25 +114,55 @@ static double extra_delta(Ctx *ctx, const Segs *sg, const double *prefix, double
     return change;
 }
 
+/* The first marked note index in [from, limit), else limit (`from` itself when from >= limit):
+ * the scan `while (next < limit && !mark[next]) next++` on the bitmap of the marks. */
+static int32_t next_mark(const uint64_t *marks, int32_t from, int32_t limit) {
+    if (from >= limit) return from;
+    int32_t w = from >> 6;
+    uint64_t word = marks[w] & (~0ull << (from & 63));
+    for (;;) {
+        if (word) {
+            int32_t i = (w << 6) + __builtin_ctzll(word);
+            return i < limit ? i : limit;
+        }
+        w++;
+        if ((w << 6) >= limit) return limit;
+        word = marks[w];
+    }
+}
+
 /* The walk of one variant's terms. `rng` = (bit, lo, hi) windows; slot-dependent terms
- * (`nslot`): bit, member, cover [SLOTS][2]. */
+ * (`nslot`): bit, member, cover [SLOTS][2]. `fast` (hd_cdvar): the runs found on a bitmap of
+ * the marks, and the 120 orders added up along the tree of their prefixes with the
+ * corrections that are exactly zero left out (a zero added leaves a total as it is).
+ * hd_cdvar_each walks every note and adds every order term by term: the reference the fast
+ * walk is held to bit for bit (the same segments, the same sums in the same order). */
 static double walk_runs(Work *wk, int note_count, const double *prefix, double constant,
                         double bias, uint64_t always_mask, int nrng, const int32_t *rng,
                         int nslot, const int32_t *slot_bit, const int32_t *slot_member,
-                        const int32_t *slot_cover, const uint8_t *allowed) {
+                        const int32_t *slot_cover, const uint8_t *allowed, int fast) {
     Ctx *ctx = &wk->ctx;
     Segs *sg = &wk->sg;
     /* the runs: a segment boundary at every note index some window starts or ends at (also
      * where two flips cancel), the live set flipped there by those windows' bits */
     uint8_t *mark = wk->mark;
+    uint64_t *marks = wk->marks;
     uint64_t *flip = wk->flip;
-    memset(mark, 0, (size_t)note_count + 1);
+    if (fast) memset(marks, 0, (size_t)((note_count >> 6) + 1) * sizeof(uint64_t));
+    else memset(mark, 0, (size_t)note_count + 1);
     for (int i = 0; i < nrng; i++) {
         int32_t lo = rng[3 * i + 1], hi = rng[3 * i + 2];
         if (lo < 0) lo = 0;
         if (hi > note_count) hi = note_count;
         if (lo >= hi) continue;
         uint64_t bit = 1ull << rng[3 * i];
+        if (fast) {
+            if (!((marks[lo >> 6] >> (lo & 63)) & 1)) { marks[lo >> 6] |= 1ull << (lo & 63); flip[lo] = 0; }
+            flip[lo] ^= bit;
+            if (!((marks[hi >> 6] >> (hi & 63)) & 1)) { marks[hi >> 6] |= 1ull << (hi & 63); flip[hi] = 0; }
+            flip[hi] ^= bit;
+            continue;
+        }
         if (!mark[lo]) { mark[lo] = 1; flip[lo] = 0; }
         flip[lo] ^= bit;
         if (!mark[hi]) { mark[hi] = 1; flip[hi] = 0; }
@@ -140,10 +171,14 @@ static double walk_runs(Work *wk, int note_count, const double *prefix, double c
     uint64_t cur = always_mask;
     int ns = 0;
     int32_t at = 0;
-    if (mark[0]) cur ^= flip[0];
+    if (fast ? (int)(marks[0] & 1) : mark[0]) cur ^= flip[0];
     for (;;) {
-        int32_t next = at + 1;
-        while (next < note_count && !mark[next]) next++;
+        int32_t next;
+        if (fast) next = next_mark(marks, at + 1, note_count);
+        else {
+            next = at + 1;
+            while (next < note_count && !mark[next]) next++;
+        }
         if (next > note_count) next = note_count;
         if (next > at && ns < MAX_SEG) { sg->start[ns] = at; sg->mask[ns] = cur; ns++; }
         if (next >= note_count) break;
@@ -180,11 +215,25 @@ static double walk_runs(Work *wk, int note_count, const double *prefix, double c
     for (int o = 0; o < SLOTS; o++)
         for (int slot = 0; slot < SLOTS; slot++)
             if (sn[o][slot]) delta[o][slot] = extra_delta(ctx, sg, prefix, constant, sn[o][slot], slo[o][slot], shi[o][slot], sbit[o][slot]);
+    /* the fast walk: each (member, slot)'s spans' bounding range; two that do not meet cannot
+     * overlap, so the span-by-span test is left out for them */
+    int32_t bmin[SLOTS][SLOTS], bmax[SLOTS][SLOTS];
+    if (fast)
+        for (int o = 0; o < SLOTS; o++)
+            for (int slot = 0; slot < SLOTS; slot++) {
+                int32_t a = 0, z = 0;
+                for (int i = 0; i < sn[o][slot]; i++) {
+                    if (i == 0 || slo[o][slot][i] < a) a = slo[o][slot][i];
+                    if (i == 0 || shi[o][slot][i] > z) z = shi[o][slot][i];
+                }
+                bmin[o][slot] = a; bmax[o][slot] = z;
+            }
     int32_t lo[2 * MAX_TERMS], hi[2 * MAX_TERMS];
     uint64_t bits[2 * MAX_TERMS];
     for (int o1 = 0; o1 < SLOTS; o1++) for (int o2 = o1 + 1; o2 < SLOTS; o2++)
         for (int s1 = 0; s1 < SLOTS; s1++) for (int s2 = 0; s2 < SLOTS; s2++) {
             if (s1 == s2 || !sn[o1][s1] || !sn[o2][s2]) continue;
+            if (fast && (bmin[o1][s1] >= bmax[o2][s2] || bmin[o2][s2] >= bmax[o1][s1])) continue;
             int ov = 0;
             for (int i = 0; i < sn[o1][s1] && !ov; i++)
                 for (int j = 0; j < sn[o2][s2]; j++)
@@ -198,8 +247,48 @@ static double walk_runs(Work *wk, int note_count, const double *prefix, double c
             pairc[o1][s1][o2][s2] = c;
             pairc[o2][s2][o1][s1] = c;
         }
-    int p[SLOTS] = {0, 1, 2, 3, 4};
     double best = 0.0; int have = 0;
+    if (fast) {
+        /* the slot pairs (s, t), in the reference's order, whose correction is not zero for
+         * some two members: only those are added */
+        int ps[SLOTS * (SLOTS - 1) / 2], pt[SLOTS * (SLOTS - 1) / 2], npair = 0;
+        for (int s = 0; s < SLOTS; s++)
+            for (int t = s + 1; t < SLOTS; t++) {
+                int any = 0;
+                for (int o1 = 0; o1 < SLOTS && !any; o1++)
+                    for (int o2 = 0; o2 < SLOTS; o2++)
+                        if (o1 != o2 && pairc[o1][s][o2][t] != 0.0) { any = 1; break; }
+                if (any) { ps[npair] = s; pt[npair] = t; npair++; }
+            }
+        /* the orders in lexicographic order (`index`, as `allowed` numbers them), each total
+         * fixed + delta[p0][0] + ... + delta[p4][4] grown from its prefix's */
+        int index = 0;
+        for (int a = 0; a < SLOTS; a++) {
+            double t0 = fixed + delta[a][0];
+            for (int b = 0; b < SLOTS; b++) {
+                if (b == a) continue;
+                double t1 = t0 + delta[b][1];
+                for (int c = 0; c < SLOTS; c++) {
+                    if (c == a || c == b) continue;
+                    double t2 = t1 + delta[c][2];
+                    for (int d = 0; d < SLOTS; d++) {
+                        if (d == a || d == b || d == c) continue;
+                        double t3 = t2 + delta[d][3];
+                        int e = 10 - a - b - c - d;
+                        if (!allowed || allowed[index]) {
+                            double total = t3 + delta[e][4];
+                            int p[SLOTS] = {a, b, c, d, e};
+                            for (int k = 0; k < npair; k++) total += pairc[p[ps[k]]][ps[k]][p[pt[k]]][pt[k]];
+                            if (!have || total > best) { best = total; have = 1; }
+                        }
+                        index++;
+                    }
+                }
+            }
+        }
+        return have ? best : NAN;
+    }
+    int p[SLOTS] = {0, 1, 2, 3, 4};
     /* `allowed` (NULL: every order): one outcome of a recipients tie, as in notewalk.c */
     for (int index = 0;; index++) {
         if (!allowed || allowed[index]) {
@@ -389,7 +478,7 @@ double hd_cdvar_each(int note_count, const double *times, const double *prefix, 
         memset(ctxp->full, 0, sizeof ctxp->full);
         ctxp->used = 0;
         out[v] = walk_runs(wk, note_count, prefix, constant, bias, always_mask, nr, rng,
-                           nslot, slot_bit, slot_member, slot_cover, allowed);
+                           nslot, slot_bit, slot_member, slot_cover, allowed, 0);
     }
     free(wk);
     return ok_all ? 0.0 : 1.0;
@@ -410,7 +499,6 @@ typedef struct {
     double q[MAX_HOSTS][MAX_PARTS];      /* rider rate of host h on part p, < 0: none */
     int32_t kmax[MAX_HOSTS][MAX_PARTS];  /* most rider copies any variant needs */
     int32_t base[MAX_HOSTS][MAX_PARTS];  /* first bit of those copies */
-    int32_t pfirst[MAX_PARTS], pn[MAX_PARTS];
     Term terms[MAX_TERMS];
     uint64_t always;
     /* the slot-dependent fixed terms, before the riders (`order`) and after them (outfit) */
@@ -419,62 +507,151 @@ typedef struct {
     int32_t cs_bit[MAX_TERMS], cs_member[MAX_TERMS], cs_cover[MAX_TERMS * SLOTS * 2];
 } Layout;
 
-/* One variant's ACTIVE windows, allocated in hd_cdvar_each's order (each lattice, then its
- * combo split's copies) so a MAX_WIN overflow falls on the same variants. Static part p gets
- * [pfirst[p], pfirst[p] + pn[p]); pn 0 for a part that variant does not emit. 0 on overflow. */
-static int variant_windows(Work *wk, Layout *ly, int note_count, const double *times, double song_seconds,
-                           int norder, const int32_t *order, const int32_t *active_i, const double *active_d,
-                           const double *cdv) {
-    double *win_start = wk->win_start, *win_end = wk->win_end;
-    int nwin = 0, p = 0;
-    for (int o = 0; o < norder; o++) {
-        if (order[2 * o] != 1) continue;
-        int idx = order[2 * o + 1];
-        const int32_t *ai = active_i + AI * idx;
-        const double *ad = active_d + AD * idx;
-        int split = ai[6] != 0;
-        double reduction = ad[3] + cdv[ai[5]];
-        double interval = ad[1] / (1.0 + reduction);
-        double duration = ad[2];
-        int first = nwin;
-        for (int k = 1; ; k++) {
-            double start = k * interval;
-            if (!(start <= song_seconds)) break;
-            if (nwin >= MAX_WIN) return 0;
-            win_start[nwin] = start; win_end[nwin] = start + duration; nwin++;
-        }
-        int count = nwin - first;
-        for (int part = 0; part < (split ? 2 : 1); part++, p++) {
-            ly->pfirst[p] = nwin; ly->pn[p] = 0;
-            if (count == 0) continue;
-            if (!split) { ly->pfirst[p] = first; ly->pn[p] = count; continue; }
-            for (int w = first; w < first + count; w++) {
-                int32_t combo = lower_bound(times, note_count, win_start[w]);
+/* Each ACTIVE recipe's windows move with its member's cooldown alone, so a call builds them
+ * once per (recipe, cooldown) it meets: each part's windows (a combo split makes two parts) as
+ * note ranges, and per rider host the copies and slot covers they give, as hd_cdvar_each builds
+ * them for each variant (its lattice, its split, a host's span counting at most RIDER_CAP
+ * windows). Past CD_HELD cooldowns of one recipe, the call goes to the per-variant layout. */
+#define CD_HELD 64
+
+typedef struct {
+    double cd;       /* the member's cooldown shortening */
+    int ok;          /* 0: the lattice alone passes MAX_WIN */
+    int uses;        /* windows the variant walk takes for it: the lattice, then a split's copies */
+    int pn[2];       /* per part: windows */
+    int win[2];      /* per part: offset of their (lo, hi) note ranges in the arena */
+    int riders[2];   /* per part: offset of [nhost] rider copies, then [nhost] cover offsets */
+} CdEntry;
+
+typedef struct {
+    int nrec, nhost;
+    int32_t rec_idx[MAX_PARTS], rec_first[MAX_PARTS], rec_member[MAX_PARTS], rec_split[MAX_PARTS];
+    int held[MAX_PARTS], last[MAX_PARTS];
+    CdEntry *entries; /* nrec * CD_HELD */
+    int32_t *arena;
+    size_t used, cap;
+} CdCache;
+
+/* n ints of the arena (an offset), -1 when it cannot grow */
+static int arena_take(CdCache *cc, size_t n) {
+    if (cc->used + n > cc->cap) {
+        size_t cap = cc->cap ? cc->cap : 4096;
+        while (cc->used + n > cap) cap *= 2;
+        int32_t *grown = (int32_t *)realloc(cc->arena, cap * sizeof(int32_t));
+        if (grown == NULL) return -1;
+        cc->arena = grown;
+        cc->cap = cap;
+    }
+    int at = (int)cc->used;
+    cc->used += n;
+    return at;
+}
+
+/* Recipe r's windows at cooldown shortening `cdv`. 0 when the arena cannot grow. */
+static int cd_fill(CdCache *cc, const Layout *ly, CdEntry *e, int r, double cdv, int note_count,
+                   const double *times, double song_seconds, const int32_t *active_i, const double *active_d,
+                   const int32_t *host_i, const double *host_d) {
+    const int32_t *ai = active_i + AI * cc->rec_idx[r];
+    const double *ad = active_d + AD * cc->rec_idx[r];
+    int split = cc->rec_split[r], nhost = cc->nhost;
+    double reduction = ad[3] + cdv;
+    double interval = ad[1] / (1.0 + reduction);
+    double duration = ad[2];
+    double ws[MAX_WIN], we[MAX_WIN];
+    int count = 0;
+    e->cd = cdv;
+    e->ok = 1;
+    for (int k = 1; ; k++) {
+        double start = k * interval;
+        if (!(start <= song_seconds)) break;
+        if (count >= MAX_WIN) { e->ok = 0; break; }
+        ws[count] = start; we[count] = start + duration; count++;
+    }
+    e->uses = split ? 2 * count : count;
+    int sel[MAX_WIN];
+    for (int part = 0; part < 2; part++) {
+        e->pn[part] = 0; e->win[part] = 0;
+        int at = arena_take(cc, (size_t)(2 * nhost));
+        if (at < 0) return 0;
+        e->riders[part] = at;
+        for (int h = 0; h < 2 * nhost; h++) cc->arena[at + h] = 0;
+        if ((part == 1 && !split) || !e->ok) continue;
+        int n = 0;
+        for (int w = 0; w < count; w++) {
+            if (split) {
+                int32_t combo = lower_bound(times, note_count, ws[w]);
                 int reached = ai[6] == 2 ? combo <= ai[7] : combo >= ai[7];
-                if (reached == (part == 0)) {
-                    if (nwin >= MAX_WIN) return 0;
-                    win_start[nwin] = win_start[w]; win_end[nwin] = win_end[w]; nwin++; ly->pn[p]++;
-                }
+                if (reached != (part == 0)) continue;
             }
+            sel[n++] = w;
+        }
+        int rng = arena_take(cc, (size_t)(2 * n));
+        if (rng < 0) return 0;
+        for (int i = 0; i < n; i++) {
+            cc->arena[rng + 2 * i] = lower_bound(times, note_count, ws[sel[i]]);
+            cc->arena[rng + 2 * i + 1] = lower_bound(times, note_count, we[sel[i]]);
+        }
+        e->pn[part] = n;
+        e->win[part] = rng;
+        int p = cc->rec_first[r] + part;
+        for (int h = 0; h < nhost; h++) {
+            if (ly->q[h][p] < 0.0 || n == 0) continue;
+            const int32_t *hi_ = host_i + HI * h;
+            const double *hd_ = host_d + 2 * SLOTS * h;
+            int nw[SLOTS], ww[SLOTS][RIDER_CAP], kmax = 0;
+            for (int t = 0; t < SLOTS; t++) {
+                nw[t] = 0;
+                if (!hi_[1 + t]) continue;
+                double lo = hd_[2 * t], hi = hd_[2 * t + 1];
+                for (int i = 0; i < n; i++)
+                    if (lo <= ws[sel[i]] && ws[sel[i]] < hi && nw[t] < RIDER_CAP) ww[t][nw[t]++] = sel[i];
+                if (nw[t] > kmax) kmax = nw[t];
+            }
+            int cov = arena_take(cc, (size_t)(kmax * SLOTS * 2));
+            if (cov < 0) return 0;
+            for (int k = 0; k < kmax; k++)
+                for (int t = 0; t < SLOTS; t++) {
+                    int32_t a = 0, z = 0;
+                    if (k < nw[t]) {
+                        a = lower_bound(times, note_count, ws[ww[t][k]]);
+                        z = lower_bound(times, note_count, we[ww[t][k]]);
+                    }
+                    cc->arena[cov + (k * SLOTS + t) * 2] = a;
+                    cc->arena[cov + (k * SLOTS + t) * 2 + 1] = z;
+                }
+            cc->arena[e->riders[part] + h] = kmax;
+            cc->arena[e->riders[part] + nhost + h] = cov;
         }
     }
     return 1;
 }
 
-/* The rider copies host `hi_` needs on part p in the current windows, and per slot the
- * windows they cover (`w[s][k]`, `n[s]`). */
-static int rider_windows(const Work *wk, const Layout *ly, const int32_t *hi_, const double *hd_, int p,
-                         int n[SLOTS], int w[SLOTS][RIDER_CAP]) {
-    int kmax = 0;
-    for (int s = 0; s < SLOTS; s++) {
-        n[s] = 0;
-        if (!hi_[1 + s]) continue;
-        double lo = hd_[2 * s], hi = hd_[2 * s + 1];
-        for (int x = ly->pfirst[p]; x < ly->pfirst[p] + ly->pn[p]; x++)
-            if (lo <= wk->win_start[x] && wk->win_start[x] < hi && n[s] < RIDER_CAP) w[s][n[s]++] = x;
-        if (n[s] > kmax) kmax = n[s];
+/* Every recipe's entry at the variant's cooldowns `cdv` (`got`), built when first met; 0 when
+ * one cannot be had. `*fits`: 0 when its windows pass MAX_WIN (a NAN variant in either layout). */
+static int cd_variant(CdCache *cc, const Layout *ly, const double *cdv, CdEntry **got, int *fits, int note_count,
+                      const double *times, double song_seconds, const int32_t *active_i, const double *active_d,
+                      const int32_t *host_i, const double *host_d) {
+    int uses = 0, ok = 1;
+    for (int r = 0; r < cc->nrec; r++) {
+        double c = cdv[cc->rec_member[r]];
+        CdEntry *es = cc->entries + (size_t)r * CD_HELD;
+        CdEntry *e = NULL;
+        if (cc->held[r] && es[cc->last[r]].cd == c) e = &es[cc->last[r]];
+        for (int i = 0; e == NULL && i < cc->held[r]; i++)
+            if (es[i].cd == c) { e = &es[i]; cc->last[r] = i; }
+        if (e == NULL) {
+            if (cc->held[r] >= CD_HELD) return 0;
+            e = &es[cc->held[r]];
+            if (!cd_fill(cc, ly, e, r, c, note_count, times, song_seconds, active_i, active_d, host_i, host_d))
+                return 0;
+            cc->last[r] = cc->held[r]++;
+        }
+        got[r] = e;
+        if (!e->ok) ok = 0;
+        uses += e->uses;
     }
-    return kmax;
+    *fits = ok && uses <= MAX_WIN;
+    return 1;
 }
 
 static void put_fixed(Term *t, const int32_t *fi, const double *fd) {
@@ -484,8 +661,9 @@ static void put_fixed(Term *t, const int32_t *fi, const double *fd) {
 
 /* The numbering shared by every variant, in hd_cdvar_each's order: `order` (fixed terms,
  * ACTIVE parts), the riders by host and part (as many copies as any variant needs), the
- * outfit's terms. 0 when it needs more than MAX_TERMS bits. */
-static int shared_layout(Work *wk, Layout *ly, int note_count, const double *times, double song_seconds,
+ * outfit's terms. 0 when it needs more than MAX_TERMS bits, -1 when a recipe's windows cannot
+ * be held (`cd_variant`): the per-variant layout either way. */
+static int shared_layout(CdCache *cc, Layout *ly, int note_count, const double *times, double song_seconds,
                          const int32_t *fixed_i, const double *fixed_d,
                          const int32_t *active_i, const double *active_d,
                          const int32_t *rider_host, const double *rider_q,
@@ -493,11 +671,20 @@ static int shared_layout(Work *wk, Layout *ly, int note_count, const double *tim
                          int norder, const int32_t *order, int ncostume, const int32_t *costume,
                          int nvar, const double *cd) {
     int nsp = 0;
+    cc->nrec = 0;
+    cc->nhost = nhost;
     for (int o = 0; o < norder; o++) {
         if (order[2 * o] != 1) continue;
         const int32_t *ai = active_i + AI * order[2 * o + 1];
         const double *ad = active_d + AD * order[2 * o + 1];
         int split = ai[6] != 0;
+        if (cc->nrec >= MAX_PARTS) return 0;
+        cc->rec_idx[cc->nrec] = order[2 * o + 1];
+        cc->rec_first[cc->nrec] = nsp;
+        cc->rec_member[cc->nrec] = ai[5];
+        cc->rec_split[cc->nrec] = split;
+        cc->held[cc->nrec] = cc->last[cc->nrec] = 0;
+        cc->nrec++;
         for (int part = 0; part < (split ? 2 : 1); part++) {
             if (nsp >= MAX_PARTS) return 0;
             ly->sp_recipe[nsp] = order[2 * o + 1];
@@ -515,15 +702,22 @@ static int shared_layout(Work *wk, Layout *ly, int note_count, const double *tim
             ly->q[h][p] = q;
             ly->kmax[h][p] = 0;
         }
-    int nw[SLOTS], ww[SLOTS][RIDER_CAP];
+    cc->entries = (CdEntry *)malloc((size_t)(cc->nrec ? cc->nrec : 1) * CD_HELD * sizeof(CdEntry));
+    if (cc->entries == NULL) return -1;
+    CdEntry *got[MAX_PARTS];
     for (int v = 0; v < nvar; v++) {
-        if (!variant_windows(wk, ly, note_count, times, song_seconds, norder, order, active_i, active_d, cd + v * SLOTS))
-            continue;  /* a NAN variant in either layout */
-        for (int h = 0; h < nhost; h++)
-            for (int p = 0; p < nsp; p++) {
-                if (ly->q[h][p] < 0.0 || ly->pn[p] == 0) continue;
-                int k = rider_windows(wk, ly, host_i + HI * h, host_d + 2 * SLOTS * h, p, nw, ww);
-                if (k > ly->kmax[h][p]) ly->kmax[h][p] = k;
+        int fits;
+        if (!cd_variant(cc, ly, cd + v * SLOTS, got, &fits, note_count, times, song_seconds, active_i, active_d,
+                        host_i, host_d))
+            return -1;
+        if (!fits) continue;  /* a NAN variant in either layout */
+        for (int r = 0; r < cc->nrec; r++)
+            for (int part = 0; part < (cc->rec_split[r] ? 2 : 1); part++) {
+                int p = cc->rec_first[r] + part;
+                for (int h = 0; h < nhost; h++) {
+                    int k = cc->arena[got[r]->riders[part] + h];
+                    if (k > ly->kmax[h][p]) ly->kmax[h][p] = k;
+                }
             }
     }
     int nt = 0, p = 0;
@@ -591,10 +785,13 @@ double hd_cdvar(int note_count, const double *times, const double *prefix, doubl
     if (note_count > MAX_NOTES) { for (int v = 0; v < nvar; v++) out[v] = NAN; return 1.0; }
     Work *wk = nhost <= MAX_HOSTS ? (Work *)malloc(sizeof(Work)) : NULL;
     Layout *ly = wk != NULL ? (Layout *)malloc(sizeof(Layout)) : NULL;
-    int nt = ly == NULL ? 0
-        : shared_layout(wk, ly, note_count, times, song_seconds, fixed_i, fixed_d, active_i, active_d,
+    CdCache *cc = ly != NULL ? (CdCache *)calloc(1, sizeof(CdCache)) : NULL;
+    int nt = cc == NULL ? 0
+        : shared_layout(cc, ly, note_count, times, song_seconds, fixed_i, fixed_d, active_i, active_d,
                         rider_host, rider_q, nhost, host_i, host_d, norder, order, ncostume, costume, nvar, cd);
-    if (nt == 0) {  /* no room, or no term at all: the per-variant layout */
+    if (nt <= 0) {  /* no room, no term at all, or windows the cache cannot hold: the per-variant layout */
+        if (cc != NULL) { free(cc->entries); free(cc->arena); }
+        free(cc);
         free(ly);
         free(wk);
         return hd_cdvar_each(note_count, times, prefix, song_seconds, constant, bias, score_rates, nrates,
@@ -609,10 +806,21 @@ double hd_cdvar(int note_count, const double *times, const double *prefix, doubl
     ctxp->used = 0;
     int32_t *rng = wk->rng;
     int32_t slot_bit[MAX_TERMS], slot_member[MAX_TERMS], slot_cover[MAX_TERMS * SLOTS * 2];
-    int nw[SLOTS], ww[SLOTS][RIDER_CAP];
+    CdEntry *got[MAX_PARTS];
     int ok_all = 1;
     for (int v = 0; v < nvar; v++) {
-        if (!variant_windows(wk, ly, note_count, times, song_seconds, norder, order, active_i, active_d, cd + v * SLOTS)) {
+        int fits;
+        if (!cd_variant(cc, ly, cd + v * SLOTS, got, &fits, note_count, times, song_seconds, active_i, active_d,
+                        host_i, host_d))
+            fits = -1;  /* cannot happen: the layout's pass met every variant's cooldowns */
+        if (fits < 0) {
+            free(cc->entries); free(cc->arena); free(cc); free(ly); free(wk);
+            return hd_cdvar_each(note_count, times, prefix, song_seconds, constant, bias, score_rates, nrates,
+                                 skill_effect_up, nfixed, fixed_i, fixed_d, nactive, active_i, active_d, rider_host,
+                                 rider_q, nhost, host_i, host_d, norder, order, ncostume, costume, nvar, cd, out,
+                                 allowed);
+        }
+        if (!fits) {
             out[v] = NAN; ok_all = 0; continue;
         }
         if (ctxp->used >= MEMO / 2) {  /* full enough to stop caching: start it again */
@@ -620,13 +828,17 @@ double hd_cdvar(int note_count, const double *times, const double *prefix, doubl
             ctxp->used = 0;
         }
         int nr = 0, overflow = 0;
-        for (int q = 0; q < ly->nsp && !overflow; q++)
-            for (int x = ly->pfirst[q]; x < ly->pfirst[q] + ly->pn[q]; x++) {
-                if (nr >= MAX_RANGES) { overflow = 1; break; }
-                rng[3 * nr] = ly->sp_bit[q];
-                rng[3 * nr + 1] = lower_bound(times, note_count, wk->win_start[x]);
-                rng[3 * nr + 2] = lower_bound(times, note_count, wk->win_end[x]);
-                nr++;
+        for (int r = 0; r < cc->nrec && !overflow; r++)
+            for (int part = 0; part < (cc->rec_split[r] ? 2 : 1) && !overflow; part++) {
+                const CdEntry *e = got[r];
+                int q = cc->rec_first[r] + part;
+                for (int x = 0; x < e->pn[part]; x++) {
+                    if (nr >= MAX_RANGES) { overflow = 1; break; }
+                    rng[3 * nr] = ly->sp_bit[q];
+                    rng[3 * nr + 1] = cc->arena[e->win[part] + 2 * x];
+                    rng[3 * nr + 2] = cc->arena[e->win[part] + 2 * x + 1];
+                    nr++;
+                }
             }
         if (overflow) { out[v] = NAN; ok_all = 0; continue; }
         int nslot = 0;
@@ -636,31 +848,32 @@ double hd_cdvar(int note_count, const double *times, const double *prefix, doubl
         }
         for (int h = 0; h < nhost; h++) {
             const int32_t *hi_ = host_i + HI * h;
-            const double *hd_ = host_d + 2 * SLOTS * h;
-            for (int q = 0; q < ly->nsp; q++) {
-                if (ly->q[h][q] < 0.0 || ly->pn[q] == 0) continue;
-                int kmax = rider_windows(wk, ly, hi_, hd_, q, nw, ww);
-                for (int k = 0; k < kmax; k++, nslot++) {
-                    slot_bit[nslot] = ly->base[h][q] + k; slot_member[nslot] = hi_[0];
-                    for (int s = 0; s < SLOTS; s++) {
-                        int32_t a = 0, b = 0;
-                        if (k < nw[s]) {
-                            a = lower_bound(times, note_count, wk->win_start[ww[s][k]]);
-                            b = lower_bound(times, note_count, wk->win_end[ww[s][k]]);
+            for (int r = 0; r < cc->nrec; r++)
+                for (int part = 0; part < (cc->rec_split[r] ? 2 : 1); part++) {
+                    const CdEntry *e = got[r];
+                    int q = cc->rec_first[r] + part;
+                    if (ly->q[h][q] < 0.0 || e->pn[part] == 0) continue;
+                    int kmax = cc->arena[e->riders[part] + h];
+                    int cov = cc->arena[e->riders[part] + nhost + h];
+                    for (int k = 0; k < kmax; k++, nslot++) {
+                        slot_bit[nslot] = ly->base[h][q] + k; slot_member[nslot] = hi_[0];
+                        for (int s = 0; s < SLOTS; s++) {
+                            slot_cover[(nslot * SLOTS + s) * 2] = cc->arena[cov + (k * SLOTS + s) * 2];
+                            slot_cover[(nslot * SLOTS + s) * 2 + 1] = cc->arena[cov + (k * SLOTS + s) * 2 + 1];
                         }
-                        slot_cover[(nslot * SLOTS + s) * 2] = a;
-                        slot_cover[(nslot * SLOTS + s) * 2 + 1] = b;
                     }
                 }
-            }
         }
         for (int f = 0; f < ly->ncs; f++, nslot++) {
             slot_bit[nslot] = ly->cs_bit[f]; slot_member[nslot] = ly->cs_member[f];
             memcpy(slot_cover + nslot * 2 * SLOTS, ly->cs_cover + f * 2 * SLOTS, 2 * SLOTS * sizeof(int32_t));
         }
         out[v] = walk_runs(wk, note_count, prefix, constant, bias, ly->always, nr, rng,
-                           nslot, slot_bit, slot_member, slot_cover, allowed);
+                           nslot, slot_bit, slot_member, slot_cover, allowed, 1);
     }
+    free(cc->entries);
+    free(cc->arena);
+    free(cc);
     free(ly);
     free(wk);
     return ok_all ? 0.0 : 1.0;

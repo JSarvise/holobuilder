@@ -219,6 +219,10 @@ def _fake_engine(n_cards: int = 14, n_charts: int = 9):
                 )
             return out
 
+        def batch_counts(self, teams, chart_indices=None, *, both=False, known=None):
+            # `RefinePool.batch_counts`: COUNTS (COUNTS_BOTH) in parts, the same floats
+            return self.batch_score(teams, chart_indices, "counts_both" if both else "counts")
+
         def batch_score_and_ceiling(self, teams, chart_indices, refine_activation):
             return [(v, v * 1.05) for v in self.batch_score(teams, chart_indices, refine_activation)]
 
@@ -650,7 +654,8 @@ def test_a_search_uses_its_own_plan_options_and_hints():
 def test_the_counts_funnel_takes_the_teams_the_counts_lift_most(monkeypatch):
     """In general: the teams whose frequency counts are chosen on every chart are the best of
     the funnel by the plain mean times what the counts add on the funnel's chart sample, not
-    the best by the plain mean alone; each keeps its plain value, in the ranking's order."""
+    the best by the plain mean alone; each keeps its plain value, in the ranking's order. Their
+    served values on the sample come back by chart index, for the counts batch to keep."""
     from hbuilder.domain import team as team_mod
 
     monkeypatch.setattr(ondemand, "GENERAL_COUNTS_HEAD", 3)
@@ -663,22 +668,30 @@ def test_the_counts_funnel_takes_the_teams_the_counts_lift_most(monkeypatch):
     asked = []
 
     class Pool:
-        def batch_score(self, teams, chart_indices=None, refine_activation=None):
-            asked.append((len(teams), tuple(chart_indices), refine_activation))
-            # the 6th team gains 5 % from its counts, the others nothing
-            return [(1000.0, 1050.0 if k == 5 else 1000.0) for k in range(len(teams))]
+        def batch_counts_per_chart(self, teams, chart_indices=None, *, both=False, known=None):
+            asked.append((len(teams), tuple(chart_indices), both))
+            # each chart's (plain, served): the 6th team gains 5 % from its counts, the others nothing
+            return [
+                [(1000.0, (1050.0 if k == 5 else 1000.0) + j) for j in range(len(chart_indices))]
+                for k in range(len(teams))
+            ]
 
     eng.pool = Pool()
     leaders, pool = eng.reps, eng.reps
     ranking = [(1000.0 - k, k, (k + 1,)) for k in range(12)]
-    chosen = ondemand.Engine._counts_funnel(eng, ranking, leaders, pool)
+    chosen, known = ondemand.Engine._counts_funnel(eng, ranking, leaders, pool)
     assert chosen == [ranking[0], ranking[1], ranking[5]]
     # one estimate of the funnel's 8 teams, on the 4 sampled charts
-    assert asked == [(8, eng._counts_charts, "counts_both")] and len(eng._counts_charts) == 4
+    assert asked == [(8, eng._counts_charts, True)] and len(eng._counts_charts) == 4
+    # the chosen teams' served values, by the chart's index in the engine's charts
+    assert known == {
+        (li, s): {c: (1050.0 if li == 5 else 1000.0) + j for j, c in enumerate(eng._counts_charts)}
+        for _v, li, s in chosen
+    }
     # no more teams than the head, or no more charts than the sample: the head as it is
-    assert ondemand.Engine._counts_funnel(eng, ranking[:3], leaders, pool) == ranking[:3]
+    assert ondemand.Engine._counts_funnel(eng, ranking[:3], leaders, pool) == (ranking[:3], {})
     monkeypatch.setattr(ondemand, "GENERAL_COUNTS_SAMPLE", 9)
-    assert ondemand.Engine._counts_funnel(eng, ranking, leaders, pool) == ranking[:3]
+    assert ondemand.Engine._counts_funnel(eng, ranking, leaders, pool) == (ranking[:3], {})
     assert len(asked) == 1
 
 

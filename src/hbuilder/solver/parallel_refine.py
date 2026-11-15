@@ -427,6 +427,7 @@ def evaluate(
     *,
     plan_cache: PlanCache | None = None,
     per_chart: bool = False,
+    part: Sequence[int] | None = None,
 ) -> Any:
     """ONE exact evaluation: develop the team, score it on the context's charts,
     return the mean. Shared by the worker task and the in-process fallback, so both
@@ -445,7 +446,15 @@ def evaluate(
 
     `per_chart=True` returns each chart's score, in chart order, instead of their
     mean (the mean is their sum, added in that order, over their count: the same
-    float). Not for the developed deck-screen score (no charts)."""
+    float, `chart_mean`); with COUNTS_BOTH, each chart's `(plain, served)`. Not for the
+    developed deck-screen score (no charts).
+
+    `part` (with `per_chart` and `ctx.board_per_chart`): positions in this evaluation's
+    charts; only those are scored, in that order, and the list holds just them. Every
+    choice that reads the chart list still reads all of it (each chart's singer context,
+    the charts a board is refined on), so each value is the one the whole evaluation
+    gives that chart: a team's charts can be spread over several workers and its mean
+    added back (`RefinePool.batch_counts`)."""
     # `team_ids` may carry a third element: indices into `ctx.charts`, the charts
     # THIS evaluation is scored on. One pool holding the whole library can then
     # answer for one song, a sample or all of them without a context per song
@@ -491,6 +500,10 @@ def evaluate(
     charts = (
         ctx.charts if not selection or selection[0] is None else tuple(ctx.charts[i] for i in selection[0])
     )
+    if part is not None and (not per_chart or not ctx.board_per_chart or not charts or both or lens):
+        raise ValueError(
+            "`part` scores some charts of a per-chart evaluation (`per_chart`, `RefineContext.board_per_chart`)"
+        )
     team = Team(leader=by_id[leader_id], members=tuple(by_id[m] for m in member_ids))
     powers: dict[int, tuple[object, OverallPower]] = {}  # id(board) -> (that board, power)
     # what a board gives the Overall Power -> that power: the team's singer contexts each
@@ -649,7 +662,7 @@ def evaluate(
         # the context is the team's own singers (`key` below), not the whole cast.
         configs: dict[tuple[frozenset, str], ScoringConfig] = {}
         total = 0.0
-        scores: list[float] = []
+        scores: list = []  # floats, or COUNTS_BOTH's pairs
         # keyed by WHICH of the team's holomems sing: the leader's reds and every
         # singing board's yellows (members included) follow the cast
         team_chrs = frozenset("chr-" + c.id.split("-")[1] for c in (team.leader, *team.members))
@@ -674,8 +687,9 @@ def evaluate(
         choosers: dict = {}
         axes_memo: dict = {}
         respend_memo: dict = {}
+        variants_memo: dict = {}
         plain_total = 0.0
-        for chart in charts:
+        for chart in charts if part is None else [charts[k] for k in part]:
             sings = key(chart)
             cast = assembled_for(chart)
             cfg_c = configs.get((cast, cast.scope))
@@ -709,6 +723,7 @@ def evaluate(
                         values_for=_plan_values_or_none(ctx, team, plan, plan_cache),
                         player_level=player_level(ctx.cfg),
                         respend_memo=respend_memo,
+                        variants_memo=variants_memo,
                     )
                 else:
                     cfg_c = dataclasses.replace(ctx.cfg, board=develop(sings, same, cast))
@@ -736,14 +751,16 @@ def evaluate(
             if count_screen:
                 s = count_screen_value(team, chart, cfg_c, s, power_of(cfg_c))
             if per_chart:
-                scores.append(s)
+                scores.append((plain_c, s) if counts_both else s)
             total += s
         if both:
             # the ceilings added in chart order from 0, as a `ceiling` evaluation adds them
             return total / len(charts), sum(scores) / len(charts)
+        if per_chart:
+            return scores
         if counts_both:
             return plain_total / len(charts), total / len(charts)
-        return scores if per_chart else total / len(charts)
+        return total / len(charts)
     if counts:
         raise ValueError(
             "the per-chart frequency counts need a board per chart (`RefineContext.board_per_chart`)"
@@ -1332,6 +1349,7 @@ class ChartCounts:
         values_for: Callable[[str], Mapping[str, float] | None] | None = None,
         player_level: int | None = None,
         respend_memo: dict | None = None,
+        variants_memo: dict | None = None,
     ) -> None:
         self.team, self.cfg, self.plan = team, cfg, plan  # `cfg.board`: the plain board
         self._assemble, self._tree_for, self._budget_for = assemble, tree_for, budget_for
@@ -1339,6 +1357,7 @@ class ChartCounts:
         self._values_for, self._player_level = values_for, player_level
         self._frozen = _cooldown_nodes(skilltree)
         self._respend_memo = respend_memo if respend_memo is not None else {}
+        self._variants_memo = variants_memo if variants_memo is not None else {}
         self._cards = {c.id: c for c in (team.leader, *team.members)}
         members = {c.id: c for c in team.members}
         board = cfg.board
@@ -1375,6 +1394,25 @@ class ChartCounts:
                 self._holomems, self._own, self._unit, self.axes, combo, self.start
             )
         }
+
+    def _every_combo(self) -> tuple[tuple[tuple[int, ...], ...], tuple[dict, ...]]:
+        """Every combination of the members' counts (`itertools.product` order) and each one's
+        cooldowns (`_cooldowns`): the same for every chart this chooser screens, and for the
+        team's other singer contexts whose boards give the members the same counts and
+        shortenings (`variants_memo`, keyed by all `_cooldowns` reads). One tuple object, which
+        the screen keys what it builds from it by."""
+        key = (
+            tuple(self._holomems),
+            tuple(self._own),
+            tuple(self._unit),
+            tuple(tuple(count for count, _sel in states) for _cid, states, _here in self.axes),
+            self.start,
+        )
+        hit = self._variants_memo.get(key)
+        if hit is None:
+            combos = tuple(itertools.product(*(range(k + 1) for k in self.start)))
+            hit = self._variants_memo[key] = (combos, tuple(self._cooldowns(c) for c in combos))
+        return hit
 
     def _respent(self, combo: tuple[int, ...]) -> tuple[TeamBoardPlan, bool]:
         """`(the plan with the members at combo and the freed points spent again, whether
@@ -1463,20 +1501,20 @@ class ChartCounts:
         """`(plain score, the combination with the best estimate)`: the plain board's exact
         score and every combination of the members' counts screened, from one set-up of the
         team on the chart; a tie keeps the first combination (itertools.product order)."""
-        combos = list(itertools.product(*(range(k + 1) for k in self.start)))
+        combos, variants = self._every_combo()
         score, values = score_song_and_screen(
             self.team.members,
             self.team.leader,
             chart,
             self.cfg,
-            [self._cooldowns(c) for c in combos],
+            variants,
             deck_power=self._power_of(self.cfg),
             team_setup=self._setup,
         )
         if not values:
             return score.total_score, None
-        top = max(range(len(values)), key=lambda i: (values[i], -i))
-        return score.total_score, combos[top]
+        # the highest estimate, the first of equal ones
+        return score.total_score, combos[values.index(max(values))]
 
     def _greedy(self, chart: SongChart) -> tuple[float, tuple[int, ...]]:
         """`(plain score, the combination reached)` by up to COUNT_SCREEN_ROUNDS rounds of the
@@ -1547,6 +1585,73 @@ def _ctx_task_per_chart(item):
     token, *rest = item
     _activate(token)
     return _task_per_chart(tuple(rest))
+
+
+def _task_part(item):
+    """Some charts of one team's per-chart evaluation (`evaluate(part=...)`):
+    `(index, (team ids, part))`."""
+    index, (team_ids, part) = item
+    assert _CTX is not None
+    return index, evaluate(
+        _CTX,
+        _BY_ID,
+        _tree_for,
+        _budget_for,
+        team_ids,
+        plan_cache=_worker_plan_cache(),
+        per_chart=True,
+        part=part,
+    )
+
+
+def _ctx_task_part(item):
+    """`_task_part` in a `SharedPool` worker: `(token, index, (team ids, part))`."""
+    token, *rest = item
+    _activate(token)
+    return _task_part(tuple(rest))
+
+
+def chart_mean(values: Sequence[float]) -> float:
+    """The mean `evaluate` returns from the per-chart values it adds up: their sum, added in
+    chart order from 0.0, over their count. Not `sum`, which compensates the rounding and can
+    differ in the last bit."""
+    total = 0.0
+    for value in values:
+        total += value
+    return total / len(values)
+
+
+# The COUNTS batch (`RefinePool.batch_counts`) scores few teams (In general: 50) at seconds
+# each; one task per team would leave most workers idle through its last round. Each team's
+# charts go out in parts instead, about COUNT_PART_TASKS a worker over the batch, none
+# under COUNT_PART_MIN charts (a part sets up the boards of its singer contexts again).
+COUNT_PART_TASKS = 8
+COUNT_PART_MIN = 8
+
+
+def _count_parts(charts: Sequence[SongChart], positions: Sequence[int], parts: int) -> list[tuple[int, ...]]:
+    """`positions` (in `charts`) cut into at most `parts` parts of about equal weight (their
+    notes), none under COUNT_PART_MIN charts, the charts of one cast next to each other (the
+    singer contexts a part sets up). Only how the work is spread: each part's values are the
+    whole evaluation's (`evaluate(part=...)`)."""
+    parts = max(1, min(parts, len(positions) // max(1, COUNT_PART_MIN)))
+    if parts == 1:
+        return [tuple(positions)]
+    order = sorted(positions, key=lambda p: (tuple(sorted(charts[p].singers)), charts[p].singer_type, p))
+    weights = [len(charts[p].notes) for p in order]
+    total = sum(weights)
+    out: list[tuple[int, ...]] = []
+    current: list[int] = []
+    reached = 0
+    for p, w in zip(order, weights):
+        current.append(p)
+        reached += w
+        if len(out) < parts - 1 and reached * parts >= total * (len(out) + 1):
+            out.append(tuple(current))
+            current = []
+    if current:
+        out.append(tuple(current))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -2068,13 +2173,16 @@ class RefinePool:
         taken, self.warnings = self.warnings, []
         return taken
 
-    def _gather_or_warn(self, task: Callable, tasks: list, out: list) -> None:
-        """`_gather` into `out`. A worker that died or a task that raised leaves the items
-        without an answer None, for the caller to score in this process, and is reported. The
-        pool is kept for the next batch: it has replaced a dead worker already, and a task's
-        own error is the task's (the in-process run raises it again)."""
+    def _gather_or_warn(self, task: Callable, tasks: list, out: list, chunksize: int | None = None) -> None:
+        """`_gather` into `out`, in chunks of `chunksize` (None: `_chunksize`'s). A worker that
+        died or a task that raised leaves the items without an answer None, for the caller to
+        score in this process, and is reported. The pool is kept for the next batch: it has
+        replaced a dead worker already, and a task's own error is the task's (the in-process
+        run raises it again)."""
+        if chunksize is None:
+            chunksize = _chunksize(len(tasks), self.workers)
         try:
-            _gather(self._pool, task, tasks, _chunksize(len(tasks), self.workers), out)
+            _gather(self._pool, task, tasks, chunksize, out)
         except Exception as exc:  # noqa: BLE001 — reported; the batch finishes in this process
             missing = sum(v is None for v in out)
             self._warn(
@@ -2141,3 +2249,84 @@ class RefinePool:
                 per_chart=True,
             )
         return [[float(s) for s in v] for v in out]
+
+    def batch_counts_per_chart(
+        self,
+        teams: Sequence[Team],
+        chart_indices: Sequence[int] | None = None,
+        *,
+        both: bool = False,
+        known: Sequence[Mapping[int, Any]] | None = None,
+    ) -> list[list]:
+        """Each team's per-chart values with the members' frequency counts chosen chart by
+        chart (`evaluate` with COUNTS and `per_chart`; `both`: COUNTS_BOTH's `(plain, served)`
+        per chart), on every chart of the context or on `chart_indices`, in that order. One
+        list per team, in order. Each team's charts go out in parts spread over the workers
+        (`_count_parts`). `known[k]`: `{position: value}` that team k already has from the same
+        evaluation (a value at a position of these charts, as this method gives it), kept as
+        it is and not scored again."""
+        count = len(self.ctx.charts) if chart_indices is None else len(chart_indices)
+        chosen = None if chart_indices is None else tuple(chart_indices)
+        mode = COUNTS_BOTH if both else COUNTS
+        ids = [(t.leader.id, tuple(m.id for m in t.members), chosen, mode) for t in teams]
+        out: list[list] = [[None] * count for _ in teams]
+        for k, have in enumerate(known or ()):
+            for position, value in have.items():
+                out[k][position] = value
+        if self._pool is not None:
+            charts = self.ctx.charts if chosen is None else tuple(self.ctx.charts[i] for i in chosen)
+            needed = [[p for p, v in enumerate(row) if v is None] for row in out]
+            busy = sum(1 for positions in needed if positions)
+            parts = math.ceil(COUNT_PART_TASKS * self.workers / max(1, busy))
+            tasks = [
+                (k, part)
+                for k, positions in enumerate(needed)
+                if positions
+                for part in _count_parts(charts, positions, parts)
+            ]
+            answers: list = [None] * len(tasks)
+            task, items = self._items([(ids[k], part) for k, part in tasks], _task_part, _ctx_task_part)
+            # one part a dispatch: few, long tasks
+            self._gather_or_warn(task, items, answers, chunksize=1)
+            for (k, part), values in zip(tasks, answers):
+                if values is not None:
+                    for position, value in zip(part, values):
+                        out[k][position] = value
+        # in this process: no pool, or the parts of a failed worker
+        for k, row in enumerate(out):
+            missing = tuple(p for p, v in enumerate(row) if v is None)
+            if not missing:
+                continue
+            if self.ctx.use_plan_cache and self._plan_cache is None:
+                self._plan_cache = new_plan_cache(self.ctx, self._by_id)
+            values = evaluate(
+                self.ctx,
+                self._by_id,
+                self._tree_for,
+                self._budget_for,
+                ids[k],
+                plan_cache=self._plan_cache,
+                per_chart=True,
+                part=missing,
+            )
+            for position, value in zip(missing, values):
+                row[position] = value
+        if both:
+            return [[(float(p), float(s)) for p, s in row] for row in out]
+        return [[float(v) for v in row] for row in out]
+
+    def batch_counts(
+        self,
+        teams: Sequence[Team],
+        chart_indices: Sequence[int] | None = None,
+        *,
+        both: bool = False,
+        known: Sequence[Mapping[int, Any]] | None = None,
+    ) -> list:
+        """`batch_score(teams, chart_indices, refine_activation=COUNTS)` (`both`: COUNTS_BOTH's
+        `(plain mean, mean)`), the same floats: each team's `batch_counts_per_chart` values
+        added in chart order (`chart_mean`), its charts spread over the workers."""
+        rows = self.batch_counts_per_chart(teams, chart_indices, both=both, known=known)
+        if both:
+            return [(chart_mean([p for p, _s in row]), chart_mean([s for _p, s in row])) for row in rows]
+        return [chart_mean(row) for row in rows]

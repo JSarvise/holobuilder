@@ -37,7 +37,7 @@ import two_stage  # noqa: E402
 
 from hbuilder.solver import members_first  # noqa: E402
 from hbuilder.solver.parallel import default_workers  # noqa: E402
-from hbuilder.solver.parallel_refine import COUNTS, COUNTS_BOTH, SEARCH, RefinePool, SharedPool  # noqa: E402
+from hbuilder.solver.parallel_refine import COUNTS, SEARCH, RefinePool, SharedPool, chart_mean  # noqa: E402
 
 if TYPE_CHECKING:
     from hbuilder.domain.card import Card
@@ -904,24 +904,36 @@ class Engine:
         node counts chosen on every chart, in `ranking`'s order: from its best
         GENERAL_COUNTS_FUNNEL, the ones whose full plain mean times what the counts add on
         GENERAL_COUNTS_SAMPLE note-spread charts is highest. The plain mean alone orders
-        them badly (a team's gain runs from 0.1 to 1.9 %). Each keeps its plain value."""
+        them badly (a team's gain runs from 0.1 to 1.9 %). Each keeps its plain value.
+
+        Returns `(those teams, {(leader index, set): {chart index: value}})`: each one's
+        values on the sample, the very values its every-chart evaluation gives those charts,
+        which the counts batch then takes as they are (`RefinePool.batch_counts(known=)`)."""
         from hbuilder.domain.team import Team  # noqa: PLC0415
 
         funnel = list(ranking[:GENERAL_COUNTS_FUNNEL])
         if len(funnel) <= GENERAL_COUNTS_HEAD or len(self.charts) <= GENERAL_COUNTS_SAMPLE:
-            return funnel[:GENERAL_COUNTS_HEAD]
+            return funnel[:GENERAL_COUNTS_HEAD], {}
         if self._counts_charts is None:
             by_obj = {id(c): k for k, c in enumerate(self.charts)}
             self._counts_charts = tuple(
                 by_obj[id(c)] for c in two_stage.chart_sample(self.charts, GENERAL_COUNTS_SAMPLE)
             )
         teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in funnel]
-        both = self.pool.batch_score(teams, chart_indices=self._counts_charts, refine_activation=COUNTS_BOTH)
+        # each chart's (plain, served): their means are COUNTS_BOTH's, the same floats
+        rows = self.pool.batch_counts_per_chart(teams, self._counts_charts, both=True)
+        both = [(chart_mean([p for p, _c in row]), chart_mean([c for _p, c in row])) for row in rows]
         estimate = [
             float(v) * (float(c) / float(p) if p else 1.0) for (v, _li, _s), (p, c) in zip(funnel, both)
         ]
         best = sorted(range(len(funnel)), key=lambda k: (-estimate[k], k))[:GENERAL_COUNTS_HEAD]
-        return [funnel[k] for k in sorted(best)]
+        known = {
+            (funnel[k][1], funnel[k][2]): {
+                self._counts_charts[position]: served for position, (_p, served) in enumerate(rows[k])
+            }
+            for k in best
+        }
+        return [funnel[k] for k in sorted(best)], known
 
     def _count_cooldowns(self, chosen, teams, refined, chart_indices):
         """The refined teams within COUNTS_MARGIN of the best (at most COUNTS_HEAD) refined
@@ -1364,11 +1376,12 @@ class Engine:
                     # frequency node counts chosen for it (`parallel_refine.ChartCounts`)
                     if cancel is not None and cancel.is_set():
                         raise Cancelled()
-                    chosen = self._counts_funnel(ranking, leaders, pool)
-                    refined = self.pool.batch_score(
+                    chosen, known = self._counts_funnel(ranking, leaders, pool)
+                    # `batch_score(refine_activation=COUNTS)`'s floats, each team's charts
+                    # spread over the workers and the funnel's sample charts not scored again
+                    refined = self.pool.batch_counts(
                         [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in chosen],
-                        chart_indices=None,
-                        refine_activation=COUNTS,  # type: ignore[arg-type]
+                        known=[known.get((li, s), {}) for _v, li, s in chosen],
                     )
                     levels = [COUNTS] * len(chosen)
             else:

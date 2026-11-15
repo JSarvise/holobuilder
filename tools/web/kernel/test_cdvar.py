@@ -180,3 +180,32 @@ def test_without_a_kernel_the_screen_is_the_exact_totals(leaf, monkeypatch):
             )
             == exact
         )
+
+
+def test_a_tuple_of_variants_screened_again_gives_the_same_doubles(leaf):
+    """The screen builds the variants' per-member cooldowns once per tuple of variants and
+    board cooldowns (`song._variant_cooldowns`), and the kernel's C array of them once per
+    tuple (`cdvar`): a tuple screened again, on its board or on one with another cooldown for
+    a member the variants leave out, gives the doubles of the same variants as a new list."""
+    import cdvar
+
+    from hbuilder.domain import song as song_mod
+
+    assert cdvar.enable()
+    for team, chart, cfg, power, variants in _cases(leaf, "m0342", 4, 17):
+        left_out = next(iter(variants[0]))
+        own = cfg.board.uptime_for(left_out)[1]
+        other = dataclasses.replace(cfg, board=cfg.board.with_cooldowns({left_out: own / 2 if own else 0.05}))
+        partial = tuple({h: v for h, v in d.items() if h != left_out} for d in variants)
+        for held in (tuple(variants), partial):
+            for c in (cfg, other, cfg):
+                fresh = song_mod.screen_song_cooldown_variants(
+                    team.members, team.leader, chart, c, [dict(d) for d in held], deck_power=power
+                )
+                for _again in range(2):
+                    assert (
+                        song_mod.screen_song_cooldown_variants(
+                            team.members, team.leader, chart, c, held, deck_power=power
+                        )
+                        == fresh
+                    )
