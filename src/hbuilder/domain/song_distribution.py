@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_left
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from hbuilder.domain.card import Card
 from hbuilder.domain.gates import resolve_card_set_gates, resolve_leader_costume_skills
@@ -58,9 +58,61 @@ from hbuilder.domain.song import (
     _term_for,
 )
 
-__all__ = ["best_of_n", "pace_cuts", "run_score_distribution", "score_pace"]
+__all__ = ["best_of_n", "merge_laws", "pace_cuts", "run_score_distribution", "score_pace"]
 
 PERCENTILES = (0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99)
+
+# The merge of two laws (`merge_laws`) is the sweep's whole cost on a real row (millions of
+# dictionary updates). A compiled one is injected by the web layer (`tools/web/kernel/lawmerge.py`),
+# never imported here, so this package keeps `dependencies = []`. It is called as `merge_laws`
+# is and returns `(law, bin_width)`, the law any object with `items()` (in insertion order),
+# iteration over its values, `len()` and `[value]`. The contract is bit-identity with
+# `merge_laws` (`tools/web/kernel/test_lawmerge.py`).
+MERGE_KERNEL: Callable | None = None
+
+
+def _put(out: dict[int, float], key: int, mass: float, base: int, bin_width: int) -> None:
+    """`mass` at relative `key` (absolute `base + key`), split between the two grid points
+    around it when the law is binned (`bin_width` > 1)."""
+    if bin_width == 1:
+        out[key] = out.get(key, 0.0) + mass
+        return
+    absolute = base + key
+    grid = (absolute // bin_width) * bin_width
+    upper = (absolute - grid) / bin_width
+    low = grid - base
+    out[low] = out.get(low, 0.0) + mass * (1.0 - upper)
+    if upper:
+        out[low + bin_width] = out.get(low + bin_width, 0.0) + mass * upper
+
+
+def merge_laws(
+    law_a,
+    share_a: float,
+    shift_a: int,
+    law_b,
+    share_b: float,
+    shift_b: int,
+    base: int,
+    bin_width: int,
+    cap: int,
+) -> tuple[dict[int, float], int]:
+    """`(law, bin_width)`: `law_a` scaled by `share_a` and moved by `shift_a`, then `law_b` the
+    same, added value by value into one law relative to `base`, in that order (each value's
+    mass split on the grid when binned, `_put`). When its support exceeds `cap` it is binned
+    again on a coarser grid (the bin width at least doubles), so the mean stays exact."""
+    out: dict[int, float] = {}
+    for share, shift, law in ((share_a, shift_a, law_a), (share_b, shift_b, law_b)):
+        for v, p in law.items():
+            _put(out, v + shift, p * share, base, bin_width)
+    if len(out) > cap:
+        lo, hi = min(out), max(out)
+        bin_width = max(bin_width * 2, (hi - lo) // (cap // 2) + 1)
+        binned: dict[int, float] = {}
+        for v, p in out.items():
+            _put(binned, v, p, base, bin_width)
+        out = binned
+    return out, bin_width
 
 
 def _terms(members: tuple[Card, ...], leader: Card, chart: SongChart, cfg: ScoringConfig):
@@ -402,19 +454,7 @@ class _Sweep:
             if boundary in keep_at:
                 kept[boundary] = {fired: (s[0], s[1], s[2]) for fired, s in states.items()}
 
-        def put(out: dict[int, float], key: int, mass: float, base: int) -> None:
-            """`mass` at relative `key` (absolute `base + key`), split between the two
-            grid points around it when the law is binned."""
-            if bin_width == 1:
-                out[key] = out.get(key, 0.0) + mass
-                return
-            absolute = base + key
-            grid = (absolute // bin_width) * bin_width
-            upper = (absolute - grid) / bin_width
-            low = grid - base
-            out[low] = out.get(low, 0.0) + mass * (1.0 - upper)
-            if upper:
-                out[low + bin_width] = out.get(low + bin_width, 0.0) + mass * upper
+        merge = MERGE_KERNEL or merge_laws
 
         def merged(a: list, b: list) -> list:
             nonlocal bin_width
@@ -424,19 +464,17 @@ class _Sweep:
             if da is db and oa == ob:
                 return [w, oa, da, la, ha]
             base_off = min(oa, ob)
-            out: dict[int, float] = {}
-            for weight, off, law in ((wa, oa, da), (wb, ob, db)):
-                share = weight / w if w else 0.0
-                shift = off - base_off
-                for v, p in law.items():
-                    put(out, v + shift, p * share, base_off)
-            if len(out) > cap:
-                lo, hi = min(out), max(out)
-                bin_width = max(bin_width * 2, (hi - lo) // (cap // 2) + 1)
-                binned: dict[int, float] = {}
-                for v, p in out.items():
-                    put(binned, v, p, base_off)
-                out = binned
+            out, bin_width = merge(
+                da,
+                wa / w if w else 0.0,
+                oa - base_off,
+                db,
+                wb / w if w else 0.0,
+                ob - base_off,
+                base_off,
+                bin_width,
+                cap,
+            )
             return [w, base_off, out, min(la + oa, lb + ob) - base_off, max(ha + oa, hb + ob) - base_off]
 
         n = self.n

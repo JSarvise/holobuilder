@@ -17,3 +17,18 @@ def test_a_large_batch_is_cut_into_bounded_chunks_that_still_use_every_worker():
             size = _chunksize(count, workers)
             assert 1 <= size <= 64
             assert count / size >= workers * 8  # at least 8 chunks per worker
+
+
+def test_a_chunk_answers_in_order_and_sets_what_it_kept_aside_from_the_cyclic_collector():
+    """`_run_chunk` (`WORKER_GC_FREEZE`): the answers are the tasks', in order, and what is
+    alive afterwards is frozen, so the collector's full passes stop walking the caches."""
+    import gc
+
+    from hbuilder.solver import parallel_refine as pr
+
+    gc.unfreeze()
+    try:
+        assert pr._run_chunk((lambda x: x * 2, [3, 1, 2])) == [6, 2, 4]
+        assert gc.get_freeze_count() > 0 if pr.WORKER_GC_FREEZE else gc.get_freeze_count() == 0
+    finally:
+        gc.unfreeze()

@@ -105,6 +105,11 @@ SETTLE_FROM = 3
 SETTLE_RESCORE = 20
 # ...and two-card moves: the best this many one-swaps of the climb's best team, paired
 SETTLE_PAIR_MOVES = 20
+# In general, the sample and wide-sample values a request has already scored are kept for the
+# request and not sent to the workers again: each start and each climb keeps its own record of
+# what it scored, and the second start asks again for 17-42 % of its teams, the settle for 95 %
+# of the climb's. A team's score is a pure function of the team, so the numbers are the same
+REQUEST_MEMO = True
 SAMPLE_TRAIN = 300
 SAMPLE_SEED = 20261022
 GENERAL_RESCORE = 200
@@ -254,6 +259,26 @@ def candidates(reps: Iterable[Card], filters: Filters) -> tuple[list, list]:
 
 class Cancelled(Exception):
     pass
+
+
+def memoised(
+    score: Callable[[list], list], memo: dict | None, cancel: threading.Event | None = None
+) -> Callable[[list], list]:
+    """`score` (a list of `(leader index, set)` pairs -> their values, in order) answering
+    from `memo` the pairs it has already scored and sending only the others, each once; None
+    leaves `score` as it is. The values are the floats `score` returned for those pairs."""
+    if memo is None:
+        return score
+
+    def scored(pairs: list) -> list:
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+        todo = list(dict.fromkeys(p for p in pairs if p not in memo))
+        if todo:
+            memo.update(zip(todo, score(todo)))
+        return [memo[p] for p in pairs]
+
+    return scored
 
 
 class SearchRounds:
@@ -724,6 +749,7 @@ class Engine:
         self._wide: tuple[int, ...] = ()
         self._counts_charts: tuple[int, ...] | None = None  # `_counts_funnel`'s sample
         self._leader_factors: dict[tuple[int, ...], dict[str, float]] = {}
+        self._factor_full: list[float] | None = None  # `leader_factors`' every-chart means
 
     def _within_materials(
         self, a, ranking, leaders, pool, song, chart_indices, cancel, progress=None, also=None
@@ -1091,7 +1117,15 @@ class Engine:
         if cancel is not None and cancel.is_set():
             raise Cancelled()
         with self.lock:
-            full = self.pool.batch_score(teams, chart_indices=None, refine_activation=SEARCH)  # type: ignore[arg-type]
+            # the teams depend on the engine only (its cards, SAMPLE_SEED), not on the sample:
+            # their means over every chart serve every sample's factors
+            full = self._factor_full
+            if full is None:
+                full = self._factor_full = self.pool.batch_score(
+                    teams,
+                    chart_indices=None,
+                    refine_activation=SEARCH,  # type: ignore[arg-type]
+                )
             part = self.pool.batch_score(teams, chart_indices=key, refine_activation=SEARCH)  # type: ignore[arg-type]
         logs: dict[str, list[float]] = {}
         for team, f, p in zip(teams, full, part):
@@ -1226,6 +1260,9 @@ class Engine:
                 values = [float(v) * factors.get(leaders[li].id, 1.0) for v, (li, _s) in zip(values, pairs)]
             return values
 
+        # In general the starts share what they scored (`REQUEST_MEMO`)
+        score_pairs = memoised(score_pairs, {} if REQUEST_MEMO and general else None, cancel)
+
         # In general each leader's sample scores are scaled by her own factor (LEADER_REFERENCE);
         # one leader needs none
         factors: dict[str, float] = {}
@@ -1286,6 +1323,7 @@ class Engine:
                 raise KeyError("no legal team satisfies the filters")
             if emit:
                 emit({"type": "progress", "stage": "refine", "evaluated": 0})
+            level1_ceilings: dict[int, float] = {}  # chosen index -> its level-1 ceiling
             if general:
                 # the climb on the wide sample, from the search's best teams; its
                 # best go to the full re-score first, then the search's own order
@@ -1311,6 +1349,8 @@ class Engine:
                             ]
                         return values
 
+                    # the climb and the settle below share what they scored (`REQUEST_MEMO`)
+                    score_wide = memoised(score_wide, {} if REQUEST_MEMO else None, cancel)
                     climbed = joint_search.climb(
                         pool,
                         leaders,
@@ -1393,11 +1433,19 @@ class Engine:
                     else self._count_funnel(ranking, leaders, pool, chart_indices, lens=lens)
                 )
                 teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in chosen]
-                refined = (
-                    self.pool.batch_score(teams, chart_indices=chart_indices, refine_activation=True)
-                    if teams
-                    else []
-                )
+                if teams and not replan:
+                    # each refined team's ceiling from the same develop: the rows served on
+                    # their level-1 board take it (`_ceilings`' known) instead of developing
+                    # that board again (a re-planned row is served on another board)
+                    both = self.pool.batch_score_and_ceiling(teams, chart_indices, True)
+                    refined = [e for e, _c in both]
+                    level1_ceilings = {k: c for k, (_e, c) in enumerate(both)}
+                elif teams:
+                    refined = self.pool.batch_score(
+                        teams, chart_indices=chart_indices, refine_activation=True
+                    )
+                else:
+                    refined = []
                 refined, levels, counted_ceilings = self._count_cooldowns(
                     chosen, teams, refined, chart_indices
                 )
@@ -1495,6 +1543,14 @@ class Engine:
                 for k, (_plain, li, s) in enumerate(chosen)
                 if k in counted_ceilings and on_refined.get((li, s)) == 2
             }
+            # ...and the level-1 rows' with their level-1 expectation
+            known.update(
+                {
+                    (li, s): level1_ceilings[k]
+                    for k, (_plain, li, s) in enumerate(chosen)
+                    if k in level1_ceilings and on_refined.get((li, s)) == 1
+                }
+            )
             self._ceilings(
                 served, leaders, pool, chart_indices, on_refined, planned_boards, cancel, replan, known
             )

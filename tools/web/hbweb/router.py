@@ -333,6 +333,11 @@ def _enable_kernels() -> None:
     import jointmatch  # noqa: PLC0415
 
     jointmatch.enable()
+    # ...and the merge of two run-score laws (`song_distribution.MERGE_KERNEL`): a row's exact
+    # law (its detail's distribution, the event's first row) from ~9 s to well under a second
+    import lawmerge  # noqa: PLC0415
+
+    lawmerge.enable()
 
 
 def _start_cutoffs_poller() -> None:

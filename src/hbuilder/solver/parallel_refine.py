@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import atexit
 import dataclasses
+import gc
 import itertools
 import math
 import multiprocessing
@@ -270,6 +271,11 @@ _CONTEXTS: dict = {}
 _TOKEN: tuple | None = None
 # the contexts a worker keeps loaded (an engine's each, with its plan cache)
 CONTEXTS_HELD = 3
+# After each chunk a worker moves what is still alive (its plan caches, memos, contexts) out of
+# the cyclic collector's reach (`gc.freeze`): its full collections otherwise walk those caches
+# over and over, ~22 % of an In general search evaluation's time on 8 charts, ~5 % on every
+# chart. The collector only frees reference cycles; the numbers do not depend on it
+WORKER_GC_FREEZE = True
 
 
 def _init_worker(ctx: RefineContext | str, stop=None) -> None:
@@ -309,6 +315,11 @@ def _activate(token: tuple) -> None:
     while len(_CONTEXTS) > CONTEXTS_HELD:
         dropped = _CONTEXTS.pop(next(iter(_CONTEXTS)))
         forget_context(dropped[0], dropped[3])
+        if WORKER_GC_FREEZE:
+            # what `_run_chunk` set aside may now be garbage: back to the collector
+            del dropped
+            gc.unfreeze()
+            gc.collect()
     _CTX, _BY_ID, _TREES, _PLAN_CACHE = held
     _TOKEN, _SLOT = token, token[1]
 
@@ -1822,7 +1833,10 @@ def _run_chunk(job: tuple[Callable, list]) -> list:
     """In a worker: one chunk of a batch, `task` on each of its items, as the pool's own
     chunking (`mapstar`) runs one."""
     task, items = job
-    return [task(item) for item in items]
+    out = [task(item) for item in items]
+    if WORKER_GC_FREEZE:
+        gc.freeze()
+    return out
 
 
 def _gather(pool: Any, task: Callable, tasks: list, chunksize: int, out: list) -> None:

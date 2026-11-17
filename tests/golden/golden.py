@@ -31,8 +31,11 @@ import sandbox  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 
 # --------------------------------------------------------------------------- the sample
-SONG = "m0342"  # an EXPERT chart of the frozen event's song list
+SONG = "m0342"  # the per-song searches' chart (EXPERT)
+# the event cases' chapter and song: on a snapshot with its own clock, the chapter open at that
+# instant and its event song (`event_case`); these on an older snapshot
 EVENT = "marathon_event-normal-008-chapter-01"
+EVENT_SONG = SONG
 PLAN = {
     "level": "account",
     "bloom": "account",
@@ -105,6 +108,51 @@ def _event_run(song: str, basis: str):
     return body
 
 
+def _chapter_windows(meta: dict) -> dict[str, tuple[int, int]]:
+    """`{chapter id: (start_ms, end_ms)}` as `event_mode.chapter_windows` reads `event_meta.json`:
+    a chapter starts when the one before it ends, the first at the event's start."""
+    import datetime  # noqa: PLC0415
+
+    out: dict[str, tuple[int, int]] = {}
+    for ev in meta.get("events") or []:
+        start = int(datetime.datetime.fromisoformat(ev["starts_at"]).timestamp() * 1000)
+        for ch in sorted(ev.get("chapters") or [], key=lambda c: c.get("number") or 0):
+            end = int(datetime.datetime.fromisoformat(ch["ends_at"]).timestamp() * 1000)
+            out[ch["id"]] = (start, end)
+            start = end + 1000
+    return out
+
+
+def event_case(frozen: Path) -> tuple[str, str]:
+    """`(event chapter, song)` the event cases run on: the snapshot's `golden_case.json`
+    (`freeze.py` writes `choose_event_case`'s), else EVENT and EVENT_SONG (older snapshots)."""
+    path = frozen / "golden_case.json"
+    if not path.is_file():
+        return EVENT, EVENT_SONG
+    case = json.loads(path.read_text(encoding="utf-8"))
+    return case["event"], case["event_song"]
+
+
+def choose_event_case(frozen: Path) -> tuple[str, str]:
+    """The chapter the app opens at the snapshot's clock (`clock.txt`; `marathon.pick_chapter`
+    among the open ones) and that chapter's event song with an EXPERT chart."""
+    sys.path.insert(0, str(REPO / "src"))
+    from hbuilder.domain import marathon  # noqa: PLC0415
+
+    dumps = frozen / "inputs" / sandbox.DUMPS_REL
+    bonus = json.loads((dumps / "marathon_bonus.json").read_text(encoding="utf-8"))
+    meta = json.loads((dumps / "event_meta.json").read_text(encoding="utf-8"))
+    charts = (dumps / "charts.json").read_text(encoding="utf-8")
+    keys = sorted({marathon._event_key(g) for g in bonus.get("current_group_ids") or []})
+    chapter = marathon.pick_chapter(keys, _chapter_windows(meta), int(sandbox.clock_of(frozen) * 1000))
+    for group in bonus.get("groups") or []:
+        if group.get("kind") == "music" and marathon._event_key(group.get("group_id", "")) == chapter:
+            for row in group.get("rows") or []:
+                if row.get("music_id") and f'"{row["music_id"]}"' in charts:
+                    return chapter, row["music_id"]
+    raise SystemExit(f"the event chapter {chapter} has no event song with an EXPERT chart")
+
+
 # A group = one fresh server. The first step is a job; the follow-ups use its top rows the way
 # the pages do (row detail -> board plan, Versus compare of the two best teams).
 GROUPS = [
@@ -112,7 +160,7 @@ GROUPS = [
     ("search_song_maxed", "/api/search", _search_song_maxed, ("detail", "compare")),
     ("search_all_account", "/api/search", _search_all_account, ("detail_all",)),
     ("search_all_maxed", "/api/search", _search_all_maxed, ()),
-    ("event_song_account", "/api/event/run", lambda: _event_run(SONG, "account"), ("points",)),
+    ("event_song_account", "/api/event/run", lambda: _event_run(EVENT_SONG, "account"), ("points",)),
     ("event_highlight_account", "/api/event/run", lambda: _event_run("highlight", "account"), ()),
     ("event_highlight_maxed", "/api/event/run", lambda: _event_run("highlight", "maxed"), ()),
 ]
@@ -398,8 +446,11 @@ def _follow_ups(base: str, name: str, req: dict, payload: dict, kinds, out: list
 
 # --------------------------------------------------------------------------- a run
 def run(code: Path, frozen: Path, out: Path, workers: int | None, only: set[str] | None = None) -> dict:
+    global EVENT, EVENT_SONG
+    EVENT, EVENT_SONG = event_case(frozen)
+    print(f"event cases: {EVENT} on {EVENT_SONG}", flush=True)
     out.mkdir(parents=True, exist_ok=True)
-    timings: dict = {"workers": workers, "cases": {}}
+    timings: dict = {"workers": workers, "cases": {}, "event": EVENT, "event_song": EVENT_SONG}
     box = sandbox.build(code, frozen)
     try:
         for name, route, make, kinds in GROUPS:

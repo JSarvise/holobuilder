@@ -20,7 +20,10 @@ do the same thing and take the same options; [On Linux](#on-linux) lists what di
 - **Python 3.13** from [python.org](https://www.python.org/downloads/windows/), with *Add
   python.exe to PATH* ticked. 3.12 and newer work; 3.13 is the version the project is tested on.
   `setup.cmd` names an older Python it finds and stops; a `.venv` made with one is made again.
-- **gcc**, a C compiler. The team search runs four small C kernels that are compiled on your PC.
+  The desktop app runs Python 3.15, whose Windows build runs the searches about 7-13 % faster
+  with the same answers; from source, stay on 3.13 for now: the data refresh reads the game's
+  pictures and models with UnityPy, which has no Python 3.15 build yet.
+- **gcc**, a C compiler. The team search runs five small C kernels that are compiled on your PC.
   The easiest is WinLibs: `winget install BrechtSanders.WinLibs.POSIX.UCRT` (or download it from
   [winlibs.com](https://winlibs.com/) and add its `mingw64\bin` folder to the PATH). Open a new
   window afterwards so the PATH is read again.

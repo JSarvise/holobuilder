@@ -148,6 +148,16 @@ def freeze(source: Path, out: Path, master_repo: Path | None) -> dict:
     (out / "MANIFEST.json").write_text(
         json.dumps({"meta": meta, "files": manifest}, indent=1, sort_keys=True), encoding="utf-8"
     )
+    # the golden's fixed clock (`sandbox.clock_of`): the freeze instant, inside the event chapter
+    # open when these inputs were read; the event cases run on that chapter and its event song
+    (out / "clock.txt").write_text(f"{int(started)}\n", encoding="utf-8")
+    import golden  # noqa: PLC0415
+
+    event, song = golden.choose_event_case(out)
+    (out / "golden_case.json").write_text(
+        json.dumps({"event": event, "event_song": song}, indent=1) + "\n", encoding="utf-8"
+    )
+    meta["golden_case"] = {"event": event, "event_song": song}
     return meta
 
 

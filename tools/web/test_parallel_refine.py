@@ -336,6 +336,20 @@ def test_the_ceiling_is_the_all_fire_score_on_the_leaf_board(refine):
             assert pool.batch_ceiling([team], [0], [refine], [None]) == [ceiling]
 
 
+@pytest.mark.parametrize("per_chart", [False, True])
+def test_the_expectation_and_ceiling_of_one_develop_are_the_two_passes_floats(per_chart):
+    """`batch_score_and_ceiling` at level 1: the refined expectation `batch_score` gives and the
+    ceiling `batch_ceiling` gives on that refined board, bit for bit, from one develop (the song
+    search serves its level-1 rows' Max from it)."""
+    ctx, teams = _context()
+    ctx = dataclasses.replace(ctx, board_per_chart=per_chart)
+    with RefinePool(ctx, workers=1) as pool:
+        both = pool.batch_score_and_ceiling(teams, [0], True)
+        expect = pool.batch_score(teams, chart_indices=[0], refine_activation=True)
+        ceiling = pool.batch_ceiling(teams, [0], [1] * len(teams), [None] * len(teams))
+    assert both == list(zip(expect, ceiling))
+
+
 def test_two_contexts_on_one_shared_pool_score_as_their_own_pools():
     """Two engines' contexts on ONE set of workers (`SharedPool`), batches interleaved so
     each worker switches between them: the same floats, in order, as each context alone."""

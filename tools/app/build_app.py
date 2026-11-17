@@ -4,8 +4,10 @@
     python tools/app/build_app.py 0.1.0 --publish   # ...and put it on the server
 
     build/holobuilder/
-      runtime/   the official embeddable CPython (the exact version .venv runs) + the app's
-                 packages, pinned to .venv's versions -- same interpreter, same speed
+      runtime/   the official embeddable CPython PY_VERSION + the app's packages, pinned to
+                 .venv's versions and installed by the full CPython of the same version
+                 (python.org's NuGet package): the app runs a newer interpreter than .venv
+                 (see PY_VERSION) with the same numbers
       app/       the code: src/, tools/web, tools/app, the refresh scripts (tools/refresh),
                  data/cards.json, the C kernels' DLLs (gcc -O2, no -march=native: any x64)
 
@@ -40,8 +42,15 @@ REPO = paths.REPO
 BUILD = REPO / "build"
 OUT = BUILD / "holobuilder"
 CACHE = paths.DUMPS / "build_cache"
-PY_VERSION = "3.13.7"
+# The app's interpreter. 3.15's official Windows build is the tail-calling interpreter: the same
+# doubles as 3.13 (golden identical with the same highspy), ~7 % faster In general and ~13 % on a
+# song. .venv stays on 3.13: the refresh's UnityPy and its native dependencies have no 3.15
+# wheels yet, and the app does not ship them
+PY_VERSION = "3.15.2"
 PY_URL = f"https://www.python.org/ftp/python/{PY_VERSION}/python-{PY_VERSION}-embed-amd64.zip"
+# the full CPython of the same version, which installs the runtime's packages (pip --target picks
+# the wheels of the interpreter that runs it); python.org publishes each release there too
+PY_FULL_URL = f"https://api.nuget.org/v3-flatcontainer/python/{PY_VERSION}/python.{PY_VERSION}.nupkg"
 REMOTE_APP = "/srv/holobuilder/app"
 
 # Pinned to what .venv runs (pip freeze); pywebview brings pythonnet/bottle/...
@@ -50,7 +59,9 @@ PACKAGES = [
     "h2==4.3.0",
     "hpack==4.2.0",
     "hyperframe==6.1.0",
-    "highspy==1.15.1",
+    "highspy==1.16.0",
+    # highspy would pull it unpinned (requirements.txt)
+    "numpy==2.5.4",
     "pillow==12.3.0",
     "pywebview==5.4",
     "truststore==0.10.5",
@@ -144,6 +155,31 @@ def fetch_python() -> Path:
     return z
 
 
+def full_python() -> Path:
+    """`python.exe` of the full CPython PY_VERSION (unpacked once into the build cache), with pip."""
+    home = CACHE / f"python-{PY_VERSION}-full"
+    exe = home / "tools" / "python.exe"
+    if not exe.is_file():
+        CACHE.mkdir(parents=True, exist_ok=True)
+        pkg = CACHE / PY_FULL_URL.rsplit("/", 1)[1]
+        if not pkg.is_file():
+            print(f"downloading {PY_FULL_URL}")
+            with urllib.request.urlopen(PY_FULL_URL, timeout=120) as r:  # noqa: S310 -- python.org's package
+                pkg.write_bytes(r.read())
+        with zipfile.ZipFile(pkg) as zf:
+            zf.extractall(home)
+        subprocess.run([str(exe), "-m", "ensurepip"], check=True)
+    out = subprocess.run(
+        [str(exe), "-c", "import platform; print(platform.python_version())"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if out != PY_VERSION:
+        raise SystemExit(f"{exe} runs Python {out}, not {PY_VERSION}")
+    return exe
+
+
 def build_runtime(dest: Path) -> None:
     with zipfile.ZipFile(fetch_python()) as zf:
         zf.extractall(dest)
@@ -161,13 +197,12 @@ def build_runtime(dest: Path) -> None:
     )
     site = dest / "Lib" / "site-packages"
     site.mkdir(parents=True, exist_ok=True)
-    # .venv IS the target platform (CPython 3.13, win_amd64), so a plain --target install
-    # picks the same wheels; proxy_tools (a pywebview dependency) ships as an sdist only
-    if sys.version_info[:2] != tuple(int(x) for x in PY_VERSION.split(".")[:2]):
-        raise SystemExit(f"build with Python {PY_VERSION} (.venv): the wheels must match the runtime")
+    # the full CPython of the runtime's version IS the target platform (win_amd64), so a plain
+    # --target install picks the runtime's wheels; proxy_tools (a pywebview dependency) ships as
+    # an sdist only
     subprocess.run(
         [
-            sys.executable,
+            str(full_python()),
             "-m",
             "pip",
             "install",

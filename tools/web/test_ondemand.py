@@ -245,7 +245,7 @@ def _fake_engine(n_cards: int = 14, n_charts: int = 9):
     eng.pool, eng.lock, eng.hints = Pool(), threading.Lock(), {}
     eng.started_seconds, eng.closed, eng.key = 0.0, False, "k"
     eng._sample, eng._wide, eng._counts_charts = None, (), None
-    eng._leader_factors = {}
+    eng._leader_factors, eng._factor_full = {}, None
     return eng, calls
 
 
@@ -308,6 +308,63 @@ def test_engine_song_and_general_payloads(monkeypatch):
         other.search(None)
         assert not any(c[1] == "per_chart" for c in other_calls)
         assert other._wide == () and len(other._sample) == (3 if basis == "account" else 9)
+
+
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="no gcc to build the screen")
+def test_in_general_no_team_is_scored_twice_on_a_sample_and_the_answer_is_the_same(monkeypatch):
+    """`REQUEST_MEMO`: In general the second start and the settle ask again for teams the first
+    start and the climb scored; those come from the request's record, never from the workers
+    again, and the answer is the one scoring them again gives. The leader factors' reference
+    teams are scored on every chart once for both samples."""
+    import collections
+
+    from hbuilder.domain import team as team_mod
+
+    monkeypatch.setattr(ondemand, "GENERAL_SAMPLE", 3)
+    monkeypatch.setattr(ondemand, "SAMPLE_TRAIN", 40)
+    monkeypatch.setattr(ondemand, "GENERAL_WIDE", 5)
+    monkeypatch.setattr(ondemand, "FITTED_SAMPLE", 3)
+    monkeypatch.setattr(
+        team_mod, "Team", lambda leader, members: SimpleNamespace(leader=leader, members=members)
+    )
+
+    def run(memo):
+        monkeypatch.setattr(ondemand, "REQUEST_MEMO", memo)
+        eng, _calls = _fake_engine()
+        eng.basis = "maxed"
+        sent: collections.Counter = collections.Counter()
+        every_chart = []
+        inner = eng.pool.batch_score
+        in_factors = [False]
+        factors = eng.leader_factors
+
+        def counting(teams, chart_indices=None, refine_activation=None):
+            if refine_activation == "search":
+                if chart_indices is None:
+                    every_chart.append(len(teams))
+                elif not in_factors[0]:  # the search's own requests (the factors' teams are its own)
+                    for t in teams:
+                        sent[(tuple(chart_indices), t.leader.id, tuple(m.id for m in t.members))] += 1
+            return inner(teams, chart_indices, refine_activation)
+
+        def counting_factors(*args, **kwargs):
+            in_factors[0] = True
+            try:
+                return factors(*args, **kwargs)
+            finally:
+                in_factors[0] = False
+
+        eng.pool.batch_score = counting
+        eng.leader_factors = counting_factors
+        return eng.search(None), sent, every_chart
+
+    got, sent, every_chart = run(True)
+    plain, sent_plain, _every_chart = run(False)
+    assert got["ranking"] == plain["ranking"]
+    assert max(sent_plain.values()) > 1  # what the record is for
+    assert max(sent.values()) == 1
+    assert sum(sent.values()) < sum(sent_plain.values())
+    assert len(every_chart) == 1  # the factors of the sample and of the wide sample
 
 
 def test_assumptions_default_is_the_account_untouched_and_levers_parse():
