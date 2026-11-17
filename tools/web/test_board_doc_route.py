@@ -68,6 +68,9 @@ def test_board_doc_overlays_the_given_board_without_optimising(web_base, develop
     assert doc["budget"] == 453 and doc["budget_kind"] == "flat"
     chars = {c["chr"]: c for c in doc["characters"]}
     assert set(chars) == set(developed["board_state"])
+    from hbweb import config
+
+    account = config.read_json(config.BOARD_STATE_PATH) or {}
     for chr_id, state in developed["board_state"].items():
         c = chars[chr_id]
         plan = c["plan"]
@@ -77,9 +80,13 @@ def test_board_doc_overlays_the_given_board_without_optimising(web_base, develop
         assert set(plan["to_sell"]) == owned - set(state["nodes"])
         assert plan["point_budget"] == 453  # labelled by the given kind
         assert plan["point_cost"] >= 0
-        assert state["slots"].items() <= plan["slots"].items()  # the given placements kept
+        # the given placements kept, or the account's own card already in that socket when it is
+        # an equivalent one (`boardplan.settle_slots`: a swap that changes nothing is not shown)
+        held = (account.get(chr_id) or {}).get("slots") or {}
+        for sock_id, card in state["slots"].items():
+            assert plan["slots"].get(sock_id) in (card, held.get(sock_id))
         for sock in c.get("sockets", []):
-            cid = state["slots"].get(sock["socket"])
+            cid = plan["slots"].get(sock["socket"])
             if cid:
                 assert sock["recommended_card"] == cid
     assert isinstance(doc.get("branches"), dict)

@@ -59,7 +59,7 @@ from pathlib import Path
 from typing import Any
 
 import atomic_io
-from refresh_steps import ACCOUNT_STEPS, PICTURE_STEPS, STEP_NAMES, STEPS, Step, _pyexe
+from refresh_steps import ACCOUNT_STEPS, PICTURE_STEPS, STEP_NAMES, STEPS, Step, _assets_pyexe, _pyexe
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
 from hbuilder import paths  # noqa: E402
@@ -1094,6 +1094,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"repo         {REPO}")
     print(f"master repo  {MASTER_REPO}{'' if MASTER_REPO.is_dir() else '   (MISSING)'}")
     print(f"python       {_pyexe(args)}")
+    if _assets_pyexe(args) != _pyexe(args):
+        print(f"assets       {_assets_pyexe(args)}   (the steps that read the game's asset bundles)")
     print(f"master guard {master_guard_state(args.force)}")
     print("=" * 74)
 

@@ -59,8 +59,10 @@ In both cases the optimizer runs on your PC and your account is read straight fr
 **The app:** download `holobuilder-setup.exe` from [Releases](../../releases/latest), sign in with
 Google and wait for approval; the installer does the rest. See [Getting started](docs/getting-started.md).
 
-**From source:** you need the game installed and started once, Python 3.12 or newer (3.13 is
-the tested one) and `gcc`. On Windows: [Python 3.13](https://www.python.org/downloads/windows/)
+**From source:** you need the game installed and started once, Python 3.12 or newer (3.15 and
+3.13 are the tested ones: 3.15 searches faster, and 3.13 reads the game's pictures and models
+beside it; 3.13 alone works too) and `gcc`. On Windows:
+[Python 3.15 and 3.13](https://www.python.org/downloads/windows/)
 and `winget install BrechtSanders.WinLibs.POSIX.UCRT`. On Linux, with the game under Proton:
 `sudo apt install python3 python3-venv gcc libsqlcipher1` (or your distribution's equivalent).
 

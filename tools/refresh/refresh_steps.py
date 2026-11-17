@@ -34,6 +34,12 @@ def _pyexe(args: argparse.Namespace) -> str:
     return args.python or sys.executable
 
 
+def _assets_pyexe(args: argparse.Namespace) -> str:
+    """The interpreter of a step that reads the game's asset bundles (UnityPy): `--python` when
+    given, else this one when it can import UnityPy, else .venv-assets' (paths.assets_python)."""
+    return args.python or paths.assets_python()
+
+
 def cmd_master(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
     script = MASTER_REPO / "scripts" / "run-local.ps1"
     cmd = [
@@ -180,17 +186,17 @@ def cmd_chart_lib(args: argparse.Namespace) -> tuple[list[str], dict[str, str], 
 
 
 def cmd_jackets(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "song_jackets.py"), "--sync"], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "song_jackets.py"), "--sync"], {}, HERE
 
 
 def cmd_card_art(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "card_art_sync.py")], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "card_art_sync.py")], {}, HERE
 
 
 def cmd_event_art(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
     # Exits 0 whatever is missing: a banner the CDN will not serve is a printed line
     # and a null title/art on the Event page, never a failed refresh.
-    return [_pyexe(args), str(HERE / "event_art.py")], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "event_art.py")], {}, HERE
 
 
 def cmd_event_cutoffs(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
@@ -202,22 +208,22 @@ def cmd_event_cutoffs(args: argparse.Namespace) -> tuple[list[str], dict[str, st
 
 def cmd_event_emblems(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
     # after event_history: it names the chapters on record (each one's exact medal)
-    return [_pyexe(args), str(HERE / "event_emblems.py")], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "event_emblems.py")], {}, HERE
 
 
 def cmd_event_history(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
     # Offline: folds event_meta (archived before the event leaves the list), the cutoff store
     # (the account's rank, Event Pt, final borders) and the emblems held into event_history.json.
-    return [_pyexe(args), str(HERE / "event_history.py")], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "event_history.py")], {}, HERE
 
 
 def cmd_item_icons(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
     # Reads the client's own Octo cache; downloads nothing.
-    return [_pyexe(args), str(HERE / "item_icons.py")], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "item_icons.py")], {}, HERE
 
 
 def cmd_ui_assets(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "ui_assets.py")], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "ui_assets.py")], {}, HERE
 
 
 def cmd_node_master(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
@@ -229,15 +235,15 @@ def cmd_skilltree(args: argparse.Namespace) -> tuple[list[str], dict[str, str], 
 
 
 def cmd_member_icons(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "member_icons.py")], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "member_icons.py")], {}, HERE
 
 
 def cmd_skill_icons(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "skill_icons.py")], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "skill_icons.py")], {}, HERE
 
 
 def cmd_park_export(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "park_export.py")], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "park_export.py")], {}, HERE
 
 
 def cmd_board(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
@@ -258,12 +264,12 @@ def cmd_live2d(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Pat
     # The leaders' Live2D figures: every outfit of the catalogue not converted yet, owned or
     # not ("Maxed account" and the pulls page lead with any card). Built models are skipped;
     # a new outfit is ~4.5 MB.
-    return [_pyexe(args), str(HERE / "live2d_build.py"), "--all"], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "live2d_build.py"), "--all"], {}, HERE
 
 
 def cmd_chibi(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
     # The Optimizer's progress-bar runners: only the SdCostume outfits with no model yet.
-    return [_pyexe(args), str(HERE / "chibi_build.py"), "--new"], {}, HERE
+    return [_assets_pyexe(args), str(HERE / "chibi_build.py"), "--new"], {}, HERE
 
 
 # What the desktop app refreshes (`--account-only`): the steps that read the account itself,

@@ -5,8 +5,10 @@
 
 cd "$(dirname "$0")" || exit 1
 
-# Python 3.12 or newer, 3.13 first: the version the project is tested on.
-for py in python3.13 python3.12 python3.14 python3 python; do
+# Python 3.12 or newer, 3.15 first (the search runs faster on it), then 3.13: the versions the
+# project is tested on. With 3.15, setup also makes .venv-assets with a python3.13, 3.12 or 3.14
+# for the refresh steps that read the game's asset bundles.
+for py in python3.15 python3.13 python3.12 python3.14 python3 python; do
   if command -v "$py" >/dev/null 2>&1 && "$py" -c 'import sys; sys.exit(sys.version_info < (3, 12))' 2>/dev/null; then
     exec "$py" -u tools/local/run_local.py setup
   fi
@@ -24,5 +26,5 @@ if [ -n "$old" ]; then
 else
   echo "  [X] Python 3.12 or newer was not found."
 fi
-echo "      Install Python 3.13 (or 3.12+) from your distribution, then run ./setup.sh again."
+echo "      Install Python 3.15 and 3.13 (or any 3.12+) from your distribution, then run ./setup.sh again."
 exit 1

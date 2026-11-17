@@ -40,6 +40,7 @@ import re
 import socket
 import ssl
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -249,6 +250,36 @@ _APP_VERSION_RE = re.compile(rb"(?<![\d.])\d+\.\d+\.\d+(?![\d.])")
 _app_version_cache: list[str | None] = []
 
 
+def _install_versions() -> set[str]:
+    """Every X.Y.Z string in the installed client's PlayerSettings (data.unity3d). Raises
+    MissingInput without the game and ImportError without UnityPy, in that order."""
+    data = os.path.join(paths.game_root(), "hololive-Dreams_Data", "data.unity3d")
+    import UnityPy
+
+    found: set[str] = set()
+    for obj in UnityPy.load(data).objects:
+        if obj.type.name == "PlayerSettings":
+            found |= {m.group().decode() for m in _APP_VERSION_RE.finditer(obj.get_raw_data())}
+    return found
+
+
+def _install_versions_with(python: str) -> set[str]:
+    """`_install_versions()` run by another interpreter (.venv-assets'), as a JSON list on its
+    last line of output. Raises when it fails."""
+    code = (
+        "import json, sys; sys.path.insert(0, sys.argv[1]); import account_snapshot; "
+        "print(json.dumps(sorted(account_snapshot._install_versions())))"
+    )
+    out = subprocess.run(
+        [python, "-c", code, str(Path(__file__).resolve().parent)],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=True,
+    )
+    return {str(v) for v in json.loads(out.stdout.strip().splitlines()[-1])}
+
+
 def app_version() -> str | None:
     """The client version the server will accept, or None to keep the header as written.
 
@@ -257,7 +288,8 @@ def app_version() -> str | None:
 
     `HOLODREAMS_APP_VERSION` wins. Otherwise Unity's PlayerSettings.bundleVersion is read off
     the installed client's data.unity3d (the raw object is scanned, since UnityPy cannot read
-    its type tree; anything but exactly one X.Y.Z string counts as unreadable). Without the
+    its type tree; anything but exactly one X.Y.Z string counts as unreadable). An interpreter
+    without UnityPy (Python 3.15) has .venv-assets read it (`paths.assets_python`). Without the
     game (the desktop app) the fallback is `dumps/client_version.json`, written by
     `tools/app/publish.py`.
     """
@@ -267,12 +299,12 @@ def app_version() -> str | None:
     if not _app_version_cache:
         found: set[str] = set()
         try:
-            import UnityPy
-
-            data = os.path.join(paths.game_root(), "hololive-Dreams_Data", "data.unity3d")
-            for obj in UnityPy.load(data).objects:
-                if obj.type.name == "PlayerSettings":
-                    found |= {m.group().decode() for m in _APP_VERSION_RE.finditer(obj.get_raw_data())}
+            try:
+                found = _install_versions()
+            except ImportError:
+                other = paths.assets_python()
+                if other != sys.executable:
+                    found = _install_versions_with(other)
         except Exception:  # noqa: BLE001 -- no install, no UnityPy: keep the header as written
             found = set()
         _app_version_cache.append(found.pop() if len(found) == 1 else _published_version())

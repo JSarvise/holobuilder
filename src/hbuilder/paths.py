@@ -19,6 +19,7 @@ contents.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import sys
@@ -57,6 +58,25 @@ def venv_python(venv: Path = VENV, platform: str = sys.platform) -> Path:
     """The interpreter of a virtual environment: `Scripts/python.exe` on Windows, `bin/python`
     elsewhere."""
     return venv / ("Scripts/python.exe" if platform == "win32" else "bin/python")
+
+
+# The second environment, for the scripts that read the game's asset bundles (UnityPy). UnityPy's
+# native dependencies ship no wheels for the newest Python, so when .venv runs one (3.15), setup
+# makes .venv-assets with an older one (3.13, 3.12 or 3.14) for those scripts alone.
+VENV_ASSETS = REPO / ".venv-assets"
+
+
+def assets_python(venv: Path = VENV_ASSETS, has_unitypy: bool | None = None) -> str:
+    """The interpreter for a script that reads the game's asset bundles: this one when it can
+    import UnityPy, else .venv-assets' when that exists, else this one (the script then names the
+    missing package itself)."""
+    if has_unitypy is None:
+        has_unitypy = importlib.util.find_spec("UnityPy") is not None
+    if not has_unitypy:
+        other = venv_python(venv)
+        if other.is_file():
+            return str(other)
+    return sys.executable
 
 
 # The master-data dump repo: HB_MASTER_REPO, else the folder next to this checkout.

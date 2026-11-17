@@ -4,6 +4,8 @@ __pycache__/
 .pytest_cache/
 .cache/
 .venv/
+.venv-assets/
+.venv-previous/
 extracted/
 
 # this PC's own: the account, its settings, credentials and keys

@@ -3,6 +3,8 @@ no sign-in, no approval. The scripts at the top of the repository call it, `.cmd
 `.sh` on Linux, and hold no logic of their own beyond finding Python:
 
     setup     run_local.py setup: creates .venv, installs the packages, then run_local.py check
+              (on Python 3.15 also .venv-assets, with 3.13 / 3.12 / 3.14, for the refresh steps
+              that read the game's asset bundles: UnityPy has no packages for 3.15 yet)
     refresh   run_local.py refresh [--region us|jp|as] [any refresh_all.py option]
     start     run_local.py start [--port N] [--no-browser] [--region us|jp|as]
     update    run_local.py update [--no-refresh]: the newest holobuilder from GitHub, then refresh
@@ -69,7 +71,6 @@ DEFAULT_PORT = 8731
 REGIONS = ("us", "as", "jp")  # the order a region is looked for: worldwide ones first
 PACKAGES = (
     ("Crypto", "pycryptodome"),
-    ("UnityPy", "UnityPy"),
     ("h2", "h2"),
     ("highspy", "highspy"),
     ("PIL", "pillow"),
@@ -79,8 +80,13 @@ KERNELS = ("notewalk", "connect", "surrogate", "cdvar", "jointmatch")
 WINLIBS = "winget install BrechtSanders.WinLibs.POSIX.UCRT"
 WINDOWS = sys.platform == "win32"
 # The oldest Python holobuilder runs on (pyproject.toml's requires-python): the compiled board
-# assembly replays the built-in sum() as 3.12 compensates it. 3.13 is the tested one.
+# assembly replays the built-in sum() as 3.12 compensates it. 3.15 and 3.13 are the tested ones;
+# 3.15 runs the search faster, and setup.cmd / setup.sh pick it first.
 MIN_PYTHON = (3, 12)
+TESTED = ((3, 15), (3, 13))
+# The Pythons UnityPy's native dependencies ship wheels for (requirements-assets.txt skips it on
+# a newer one), in the order setup looks for one to make .venv-assets with.
+ASSETS_PYTHONS = ((3, 13), (3, 12), (3, 14))
 MARKS = {True: "ok", False: "X ", None: "--"}  # ready / blocks the local route / not yet
 
 for _path in (paths.APP_DIR, REFRESH, KERNEL):
@@ -284,7 +290,8 @@ def refresh(args: argparse.Namespace, extra: list[str]) -> int:
         if code not in (3, 4):  # maintenance, no constants: the gacha read is refused too
             # the pull history and its banners, as the pages' Refresh reads them after the refresh
             print("\n--- your pull history (gacha_sync.py) ---")
-            gacha, more = _stream([sys.executable, "-u", str(REFRESH / "gacha_sync.py")], env)
+            # the banners' art comes out of the game's asset bundles: the Python that reads them
+            gacha, more = _stream([paths.assets_python(), "-u", str(REFRESH / "gacha_sync.py")], env)
             seen = f"{seen} {more}".strip()
             if gacha:
                 print(f"  (the pull history was not read: exit {gacha})")
@@ -333,7 +340,8 @@ def _stream(cmd: list[str], env: dict) -> tuple[int, str]:
 # ---------------------------------------------------------------- update
 CATALOGUE = "data/cards.json"  # the one tracked file a refresh writes (card_append.py adds to it)
 CATALOGUE_BACKUP = "cards_before_update.json"  # in dumps/: the catalogue as it was before an update
-PACKAGES_FILES = ("requirements.txt", "pyproject.toml")  # a change to these needs setup again
+# a change to these needs setup again
+PACKAGES_FILES = ("requirements.txt", "requirements-assets.txt", "pyproject.toml")
 
 
 def only_added_cards(before: object, now: object) -> bool:
@@ -418,7 +426,7 @@ def update(args: argparse.Namespace, repo: Path = REPO, run: Callable[[list[str]
         return 1
     old = _git(repo, "rev-parse", "HEAD").stdout.strip()
     new = _git(repo, "rev-parse", "@{u}").stdout.strip()
-    put_aside = False
+    put_aside = ran_setup = False
     if _git(repo, "merge-base", "--is-ancestor", new, old).returncode == 0:
         print("  this folder already has the newest holobuilder")
     else:
@@ -455,12 +463,41 @@ def update(args: argparse.Namespace, repo: Path = REPO, run: Callable[[list[str]
             code = run([sys.executable, "-u", str(repo / "tools" / "local" / "run_local.py"), "setup"])
             if code:
                 return code
+            ran_setup = True
+    tip = None if ran_setup else faster_python_tip()  # setup has said it
     if args.no_refresh:
         if put_aside:
             print(f"\n  Run {launcher('refresh')} next: it adds back the cards the new catalogue lacks.")
+        if tip:
+            print("\n" + tip)
         return 0
     print("\n  now the refresh: it signs in to your account, so close the game first\n")
-    return run([sys.executable, "-u", str(repo / "tools" / "local" / "run_local.py"), "refresh"])
+    code = run([sys.executable, "-u", str(repo / "tools" / "local" / "run_local.py"), "refresh"])
+    if tip:
+        print("\n" + tip)
+    return code
+
+
+def faster_python_tip(find: Callable[[], str | None] | None = None) -> str | None:
+    """What update says when this .venv runs an older Python than the newest tested one: run
+    setup once when that Python is installed, else where to get it. None on the newest."""
+    newest = max(TESTED)
+    if this_python() >= newest:
+        return None
+    found = (find or (lambda: find_python((newest,))))()
+    how = (
+        f"run {launcher('setup')} once, with holobuilder closed: it moves .venv onto it and makes "
+        f'.venv-assets for the refresh\'s pictures and models (docs/run-locally.md, "Two environments")'
+    )
+    if found:
+        return (
+            f"  Python {dotted(newest)} is installed on this PC: {how}. The searches run about "
+            "7-17 % faster on it, with the same answers."
+        )
+    return (
+        f"  Tip: the searches run about 7-17 % faster on Python {dotted(newest)}, with the same answers. "
+        f"Install it (python.org) beside Python {dotted(this_python())}, then {how}."
+    )
 
 
 # ---------------------------------------------------------------- the web app
@@ -600,6 +637,32 @@ def shown(path, home: str | None = None, windows: bool = WINDOWS) -> str:
     return text
 
 
+def asset_reader() -> tuple[bool, str, str, str]:
+    """check's row for UnityPy, which the refresh reads the game's asset bundles with: in this
+    .venv, or in .venv-assets when this Python has no packages for it."""
+    if importlib.util.find_spec("UnityPy") is not None:
+        return True, "asset reader", "UnityPy (in this .venv)", ""
+    other = paths.assets_python()
+    if other != sys.executable:
+        works = not subprocess.run([other, "-c", "import UnityPy"], capture_output=True).returncode
+        version = venv_version(Path(other))
+        if works and version:
+            return True, "asset reader", f"UnityPy in .venv-assets (Python {dotted(version)})", ""
+    if needs_assets_env(this_python()):
+        fix = (
+            f"install Python 3.13 (python.org) and run {launcher('setup')} again: it makes .venv-assets "
+            "with it"
+        )
+    else:
+        fix = f"run {launcher('setup')} again (it installs it)"
+    return (
+        False,
+        "asset reader",
+        "UnityPy is missing: the refresh cannot read the game's pictures and models, nor its client version",
+        fix,
+    )
+
+
 def check(_args: argparse.Namespace | None = None) -> int:
     print("holobuilder -- what this PC has for running it locally\n")
     blocking = 0
@@ -611,14 +674,14 @@ def check(_args: argparse.Namespace | None = None) -> int:
         if fix:
             print(f"  {'':<20}{fix}")
 
-    py = sys.version_info[:2]
+    py = this_python()
     row(
         py >= MIN_PYTHON,
         "Python",
         f"{platform.python_version()} ({shown(sys.executable)})"
-        + ("" if py == (3, 13) else "; the project is tested on 3.13")
+        + ("" if py in TESTED else "; the project is tested on 3.15 and 3.13")
         + ("" if py >= MIN_PYTHON else "; too old: 3.12 or newer is needed"),
-        "" if py >= MIN_PYTHON else f"install Python 3.13 (python.org) and run {launcher('setup')} again",
+        "" if py >= MIN_PYTHON else f"install Python 3.15 (python.org) and run {launcher('setup')} again",
     )
     missing = [pip for mod, pip in PACKAGES if importlib.util.find_spec(mod) is None]
     row(
@@ -627,6 +690,7 @@ def check(_args: argparse.Namespace | None = None) -> int:
         "installed" if not missing else "missing: " + ", ".join(missing),
         "" if not missing else f"run {launcher('setup')} again (it installs them)",
     )
+    row(*asset_reader())
     gcc = shutil.which("gcc")
     if gcc is None:
         row(
@@ -685,27 +749,236 @@ def check(_args: argparse.Namespace | None = None) -> int:
     return 1 if blocking else 0
 
 
+def this_python() -> tuple[int, int]:
+    return sys.version_info[0], sys.version_info[1]
+
+
+def dotted(version: tuple[int, int]) -> str:
+    return f"{version[0]}.{version[1]}"
+
+
+def needs_assets_env(version: tuple[int, int]) -> bool:
+    """Whether a .venv on `version` reads the game's asset bundles through .venv-assets: UnityPy
+    has no wheels for a Python newer than ASSETS_PYTHONS."""
+    return version > max(ASSETS_PYTHONS)
+
+
+def make_venv(python: str, venv: Path, clear: bool = False) -> bool:
+    """`python -m venv` into `venv`; True once its pip answers."""
+    subprocess.run([python, "-m", "venv", *(["--clear"] if clear else []), str(venv)], cwd=str(REPO))
+    venv_py = paths.venv_python(venv)
+    return (
+        venv_py.is_file()
+        and not subprocess.run(
+            [str(venv_py), "-m", "pip", "--version"], cwd=str(REPO), capture_output=True
+        ).returncode
+    )
+
+
+def install_packages(venv_py: Path) -> bool:
+    """requirements.txt (and this checkout, editable) into a .venv; pip says what failed."""
+    print(f"\n  installing the packages into {venv_py.parents[1].name} (a few minutes the first time) ...\n")
+    pip = subprocess.run(
+        [
+            str(venv_py),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "-e",
+            ".",
+            "-r",
+            "requirements.txt",
+        ],
+        cwd=str(REPO),
+    )
+    if pip.returncode:
+        print("\n  [X] The packages did not install (see pip's message above).")
+    return not pip.returncode
+
+
+def find_assets_python(which: Callable[[str], str | None] = shutil.which) -> str | None:
+    """An installed Python of ASSETS_PYTHONS, the first found in their order."""
+    return find_python(ASSETS_PYTHONS, which)
+
+
+def find_python(
+    versions: tuple[tuple[int, int], ...], which: Callable[[str], str | None] = shutil.which
+) -> str | None:
+    """An installed Python of `versions`, the first found in their order: the py launcher's on
+    Windows, then python3.X on the PATH."""
+    for version in versions:
+        found = []
+        if WINDOWS and which("py"):
+            out = subprocess.run(
+                ["py", f"-{dotted(version)}", "-c", "import sys; print(sys.executable)"],
+                capture_output=True,
+                text=True,
+            )
+            if not out.returncode and out.stdout.strip():
+                found.append(out.stdout.strip())
+        found.append(which(f"python{dotted(version)}") or "")
+        for exe in found:
+            if exe and venv_version(Path(exe)) == version:
+                return exe
+    return None
+
+
+def setup_assets(venv: Path | None = None) -> bool:
+    """.venv-assets made, or its packages brought up to date, for the refresh steps that read the
+    game's asset bundles. False, having said why, when no Python of ASSETS_PYTHONS is installed
+    or its packages did not install."""
+    venv = paths.VENV_ASSETS if venv is None else venv
+    venv_py = paths.venv_python(venv)
+    have = venv_version(venv_py) if venv_py.is_file() else None
+    print(
+        f"\n  Python {dotted(this_python())} cannot read the game's pictures and models (UnityPy has no "
+        "packages for it yet): .venv-assets, with an older Python, runs those refresh steps"
+    )
+    if have in ASSETS_PYTHONS:
+        print(f"  .venv-assets (Python {dotted(have)}) is already here: bringing its packages up to date")
+    else:
+        base = find_assets_python()
+        if base is None:
+            print(
+                "  [!] No Python "
+                + ", ".join(dotted(v) for v in ASSETS_PYTHONS)
+                + " on this PC: without one the refresh cannot read the game's pictures, Live2D and "
+                "chibi models, nor the version of the game's client. Install Python 3.13 "
+                f"(python.org) and run {launcher('setup')} again."
+            )
+            return False
+        print(
+            f"  making .venv-assets with Python {dotted(venv_version(Path(base)) or (0, 0))} ({shown(base)}) ..."
+        )
+        if not make_venv(base, venv, clear=venv.exists()):
+            print("  [X] .venv-assets could not be created (see the message above).")
+            return False
+    return install_packages(venv_py)
+
+
+def processes_in(folder: Path) -> list[int]:
+    """The processes whose program lies in `folder` (a .venv's python: its server, a refresh, a
+    background picture run). Windows: every process's image path; Linux: each one's argv[0]
+    (a venv's bin/python is a link to the system's, so its image path names the system's).
+    Elsewhere, or when nothing can be read, none."""
+    root = os.path.normcase(os.path.abspath(folder)).rstrip("\\/") + os.sep
+    found = []
+    if WINDOWS:
+        import ctypes  # noqa: PLC0415
+        from ctypes import wintypes  # noqa: PLC0415
+
+        kernel, psapi = ctypes.WinDLL("kernel32"), ctypes.WinDLL("psapi")
+        pids = (wintypes.DWORD * 8192)()
+        size = wintypes.DWORD()
+        if not psapi.EnumProcesses(pids, ctypes.sizeof(pids), ctypes.byref(size)):
+            return []
+        name = ctypes.create_unicode_buffer(32768)
+        for pid in pids[: size.value // ctypes.sizeof(wintypes.DWORD)]:
+            handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                continue
+            try:
+                length = wintypes.DWORD(len(name))
+                if kernel.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(length)):
+                    if os.path.normcase(name.value).startswith(root):
+                        found.append(int(pid))
+            finally:
+                kernel.CloseHandle(handle)
+    elif sys.platform == "linux":
+        for proc in Path("/proc").glob("[0-9]*"):
+            try:
+                argv0 = (proc / "cmdline").read_bytes().split(b"\0")[0].decode()
+                if argv0 and not os.path.isabs(argv0):
+                    argv0 = os.path.join(os.readlink(proc / "cwd"), argv0)
+            except (OSError, UnicodeDecodeError):
+                continue
+            if argv0 and os.path.normpath(argv0).startswith(root):
+                found.append(int(proc.name))
+    return [pid for pid in found if pid != os.getpid()]
+
+
+def move_venv(venv: Path, old: tuple[int, int]) -> bool:
+    """Make `venv` again with this Python, the old one kept aside until the new one has its
+    packages: False, with the old one back in place, when anything fails. Refused while a
+    program runs from it (Windows renames the folder anyway, and that program would go on with
+    its packages swapped under it)."""
+    busy = processes_in(venv)
+    if busy:
+        print(
+            "  [X] Programs are running from .venv (PID "
+            + ", ".join(str(p) for p in busy)
+            + f"): close holobuilder (and wait for any refresh still running), then run "
+            f"{launcher('setup')} again. Nothing was changed."
+        )
+        return False
+    aside = venv.with_name(venv.name + "-previous")
+    shutil.rmtree(aside, ignore_errors=True)
+    try:
+        os.replace(venv, aside)
+    except OSError as exc:
+        print(
+            f"  [X] .venv could not be set aside ({exc}); run {launcher('setup')} again. Nothing was changed."
+        )
+        return False
+    if make_venv(sys.executable, venv) and install_packages(paths.venv_python(venv)):
+        shutil.rmtree(aside, ignore_errors=True)
+        if aside.exists():
+            print(
+                f"  [!] The old .venv could not be deleted entirely: {shown(aside)} can be deleted by hand."
+            )
+        return True
+    shutil.rmtree(venv, ignore_errors=True)
+    try:
+        os.replace(aside, venv)
+        print(f"  .venv is back as it was (Python {dotted(old)}).")
+    except OSError:
+        print(f"  [X] The old .venv is in {shown(aside)}: rename that folder to .venv.")
+    return False
+
+
 def setup(_args: argparse.Namespace | None = None) -> int:
     """Create .venv with the interpreter running this, install the packages into it, then run
-    `check` with the .venv's interpreter. Safe to run again: an existing .venv is updated."""
+    `check` with the .venv's interpreter. Safe to run again: an existing .venv is updated, and
+    made again when it runs another Python than this one (the old one stays until the new one
+    works). On a Python UnityPy has no packages for, .venv-assets is made too (setup_assets)."""
     print("\n  holobuilder setup\n  =================\n")
     if sys.version_info < MIN_PYTHON:
         print(
             f"  [X] Python {platform.python_version()} is too old: 3.12 or newer is needed "
-            "(3.13 is the version the project is tested on)."
+            "(3.15 and 3.13 are the versions the project is tested on)."
         )
         return 1
+    here = this_python()
     print(f"  Python {platform.python_version()}  ({shown(sys.executable)})")
+    assets = setup_assets() if needs_assets_env(here) else None
     venv_py = paths.venv_python(paths.VENV)
     old = venv_version(venv_py) if venv_py.is_file() else MIN_PYTHON
+    print()
     if old is None or old < MIN_PYTHON:
         print(
             "  .venv "
-            + (f"runs Python {old[0]}.{old[1]}, too old" if old else "does not start")
+            + (f"runs Python {dotted(old)}, too old" if old else "does not start")
             + ": making it again with this Python ..."
         )
         subprocess.run([sys.executable, "-m", "venv", "--clear", str(paths.VENV)], cwd=str(REPO))
+    elif venv_py.is_file() and old != here and (assets is not False or needs_assets_env(old)):
+        print(
+            f"  .venv runs Python {dotted(old)}: making it again with Python {dotted(here)} "
+            "(the old one is kept until the new one works) ..."
+        )
+        if not move_venv(paths.VENV, old):
+            return 1
+        print()
+        return subprocess.run(
+            [str(venv_py), str(Path(__file__).resolve()), "check"], cwd=str(REPO)
+        ).returncode
     elif venv_py.is_file():
+        if old != here:
+            print(
+                f"  .venv stays on Python {dotted(old)}: on Python {dotted(here)} it would lose the "
+                "steps that read the game's pictures and models (see above)"
+            )
         print("  .venv is already here: bringing its packages up to date")
     else:
         print("  creating .venv ...")
@@ -723,26 +996,16 @@ def setup(_args: argparse.Namespace | None = None) -> int:
                 "and run ./setup.sh again."
             )
         return 1
-    print("\n  installing the packages (a few minutes the first time) ...\n")
-    pip = subprocess.run(
-        [
-            str(venv_py),
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "-e",
-            ".",
-            "-r",
-            "requirements.txt",
-        ],
-        cwd=str(REPO),
-    )
-    if pip.returncode:
-        print("\n  [X] The packages did not install (see pip's message above).")
+    if not install_packages(venv_py):
         return 1
     print()
-    return subprocess.run([str(venv_py), str(Path(__file__).resolve()), "check"], cwd=str(REPO)).returncode
+    code = subprocess.run([str(venv_py), str(Path(__file__).resolve()), "check"], cwd=str(REPO)).returncode
+    # also here: an update from an older version runs its own (older) update, which says nothing
+    # of it, and this setup with the new code
+    tip = faster_python_tip()
+    if tip:
+        print("\n" + tip)
+    return code
 
 
 def venv_version(venv_py: Path) -> tuple[int, int] | None:
@@ -764,7 +1027,7 @@ def too_old() -> bool:
         return False
     print(
         f"  [X] This folder's .venv runs Python {platform.python_version()}: holobuilder needs "
-        f"3.12 or newer. Install Python 3.13 (python.org) and run {launcher('setup')} again: "
+        f"3.12 or newer. Install Python 3.15 (python.org) and run {launcher('setup')} again: "
         "it makes .venv again with it."
     )
     return True

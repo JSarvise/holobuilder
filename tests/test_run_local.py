@@ -260,6 +260,8 @@ def test_shown_hides_the_user_folder_on_both_platforms():
 
 
 def test_setup_creates_the_venv_installs_and_checks(monkeypatch, tmp_path):
+    monkeypatch.setattr(run_local, "this_python", lambda: (3, 13))  # one .venv: no .venv-assets
+    monkeypatch.setattr(run_local, "faster_python_tip", lambda: None)
     venv = tmp_path / ".venv"
     py = run_local.paths.venv_python(venv)
     calls = []
@@ -285,6 +287,8 @@ def test_setup_creates_the_venv_installs_and_checks(monkeypatch, tmp_path):
 
 
 def test_setup_stops_when_the_venv_cannot_be_made(monkeypatch, tmp_path):
+    monkeypatch.setattr(run_local, "this_python", lambda: (3, 13))  # one .venv: no .venv-assets
+    monkeypatch.setattr(run_local, "faster_python_tip", lambda: None)
     monkeypatch.setattr(run_local.paths, "VENV", tmp_path / ".venv")
     monkeypatch.setattr(run_local.subprocess, "run", lambda cmd, **_kw: type("R", (), {"returncode": 1})())
     assert run_local.setup() == 1
@@ -298,6 +302,8 @@ def test_setup_refuses_a_python_older_than_the_minimum(monkeypatch, capsys):
 
 
 def test_setup_makes_a_venv_from_an_older_python_again(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(run_local, "this_python", lambda: (3, 13))  # one .venv: no .venv-assets
+    monkeypatch.setattr(run_local, "faster_python_tip", lambda: None)
     venv = tmp_path / ".venv"
     py = run_local.paths.venv_python(venv)
     py.parent.mkdir(parents=True)

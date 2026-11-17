@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import gacha_view
 
+from hbuilder import paths
 from hbweb import config, scripts, static
 
 if TYPE_CHECKING:
@@ -156,7 +157,7 @@ def gacha_sync(h: Handler) -> None:
         h.reply_json(409, {"error": "a gacha sync is already running"})
         return
     try:
-        ran = scripts.run_recon_script(h, config.GACHA_SYNC_SCRIPT, "gacha")
+        ran = scripts.run_recon_script(h, config.GACHA_SYNC_SCRIPT, "gacha", python=paths.assets_python())
         if ran is None:
             return
         code, out = ran
@@ -178,7 +179,7 @@ def sync_after_refresh(h: Handler, refresh_code: int) -> dict | None:
     if not SYNC_LOCK.acquire(blocking=False):
         return {"error": "a gacha sync is already running; pulls not synced this refresh"}
     try:
-        ran = scripts.run_recon_script(h, config.GACHA_SYNC_SCRIPT, "gacha")
+        ran = scripts.run_recon_script(h, config.GACHA_SYNC_SCRIPT, "gacha", python=paths.assets_python())
     finally:
         SYNC_LOCK.release()
     if ran is None:

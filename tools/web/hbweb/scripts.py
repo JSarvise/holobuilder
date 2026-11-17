@@ -18,11 +18,12 @@ if TYPE_CHECKING:
 
 
 def run_recon_script(
-    h: Handler, script: Path, tag: str, args: list[str] | None = None
+    h: Handler, script: Path, tag: str, args: list[str] | None = None, python: str | None = None
 ) -> tuple[int, str] | None:
     """Run a recon-side script as a subprocess, echoing each line of its output to this
     server's console AS IT ARRIVES (the operator watches the console; a captured pipe
-    would leave it blank for minutes) and collecting it for the reply.
+    would leave it blank for minutes) and collecting it for the reply. `python` runs it
+    (this server's interpreter by default).
 
     Returns `(returncode, stdout)`, or `None` having ALREADY answered 500 when the
     script is missing or will not start -- the two failures where there is no exit
@@ -39,7 +40,7 @@ def run_recon_script(
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     try:
         process = subprocess.Popen(  # noqa: S603
-            [sys.executable, "-u", str(script), *(args or [])],
+            [python or sys.executable, "-u", str(script), *(args or [])],
             cwd=str(config.REPO_ROOT),
             env=env,
             stdout=subprocess.PIPE,

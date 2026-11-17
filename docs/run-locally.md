@@ -17,12 +17,16 @@ do the same thing and take the same options; [On Linux](#on-linux) lists what di
 - **Windows 10 or 11**, or **Linux** (see [On Linux](#on-linux) for its packages).
 - **hololive Dreams**, installed from Steam on this PC and started at least once (that is when the
   game writes your account file). It does not need to be running.
-- **Python 3.13** from [python.org](https://www.python.org/downloads/windows/), with *Add
-  python.exe to PATH* ticked. 3.12 and newer work; 3.13 is the version the project is tested on.
-  `setup.cmd` names an older Python it finds and stops; a `.venv` made with one is made again.
-  The desktop app runs Python 3.15, whose Windows build runs the searches about 7-13 % faster
-  with the same answers; from source, stay on 3.13 for now: the data refresh reads the game's
-  pictures and models with UnityPy, which has no Python 3.15 build yet.
+- **Python 3.15 and Python 3.13** from [python.org](https://www.python.org/downloads/windows/),
+  each with *Add python.exe to PATH* ticked. 3.15 runs holobuilder: its Windows build runs the
+  searches about 7-17 % faster than 3.13, with the same answers (the desktop app runs it too).
+  3.13 runs only the refresh steps that read the game's pictures, Live2D and chibi models and the
+  version of the game's client: they use UnityPy, which has no Python 3.15 build yet, so `setup`
+  gives them a second environment of their own, `.venv-assets`
+  ([Two environments](#two-environments-venv-and-venv-assets)).
+  **3.13 alone also works**, as before: one environment, a slower search. 3.12 and newer work;
+  3.15 and 3.13 are the versions the project is tested on. `setup.cmd` names an older Python it
+  finds and stops; a `.venv` made with one is made again.
 - **gcc**, a C compiler. The team search runs five small C kernels that are compiled on your PC.
   The easiest is WinLibs: `winget install BrechtSanders.WinLibs.POSIX.UCRT` (or download it from
   [winlibs.com](https://winlibs.com/) and add its `mingw64\bin` folder to the PATH). Open a new
@@ -49,12 +53,14 @@ the classic Command Prompt); each script can also be double-clicked in Explorer.
 ./setup.sh         (Linux)
 ```
 
-It finds Python, creates a private environment in `.venv`, installs the packages listed in
-`requirements.txt`, compiles the search kernels, and then checks the rest:
+It finds Python (3.15 first, then 3.13, 3.12, 3.14), creates a private environment in `.venv`,
+installs the packages listed in `requirements.txt` (with 3.15, it makes `.venv-assets` too),
+compiles the search kernels, and then checks the rest:
 
 ```
-  [ok] Python          3.13.x (...\.venv\Scripts\python.exe)
+  [ok] Python          3.15.x (...\.venv\Scripts\python.exe)
   [ok] packages        installed
+  [ok] asset reader    UnityPy in .venv-assets (Python 3.13)
   [ok] C compiler      gcc (...\gcc.exe): search kernels built
   [ok] game install    C:\Program Files (x86)\Steam\steamapps\common\hololiveDreams
   [ok] account file    found in the game's own folder (read in place, never copied)
@@ -65,6 +71,26 @@ It finds Python, creates a private environment in `.venv`, installs the packages
 
 `[X]` lines block the local route and say what to do; `[--]` lines are done by the first refresh.
 Run `setup.cmd` again whenever you like: it only installs what is missing.
+
+### Two environments: `.venv` and `.venv-assets`
+
+With Python 3.15, holobuilder (the web app, the search, most of the refresh) runs in `.venv`, and
+the refresh steps that read the game's asset bundles run in `.venv-assets`, made with the newest
+of 3.13, 3.12 or 3.14 that is installed: card art, song jackets, event and gacha banners, icons,
+the Live2D figures, the chibis, the Park maps, and the version of the game's client the account
+read sends. The refresh picks the right one by itself (its first lines name both); nothing else
+changes. `requirements-assets.txt` holds UnityPy; `requirements.txt` includes it, and pip skips it
+on 3.15.
+
+- **Already set up with 3.13?** Nothing breaks: `update.cmd` keeps your `.venv` as it is, and says at its end whether Python 3.15 is installed. To move
+  to 3.15, install it and run `setup.cmd` once: it makes `.venv-assets`, then makes `.venv` again
+  with 3.15. The old `.venv` stays aside until the new one has every package, and comes back if
+  anything fails. Close holobuilder first: setup will not move a `.venv` a program runs from, and says which.
+  Packages you installed into `.venv` by hand go with the old one.
+- **3.15 without 3.13 (or 3.12 / 3.14)**: setup warns and `check` shows
+  `[X] asset reader`: the refresh could not read the game's pictures and models, nor the version
+  of the game's client (after a game update the account read would be refused). Install 3.13 and
+  run `setup.cmd` again. If `.venv` was on 3.13, setup keeps it there instead.
 
 ## 3. Read the game and your account: `refresh.cmd` / `refresh.sh`
 
@@ -178,6 +204,7 @@ does all of it.
 | Folder | What it holds | In git? |
 |---|---|---|
 | `.venv\` | the Python environment `setup.cmd` made | no |
+| `.venv-assets\` | with Python 3.15: the second environment, for the refresh steps that read the game's asset bundles | no |
 | `state\` | this PC's own: your collection, client profile, the game's constants, the region | no, private |
 | `data\owned.json`, `data\gacha\` | your cards and your pull history | no, private |
 | `tools\recon\proxy\dumps\` | everything the refresh builds from the game | no |
@@ -191,7 +218,9 @@ refresh needs to read your account.
 The game runs on Linux through Steam's Proton, and holobuilder reads it the same way it does on
 Windows. What differs:
 
-- **Packages.** Python 3.12 or newer with `venv`, gcc and SQLCipher. On Debian or Ubuntu:
+- **Packages.** Python 3.12 or newer with `venv` (3.15 and 3.13 where your distribution has
+  them, as on Windows; `setup.sh` looks for `python3.15` first, and for `.venv-assets` for
+  `python3.13`, `python3.12` or `python3.14`), gcc and SQLCipher. On Debian or Ubuntu:
 
   ```
   sudo apt install python3 python3-venv gcc libsqlcipher1 git
@@ -269,8 +298,10 @@ The scripts only gather what the tools below need; everything can be run by hand
 On Windows:
 
 ```
-python -m venv .venv
-.venv\Scripts\pip install -e . -r requirements.txt
+py -3.15 -m venv .venv
+.venv\Scripts\python -m pip install -e . -r requirements.txt
+py -3.13 -m venv .venv-assets
+.venv-assets\Scripts\python -m pip install -e . -r requirements.txt
 .venv\Scripts\python tools\app\client_profile.py --write
 .venv\Scripts\python tools\refresh\game_keys.py --find
 set HB_CREDENTIAL_FILE=C:\path\to\the\game\account\file
@@ -280,7 +311,9 @@ set HB_ACCOUNT_HOST=us.game-hololive-dreams.com
 ```
 
 (`set` is the Command Prompt's; in PowerShell it is `$env:HB_CREDENTIAL_FILE = "..."`.) On Linux
-the same with `.venv/bin/python`, forward slashes and `export HB_CREDENTIAL_FILE=...`.
+the same with `python3.15` / `python3.13`, `.venv/bin/python`, forward slashes and
+`export HB_CREDENTIAL_FILE=...`. With 3.13 alone, make only `.venv`, with 3.13: `.venv-assets` is
+needed only when `.venv` cannot import UnityPy, and the refresh uses it by itself when it is there.
 
 ## Tests
 

@@ -2,6 +2,9 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.11 (2026-11-17)
+- **Running from source on Python 3.15:** the searches run about 7-17 % faster, with the same answers, as in the app. Install Python 3.15 beside 3.13 and run `setup.cmd` (or `./setup.sh`): holobuilder moves to 3.15, and the refresh steps that read the game's pictures, Live2D and chibi models and the game client's version run in a second environment, `.venv-assets`, on 3.13 (UnityPy, which reads them, has no 3.15 build yet). The old `.venv` stays aside until the new one works, and comes back if anything fails. Python 3.13 alone works as before. Already running from source: `update.cmd` brings this version and keeps your Python, and at its end says whether Python 3.15 is installed and what to run. See "Two environments" in docs/run-locally.md.
+
 ## 0.2.10 (2026-11-17)
 - **Faster searches, the same answers.** "In general" on a maxed account is about 14 % faster (71 → 61 s on our PC, before the newer Python below). A search no longer scores again the teams it already scored (its second start and its final settle repeated up to 40 % and 95 % of theirs), the leaders' every-song reference teams are scored once, and Python's garbage collector no longer walks the workers' caches over and over (about a fifth of each team's score on the search's sample). A song search's Max now comes with its refinement (about 4 % faster). The answers are the same, to the last digit.
 - **Team details with the score distribution about 7 times faster** (9.4 → 1.3 s on a maxed song): the exact law of the run score is merged in C, with the same numbers. The Event search scores its first row's distribution too: an Event search on your account is about 25 % faster.

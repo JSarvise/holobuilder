@@ -44,8 +44,8 @@ OUT = BUILD / "holobuilder"
 CACHE = paths.DUMPS / "build_cache"
 # The app's interpreter. 3.15's official Windows build is the tail-calling interpreter: the same
 # doubles as 3.13 (golden identical with the same highspy), ~7 % faster In general and ~13 % on a
-# song. .venv stays on 3.13: the refresh's UnityPy and its native dependencies have no 3.15
-# wheels yet, and the app does not ship them
+# song. The app does not ship UnityPy (the refresh's asset reader, whose native dependencies have
+# no 3.15 wheels yet): a checkout on 3.15 reads the assets through .venv-assets (paths.assets_python)
 PY_VERSION = "3.15.2"
 PY_URL = f"https://www.python.org/ftp/python/{PY_VERSION}/python-{PY_VERSION}-embed-amd64.zip"
 # the full CPython of the same version, which installs the runtime's packages (pip --target picks
