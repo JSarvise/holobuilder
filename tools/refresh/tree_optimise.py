@@ -488,6 +488,54 @@ class Oracle:
         results = self._score_set(members, (by_id[leader_id],), cfg)
         return max((r.total_score for r in results), default=0.0)
 
+    def screen_cooldown_counts(
+        self,
+        leader_id: str,
+        member_ids,
+        nodes_by_chr: dict,
+        cooldown_nodes: dict[str, list[str]],
+        vectors: list[tuple[int, ...]],
+    ) -> list[float] | None:
+        """ONE team's ESTIMATED score on the board `nodes_by_chr` (`{chr: nodes}`) with the
+        boards of `cooldown_nodes` (`{chr: its Act.CD nodes}`) at each vector's counts of
+        them, in order: `screen_song_cooldown_variants`, one set-up for every vector, within
+        a few 1e-5 of `score_team`. For ORDERING cooldown counts, never a served number.
+        None off a song (the general scorer has no screen) or with no screen kernel, where
+        every vector would be scored exactly (~30 s for 1,024 instead of ~30 ms)."""
+        from hbuilder.domain import song  # noqa: PLC0415
+
+        if self._chart is None or song._cooldown_screen_kernel() is None:
+            return None
+        from hbuilder.domain.song import overall_power_for, screen_song_cooldown_variants  # noqa: PLC0415
+
+        def board(nodes: dict):
+            return self.board_for(self.state_from({c: sorted(n) for c, n in nodes.items()}))
+
+        def at(chr_id: str, k: int):
+            trial = dict(nodes_by_chr)
+            cds = cooldown_nodes[chr_id]
+            trial[chr_id] = (set(nodes_by_chr[chr_id]) - set(cds)) | set(cds[:k])
+            return board(trial)
+
+        model = board(nodes_by_chr)
+        names = model.name_by_chr
+        # each board's cooldown shortening at each count, read off a board where only it moved
+        shorten = {
+            (c, k): at(c, k).uptime_for(names[c])[1]
+            for c, cds in cooldown_nodes.items()
+            for k in range(len(cds) + 1)
+        }
+        variants = [{names[c]: shorten[(c, k)] for c, k in zip(cooldown_nodes, kv)} for kv in vectors]
+        cfg = dataclasses.replace(self.base_cfg, board=model)
+        members = tuple(self._by_id[m] for m in member_ids)
+        leader = self._by_id[leader_id]
+        # the deck power `_score_set` scores this team on, so the screen orders the same score
+        modelled = not cfg.song_absolute_deck_power or getattr(_VALUATION, "modelled", False)
+        power = None if modelled else overall_power_for(members, leader, cfg)
+        return screen_song_cooldown_variants(
+            members, leader, self._chart, cfg, variants, deck_power=power, auto=cfg.song_auto
+        )
+
     def _board_state(self) -> dict:
         """`board_state.json` as `_load` returns it, a fresh copy per call: parsed once
         per file version (an exact plan scores ~1,000 states, and re-parsing the file
