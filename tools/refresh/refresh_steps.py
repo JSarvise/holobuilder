@@ -114,6 +114,10 @@ LEVEL_TABLES = ("Card", "CardLevel", "LiveNote", "SkillTreeNode", "CharacterLeve
 # event_art step has them: song_meta runs after it
 EVENT_TITLE_TABLES = ("Poster", "LangPoster_Eng", "LangEventStoryChapter_Eng")
 
+# the songs holomem_rating rates (Music), written early for the same reason: it runs right after
+# the account, song_meta after the songs
+ACCOUNT_READ_TABLES = ("Music",)
+
 
 SONG_META_TABLES = (
     "Music",
@@ -134,7 +138,8 @@ SONG_META_TABLES = (
 
 
 def cmd_level_tables(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
-    return [_pyexe(args), str(HERE / "master_json.py"), *LEVEL_TABLES, *EVENT_TITLE_TABLES], {}, HERE
+    tables = (*LEVEL_TABLES, *EVENT_TITLE_TABLES, *ACCOUNT_READ_TABLES)
+    return [_pyexe(args), str(HERE / "master_json.py"), *tables], {}, HERE
 
 
 def cmd_import(args: argparse.Namespace) -> tuple[list[str], dict[str, str], Path]:
@@ -317,7 +322,7 @@ STEPS: list[Step] = [
     # master_index, so a table the game just changed is read at its new seed.
     Step(
         "level_tables",
-        "Card + CardLevel (exp -> level) + LiveNote + SkillTreeNode from our master",
+        "Card + CardLevel (exp -> level) + LiveNote + SkillTreeNode + Music from our master",
         network=True,
         probes=[],
         build=cmd_level_tables,

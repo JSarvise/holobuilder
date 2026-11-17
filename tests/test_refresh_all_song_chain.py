@@ -144,6 +144,40 @@ def test_the_exp_to_level_tables_are_fetched_before_the_account_is_read():
     assert order.index("level_tables") < order.index("account")
 
 
+def test_every_master_table_a_step_names_is_written_by_an_earlier_step():
+    """A step that reads dumps/holodori/main_<T>.json finds it on a FIRST refresh only when an
+    earlier master_json.py step writes T (holomem_rating reads Music, which song_meta writes after
+    the songs: level_tables writes it early)."""
+    import argparse
+    import re
+
+    args = argparse.Namespace(
+        python="",
+        force=False,
+        account="main",
+        merge_collection=True,
+        account_only=False,
+        dry_run_adds=False,
+        connect_level="max",
+    )
+    built = [(s.name, s.build(args)[0]) for s in refresh_all.STEPS]
+    written: dict[str, int] = {}
+    for i, (_name, cmd) in enumerate(built):
+        scripts = [a for a in cmd if a.endswith(".py")]
+        if scripts and Path(scripts[0]).name == "master_json.py":
+            for table in cmd[cmd.index(scripts[0]) + 1 :]:
+                written.setdefault(table, i)
+    late = []
+    for i, (name, cmd) in enumerate(built):
+        scripts = [a for a in cmd if a.endswith(".py")]
+        if not scripts:
+            continue
+        for table in set(re.findall(r"main_([A-Za-z_]+)\.json", Path(scripts[0]).read_text("utf8"))):
+            if written.get(table, len(built)) > i:
+                late.append((name, table))
+    assert late == []
+
+
 def test_item_icons_is_a_soft_local_step_after_the_catalogue() -> None:
     """A new item's icon arrives with the refresh that brings the item (otherwise
     /inventory 404s until item_icons.py is run by hand). It reads the client's own cache
