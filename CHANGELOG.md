@@ -2,6 +2,12 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.12 (2026-11-18)
+- **Event: plan a later chapter.** In a Spotlight event the Optimizer's header shows one face per chapter, the running one ringed. Pick another chapter and the search plans for it: its Event Bonus holomem and cards, its event song and its Highlight pool. The choice lasts while the page is open; the next visit starts on the running chapter.
+- **Highlight: the board plan and the Connect cards for the whole pool.** A Highlight team's details planned the Holomem Board and dealt the Connect cards on one song of the pool. They now value the mean over the pool (up to six charts of a larger one) and deal the Connect cards for each song's singers, mixing them while the pool's mean rises: on our test account +4.3 % on a 4-song pool and +3.1 % on a 15-song one. The details take about 9-13 s. The search's list of teams is unchanged.
+- **Fix: a first refresh** on a new install read Holomem Rating's songs before it had fetched them; the song table now comes with the first master tables.
+- **Fix: the Optimizer's song header** cut the facts under the title (in Event, the song's length and its length bonus never showed); they now wrap onto a second line. An empty box no longer shows beside the goal outside Event.
+
 ## 0.2.11 (2026-11-17)
 - **Running from source on Python 3.15:** the searches run about 7-17 % faster, with the same answers, as in the app. Install Python 3.15 beside 3.13 and run `setup.cmd` (or `./setup.sh`): holobuilder moves to 3.15, and the refresh steps that read the game's pictures, Live2D and chibi models and the game client's version run in a second environment, `.venv-assets`, on 3.13 (UnityPy, which reads them, has no 3.15 build yet). The old `.venv` stays aside until the new one works, and comes back if anything fails. Python 3.13 alone works as before. Already running from source: `update.cmd` brings this version and keeps your Python, and at its end says whether Python 3.15 is installed and what to run. See "Two environments" in docs/run-locally.md.
 

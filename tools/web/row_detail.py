@@ -399,6 +399,16 @@ def _bench_slots(ctx, team, sockets) -> dict | None:
     return out
 
 
+def _mixed_bench_slots(ctx, team_chrs: set, deal: Mapping) -> dict:
+    """`_bench_slots`' map for a deal stated whole (`pool_connect`): every off-team board
+    with the cards the deal gives it."""
+    out: dict = {c: {} for c in (getattr(ctx, "bench_sockets", None) or {}) if c not in team_chrs}
+    for (chr_id, socket), card in sorted(deal.items()):
+        if chr_id not in team_chrs:
+            out.setdefault(chr_id, {})[socket] = card
+    return out
+
+
 def board_state_of(bt: BoardOptimisedTeam) -> dict:
     """`{chr: {nodes, slots}}` of a developed team — the server's own
     `_board_state_of` shape (the plan's nodes, the REAL Connect placements)."""
@@ -1004,26 +1014,129 @@ def _common_order(team: Team, charts: Sequence, cfg_board) -> tuple[tuple[str, .
     return best, sums[best] / len(charts), [(m, tot[best], max(tot.values())) for m, tot in per]  # type: ignore[return-value,index]
 
 
+# How many of a pool's charts the plan's valuation scores (`pool_yellow`'s `share`): every
+# chart of a pool this size, a spread of this many of a larger one (`two_stage.chart_sample`,
+# the search's own sample). Each node value, grouping slope and Act level costs one scoring
+# per chart, so a plan's scoring time grows with this.
+POOL_PLAN_CHARTS = 6
+
+
 def pool_yellow(team: Team, charts: Sequence[SongChart], cfg_board: ScoringConfig) -> list[dict]:
-    """The pool's songs as the plan solver values their yellows (`board_plan_solver.
-    _pool_yellow_terms`): `[{"singers", "singer_type", "slope"}]`, one per distinct
-    (cast, singer type), `slope` the team's score per permil of that song's bonus on
-    `cfg_board` -- `total / (1000 x (1 + bonus))`, the bonus multiplying every note
-    (`score_song_detailed`'s `1 + board_score_rate`) -- over the pool's size, so the
-    capped terms add up to the pool MEAN the view ranks by."""
-    out: dict = {}
-    for c in charts:
-        if not c.singers or not c.singer_type:
-            continue
-        total = score_team_on_chart(team, c, cfg_board).total_score
-        rate = (
-            cfg_board.board.song_score_bonus_for(c.singers, scope=c.singer_type)
-            if cfg_board.board is not None
-            else 0.0
+    """The pool's songs as the plan solver reads them (`board_plan_solver.solve_team_board`'s
+    `song_pool`): `[{"music_id", "singers", "singer_type", "slope", "share"}]`, one per song.
+
+    `slope`: the team's score per permil of that song's yellow bonus on `cfg_board` --
+    `total / (1000 x (1 + bonus))`, the bonus multiplying every note (`score_song_detailed`'s
+    `1 + board_score_rate`) -- over the pool's size, so the capped terms add up to the pool
+    MEAN the view ranks by (`_pool_yellow_terms`); 0 for a song without a cast.
+
+    `share`: the song's part in the mean the plan values every other node on
+    (`pool_shares`): 1 / n over the n charts the valuation scores (`POOL_PLAN_CHARTS`), 0
+    for the rest of a larger pool."""
+    import two_stage  # noqa: PLC0415
+
+    scored = {id(c) for c in two_stage.chart_sample(charts, POOL_PLAN_CHARTS)}
+    out = []
+    for c in sorted(charts, key=lambda c: c.music_id):
+        slope = 0.0
+        if c.singers and c.singer_type:
+            total = score_team_on_chart(team, c, cfg_board).total_score
+            rate = (
+                cfg_board.board.song_score_bonus_for(c.singers, scope=c.singer_type)
+                if cfg_board.board is not None
+                else 0.0
+            )
+            slope = total / (1000.0 * (1.0 + rate)) / len(charts)
+        out.append(
+            {
+                "music_id": c.music_id,
+                "singers": sorted(c.singers or ()),
+                "singer_type": c.singer_type or "",
+                "slope": slope,
+                "share": 1.0 / len(scored) if id(c) in scored else 0.0,
+            }
         )
-        key = (tuple(sorted(c.singers)), c.singer_type)
-        out[key] = out.get(key, 0.0) + total / (1000.0 * (1.0 + rate)) / len(charts)
-    return [{"singers": list(k[0]), "singer_type": k[1], "slope": v} for k, v in sorted(out.items())]
+    return out
+
+
+def _deal_of(bt) -> dict:
+    """`{(chr, socket): card}` of a develop's Connect placements (team and bench)."""
+    return {(p.chr, p.socket): p.card for p in bt.sockets}
+
+
+def _dealt_ctx(ctx, team_state: Mapping, deal: Mapping, team_chrs: set):
+    """`ctx` with the Connect cards of `deal` (`_deal_of`) stated instead of dealt: the
+    team's boards keep the cards it names (`board_state_slots`), the bench's boards get
+    its multipliers (`board_plan.bench_with_placements`), and nothing is re-assigned."""
+    from hbuilder.domain.board_plan import bench_with_placements  # noqa: PLC0415
+
+    slots: dict = {}
+    for (chr_id, socket), card in deal.items():
+        slots.setdefault(chr_id, {})[socket] = card
+    state = {c: {"nodes": list(v["nodes"]), "slots": dict(slots.get(c, {}))} for c, v in team_state.items()}
+    bench = bench_with_placements(
+        ctx.bench_characters or {},
+        ctx.name_by_chr or {},
+        ctx.skilltree,
+        ctx.connect_cards or {},
+        slots,
+        team_chrs,
+    )
+    return dataclasses.replace(
+        ctx, board_state=state, board_state_slots=True, bench_characters=bench, socket_bench=False
+    )
+
+
+def pool_connect(ctx, team: Team, charts: Sequence[SongChart], tree_for, budget_for, pool_sum):
+    """`(developed team, deal or None)`: the Connect cards of a planned team for a POOL of
+    songs. `ctx` holds the plan (`board_state`, the bench, `socket_bench`).
+
+    The develop deals the cards for one song's cast, and a pool has several: a card on a
+    bench singer's yellows pays only on her songs. So the cards are dealt once per distinct
+    cast of the pool, the deal with the best score summed over the pool (`pool_sum(board)`)
+    is kept, and then each other cast's choices for ITS singers' boards are tried on it
+    one socket at a time (the card moved from wherever it was, the two swapped when both
+    sockets held one), each kept only when the pool's exact score rises. Never below the
+    best single deal. `deal` (`{(chr, socket): card}`) is given when the result mixes
+    casts, None when one cast's deal stands."""
+    from hbuilder.solver.parallel_refine import develop_team  # noqa: PLC0415
+
+    casts: dict = {}
+    for c in charts:
+        casts.setdefault((frozenset(c.singers or ()), c.singer_type or ""), []).append(c)
+    reps = [group[0] for _key, group in sorted(casts.items(), key=lambda kv: -len(kv[1]))]
+    deals: list = []  # (pool score, rep chart, developed team, deal)
+    for rep in reps:
+        bt = develop_team(ctx, team, tree_for, budget_for, rep)
+        deal = _deal_of(bt)
+        if all(deal != d[3] for d in deals):
+            deals.append((pool_sum(bt.board), rep, bt, deal))
+    best = max(deals, key=lambda d: d[0])  # a tie: the commonest cast's
+    if len(deals) == 1:
+        return best[2], None
+    team_chrs = {_chr(c) for c in (team.leader, *team.members)}
+    state = ctx.board_state
+    score, cur_bt, cur, mixed = best[0], best[2], dict(best[3]), False
+    for _score, rep, _bt, deal in sorted((d for d in deals if d is not best), key=lambda d: -d[0]):
+        cast = set(rep.singers or ())
+        for key in sorted(deal):
+            card = deal[key]
+            if key[0] not in cast or cur.get(key) == card:
+                continue
+            trial = dict(cur)
+            holder = next((k for k, held in trial.items() if held == card), None)
+            displaced = trial.get(key)
+            trial[key] = card
+            if holder is not None:
+                if displaced is not None:
+                    trial[holder] = displaced
+                else:
+                    del trial[holder]
+            bt = develop_team(_dealt_ctx(ctx, state, trial, team_chrs), team, tree_for, budget_for, None)
+            got = pool_sum(bt.board)
+            if got > score:
+                score, cur_bt, cur, mixed = got, bt, trial, True
+    return cur_bt, (cur if mixed else None)
 
 
 def pool_detail(
@@ -1044,10 +1157,12 @@ def pool_detail(
     maximises that mean among:
 
     * boards planned within the wallet (`assumptions.replan`): the plan for no song
-      (`materials_plan.plan_for(song=None)`, song-agnostic), the plan for the pool song
-      whose singers on the team are the commonest, and that plan with the yellows valued
-      on EVERY pool song, one capped term per song (`pool_yellow`: e.g. a bench
-      Raden's yellows count on her pool songs, up to each song's cap);
+      (`materials_plan.plan_for(song=None)`, song-agnostic) and the plan for the POOL:
+      every node valued on the mean of the pool's songs (`pool_yellow`'s `share`: a red
+      or blue node one song rewards and another does not is worth its mean), the yellows
+      on EVERY pool song, one capped term per song (e.g. a bench Raden's yellows count
+      on her pool songs, up to each song's cap). Each plan's Connect cards are dealt for
+      the pool's casts together (`pool_connect`), not for one song's;
     * boards as they are: the account's, the only one;
     * developed boards: each singer context's develop (the boards the search scores the
       pool on) and, with `refine`, the best of them with its activation nodes re-chosen
@@ -1090,19 +1205,20 @@ def pool_detail(
     cands: list[tuple[str, Any, Any, Any]] = []  # (label, plan song, ctx, developed team)
     plan_optimal: dict = {}  # label -> plan solved to optimality
     pool_opts: dict = {}  # label -> the plan's `song_pool`
+    mixed_deals: dict = {}  # label -> the Connect deal mixed from several casts (`pool_connect`)
     with RefinePool(ctx0, workers=1) as helper:
         tree_for, budget_for = helper._tree_for, helper._budget_for
         if assumptions is not None and assumptions.replan:
             import materials_plan  # noqa: PLC0415
 
             rep = reps[0].music_id
-            for song, extra in ((None, None), (rep, None), (rep, "pool")):
+            for song, extra in ((None, None), (rep, "pool")):
                 opts = assumptions.plan_opts()
                 if extra == "pool":
-                    # the pool's yellows, priced on the one-song plan's board
-                    last = next((cd for cd in cands if cd[1] == rep), None)
-                    if last is None:
+                    # the pool's yellows, priced on the song-agnostic plan's board
+                    if not cands:
                         continue
+                    last = cands[0]
                     opts["song_pool"] = pool_yellow(
                         team, charts, dataclasses.replace(last[2].cfg, board=last[3].board)
                     )
@@ -1112,18 +1228,24 @@ def pool_detail(
                 ctx = dataclasses.replace(
                     ctx0, board_state=planned[0], bench_characters=planned[1], socket_bench=True
                 )
-                chart = by_music.get(song) if song else None
-                if extra == "pool":
-                    pool_opts["the plan for the pool, its yellows valued on every song"] = opts["song_pool"]
                 label = (
                     "the plan for no song in particular"
                     if song is None
-                    else "the plan for one song of the pool"
-                    if extra is None
-                    else "the plan for the pool, its yellows valued on every song"
+                    else "the plan for the pool, every node valued on its songs"
                 )
+                if extra == "pool":
+                    pool_opts[label] = opts["song_pool"]
                 plan_optimal[label] = materials_plan.plan_optimal(leader_id, list(member_ids), song, opts)
-                cands.append((label, song, ctx, develop_team(ctx, team, tree_for, budget_for, chart)))
+
+                def plan_pool_sum(board, cfg=ctx.cfg):
+                    cfg_b = dataclasses.replace(cfg, board=board)
+                    return sum(score_team_on_chart(team, c, cfg_b).total_score for c in charts)
+
+                # the plan's Connect cards for the pool's casts, not for one song's
+                bt, deal = pool_connect(ctx, team, charts, tree_for, budget_for, plan_pool_sum)
+                if deal is not None:
+                    mixed_deals[label] = deal
+                cands.append((label, song, ctx, bt))
             if not cands:
                 raise ValueError("the wallet cannot fund a plan for this team")
         elif ctx0.board_state is not None:
@@ -1201,7 +1323,9 @@ def pool_detail(
     out.update(
         {
             "board_state": board_state_of(bt),
-            "bench_slots": _bench_slots(ctx, team, bt.sockets),
+            "bench_slots": _mixed_bench_slots(ctx, team_chrs, mixed_deals[label])
+            if label in mixed_deals
+            else _bench_slots(ctx, team, bt.sockets),
             "points": {
                 c: sum(p.spent for cid, p in bt.plan.per_character.items() if _chr(by_card[cid]) == c)
                 for c in budget

@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 
 # Windows consoles and pipes default to cp1252, which cannot encode the ⚠ → × this tool
@@ -273,6 +274,7 @@ class Oracle:
         song: str | None = None,
         charts_path: str | None = None,
         uptime_model: str | None = None,
+        pool_songs: Sequence[tuple[str, float]] | None = None,
     ):
         self.quiet = quiet
         # `scenario` is one of the three collection states of the board export, on two
@@ -357,9 +359,15 @@ class Oracle:
         # of `score_card_set`; both return `.total_score` per leader, so `_score_set`
         # dispatches. As in the CLI's `--song`, `prime()` enumerates the team pool
         # song-agnostically and `score()` re-scores those candidates on the chart.
+        # `pool_songs`: `[(music id, share)]` -- a pool of songs one of which is drawn (a
+        # Highlight pool). `score_team` is then the shares' sum of the team's score on each
+        # of those charts, so every value the planner measures (a node, a grouping chain, an
+        # Act level) is its value over the pool, not on `song` alone. `song` still names the
+        # chart the singer terms read.
         self.song = song
         self._chart = None
-        if song:
+        self._pool: tuple = ()
+        if song or pool_songs:
             from hbuilder.domain.song import load_charts  # noqa: PLC0415
 
             charts_file = Path(charts_path) if charts_path else (DUMPS / "charts.json")
@@ -369,16 +377,22 @@ class Oracle:
                     f"--song: chart library not on disk at {charts_file}. Build it "
                     "with tools/refresh/build_charts.py"
                 )
-            chart = library.get(song)
-            if chart is None:
-                known = ", ".join(library.music_ids[:8])
-                raise MissingInput(
-                    f"--song: no EXPERT chart for {song!r} in {charts_file} "
-                    f"({len(library.music_ids)} songs available; e.g. {known})"
-                )
-            self._chart = chart
 
-    def _score_set(self, members, leaders, cfg):
+            def chart_of(music_id):
+                chart = library.get(music_id)
+                if chart is None:
+                    known = ", ".join(library.music_ids[:8])
+                    raise MissingInput(
+                        f"--song: no EXPERT chart for {music_id!r} in {charts_file} "
+                        f"({len(library.music_ids)} songs available; e.g. {known})"
+                    )
+                return chart
+
+            if song:
+                self._chart = chart_of(song)
+            self._pool = tuple((chart_of(m), float(share)) for m, share in pool_songs or () if share > 0)
+
+    def _score_set(self, members, leaders, cfg, chart=None):
         """Dispatch to the per-song scorer when `--song` is set, else the general
         ranking scorer. Both take `(members, leaders, ..., cfg)` and return an
         iterable of results carrying `.total_score`, so every caller maximises
@@ -393,18 +407,19 @@ class Oracle:
         another deck power than the rows makes the MILP optimise another function:
         a singer-led team's plan could lose on the reported score while every MILP
         solved to optimality."""
-        if self._chart is not None:
+        chart = self._chart if chart is None else chart
+        if chart is not None:
             from hbuilder.domain.song import overall_power_for, score_song  # noqa: PLC0415
 
             if not cfg.song_absolute_deck_power or getattr(_VALUATION, "modelled", False):
-                return score_song(members, leaders, self._chart, cfg, auto=cfg.song_auto)
+                return score_song(members, leaders, chart, cfg, auto=cfg.song_auto)
             return tuple(
                 score
                 for leader in leaders
                 for score in score_song(
                     members,
                     (leader,),
-                    self._chart,
+                    chart,
                     cfg,
                     deck_power=overall_power_for(members, leader, cfg),
                     auto=cfg.song_auto,
@@ -479,13 +494,21 @@ class Oracle:
         """ONE team's score under ONE board.
 
         The team is fixed: a max over the pool would optimise some other team's board.
-        Per-song when `--song` is set (via `_score_set`), else general."""
+        Per-song when `--song` is set (via `_score_set`), else general; over a pool
+        (`pool_songs`), the shares' sum of its score on each chart of the pool."""
         # the full catalogue: a named team may hold a card outside the owned pool
         by_id = self._by_id
         self.scorings += 1
         cfg = dataclasses.replace(self.base_cfg, board=self.board_for(state))
         members = tuple(by_id[m] for m in member_ids)
-        results = self._score_set(members, (by_id[leader_id],), cfg)
+        leaders = (by_id[leader_id],)
+        if self._pool:
+            return sum(
+                share
+                * max((r.total_score for r in self._score_set(members, leaders, cfg, chart)), default=0.0)
+                for chart, share in self._pool
+            )
+        results = self._score_set(members, leaders, cfg)
         return max((r.total_score for r in results), default=0.0)
 
     def _board_state(self) -> dict:

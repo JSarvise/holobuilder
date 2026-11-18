@@ -35,7 +35,7 @@ function eventFilters(S) {
   return f;
 }
 const optsKey = S => JSON.stringify([S.goal, S.song, S.difficulty, S.boosts, S.goal === "event_points" ? S.holopass : 0,
-  S.platform, !!S.auto, eventAssumptions(S), eventFilters(S)]);
+  S.platform, !!S.auto, eventAssumptions(S), eventFilters(S), S.chapter || ""]);
 const isEP = S => S.goal === "event_points";
 
 /* ------------------------------------------------------------------ Highlight */
@@ -185,6 +185,8 @@ export async function runEvent(ctx, { certify = false } = {}) {
     started = await postJSON("/api/event/run", { objective: S.goal, song: S.song, difficulty: S.difficulty,
       boosts: S.boosts, holopass: !!S.holopass, top: S.evtop, certify, basis: isMaxed(S) ? "maxed" : "account",
       ...(A ? { assumptions: A } : {}), ...eventFilters(S),
+      // the chapter planned for, when it is not the running one (opt-app.js, S.chapter)
+      ...(S.chapter ? { event: S.chapter } : {}),
       platform: S.platform, auto: !!S.auto });
   } catch (e) { ctx.out().innerHTML = `<div class="o-error">The event search could not start: ${esc(e.message)}</div>`; done(); return; }
   if (run !== mine) { postJSON(`/cancel/${encodeURIComponent(started.job_id)}`, {}).catch(() => {}); return; }
