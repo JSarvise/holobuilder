@@ -1474,6 +1474,44 @@ def _fixed_connect_placements(
     return mults, placements
 
 
+def bench_with_placements(
+    bench_characters: Mapping[str, Sequence[Mapping]],
+    name_by_chr: Mapping[str, str],
+    skilltree: Mapping,
+    connect_cards: Mapping[str, tuple[Sequence[Sequence[int]], int]],
+    slots: Mapping[str, Mapping[str, str]],
+    skip: AbstractSet[str] = frozenset(),
+) -> dict[str, list[Mapping]]:
+    """`bench_characters` with every off-team board's Connect multipliers set by the cards
+    `slots` names (`chr_id -> {socket: card id}`): each card covers its own shape from its
+    own socket at its own permil (`_fixed_connect_placements`), a node no card reaches is at
+    1.0. A board `slots` does not name ends with no card; `skip` (the team's characters)
+    and a board `name_by_chr` cannot name are left as they are.
+
+    The develop deals the bench's sockets for ONE singer context (`socket_bench`); this
+    states a deal instead, so one mixed from several contexts can be scored. With the
+    placements a `socket_bench` develop reports, it gives that develop's bench boards."""
+    out: dict[str, list[Mapping]] = {name: list(entries) for name, entries in bench_characters.items()}
+    models = skilltree.get("models", {}) or {}
+    per_char: dict[str, tuple[Mapping, frozenset, Mapping[str, float]]] = {}
+    for chr_id, name in name_by_chr.items():
+        entries = bench_characters.get(name)
+        if chr_id in skip or not entries:
+            continue
+        positions = models.get(model_for_character(skilltree, chr_id) or "", {})
+        if not positions.get(ROOT_NODE):
+            continue
+        per_char[chr_id] = (positions, frozenset(e["node"] for e in entries if e.get("node")), {})
+    mults, _placements = _fixed_connect_placements(per_char, connect_cards, slots)
+    for chr_id in per_char:
+        of_board = mults.get(chr_id, {})
+        out[name_by_chr[chr_id]] = [
+            dict(e, connect_multiplier=of_board.get(str(e.get("node")), 1.0))
+            for e in out[name_by_chr[chr_id]]
+        ]
+    return out
+
+
 # One character's input to the team-wide assignment on the plan cache:
 # `(chr_id, its AssembledPlan, the recipes of the nodes the assignment reads,
 # is_leader, the card, singer_weight)`.

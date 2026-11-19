@@ -346,6 +346,19 @@ def _yellow_amounts(oracle, singers, singer_type: str, boards, graphs) -> dict:
     return amounts
 
 
+def pool_shares(song_pool) -> tuple:
+    """`((music id, share), ...)`: the pool songs the plan's Oracle scores on -- the
+    `song_pool` entries that name their song (`music_id`) and its share of the draw
+    (`share` > 0), in music id order. Empty: the plan is valued on `song` alone."""
+    return tuple(
+        sorted(
+            (str(s["music_id"]), float(s["share"]))
+            for s in song_pool or ()
+            if s.get("music_id") and float(s.get("share") or 0) > 0
+        )
+    )
+
+
 def _pool_yellow_terms(oracle, song_pool, boards, graphs) -> list:
     """A Highlight pool's yellows (how much yellow the pool's event units need before
     returns diminish): one
@@ -465,6 +478,7 @@ def _plan_score(kw: dict, board: dict) -> float | None:
             and k[1] == kw["song"]
             and k[2] == kw["scenario"]
             and k[3] == kw["uptime_model"]
+            and k[5] == pool_shares(kw.get("song_pool"))
         ),
         None,
     )
@@ -670,7 +684,11 @@ def solve_team_board(
 
     `song_pool` -- a Highlight pool's songs `[{"singers", "singer_type", "slope"}]`
     (`_pool_yellow_terms`): the yellows are valued on EVERY pool song, one capped term
-    each, in place of `song`'s own; `song` still sets every other singer term.
+    each, in place of `song`'s own; `song` still sets every other singer term. Entries
+    that also name their song and its share of the draw (`"music_id"`, `"share"`,
+    `pool_shares`) make the plan's whole valuation the pool's: every node, grouping chain
+    and Act level is worth what it adds to the shares' sum of the team's score on those
+    songs, not what it adds on `song`.
 
     `statuses` -- a list the HiGHS model status of every MILP of this call is appended to
     (`"kOptimal"`, or `"kTimeLimit"` when a solve stopped on the time limit and its best
@@ -738,7 +756,7 @@ def solve_team_board(
 
     # the setup: the account, the node values, the budgets, the team and its bench
     t_stage = time.perf_counter()
-    plan = _load_plan(pool, song, scenario, uptime_model, for_team, clock, highspy)
+    plan = _load_plan(pool, song, scenario, uptime_model, for_team, clock, highspy, pool_shares(song_pool))
     if plan is None:
         return None
     plan.statuses = [] if statuses is None else statuses
@@ -880,22 +898,35 @@ def _team_scorer(oracle, leader_id: str, member_ids: tuple):
 
 
 def _load_plan(
-    pool: int, song: str | None, scenario: str, uptime_model: str | None, for_team: list[str], clock, highspy
+    pool: int,
+    song: str | None,
+    scenario: str,
+    uptime_model: str | None,
+    for_team: list[str],
+    clock,
+    highspy,
+    shares: tuple = (),
 ) -> _Plan | None:
     """The account's Oracle and inputs, kept per process (`_ACCOUNT`); None when the Oracle
-    cannot load (an input read failure afterwards raises)."""
+    cannot load (an input read failure afterwards raises). `shares` (`pool_shares`): the
+    pool of songs the Oracle scores on instead of `song` alone."""
     try:
         # `uptime_model`: the in-run model the search and the page score with, not
         # `config.json`'s deck-screen `steady` (see `tree_optimise.Oracle`).
         stamp = _account_stamp()
-        akey = (pool, song, scenario, uptime_model, stamp)
+        akey = (pool, song, scenario, uptime_model, stamp, shares)
         oracle = (_ACCOUNT.get(akey) or (None,))[0]
         if oracle is None:
             if any(k[4] != stamp for k in _ACCOUNT):
                 _BLOCKS.clear()  # a bench block holds the account's points / owned nodes
             _ACCOUNT.clear()  # one Oracle per process: the song of the last plan
             oracle = to.Oracle(
-                pool_size=pool, song=song, charts_path=None, scenario=scenario, uptime_model=uptime_model
+                pool_size=pool,
+                song=song,
+                charts_path=None,
+                scenario=scenario,
+                uptime_model=uptime_model,
+                pool_songs=shares or None,
             )
     except Exception:  # noqa: BLE001
         return None

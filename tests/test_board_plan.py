@@ -1188,3 +1188,46 @@ def test_a_song_yellow_is_priced_at_the_unit_score_it_multiplies():
     assert node_values_from_recipes(recipes, song_scope="", **kw)["Y-all"] == pytest.approx(
         0.005 * 200_000.0 * (1.0 + 0.9) * 2.0
     )
+
+
+def test_bench_with_placements_states_a_deal_and_gives_the_develops_bench_for_its_own():
+    """`bench_with_placements` sets an off-team board's multipliers from the cards a deal
+    names: the card on S-001 lifts the green its shape reaches, a board the deal leaves
+    without a card is at 1.0, and the team's own characters are left as they are. Given
+    the placements a `socket_bench` develop reports, the bench it builds is that develop's."""
+    from hbuilder.domain.board_plan import bench_with_placements
+
+    leader, member, skilltree, effects, plan, bench, cards = _bench_fixture()
+    names = {"chr-00003": "Gamma"}
+    dealt = bench_with_placements(bench, names, skilltree, cards, {"chr-00003": {"S-001": "card-a"}})
+    assert dealt["Gamma"][0]["connect_multiplier"] == pytest.approx(2.0)
+    assert bench["Gamma"][0]["connect_multiplier"] == pytest.approx(2.0)  # the input is not touched
+    # S-002 reaches no bought node, and no card on the root: nothing is lifted
+    bare = bench_with_placements(bench, names, skilltree, cards, {"chr-00003": {"S-002": "card-a"}})
+    assert bare["Gamma"][0]["connect_multiplier"] == pytest.approx(1.0)
+    assert bench_with_placements(bench, names, skilltree, cards, {})["Gamma"][0][
+        "connect_multiplier"
+    ] == pytest.approx(1.0)
+    # a character of the team keeps its entry whatever the deal says
+    kept = bench_with_placements(bench, names, skilltree, cards, {}, skip={"chr-00003"})
+    assert kept["Gamma"][0]["connect_multiplier"] == pytest.approx(2.0)
+    # the develop's own deal, stated: the same bench board
+    placements: list = []
+    board = _model_from_plan(
+        leader,
+        member,
+        skilltree,
+        effects,
+        plan,
+        connect_cards=cards,
+        bench_characters=bench,
+        name_by_chr=names,
+        placements_out=placements,
+        socket_bench=True,
+        bench_sockets={"chr-00003": {"S-001": "card-a", "S-002": None}},
+    )
+    slots: dict = {}
+    for p in placements:
+        slots.setdefault(p.chr, {})[p.socket] = p.card
+    stated = bench_with_placements(bench, names, skilltree, cards, slots, skip={"chr-00001", "chr-00002"})
+    assert stated["Gamma"][0]["connect_multiplier"] == pytest.approx(_mult(board, "Gamma", "G-001"))
