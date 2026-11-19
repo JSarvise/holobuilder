@@ -420,8 +420,11 @@ ACT_ROUNDS = 4
 ACT_MIN_GAIN = 1.0
 # joint cooldown vectors re-solved in the MILP after the exhaustive staircase
 ACT_JOINT_TOP = 2
-# cooldown counts per board kept for the joint enumeration
+# cooldown counts per board kept for the joint enumeration off a song (no screen there)
 ACT_JOINT_KEEP = 3
+# on a song, every joint vector whose screened estimate is within this fraction of the best
+# estimate is scored exactly: the screen is within 1.3e-4 of exact on the songs measured, so ~8x that
+ACT_SCREEN_MARGIN = 0.001
 
 
 def _act_tables(score_fn, state: dict, act_chars, graphs, act_kind: dict, act_value: dict) -> dict:
@@ -1526,29 +1529,41 @@ def _initial_act_tables(plan: _Plan, held_levels: dict | None) -> dict:
 
 def _staircase(plan: _Plan, board: dict, best: float, tables: dict) -> tuple[dict, float]:
     """The best joint cooldown counts on the round-0 plan, pinned and re-solved; the best plan."""
-    # THE STAIRCASE, exhaustively: every joint cooldown count of the member boards
-    # (4^5 = 1,024 on a full team) scored exactly on the round-0 plan, rate sums as
-    # planned; the best ACT_JOINT_TOP vectors are then pinned in the MILP (each board
-    # free on its rate sum only) so points and cubes are re-traded around them.
-    # Unlike trying subsets of a few frontier nodes on the points LEFT OVER, this sees
-    # every count, paths and point trades included.
+    # THE STAIRCASE: the joint cooldown counts of the member boards (4^5 = 1,024 on a full
+    # team) on the round-0 plan, rate sums as planned; the best ACT_JOINT_TOP vectors are
+    # then pinned in the MILP (each board free on its rate sum only) so points and cubes are
+    # re-traded around them. Unlike trying subsets of a few frontier nodes on the points
+    # LEFT OVER, this sees every count, paths and point trades included.
     act_chars, act_kind, team_score = plan.act_chars, plan.act_kind, plan.team_score
     state0 = plan.full_state(board)
     now0 = plan.levels(state0)
     ranked = []
     cds_of = {c: sorted(n for n in plan.graphs[c] if act_kind.get(n) == "Act.CD") for c in act_chars}
-    # each board's ACT_JOINT_KEEP best counts on its own (round-0 table, others
-    # as planned): 3^5 = 243 joint vectors instead of 4^5
-    options = []
-    for c in act_chars:
-        tb = tables.get(c) or {}
-        by_k = {}
-        for (k, s), v in tb.items():
-            if s == now0[c][1]:
-                by_k[k] = v
-        ks = sorted(by_k, key=lambda k: -by_k[k])[:ACT_JOINT_KEEP] or [now0[c][0]]
-        options.append(sorted(set(ks) | {now0[c][0]}))
-    for kvec in itertools.product(*options):
+    # On a song, every vector is screened (one set-up, ~30 ms for 1,024) and those near the
+    # best estimate are scored exactly. Ranking each board's counts ALONE misses the vectors
+    # that win only jointly: one member giving up its frequency nodes while another takes more
+    # (the instant's strongest ACTIVE is what pays), each of them its board's worst count alone.
+    vectors = list(itertools.product(*(range(len(cds_of[c]) + 1) for c in act_chars)))
+    estimates = plan.oracle.screen_cooldown_counts(
+        plan.leader_id, plan.member_ids, state0, {c: cds_of[c] for c in act_chars}, vectors
+    )
+    if estimates:
+        top = max(estimates)
+        vectors = [kv for v, kv in zip(estimates, vectors) if v >= top - abs(top) * ACT_SCREEN_MARGIN]
+    else:
+        # off a song (no screen): each board's ACT_JOINT_KEEP best counts on its own
+        # (round-0 table, others as planned), 3^5 = 243 joint vectors instead of 4^5
+        options = []
+        for c in act_chars:
+            tb = tables.get(c) or {}
+            by_k = {}
+            for (k, s), v in tb.items():
+                if s == now0[c][1]:
+                    by_k[k] = v
+            ks = sorted(by_k, key=lambda k: -by_k[k])[:ACT_JOINT_KEEP] or [now0[c][0]]
+            options.append(sorted(set(ks) | {now0[c][0]}))
+        vectors = list(itertools.product(*options))
+    for kvec in vectors:
         trial = dict(state0)
         for c, k in zip(act_chars, kvec):
             trial[c] = (state0[c] - set(cds_of[c])) | set(cds_of[c][:k])
