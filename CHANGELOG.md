@@ -2,6 +2,9 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.13 (2026-11-19)
+- **Board plan with your materials: the interval nodes split across the team.** When the planner chose how many interval (Act.CD) nodes each member's Holomem Board takes, it ranked each board's counts on its own, and missed the splits that only win together (one member giving up its interval nodes so that another's skill fires more often). It now screens every combination and scores the best ones exactly. On our test account, 8 of the 31 rows of a one-song search rise (up to +0.9 %), 2 move down by 0.02 % and the first is unchanged; the search is about 5 % faster, and a Highlight pool plan gains up to 0.2 % in about 30 % less time. Contributed by namirin1 ([pull request #1](https://github.com/JSarvise/holobuilder/pull/1)), the project's first outside contribution.
+
 ## 0.2.12 (2026-11-18)
 - **Event: plan a later chapter.** In a Spotlight event the Optimizer's header shows one face per chapter, the running one ringed. Pick another chapter and the search plans for it: its Event Bonus holomem and cards, its event song and its Highlight pool. The choice lasts while the page is open; the next visit starts on the running chapter.
 - **Highlight: the board plan and the Connect cards for the whole pool.** A Highlight team's details planned the Holomem Board and dealt the Connect cards on one song of the pool. They now value the mean over the pool (up to six charts of a larger one) and deal the Connect cards for each song's singers, mixing them while the pool's mean rises: on our test account +4.3 % on a 4-song pool and +3.1 % on a 15-song one. The details take about 9-13 s. The search's list of teams is unchanged.
