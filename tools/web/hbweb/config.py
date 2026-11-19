@@ -87,6 +87,9 @@ MUSIC_PATH = paths.HOLODORI / "main_Music.json"
 # ---------------------------------------------------------------------------
 # The newest open event's bonus rows (every refresh writes them).
 EVENT_BONUS_PATH = DUMPS / "marathon_bonus.json"
+# Every chapter's bonus rows ever read, kept after the chapter closes (`marathon_bonus.py`):
+# the Event page's past events read their rules here, never the Optimizer.
+EVENT_BONUS_ARCHIVE_PATH = DUMPS / "marathon_bonus_archive.json"
 # The event's name, kind, times and banner (`event_art.py`).
 EVENT_META_PATH = DUMPS / "event_meta.json"
 EVENT_ART_DIR = DUMPS / "event_art"

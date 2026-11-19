@@ -10,6 +10,7 @@ runner is a stub. The disk round trip (append -> read back) is tested on the rec
 from __future__ import annotations
 
 import json
+import math
 import threading
 import urllib.error
 import urllib.request
@@ -281,34 +282,61 @@ def test_poller_thread_runs_and_stops_cleanly():
     assert p.status()["running"] is False and p.status()["next_run"] is None
 
 
-def test_fit_exponent_reads_a_curve_as_a_power():
-    assert cv.fit_exponent([0.0, 0.5, 1.0], [0.0, 0.25, 1.0]) == pytest.approx(2.0)
-    assert cv.fit_exponent([0.0, 1.0], [0.0, 1.0]) is None
+def _dense(fn, n=20):
+    """A finished chapter's normalised curve read at n + 1 even points, y = fn(x)."""
+    xs = [k / n for k in range(n + 1)]
+    return (xs, [fn(x) for x in xs])
 
 
-def test_template_path_bends_and_one_chapter_still_has_a_band():
-    """The forecast must not be a straight line. One past chapter with an end sprint
-    (a = 1.2) gives a convex path ending on its final, and a band from zero now to at least
-    +-BAND_FLOOR at the end (one chapter cannot bound itself)."""
+def test_template_path_bends_and_without_misses_the_band_is_the_floor():
+    """The forecast follows the past chapters' own shape from here (an end sprint bends it up),
+    ends on the template's final, and with too few earlier misses on record the band is the
+    floor: from nothing now to +-BAND_FLOOR * (time left) at the end."""
     x = 0.25
-    tpl = ([0.0, x, 1.0], [0.0, x**1.2, 1.0])
-    p = cv.predict(
-        [(START + int(50 * H * x), 100_000)],
-        start=START,
-        end=END,
-        now=START + int(50 * H * x),
-        templates=[tpl],
-    )
-    assert p["method"] == "template"
+    tpl = _dense(lambda v: v**1.2)
+    now = START + int(50 * H * x)
+    p = cv.predict([(now, 100_000)], start=START, end=END, now=now, templates=[tpl])
+    assert p["method"] == "template" and p["inputs"]["band_from"] == "floor"
     final = p["final"]
-    assert final == round(100_000 / x**1.2)
+    assert final == pytest.approx(100_000 / cv._interp(*tpl, x), abs=1)
     ys = [q[1] for q in p["points"]]
     steps = [b - a for a, b in zip(ys, ys[1:])]
-    assert all(b > a for a, b in zip(steps, steps[1:])), "convex: each step gains more"
-    lo, hi = p["band"][0][1], p["band"][0][2]
-    assert lo == hi == 100_000
-    assert p["band"][-1][1] == pytest.approx(final * (1 - cv.BAND_FLOOR), abs=1)
-    assert p["band"][-1][2] == pytest.approx(final * (1 + cv.BAND_FLOOR), abs=1)
+    assert all(b >= a - 1 for a, b in zip(steps, steps[1:])), "convex: each step gains at least as much"
+    assert p["band"][0][1] == p["band"][0][2] == 100_000
+    floor = cv.BAND_FLOOR * (1 - x)
+    assert p["band"][-1][1] == pytest.approx(final * (1 - floor), abs=1)
+    assert p["band"][-1][2] == pytest.approx(final * (1 + floor), abs=1)
+
+
+def test_the_band_is_how_far_earlier_forecasts_missed():
+    tpl = _dense(lambda v: v)
+    now = START + 25 * H
+    misses = [-0.10] * 2 + [0.0] * 16 + [0.20] * 2  # 20 misses (12 are enough)
+    p = cv.predict([(now, 100_000)], start=START, end=END, now=now, templates=[tpl], misses=misses)
+    assert p["final"] == 200_000 and p["inputs"]["band_from"] == "misses"
+    # the middle 90 % of the 20 sorted misses: from the 2nd to the 19th
+    assert p["low"] == round(200_000 * math.exp(-0.10)) and p["high"] == round(200_000 * math.exp(0.20))
+
+
+def test_a_template_read_with_long_gaps_weighs_less():
+    good = _dense(lambda v: v)  # half the final in by the middle
+    gappy = ([0.0, 0.9, 1.0], [0.0, 0.9, 1.0])  # a straight line across a 90 % gap
+    now = START + 25 * H
+    p = cv.predict(
+        [(now, 100_000)], start=START, end=END, now=now, templates=[(*good, 1.0), (*gappy, 0.2), (*good, 1.0)]
+    )
+    assert p["final"] == 200_000  # the two good ones carry the median
+    assert cv.max_gap(gappy[0]) == pytest.approx(0.9) and cv.max_gap(good[0]) == pytest.approx(0.05)
+
+
+def test_a_best_score_ranking_never_gets_a_pace():
+    """A Song Score / Total Score border jumps early and flattens: a pace from 0 would overshoot it
+    (by an order of magnitude on the chapters on record), so with no template it has no forecast."""
+    series = [(START + 4 * H, 2_000_000), (START + 10 * H, 2_400_000)]
+    assert cv.predict(series, start=START, end=END, now=START + 10 * H, kind="music:m0001") is None
+    assert cv.predict(series, start=START, end=END, now=START + 10 * H, kind="total") is None
+    assert cv.predict(series, start=START, end=END, now=START + 10 * H, kind="points")["method"] == "pace"
+    assert cv.family("music:m0001") == cv.family("total") == "best" and cv.family("points") == "points"
 
 
 def test_a_relay_learns_from_relays_when_it_can(monkeypatch):
@@ -338,7 +366,8 @@ def test_a_relay_learns_from_relays_when_it_can(monkeypatch):
     monkeypatch.setattr(cv, "list_chapters", lambda store, region: metas)
     monkeypatch.setattr(cv, "read_chapter", lambda store, region, cid: (None, recs[cid]))
     got = cv.templates_for(None, "us", "points", 500, "relay-b")
-    assert got == [([0.0, 0.2, 1.0], [0.0, 0.1, 1.0])]
+    # the one relay before it (read twice: a gap of 80 % of its chapter, so it weighs less)
+    assert got == [([0.0, 0.2, 1.0], [0.0, 0.1, 1.0], cv.TEMPLATE_GAP_WEIGHT)]
     assert cv.event_kind("marathon_event-relay-003") == "relay"
 
 
@@ -472,3 +501,60 @@ def test_own_series_ends_at_the_end_with_the_value_read_after_it():
     ]
     s = cv.own_series("no-store", "us", None, None, of_kind, "points", start=0, end=1_000_000)
     assert s == [[1_000, 50], [500_000, 900], [1_000_000, 1_300]]
+
+
+def _chapter(cid, t0, finals, *, step=H):
+    """A finished 50-hour chapter whose Top 500 border grows linearly to `finals[0]`
+    (reads every `step`), as (meta, records)."""
+    meta = dict(
+        META,
+        chapter_id=cid,
+        event_id=f"marathon_event-normal-{cid}",
+        start_time=t0,
+        end_time=t0 + 50 * H,
+        chapter_end_time=t0 + 50 * H,
+    )
+    recs = [
+        {
+            "captured_at": t0 + t,
+            "kind": "points",
+            "borders": [{"rank": 500, "score": finals[0] * t // (50 * H)}],
+        }
+        for t in range(step, 50 * H + 1, step)
+    ]
+    return meta, recs
+
+
+@pytest.fixture
+def two_chapters(monkeypatch):
+    a = _chapter("001", START - 200 * H, [1_000_000])
+    b = _chapter("002", START, [2_000_000])
+    data = {m["chapter_id"]: (m, r) for m, r in (a, b)}
+    monkeypatch.setattr(cv, "list_chapters", lambda _s, region: [b[0], a[0]] if region == "us" else [])
+    monkeypatch.setattr(cv, "read_chapter", lambda _s, region, cid: (data[cid][0], data[cid][1]))
+    monkeypatch.setattr(cv, "_CALIBRATION_CACHE", {})
+    monkeypatch.setattr(cv, "_SERIES_CACHE", {})
+    return a, b
+
+
+def test_calibration_forecasts_each_chapter_only_from_the_ones_ended_before(two_chapters):
+    cal = cv.calibration(config.CUTOFFS_STORE_DIR)
+    # chapter 001 had nothing before it: no forecast to miss; 002 learned from 001 (same shape)
+    assert {end for _f, _s, end, _m in cal} == {START + 50 * H}
+    assert all(f == "points" and abs(m) < 0.03 for f, _s, _e, m in cal)
+    assert sorted({s for _f, s, _e, _m in cal}) == list(cv.CALIBRATION_AT)
+    assert cv.misses_near(cal, "points", 0.5) and not cv.misses_near(cal, "music:m1", 0.5)
+    assert not cv.misses_near(cal, "points", 0.5, before=START)  # 002 had not ended by then
+
+
+def test_build_view_at_replays_the_chapter_as_it_stood(two_chapters):
+    v = cv.build_view(config.CUTOFFS_STORE_DIR, "us", now=START + 99 * H, chapter_id="002", at=START + 20 * H)
+    assert v["at"] == START + 20 * H and v["now"] == START + 20 * H and v["ended"] is False
+    assert v["snapshots"] == 20 and v["own_points"] is None
+    dream = v["tiers"][0]
+    assert dream["score"] == 800_000 and dream["series"][-1] == [START + 20 * H, 800_000]
+    p = dream["prediction"]
+    assert p["method"] == "template" and p["final"] == pytest.approx(2_000_000, rel=0.03)
+    # after the end: the final, as always
+    v = cv.build_view(config.CUTOFFS_STORE_DIR, "us", now=START + 99 * H, chapter_id="002")
+    assert v["ended"] is True and v["tiers"][0]["prediction"]["method"] == "final"

@@ -10,7 +10,10 @@ chapter's holomem and the tier's name, 1024 x 512. Written as
 `dumps/event_art/emblem-<chapter id>-<grade>.webp`, 512 wide, beside the banners -- so the same
 /eventart route serves them and the same content rule publishes them to the app. A chapter's
 ranking decides the series: `points` -> marathon_score_ranking_rank_reward, `total` (a Score
-Challenge) -> total_music_highest_score_reward. Files already on disk are never fetched again.
+Challenge) -> total_music_highest_score_reward. Each song ranking of a chapter rewards its own
+medal (`emblem-music_highest_score_ranking_rank_reward-<chapter id>-<music id>-<grade>`, the
+song's jacket on the plate), written as `emblem-<chapter id>-<music id>-<grade>.webp`. Files
+already on disk are never fetched again.
 Never fails the refresh: a medal that cannot be had is reported and skipped.
 """
 
@@ -28,6 +31,7 @@ sys.path.insert(0, str(paths.REFRESH_DIR))
 DUMPS = paths.DUMPS
 OUT = DUMPS / "event_art"
 SERIES = {"points": "marathon_score_ranking_rank_reward", "total": "total_music_highest_score_reward"}
+SONG_SERIES = "music_highest_score_ranking_rank_reward"
 WIDTH = 512
 
 
@@ -54,6 +58,14 @@ def wanted(chs: dict[str, str], emblem_assets: dict[str, str], grades: list[str]
             asset = emblem_assets.get(f"emblem-{series}-{cid}-{g}")
             if asset:
                 out[f"emblem-{cid}-{g}.webp"] = asset
+    # the song rankings' medals: every one the master names for a chapter on record
+    prefix = f"emblem-{SONG_SERIES}-"
+    for eid, asset in sorted(emblem_assets.items()):
+        if not eid.startswith(prefix) or not asset:
+            continue
+        parts = eid[len(prefix) :].rsplit("-", 2)
+        if len(parts) == 3 and parts[0] in chs and parts[2] in grades:
+            out[f"emblem-{parts[0]}-{parts[1]}-{parts[2]}.webp"] = asset
     return out
 
 
@@ -64,7 +76,7 @@ def main() -> int:
     assets = {
         r["id"]: (r["data"].get(3) or [""])[0]
         for r in rows("Emblem")
-        if r["id"].startswith(("emblem-marathon_score", "emblem-total_music"))
+        if r["id"].startswith(("emblem-marathon_score", "emblem-total_music", f"emblem-{SONG_SERIES}"))
     }
     todo = {f: a for f, a in wanted(chapters(), assets, grades).items() if not (OUT / f).is_file()}
     print(f"event emblems: {len(todo)} to fetch")

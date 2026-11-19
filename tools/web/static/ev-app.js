@@ -22,7 +22,12 @@ const ago = s => s == null ? "" : F.ago(Date.now() - s * 1000);
 const thumb = id => `/cardart/thumb/${encodeURIComponent(id)}?w=160`;
 const FLOOR_PT = 1598;   // the everybody-who-played border (an estimate, EVENT-API.md Cutoffs)
 
-const S = { ev: null, cut: null, songs: [], target: null, kind: null, region: "us", sort: { k: "eb", dir: -1 } };
+const S = { ev: null, cut: null, songs: [], target: null, kind: null, region: "us", sort: { k: "eb", dir: -1 }, past: null, at: null, full: null };
+// a past event (`/event?event=<event id>[&chapter=<chapter id>]`): the same page over its record
+// -- borders, forecast as it stood, top 100, your result, its rules when kept -- read from
+// /api/event/past and the stored series, never from the open event the Optimizer uses
+const evId = key => String(key || "").replace(/-chapter-\d+$/, "");
+const pastURL = (eventId, chapter) => `/api/event/past?event=${encodeURIComponent(eventId)}${chapter ? `&chapter=${encodeURIComponent(chapter)}` : ""}`;
 
 // a network failure means the app's own local engine is not answering (stopped, or restarting
 // after an update): say so instead of the browser's bare "Failed to fetch"
@@ -86,7 +91,8 @@ function renderHead(ev) {
   const facts = [e.kind_label || "Event"];
   if (e.chapter != null) facts.push(`Chapter ${+e.chapter || e.chapter}`);
   if (e.starts_at && e.ends_at) facts.push(`${fmtDate(e.starts_at)} to ${fmtDate(e.ends_at)}`);
-  if ((ev.open_events || []).length > 1) facts.push(`${ev.open_events.length} events open, showing the newest`);
+  if (S.past) facts.push("Past event: its record");
+  else if ((ev.open_events || []).length > 1) facts.push(`${ev.open_events.length} events open, showing the newest`);
   $("#evchips").innerHTML = facts.map(f => `<span>${esc(f)}</span>`).join("");
   renderChapters(ev);
   // always shown: it is also the way into the past events, art or not
@@ -98,18 +104,18 @@ function renderHeadStats() {
   const e = (S.ev && S.ev.event) || {};
   const left = e.ends_at && timeLeft(e.ends_at);
   const tiles = [];
-  if (e.ends_at) tiles.push(`<div class="stat-tile"><div><span class="lbl">${(S.ev && (S.ev.chapters || []).length > 1) ? "Chapter ends in" : "Time left"}</span><b class="n">${esc(left ? left[0] : "Ended")}</b><small>ends ${esc(fmtDate(e.ends_at))}</small></div></div>`);
+  if (e.ends_at) tiles.push(`<div class="stat-tile"><div><span class="lbl">${S.past ? ((S.ev.chapters || []).length > 1 ? "Chapter" : "Event") : (S.ev && (S.ev.chapters || []).length > 1) ? "Chapter ends in" : "Time left"}</span><b class="n">${esc(left ? left[0] : "Ended")}</b><small>ends ${esc(fmtDate(e.ends_at))}</small></div></div>`);
   // a Spotlight event: its chapters last two days each, the event runs on (both are shown)
   const chs = (S.ev && S.ev.chapters) || [];
   const evEnd = chs.length > 1 ? chs[chs.length - 1].ends_at_ms : null;
   const evLeft = evEnd && timeLeft(new Date(evEnd).toISOString());
-  if (evEnd) tiles.push(`<div class="stat-tile"><div><span class="lbl">Event ends in</span><b class="n">${esc(evLeft ? evLeft[0] : "Ended")}</b><small>chapter ${esc(String(e.chapter ? +e.chapter : "?"))} of ${chs.length} · ${esc(fmtDate(evEnd))}</small></div></div>`);
+  if (evEnd) tiles.push(`<div class="stat-tile"><div><span class="lbl">${S.past ? "Event" : "Event ends in"}</span><b class="n">${esc(evLeft ? evLeft[0] : "Ended")}</b><small>chapter ${esc(String(e.chapter ? +e.chapter : "?"))} of ${chs.length} · ${esc(fmtDate(evEnd))}</small></div></div>`);
   const me = S.cut && S.cut.self;
   const ps = ptStanding(S.cut);
   if (me && me.rank) {
     const fin = finalSelf(S.cut);
-    tiles.push(`<div class="stat-tile"><div><span class="lbl">Your rank (${esc(S.region.toUpperCase())})</span><b class="n">#${fmt(me.rank)}</b><small>${fin ? "final" : `read ${esc(ago((S.cut.now - me.captured_at) / 1000))}${S.cut.ended ? ", before the end" : ""}`}</small></div></div>`);
-    if (!ps) tiles.push(`<div class="stat-tile"><div><span class="lbl">Your Event Pt</span><b class="n">${fmt(me.score)}</b><small>${fin ? "final" : "at that read"}</small></div></div>`);
+    tiles.push(`<div class="stat-tile"><div><span class="lbl">Your rank (${esc(S.region.toUpperCase())})</span><b class="n">#${fmt(me.rank)}</b><small>${fin ? "final" : S.past ? `read ${esc(fmtDate(new Date(me.captured_at).toISOString()))}` : `read ${esc(ago((S.cut.now - me.captured_at) / 1000))}${S.cut.ended ? ", before the end" : ""}`}</small></div></div>`);
+    if (!ps) tiles.push(`<div class="stat-tile"><div><span class="lbl">${isPts() ? "Your Event Pt" : `Your ${S.cut.kind === "total" ? "total" : "best"} score`}</span><b class="n">${fmt(me.score)}</b><small>${fin ? "final" : "at that read"}</small></div></div>`);
   }
   if (ps) tiles.push(`<div class="stat-tile"><div><span class="lbl">Your final Event Pt</span><b class="n">${fmt(ps.pts)}</b><small>${ps.best ? `inside Top ${fmt(ps.best.rank)}` : "outside every tier"}</small></div></div>`);
   $("#evstats").innerHTML = tiles.join("");
@@ -140,7 +146,7 @@ function renderChart() {
   body.style.setProperty("--tc", t.color1 ? `#${t.color1}` : "#8C8BB8");
   body.innerHTML = view === "heat"
     ? heatmap(c, you ? { ...t, series: c.self_series } : t, { you, unit: isPts() ? "Event Pt" : c.kind === "total" ? "Total score" : "Song score" })
-    : lineChart(c, t, { you });
+    : lineChart(c, t, { you, truth: truthOf(t.rank) });
   if (view === "line") wireLine(body.querySelector("svg"), $("#charttip"));
   else $("#charttip").hidden = true;
 }
@@ -164,12 +170,12 @@ const TOP_REFRESH_MS = 60e3;
 async function loadTop() {
   const region = S.region;
   const kind = S.cut && S.cut.kind && S.cut.kind !== "points" ? S.cut.kind : null;
-  const r = await fetch(`/api/event/top?region=${region}${S.chapter ? `&chapter=${encodeURIComponent(S.chapter)}` : ""}${kind ? `&kind=${encodeURIComponent(kind)}` : ""}`);
+  const r = await fetch(`/api/event/top?region=${region}${S.chapter ? `&chapter=${encodeURIComponent(S.chapter)}` : ""}${kind ? `&kind=${encodeURIComponent(kind)}` : ""}${S.past ? "&past=1" : ""}${S.at ? `&at=${S.at}` : ""}`);
   const body = await r.json().catch(() => ({}));
   if (region !== S.region || kind !== (S.cut && S.cut.kind && S.cut.kind !== "points" ? S.cut.kind : null)) return;   // moved on while in flight
   if (!r.ok || (kind && !(body.rows || []).length)) {
     S.top = null;
-    if (kind && r.ok) {   // a song board not read yet
+    if (kind && r.ok && !S.past) {   // a song board not read yet
       $("#topsec").hidden = false;
       $("#h-top").textContent = `Top 100 · ${songTitle(kind)}`;
       $("#topnote").textContent = "";
@@ -188,6 +194,7 @@ async function loadTop() {
   renderTop();
 }
 function wireTopRefresh() {
+  if (S.past) return;   // a past board does not move
   setInterval(() => { if (!document.hidden) loadTop(); }, TOP_REFRESH_MS);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) loadTop(); });
 }
@@ -197,7 +204,9 @@ function renderTop() {
   const song = String(d.kind || "").startsWith("music:");
   $("#h-top").textContent = song ? `Top 100 · ${songTitle(d.kind)}` : d.kind === "total" ? "Top 100 · Total Score" : "Top 100";
   TOP_COLS.find(x => x.k === "score").lab = song ? "Best score" : d.kind === "total" ? "Total score" : "Event Pt";
-  $("#topnote").textContent = d.captured_at ? `Read ${F.ago(d.captured_at)} by the 24/7 tracker${d.final ? ". Final" : d.watching ? `, every 5${F.SP}min while this page is open` : ""}` : "";
+  $("#topnote").textContent = !d.captured_at ? ""
+    : S.past ? `${d.final ? "Final board" : "Last board read"}, ${fmtDate(d.captured_at)} · ${fmt(d.reads)} read${d.reads === 1 ? "" : "s"} while someone watched`
+    : `Read ${F.ago(d.captured_at)} by the 24/7 tracker${d.final ? ". Final" : d.watching ? `, every 5${F.SP}min while this page is open` : ""}`;
   const sort = S.topSort || { k: "rank", dir: 1 };
   const col = TOP_COLS.find(x => x.k === sort.k) || TOP_COLS[0];
   const sorted = [...rows].sort((a, b) => { const x = col.v(a), y = col.v(b); return (x < y ? -1 : x > y ? 1 : 0) * sort.dir || a.rank - b.rank; });
@@ -209,7 +218,7 @@ function renderTop() {
       <td class="n">${r.rank}</td><td><b>${esc(r.name || F.NA)}</b> <small class="dim">${esc(r.uid || "")}</small></td>
       <td>${fmt(r.score)}</td><td>${r.gain_1h == null ? `<span class="dim">${F.NA}</span>` : r.gain_1h ? `+${fmt(r.gain_1h)}` : `<span class="dim">0</span>`}</td>
       <td>${delta(r.rank_1h)}</td><td class="n">${r.pace_h == null ? F.NA : fmt(r.pace_h)}</td>
-      <td class="n">${r.last_gain_at ? F.ago(r.last_gain_at) : `<span class="dim">${d.first_read > d.captured_at - 36e5 ? "none read yet" : "not in the last hour"}</span>`}</td></tr>`).join("")}</tbody>
+      <td class="n">${r.last_gain_at ? (S.past ? fmtDate(new Date(r.last_gain_at).toISOString()) : F.ago(r.last_gain_at)) : `<span class="dim">${d.first_read > d.captured_at - 36e5 ? "none read yet" : "not in the last hour"}</span>`}</td></tr>`).join("")}</tbody>
     ${sorted.length > 20 ? `<tfoot><tr><td colspan="${TOP_COLS.length}"><button type="button" class="btn small" data-alltop>${S.allTop ? "Show the top 20" : `Show all ${sorted.length}`}</button></td></tr></tfoot>` : ""}`;
 }
 async function openPlayer(uid) {
@@ -271,9 +280,10 @@ function renderChapters(ev) {
 }
 async function selectChapter(key) {
   if (!key || key === S.chapter) return;
-  S.chapter = key;
-  try { S.ev = await getJSON(`/api/event?event=${encodeURIComponent(key)}`); renderHead(S.ev); renderRules(S.ev); } catch (e) { toast(e.message); }
-  try {
+  S.chapter = key; S.at = null; S.full = null;
+  if (S.past) history.replaceState(null, "", `/event?event=${encodeURIComponent(S.past)}&chapter=${encodeURIComponent(key)}`);
+  try { S.ev = await getJSON(S.past ? pastURL(S.past, key) : `/api/event?event=${encodeURIComponent(key)}`); renderHead(S.ev); renderRules(S.ev); } catch (e) { toast(e.message); }
+  if (!S.past) try {
     const songs = (await getJSON(`/api/event/songs?boosts=3&event=${encodeURIComponent(key)}`)).songs || [];
     S.songs = songs.filter(s => s.chart_available !== false && s.length_permil != null);
   } catch (e) { S.songs = []; }
@@ -292,7 +302,7 @@ async function openHistory() {
   try { doc = await getJSON("/api/event/history"); }
   catch (e) { $("#histbody").innerHTML = `<p class="ev-empty">The history could not be read: ${esc(e.message)}</p>`; return; }
   const evs = doc.events || [];
-  const nowKey = S.ev && S.ev.event && S.ev.event.key;
+  const nowKey = S.past || evId(S.ev && S.ev.event && S.ev.event.key);
   $("#histnote").textContent = evs.length ? `${evs.length} event${evs.length === 1 ? "" : "s"} on record` : "";
   $("#histbody").innerHTML = evs.length ? evs.map(e => histRow(e, nowKey)).join("")
     : `<p class="ev-empty">No event on record yet: the refresh starts the history.</p>`;
@@ -314,7 +324,9 @@ function histChapter(ch) {
   else if (ch.rank) rank = col(ch.final ? "Final rank" : "Rank", `#${fmt(ch.rank)}`, ch.final ? "" : `before the end`);
   else if (ch.outside) rank = col("Final rank", `<span class="mute">Outside</span>`, "below every tier");
   else rank = col("Final rank", na, "not on record");
-  const pt = col(pts ? "Event Pt" : "Total score", ch.event_pt != null ? fmt(ch.event_pt) : na,
+  // Marathon/Top's Event Pt (what the exchange spends), also in a Score Challenge, whose ranking is
+  // the total score instead
+  const pt = col("Event Pt", ch.event_pt != null ? fmt(ch.event_pt) : na,
     ch.event_pt == null ? (ch.from_emblem ? "not kept this far back" : "not read") : ch.event_pt_final || !pts ? "" : "so far");
   const tier = g ? `<div class="c"><span class="hl">Tier</span><span class="ev-grade" style="--tc:#${esc(g.color1 || "8C8BB8")}"><i></i>${esc(g.grade_name || g.grade_id)}</span>${!st && !ch.final ? `<small>at the last read</small>` : ""}${st && st.next ? `<small class="short">+${fmt(st.next.need)} short of Top ${fmt(st.next.rank)}</small>` : ""}</div>`
     : col("Tier", `<span class="mute">None</span>`);
@@ -333,7 +345,8 @@ function histChapter(ch) {
   const songs = (ch.songs || []).map(sg => {
     const res = sg.rank ? `#${fmt(sg.rank)} · ${fmtK(sg.score)}` : sg.outside ? "Outside" : F.NA;
     const bs = chips((sg.borders || []).filter(b => b.score != null).sort((a, b) => a.rank - b.rank)).join("");
-    return `<div class="ev-hborders"><span class="lbl">Song Score · ${esc(sg.title || sg.music_id)} · <b>${res}</b></span>${bs}</div>`;
+    const sm = sg.reached && sg.final ? medal(ch.chapter_id, sg.reached.grade_id, "ev-smedal", sg.music_id) : "";
+    return `<div class="ev-hborders">${sm}<span class="lbl">Song Score · ${esc(sg.title || sg.music_id)} · <b>${res}</b></span>${bs}</div>`;
   }).join("");
   const more = strip || songs ? `<details class="ev-hdet"><summary>Borders${songs ? " and song ranking" : ""}</summary>${strip}${songs}</details>` : "";
   return `<div class="ev-hline"><div class="md">${m || `<div class="nomd"></div>`}</div>${name}${rank}${pt}${tier}</div>${more}`;
@@ -343,9 +356,11 @@ function histRow(e, nowKey) {
   const when = e.starts_at && e.ends_at ? `${fmtDate(e.starts_at)} to ${fmtDate(e.ends_at)}` : "dates not on record";
   const chs = e.chapters || [];
   const body = chs.map(histChapter).join("") || `<p class="meta">Not started or no chapter on record yet.</p>`;
-  return `<article class="ev-hrow${e.event_id === nowKey ? " now" : ""}">
+  const here = e.event_id === nowKey;
+  const open = here ? "" : `<a class="btn small ev-hopen" href="${e.event_id === S.liveId ? "/event" : `/event?event=${encodeURIComponent(e.event_id)}`}">${e.event_id === S.liveId ? "Open the current event" : "Open this event"}</a>`;
+  return `<article class="ev-hrow${here ? " now" : ""}">
     <header><div class="art">${art}</div><div><h3>${esc(e.title || eventName(e.event_id))}</h3>
-      <p class="meta">${esc(e.kind_label || "Event")} · ${esc(when)}${e.event_id === nowKey ? " · current event" : ""}</p></div></header>
+      <p class="meta">${esc(e.kind_label || "Event")} · ${esc(when)}${here ? (S.past ? " · on this page" : " · current event") : e.event_id === S.liveId ? " · current event" : ""}</p></div>${open}</header>
     <div class="ev-hchs">${body}</div></article>`;
 }
 
@@ -390,9 +405,11 @@ const tierReached = c => {
   const me = c.self && c.self.rank;
   return me ? (c.tiers || []).filter(t => t.rank >= me).sort((a, b) => a.rank - b.rank)[0] || null : null;
 };
-// the chapter's ranking medal as the game draws it (event_emblems.py -> /eventart/emblem-<chapter>-<grade>.webp)
-const medal = (chapterId, gradeId, cls = "ev-medal") => chapterId && gradeId
-  ? `<img class="${cls}" src="/eventart/emblem-${esc(chapterId)}-${esc(String(gradeId).replace(/^marathon_ranking_grade-/, ""))}.webp" alt="" onerror="this.remove()">` : "";
+// the ranking medal as the game draws it (event_emblems.py -> /eventart/emblem-<chapter>-<grade>.webp);
+// a song ranking rewards its own, with the song's jacket (emblem-<chapter>-<music id>-<grade>.webp)
+const medal = (chapterId, gradeId, cls = "ev-medal", musicId = null) => chapterId && gradeId
+  ? `<img class="${cls}" src="/eventart/emblem-${esc(chapterId)}${musicId ? `-${esc(musicId)}` : ""}-${esc(String(gradeId).replace(/^marathon_ranking_grade-/, ""))}.webp" alt="" onerror="this.remove()">` : "";
+const songOf = kind => String(kind || "").startsWith("music:") ? String(kind).slice(6) : null;
 // where you ended an ended chapter: {pts, tier (the tier you finished in, or null), exact rank or null}
 function finish(c) {
   if (finalSelf(c)) return { pts: c.self.score, tier: tierReached(c), rank: c.self.rank };
@@ -400,7 +417,7 @@ function finish(c) {
   return ps ? { pts: ps.pts, tier: ps.best, rank: null, from: ps.from } : null;
 }
 
-function fan(c, t, pace) {
+function fan(c, t, pace, truth) {
   const W = 640, H = 96, PX = 6, PY = 8;
   const p = t.prediction;
   const band = (p && p.band) || [];
@@ -408,6 +425,8 @@ function fan(c, t, pace) {
   // the tier sets the scale, plus where you are now -- not your projected END, which on a low
   // tier would flatten the border's curve into the floor. Your line is clipped at the top edge
   // instead, and so is your dot when you are far above the tier.
+  const after = (truth || []).filter(q => q[0] >= c.now);   // a replay: what really followed
+  ys.push(...after.map(q => q[1]));
   const tierMax = Math.max(1, ...ys);
   if (pace && pace.now <= tierMax * 1.5) ys.push(pace.now);
   const ymax = Math.max(1, ...ys) * 1.06;
@@ -427,14 +446,16 @@ function fan(c, t, pace) {
   return `<svg class="ev-fan" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Top ${fmt(t.rank)}: border so far as dots, forecast range to the end of the event${pace ? ", and your pace as a line" : ""}">
     <line class="base" x1="${PX}" x2="${W - PX}" y1="${H - PY}" y2="${H - PY}"/>
     <line class="now" x1="${nowX}" x2="${nowX}" y1="${PY}" y2="${H - PY}"/>
-    ${area}${mid}${past}${you}${dots}</svg>`;
+    ${area}${after.length > 1 ? `<polyline class="truth" points="${pts(after)}"/>` : ""}${mid}${past}${you}${dots}</svg>`;
 }
 
 function renderCutoffs() {
   const c = S.cut;
   if (!c) return;
-  $("#cutage").textContent = c.captured_at
-    ? `Read ${ago(c.age_s)}, ${c.snapshots} read${c.snapshots === 1 ? "" : "s"}, ${Math.round((c.elapsed_fraction || 0) * 100)}% of the event gone` : "";
+  $("#cutage").textContent = !c.captured_at ? ""
+    : S.at ? `As it stood ${fmtDate(new Date(S.at).toISOString())}: ${fmt(c.snapshots)} read${c.snapshots === 1 ? "" : "s"} by then, forecast from the chapters ended by then; the grey line is what really followed`
+    : S.past ? `${fmt(c.snapshots)} read${c.snapshots === 1 ? "" : "s"} of this ranking, the last ${fmtDate(new Date(c.captured_at).toISOString())}`
+    : `Read ${ago(c.age_s)}, ${c.snapshots} read${c.snapshots === 1 ? "" : "s"}, ${Math.round((c.elapsed_fraction || 0) * 100)}% of the event gone`;
   if (!c.snapshots) {   // a ranking with no read yet (a song ranking before its first one)
     const what = rankName(c) || "This ranking";
     $("#tiers").innerHTML = `<p class="ev-empty">${esc(what)}: not read yet. ${c.ended
@@ -449,7 +470,7 @@ function renderCutoffs() {
     const g1 = t.color1 ? `#${t.color1}` : "#8C8BB8";
     const name = `<div class="tn"><i style="--tc:${g1}"></i><b>Top ${fmt(t.rank)}</b><small>${esc(t.grade_name || "")}</small></div>`;
     if (!tierOK(t)) {
-      const why = !t.filled ? `Fewer than ${fmt(t.rank)} players so far: anyone who plays is inside.`
+      const why = !t.filled ? (c.ended ? `Fewer than ${fmt(t.rank)} players took part: everyone who played was inside.` : `Fewer than ${fmt(t.rank)} players so far: anyone who plays is inside.`)
         : "At the floor: everyone who played one Live has this. No forecast yet.";
       return `<div class="ev-tier quiet" role="listitem">${name}<div class="cur"><span class="lbl">Border now</span><b class="n">${t.filled ? fmt(t.score) : F.NA}</b></div><p class="why">${why}</p></div>`;
     }
@@ -464,14 +485,18 @@ function renderCutoffs() {
       else if (fin.tier && fin.tier.rank === t.rank) verdict = `<b class="n ok one">You finished here</b><small>${fin.rank ? `#${fmt(fin.rank)}` : `#${fmt(fin.from)}–${fmt(t.rank)}`} · +${short(fin.pts - finalOf(t))} over it</small>`;
       else if (fin.pts >= finalOf(t)) verdict = `<b class="n one">Cleared by +${short(fin.pts - finalOf(t))}</b>`;
       else verdict = `<b class="n one">Outside by ${short(finalOf(t) - fin.pts)}</b>`;
+    } else if (!p) {   // no forecast (a best-score ranking with no finished chapter to learn from)
+      const mine = (c.self && c.self.score) || 0;
+      verdict = mine >= t.score ? `<b class="n ok">Inside now</b><small>no forecast yet: the border can still rise</small>`
+        : `<b class="n">+${short(t.score - mine)}</b><small>to pass it as it stands now (no forecast yet)</small>`;
     } else if (!c.self || !c.self.score) verdict = `<b class="n">${short(finalOf(t))}</b><small>${unit()} to finish inside</small>`;
     else if (gp.high <= 0) verdict = `<b class="n ok">Inside</b><small>you are above the whole fan</small>`;
     else verdict = `<b class="n">+${short(Math.max(0, gp.mid))}</b><small>${gp.low <= 0 ? "inside the low end" : `range +${short(gp.low)} to +${short(gp.high)}`}</small>`;
     return `<button type="button" class="ev-tier" role="listitem" aria-pressed="${sel}" data-rank="${t.rank}" style="--tc:${g1}">
         ${name}
         <div class="cur"><span class="lbl">${c.ended ? "Last border read" : "Border now"}</span><b class="n">${fmt(t.score)}</b><small>${c.ended ? esc(fmtDate(t.captured_at)) : t.rate_per_hour != null ? `+${fmt(t.rate_per_hour)} ${unit()}/h` : "one read, no pace yet"}</small></div>
-        ${fan(c, t, pace)}
-        <div class="fc"><span class="lbl">${c.ended || (p && p.method === "final") ? "Final" : "Forecast"}</span><b class="n">${fmt(finalOf(t))}</b>${range}</div>
+        ${fan(c, t, pace, truthOf(t.rank))}
+        <div class="fc"><span class="lbl">${c.ended || (p && p.method === "final") ? "Final" : "Forecast"}</span>${!c.ended && !p ? `<b class="n mute">${F.NA}</b><small>no finished chapter of this ranking to learn from yet</small>` : `<b class="n">${fmt(finalOf(t))}</b>${range}`}</div>
         <div class="gap"><span class="lbl">${c.ended ? "Your result" : "You need"}</span>${verdict}</div>
       </button>`;
   }).join("") || `<p class="ev-empty">No tiers in this read.</p>`;
@@ -491,15 +516,24 @@ function renderGap() {
       ? `<b class="n">#${fmt(c.self.rank)}</b><small>${won ? `Top ${fmt(won.rank)}${won.grade_name ? ` ${esc(won.grade_name)}` : ""}` : "outside every tier"}: final, read ${esc(fmtDate(c.self.captured_at))}</small>`
       : finalOut(c)
       ? `<b class="n">Outside</b><small>${rankName(c) ? `${esc(rankName(c))}: ` : ""}you finished outside every tier; final, read ${esc(fmtDate(c.self.captured_at))}</small>`
+      : !c.self && !c.own_points
+      ? `<b class="n mute">${F.NA}</b><small>No rank of yours in ${esc(REGION_NAME[c.region] || c.region)}: each region ranks its own players. The borders below are this region's.</small>`
       : `<b class="n mute">${F.NA}</b><small>The event has ended and your rank was not read after its end${c.self && c.self.rank ? ` (last read #${fmt(c.self.rank)}, ${esc(fmtDate(c.self.captured_at))})` : ""}.</small>`;
     const fin = finish(c);
-    const m = fin && fin.tier ? medal(c.chapter_id, fin.tier.grade_id, "ev-medal big") : "";
+    const m = fin && fin.tier ? medal(c.chapter_id, fin.tier.grade_id, "ev-medal big", songOf(c.kind)) : "";
     $("#evgap").innerHTML = (m ? `<div class="ev-medalbox">${m}<div><span class="ev-mlbl">Your medal</span><b class="n">${esc(fin.tier.grade_name || "")}</b><small>${fin.rank ? `#${fmt(fin.rank)}, final` : `#${fmt(fin.from)}–${fmt(fin.tier.rank)} from your final Event Pt${ptStanding(c) && !ptStanding(c).fin ? " (final borders not out yet)" : ""}`}</small></div></div>` : `<div class="stat-tile prime"><div><span class="lbl">Event ended</span>${head}</div></div>`)
       + (!finalSelf(c) && ps ? `<div class="stat-tile"><div><span class="lbl">Final Event Pt</span><b class="n">${fmt(ps.pts)}</b><small>read ${esc(fmtDate(c.own_points.captured_at))}, after the end</small></div></div>` : "")
-      + (finalSelf(c) ? `<div class="stat-tile"><div><span class="lbl">Final Event Pt</span><b class="n">${fmt(c.self.score)}</b><small>${won ? `Top ${fmt(won.rank)} border ${fmt(finalOf(won))}` : "outside every tier"}</small></div></div>` : "");
+      + (finalSelf(c) ? `<div class="stat-tile"><div><span class="lbl">${isPts() ? "Final Event Pt" : c.kind === "total" ? "Final total score" : "Final best score"}</span><b class="n">${fmt(c.self.score)}</b><small>${won ? `Top ${fmt(won.rank)} border ${fmt(finalOf(won))}` : "outside every tier"}</small></div></div>` : "");
     return;
   }
   const gp = gapOf(c, t);
+  if (!t.prediction) {   // no forecast for this ranking yet: the gap to the border as it stands
+    const mine = (c.self && c.self.score) || 0;
+    $("#evgap").innerHTML = `<div class="stat-tile prime"><div><span class="lbl">Gap to target</span>${mine >= t.score
+      ? `<b class="n ok">Inside now</b><small>Top ${fmt(t.rank)} is at ${fmt(t.score)} now; no forecast yet, so the border can still rise past you</small>`
+      : `<b class="n">+${fmt(t.score - mine)}</b><small>to pass Top ${fmt(t.rank)} as it stands now (${fmt(t.score)}); no forecast yet: no finished chapter of this ranking to learn from</small>`}</div></div>`;
+    return;
+  }
   const me = c.self && c.self.rank ? "" : `<div class="stat-tile"><div><span class="lbl">You</span><b class="n mute">${F.NA}</b><small>your rank is not read in this region</small></div></div>`;
   const head = gp.high <= 0
     ? `<b class="n ok">Inside</b><small>Top ${fmt(t.rank)} forecast ${fmt(finalOf(t))}: you are above its whole range</small>`
@@ -539,18 +573,69 @@ async function loadTrackerHealth() {
     + (r.error ? ` (${r.error})` : "")).join("; ") + `. The tracker reads every 5 min while an event is open.`;
 }
 async function loadCutoffs() {
-  loadTrackerHealth();
+  if (!S.past) loadTrackerHealth();
   const q = `region=${S.region}${S.chapter ? `&chapter=${encodeURIComponent(S.chapter)}` : ""}`;
   try {
-    let c = await getJSON(`/api/event/cutoffs?${q}${S.kind ? `&kind=${encodeURIComponent(S.kind)}` : ""}`);
-    if (S.kind && !(c.kinds || []).includes(S.kind)) { S.kind = null; c = await getJSON(`/api/event/cutoffs?${q}`); }
-    S.cut = c; renderKinds(); renderCutoffs();
+    const at = S.at ? `&at=${S.at}` : "";
+    let c = await getJSON(`/api/event/cutoffs?${q}${S.kind ? `&kind=${encodeURIComponent(S.kind)}` : ""}${at}`);
+    if (S.kind && !(c.kinds || []).includes(S.kind)) { S.kind = null; c = await getJSON(`/api/event/cutoffs?${q}${at}`); }
+    // the chapter as it ended: the replay's "what really happened" beside an earlier forecast
+    if (!S.at) S.full = c;
+    else if (!S.full || fullKey(S.full) !== fullKey(c)) {
+      try { S.full = await getJSON(`/api/event/cutoffs?region=${c.region}&chapter=${encodeURIComponent(c.chapter_id)}&kind=${encodeURIComponent(c.kind)}`); }
+      catch (_) { S.full = null; }
+    }
+    S.cut = c; renderKinds(); renderReplay(); renderCutoffs();
   }
   catch (e) {
-    S.cut = null; $("#cutage").textContent = ""; $("#rkind").innerHTML = ""; $("#rsongs").hidden = true;
+    S.cut = null; $("#cutage").textContent = ""; $("#rkind").innerHTML = ""; $("#rsongs").hidden = true; $("#replay").hidden = true;
     $("#tiers").innerHTML = "";
-    renderGap();
+    if (S.past) renderNoRecord(); else renderGap();
   }
+}
+// a past chapter whose borders were never read over time in this region (the events before the
+// 24/7 tracker): its result and final borders as the event history keeps them
+function renderNoRecord() {
+  const ch = S.hist && (S.hist.chapters || []).find(x => x.chapter_id === S.chapter);
+  $("#evgap").innerHTML = `<p class="ev-empty">This chapter's borders were not read over time in ${esc(REGION_NAME[S.region] || S.region)}: the 24/7 tracker started recording after it${ch ? ". What is on record of it:" : "."}</p>`;
+  $("#tiers").innerHTML = ch ? `<div class="ev-hchs ev-norecord">${histChapter(ch)}</div>` : "";
+}
+
+/* ------------------------------------------------------------------ replay */
+// An ended chapter can be replayed: the borders, the forecast, your standing and the top 100 as
+// they stood at any instant of it (`at`), with what really followed drawn beside the forecast.
+const fullKey = c => c ? `${c.region}|${c.chapter_id}|${c.kind}` : "";
+const REPLAY_MIN_READS = 24;
+const truthOf = rank => S.at && S.full ? ((S.full.tiers || []).find(x => x.rank === rank) || {}).series || null : null;
+function replayLabel(f, at) {
+  const share = Math.round((at - f.start_time) / (f.end_time - f.start_time) * 100);
+  return `${fmtDate(new Date(at).toISOString())} · ${share}${F.SP}% in`;
+}
+function renderReplay() {
+  const f = S.full, box = $("#replay");
+  // a chapter read only a handful of times has nothing to replay
+  box.hidden = !(f && f.ended && f.snapshots >= REPLAY_MIN_READS && f.end_time > f.start_time);
+  if (box.hidden) return;
+  const span = f.end_time - f.start_time;
+  $("#replayat").value = S.at ? Math.round((S.at - f.start_time) / span * 1000) : 1000;
+  $("#replaynote").textContent = S.at ? replayLabel(f, S.at) : "Final";
+  $("#replayend").hidden = !S.at;
+}
+function wireReplay() {
+  const at = () => {
+    const f = S.full, v = +$("#replayat").value;
+    if (!f || v >= 1000) return null;
+    // in the reads' own 5-minute steps, never before the first hour
+    return Math.max(f.start_time + 36e5, Math.round((f.start_time + (f.end_time - f.start_time) * v / 1000) / 3e5) * 3e5);
+  };
+  let timer = null;
+  $("#replayat").addEventListener("input", () => {
+    const t = at();
+    $("#replaynote").textContent = t ? replayLabel(S.full, t) : "Final";
+    clearTimeout(timer);
+    timer = setTimeout(() => { S.at = t; loadCutoffs().then(loadTop); }, 300);
+  });
+  $("#replayend").onclick = () => { S.at = null; loadCutoffs().then(loadTop); };
 }
 function wireCutoffs() {
   const seg = $("#region");
@@ -581,7 +666,7 @@ function wireCutoffs() {
 }
 
 // the server's poller keeps the store current (on at server start); the page re-reads it every minute
-setInterval(() => { if (!document.hidden) loadCutoffs(); }, 60_000);
+setInterval(() => { if (!document.hidden && !S.past) loadCutoffs(); }, 60_000);
 
 /* ------------------------------------------------------------------ 4. reference */
 // How a team's Event Bonus adds up, from this event's own rows: every member adds each bonus it
@@ -613,6 +698,9 @@ function renderRuleSummary(live) {
     : "";
 }
 function renderRules(ev) {
+  const none = ev.rules_on_record === false;
+  $("#rulesnone").hidden = !none;
+  $("#rulesbody").hidden = none;
   const live = ev.live || {};
   renderRuleSummary(live);
   $("#mems").innerHTML = (live.holomems || []).map(m => `<span class="ev-mem"><i style="--gc:${genOf(m.character_id).c}"></i>${esc(m.name)} <b class="eb">${pct(m.permil)}</b></span>`).join("")
@@ -696,22 +784,40 @@ function wireMine() {
 
 /* ------------------------------------------------------------------ boot */
 async function init() {
-  wireCutoffs(); wireMine(); wireTop(); wireTopRefresh();
+  wireCutoffs(); wireMine(); wireTop(); wireReplay();
   $("#banner").onclick = openHistory;
   $("#histopen").onclick = openHistory;
   if (location.hash === "#history") openHistory();   // a link straight to the past events
   $("#evchapters").addEventListener("click", e => { const b = e.target.closest("[data-chapter]"); if (b) selectChapter(b.dataset.chapter); });
   $("#histclose").onclick = () => $("#histdlg").close();
   $("#histdlg").addEventListener("click", e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
-  try { S.ev = await getJSON("/api/event"); S.chapter = S.ev.event && S.ev.event.key; renderHead(S.ev); renderRules(S.ev); }
-  catch (e) { $("#evtitle").textContent = "No event data"; toast(e.message); }
+  const q = new URLSearchParams(location.search);
+  S.past = q.get("event") || null;
+  // the open event's id: the past events list marks it, even while a past one is on the page
+  getJSON("/api/event").then(d => { S.liveId = evId(d.event && d.event.key); if (S.liveId === S.past) location.replace("/event"); }).catch(() => {});
+  if (S.past) {
+    $("#evback").hidden = false;
+    $("#minesec").hidden = true;   // today's cards against an old event's rules would read as its result
+    // the event history: this event's result per chapter, for a chapter with no border series
+    getJSON("/api/event/history").then(d => {
+      S.hist = (d.events || []).find(e => e.event_id === S.past) || null;
+      if (!S.cut) renderNoRecord();
+    }).catch(() => {});
+    try { S.ev = await getJSON(pastURL(S.past, q.get("chapter"))); S.chapter = S.ev.event && S.ev.event.key; renderHead(S.ev); renderRules(S.ev); }
+    catch (e) { $("#evtitle").textContent = "Event not on record"; toast(e.message); return; }
+  } else {
+    try { S.ev = await getJSON("/api/event"); S.chapter = S.ev.event && S.ev.event.key; renderHead(S.ev); renderRules(S.ev); }
+    catch (e) { $("#evtitle").textContent = "No event data"; toast(e.message); }
+  }
+  wireTopRefresh();
   const cut = loadCutoffs();   // after the event: a Spotlight event's cutoffs are per chapter
   loadTop();
   try {
-    const songs = (await getJSON(`/api/event/songs?boosts=3${S.chapter ? `&event=${encodeURIComponent(S.chapter)}` : ""}`)).songs || [];
-    S.songs = songs.filter(s => s.chart_available !== false && s.length_permil != null);
+    // a past event: every song (its titles name the song rankings), no event's ranking of them
+    const songs = (await getJSON(`/api/event/songs?boosts=3${S.chapter && !S.past ? `&event=${encodeURIComponent(S.chapter)}` : ""}`)).songs || [];
+    S.songs = S.past ? songs : songs.filter(s => s.chart_available !== false && s.length_permil != null);
   } catch (e) { S.songs = []; }
   await cut;
-  renderMine();
+  if (!S.past) renderMine();
 }
 init();

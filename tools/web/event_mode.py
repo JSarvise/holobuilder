@@ -485,6 +485,113 @@ def singer_type(music_row: Mapping | None) -> str | None:
     return raw.rsplit("_TYPE_", 1)[-1].lower() if "_TYPE_" in raw else None
 
 
+# --- GET /api/event/past ---------------------------------------------------------
+def _past_meta(entry: Mapping) -> dict:
+    """An `event_history` / `event_archive` event as `event_meta.json`'s shape (one event),
+    so `event_meta_fields` and `event_chapters` read it."""
+    chapters = entry.get("chapters") or {}
+    rows = chapters.values() if isinstance(chapters, Mapping) else chapters
+    return {
+        "events": [
+            {
+                "event_id": entry.get("event_id"),
+                "title": entry.get("title"),
+                "kind_label": entry.get("kind_label"),
+                "starts_at": entry.get("starts_at"),
+                "ends_at": entry.get("ends_at"),
+                "art": entry.get("art") or ({"banner": entry["banner"]} if entry.get("banner") else {}),
+                "chapters": [
+                    {
+                        "id": ch.get("chapter_id"),
+                        "number": int(ch.get("number") or 0) or None,
+                        "title": ch.get("title"),
+                        "ends_at": ch.get("ends_at"),
+                    }
+                    for ch in rows
+                    if ch.get("chapter_id")
+                ],
+            }
+        ]
+    }
+
+
+def past_event_payload(
+    entry: Mapping,
+    archive: Mapping | None,
+    chapter_key: str | None = None,
+    *,
+    cards_by_id: Mapping[str, Any],
+    owned_ids: Sequence[str],
+    collection: Mapping[str, Mapping],
+    titles: Mapping[str, str],
+    chr_names: Mapping[str, str],
+    art_dir: Path | None = None,
+    singers: Mapping[str, str] | None = None,
+    music_meta: Mapping[str, Mapping] | None = None,
+) -> dict:
+    """One event on record, for the Event page's past-event view: its name, banner, chapters
+    and, when `marathon_bonus_archive.json` kept them, one chapter's bonus rules in the shape
+    of `event_payload`. Read-only, and apart from the open event: nothing here is what the
+    Optimizer or `/api/event` read. `owned_bonus_cards` stays empty (today's collection
+    against old rules would read as that event's result). Raises LookupError for a chapter
+    the event does not have."""
+    meta = _past_meta(entry)
+    keys = sorted(c["id"] for c in meta["events"][0]["chapters"])
+    if not keys:
+        raise LookupError(f"no chapter of {entry.get('event_id')!r} is on record")
+    chosen = chapter_key or keys[0]
+    if chosen not in keys:
+        raise LookupError(f"{entry.get('event_id')!r} has no chapter {chosen!r}")
+    archived = (archive or {}).get("chapters") or {}
+    # every archived chapter of this event: each chapter tab's face (its holomem)
+    raw_all = {"groups": [g for k in keys for g in (archived.get(k) or {}).get("groups") or []]}
+    got = archived.get(chosen)
+    if got and got.get("groups"):
+        raw = {
+            "current_group_ids": [g["group_id"] for g in got["groups"]],
+            "groups": got["groups"],
+            "event_songs": {chosen: list(got.get("event_songs") or [])},
+            "live_fetched_at": got.get("fetched_at"),
+        }
+        _raw, event, _keys = bundle_from_raw(raw, chosen)
+        out = event_payload(
+            raw,
+            event,
+            open_keys=[],
+            cards_by_id=cards_by_id,
+            owned_ids=owned_ids,
+            collection=collection,
+            titles=titles,
+            chr_names=chr_names,
+            meta=meta,
+            art_dir=art_dir,
+            singers=singers,
+            music_meta=music_meta,
+        )
+        out["rules_on_record"] = True
+    else:
+        out = {
+            "available": True,
+            "event": {
+                "key": chosen,
+                **event_meta_fields(meta, chosen, art_dir),
+                "chapter": chosen.rsplit("chapter-", 1)[1] if "chapter-" in chosen else None,
+            },
+            "fetched_at": None,
+            "live": {"holomems": [], "cards": [], "rarity_bloom": {}, "attributes": []},
+            "music": [],
+            "event_songs": [],
+            "songs": [],
+            "rules_on_record": False,
+        }
+    out["past"] = True
+    out["event_id"] = entry.get("event_id")
+    out["open_events"] = []
+    out["owned_bonus_cards"] = []
+    out["chapters"] = event_chapters(meta, chosen, [], raw_all)
+    return out
+
+
 # --- GET /api/event/songs -------------------------------------------------------
 def songs_payload(
     music_rows: Sequence[Mapping],

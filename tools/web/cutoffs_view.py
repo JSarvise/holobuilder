@@ -5,23 +5,38 @@ READ-ONLY. The store (`tools/recon/proxy/dumps/cutoffs/<region>/<chapter_id>.jso
 reads it and computes the prediction on the fly. API contract: `tools/web/EVENT-API.md`
 "Cutoffs".
 
-The prediction, in one paragraph. Every border starts at 0 when the chapter opens, so each
-tier's series is anchored at (start, 0). With no finished chapter stored on disk the model
-is PACE: the border keeps rising at the pace it has kept, measured two ways -- since the start
-(average pace) and over the trailing window (recent pace). The prediction is their mean and the
-band is the two of them. With ONE pace (a single snapshot, or no snapshot old enough to
-measure a recent pace) there is no band: one number cannot bound itself. Once a finished
-chapter of the same region and ranking kind is stored, the model becomes TEMPLATE: each past
-chapter's border curve, normalised to its own final (x = elapsed fraction, y = score / final),
-says what fraction of the final is usually in by now; final = current / that fraction, the
-band is the spread over past chapters. Pace extrapolation knows nothing of an end-of-event
-sprint, so in that mode the band is a floor-ish estimate and is labelled as such.
+The prediction. Every border starts at 0 when the chapter opens, so each tier's series is
+anchored at (start, 0).
+
+TEMPLATE (once a finished chapter of the same region and rank is stored): each past chapter's
+border curve, normalised to its own final (x = elapsed fraction, y = score / final), says what
+share of the final is usually in by now; that chapter's forecast is current / that share, and
+the forecast is the weighted median over the past chapters (a chapter read with long gaps is a
+straight line across them and weighs less). Event Pt rankings learn from Event Pt rankings;
+the best-score rankings (Total Score, Song Score) learn from each other, since a best score
+saturates early where Event Pt keeps climbing. A relay chapter learns from relays when it can.
+The band is how far earlier forecasts made at the same point of a chapter missed (the middle
+90 % of their misses, over every finished chapter, `calibration`); before enough of them are on
+record, a floor that narrows as the chapter runs. Re-made on every finished border at 10, 50 and
+75 % of its chapter, each time with only the chapters that had ended by then, the Event Pt
+forecast missed the final by a median 17, 9 and 5 % (the earlier `y = x^a` reading of the
+templates, on the same borders: 24, 21 and 18 %), and its band held the final 79-97 % of the
+time (that one's: 32-48 %).
+
+PACE (no template): the border keeps rising at the pace it has kept, measured since the start
+(average pace) and over the trailing window (recent pace); the prediction is their mean and the
+band is the two of them. With ONE pace there is no band: one number cannot bound itself. Pace
+knows nothing of an end-of-event sprint, so expect the final above it. A best-score ranking
+never gets a pace: its border jumps early and flattens, and a pace from 0 overshoots it by
+an order of magnitude; it has no forecast until a template exists.
 """
 
 from __future__ import annotations
 
+import bisect
 import json
 import math
+import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -33,15 +48,31 @@ EARLY_FRACTION = 0.05  # before 5 % of the chapter, a pace means little
 CURVE_POINTS = 24  # prediction path resolution (to the chapter end)
 FINAL_SLACK_MS = 3600 * 1000  # a chapter whose last read is this close to its end is "final"
 # a template must have been read from early in its chapter: a curve whose first read came late
-# is anchored (0,0) -> (first read) by a straight line it never measured, and its exponent
-# comes out of that gap (a history first read at 73 % of a chapter can fit a = 2.28 where the
-# full record gives 1.04, and forecast Top 500 an order of magnitude too high)
+# is a straight line from (0, 0) to that read, a shape it never measured (a history first read
+# at 73 % of a chapter forecast Top 500 an order of magnitude too high)
 MAX_TEMPLATE_START = 0.25
-# the template band's least half-width at the chapter end, as a share of the forecast, grown
-# from 0 now in proportion to the time left: one past chapter cannot bound itself, and how far a
-# same-tier curve carries from one event to the next is not known (an estimated floor; a
-# cross-REGION transfer has missed by up to 9 % on the top tiers, 50 % on low ones)
-BAND_FLOOR = 0.15
+# the band's half-width at the chapter end before enough earlier misses are on record, as a
+# share of the forecast and times the share of the chapter still to run (25 % at the start,
+# nothing at the end). A best score moves far less (its forecasts on record missed by a median
+# 0.2-3 %), so its floor is narrower
+BAND_FLOOR = 0.25
+BAND_FLOOR_BEST = 0.10
+# a template drawn across a gap wider than this share of its chapter weighs TEMPLATE_GAP_WEIGHT
+TEMPLATE_GAP = 0.2
+TEMPLATE_GAP_WEIGHT = 0.2
+# the calibration: forecasts re-made at these shares of every finished chapter; a band needs
+# CALIBRATION_MIN misses within CALIBRATION_NEAR of the current share, and keeps the middle
+# CALIBRATION_KEEP of them
+CALIBRATION_AT = (0.05, 0.1, 0.25, 0.5, 0.75, 0.9)
+CALIBRATION_NEAR = 0.15
+CALIBRATION_MIN = 12
+CALIBRATION_KEEP = 0.9
+
+
+def family(kind: str | None) -> str:
+    """The ranking's family: `points` for Event Pt, `best` for the best-score rankings (total,
+    music:<id>)."""
+    return "points" if (kind or "points").split(":", 1)[0] == "points" else "best"
 
 
 # ------------------------------------------------------------------ store (read only)
@@ -110,13 +141,14 @@ def series_for(records: Iterable[dict], kind: str, rank: int) -> list[tuple[int,
 
 
 def _interp(xs: list[float], ys: list[float], x: float) -> float:
+    """The curve (xs ascending) at x, linear between its points, flat beyond its ends."""
     if x <= xs[0]:
         return ys[0]
-    for i in range(1, len(xs)):
-        if x <= xs[i]:
-            x0, x1, y0, y1 = xs[i - 1], xs[i], ys[i - 1], ys[i]
-            return y0 if x1 == x0 else y0 + (y1 - y0) * (x - x0) / (x1 - x0)
-    return ys[-1]
+    i = bisect.bisect_left(xs, x)
+    if i >= len(xs):
+        return ys[-1]
+    x0, x1, y0, y1 = xs[i - 1], xs[i], ys[i - 1], ys[i]
+    return y0 if x1 == x0 else y0 + (y1 - y0) * (x - x0) / (x1 - x0)
 
 
 def normalised_curve(series: list[tuple[int, int]], start: int, end: int) -> tuple[list, list] | None:
@@ -142,24 +174,32 @@ def normalised_curve(series: list[tuple[int, int]], start: int, end: int) -> tup
     return xs, ys
 
 
-def fit_exponent(xs: list, ys: list) -> float | None:
-    """The `a` of `y = x**a` closest (in logs) to a normalised curve's inner points: one
-    number per past chapter, so a forecast built from it is a smooth curve however few reads
-    the chapter had (two reads and its final drew a kinked line). >1 = an end sprint (the
-    border gains faster late), <1 = it fades. None without an inner point."""
-    num = den = 0.0
-    for x, y in zip(xs, ys):
-        if 0.01 < x < 0.99 and 0.0 < y < 1.0:
-            lx = math.log(x)
-            num += math.log(y) * lx
-            den += lx * lx
-    return num / den if den > 0 else None
+def max_gap(xs: list[float]) -> float:
+    """The widest stretch of a normalised curve between two reads, as a share of its chapter."""
+    return max((b - a for a, b in zip(xs, xs[1:])), default=1.0)
 
 
 def _median(v: list[float]) -> float:
     s = sorted(v)
     n = len(s)
     return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def _weighted_median(values: list[float], weights: list[float]) -> float:
+    """The value at half the total weight (equal weights: the plain median)."""
+    if len(set(weights)) <= 1:
+        return _median(values)
+    pairs = sorted(zip(values, weights))
+    half, acc = sum(weights) / 2, 0.0
+    for v, w in pairs:
+        acc += w
+        if acc >= half:
+            return v
+    return pairs[-1][0]
+
+
+def _quantile(sorted_v: list[float], q: float) -> float:
+    return sorted_v[min(len(sorted_v) - 1, max(0, int(round(q * (len(sorted_v) - 1)))))]
 
 
 def _path(now: int, end: int, at: Callable[[int], float]) -> list[list[int]]:
@@ -171,18 +211,28 @@ def _path(now: int, end: int, at: Callable[[int], float]) -> list[list[int]]:
     return pts
 
 
+def _template(t: tuple) -> tuple[list, list, float]:
+    """(xs, ys, weight) of a template given as (xs, ys) or (xs, ys, weight)."""
+    return t[0], t[1], (t[2] if len(t) > 2 else 1.0)
+
+
 def predict(
     series: list[tuple[int, int]],
     *,
     start: int,
     end: int,
     now: int,
-    templates: list[tuple[list, list]] | None = None,
+    templates: list[tuple] | None = None,
+    misses: list[float] | None = None,
+    kind: str | None = None,
 ) -> dict | None:
     """Predict a border's final score. `series` = this chapter's reads (oldest first).
+    `templates`: past chapters' normalised curves, (xs, ys[, weight]) (`templates_for`).
+    `misses`: log(final / forecast) of earlier forecasts made near this point of a chapter
+    (`calibration`), which set the band. `kind`: the ranking; a best-score one gets no pace.
 
-    Returns None with no reads. After the chapter end, the last read IS the final (method
-    "final"). See the module docstring for "pace" and "template"."""
+    Returns None with no reads, and for a best-score ranking with no template. After the
+    chapter end, the last read IS the final (method "final"). See the module docstring."""
     if not series:
         return None
     t_now, s_now = series[-1]
@@ -205,56 +255,77 @@ def predict(
     remaining = end - t_now
     elapsed = max(1, t_now - start)
 
-    usable = []
-    for xs, ys in templates or []:
+    used = []
+    for tpl in templates or []:
+        xs, ys, w = _template(tpl)
         f = _interp(xs, ys, x_now)
-        a = fit_exponent(xs, ys)
-        if f > 0.01 and a is not None:
-            usable.append((a, s_now / x_now**a))
-    if usable:
-        finals = [fin for _a, fin in usable]
-        mid, low, high = _median(finals), min(finals), max(finals)
-        # the path: s_now * (x / x_now) ** a, `a` chosen so that it ends on the median final
-        a_mid = math.log(s_now / mid) / math.log(x_now) if 0 < x_now < 1 and mid > 0 else 1.0
-        a_lo = math.log(s_now / low) / math.log(x_now) if low > 0 else a_mid
-        a_hi = math.log(s_now / high) / math.log(x_now) if high > 0 else a_mid
+        if f > 0.01:
+            used.append((xs, ys, w, s_now / f, f))
+    if used:
+        mid = _weighted_median([u[3] for u in used], [u[2] for u in used])
+        low, high = min(u[3] for u in used), max(u[3] for u in used)
+        calibrated = len(misses or []) >= CALIBRATION_MIN
+        if calibrated:
+            m = sorted(misses or [])
+            cut = (1 - CALIBRATION_KEEP) / 2
+            low = min(low, mid * math.exp(_quantile(m, cut)))
+            high = max(high, mid * math.exp(_quantile(m, 1 - cut)))
+        else:
+            floor = (BAND_FLOOR_BEST if family(kind) == "best" else BAND_FLOOR) * (1 - x_now)
+            low, high = min(low, mid * (1 - floor)), max(high, mid * (1 + floor))
+        low = max(low, s_now)  # a border never falls
+        high = max(high, mid)
 
-        def at(t: int, a: float) -> float:
-            return s_now * (min(1.0, (t - start) / span) / x_now) ** a
+        def share(t: int) -> float:
+            """How much of what is still to come is in by `t` (0 now, 1 at the end): the
+            weighted mean of the templates' own shapes from here."""
+            x = min(1.0, (t - start) / span)
+            num = den = 0.0
+            for xs, ys, w, _fin, f in used:
+                if f < 1.0:
+                    num += w * (_interp(xs, ys, x) - f) / (1.0 - f)
+                    den += w
+            if not den:
+                return min(1.0, max(0.0, (t - t_now) / remaining))
+            return min(1.0, max(0.0, num / den))
 
-        def band_at(t: int) -> list[int]:
-            grown = BAND_FLOOR * min(1.0, max(0.0, (t - t_now) / remaining))
-            m = at(t, a_mid)
-            return [
-                t,
-                int(round(min(at(t, a_lo), m * (1 - grown)))),
-                int(round(max(at(t, a_hi), m * (1 + grown)))),
-            ]
-
-        points = _path(t_now, end, lambda t: at(t, a_mid))
-        band = [band_at(t) for t, _ in points]
-        low, high = band[-1][1], band[-1][2]
+        points = _path(t_now, end, lambda t: s_now + (mid - s_now) * share(t))
+        band = [
+            [t, int(round(s_now + (low - s_now) * share(t))), int(round(s_now + (high - s_now) * share(t)))]
+            for t, _ in points
+        ]
+        points[-1][1] = int(round(mid))
+        band[-1][1:] = [int(round(low)), int(round(high))]
+        n_miss = len(misses or [])
         return {
             "method": "template",
             "final": int(round(mid)),
-            "low": int(low),
-            "high": int(high),
+            "low": int(round(low)),
+            "high": int(round(high)),
             "plus_minus": int(round((high - low) / 2)),
             "points": points,
             "band": band,
-            "confidence": "medium" if len(usable) >= 3 else "low",
+            "confidence": "medium" if calibrated and len(used) >= 3 else "low",
             "inputs": {
                 "elapsed_fraction": round(x_now, 4),
-                "templates": len(usable),
-                "exponents": [round(a, 3) for a, _f in usable],
+                "templates": len(used),
+                "band_from": "misses" if calibrated else "floor",
+                "misses": n_miss,
             },
             "note": (
-                f"scaled from {len(usable)} finished chapter(s) of our own record, same "
-                "region and tier; each one's curve read as y = x^a, so the path bends "
-                "(an end-of-event sprint where a > 1); band = their spread, at least "
-                f"±{round(BAND_FLOOR * 100)} % by the end"
+                f"scaled from {len(used)} finished chapter(s) of our own record, same region and "
+                "tier: the share of its final each had in by now; band = "
+                + (
+                    f"how far {n_miss} earlier forecasts at this point of a chapter missed"
+                    if calibrated
+                    else f"at least ±{round((BAND_FLOOR_BEST if family(kind) == 'best' else BAND_FLOOR) * (1 - x_now) * 100)} % "
+                    "(too few earlier forecasts on record to measure it)"
+                )
             ),
         }
+
+    if family(kind) == "best":
+        return None  # a best score saturates early: a pace from 0 would overshoot it
 
     rate_avg = s_now / elapsed
     rate_recent = None
@@ -303,29 +374,149 @@ def predict(
     }
 
 
-def templates_for(store: Path, region: str, kind: str, rank: int, exclude_chapter: str) -> list:
-    """Normalised curves of every FINISHED chapter of this region, same ranking kind and rank.
-    Song rankings ('music:<id>') template each other regardless of the song."""
-    family = kind.split(":", 1)[0]
-    out, same_kind = [], []
-    this = next((m for m in list_chapters(store, region) if m.get("chapter_id") == exclude_chapter), None)
-    this_kind = event_kind(this.get("event_id") if this else None)
+# per chapter file, every border's series by (kind, rank), kept per version of the file: the
+# template and calibration passes read every chapter on record at each request, and the parsed
+# records themselves (a Point Rally chapter is ~12,000 reads) are not kept
+_SERIES_CACHE: dict[str, tuple[tuple[int, int], dict]] = {}
+
+
+def _series_of(recs: Iterable[dict]) -> dict[tuple[str, int], list[tuple[int, int]]]:
+    out: dict[tuple[str, int], list[tuple[int, int]]] = {}
+    for r in recs:
+        k = r.get("kind")
+        if not k:
+            continue
+        t = int(r["captured_at"])
+        for b in r.get("borders") or []:
+            if b.get("score") is not None and b.get("rank") is not None:
+                out.setdefault((k, b["rank"]), []).append((t, int(b["score"])))
+    for s in out.values():
+        s.sort()
+    return out
+
+
+def chapter_series(store: Path, region: str, chapter_id: str) -> dict[tuple[str, int], list[tuple[int, int]]]:
+    """`{(kind, rank): [(captured_at, score), ...]}` of one chapter (`series_for` of each)."""
+    path = Path(store or ".") / region / f"{chapter_id}.jsonl"
+    try:
+        st = path.stat()
+        stamp: tuple[int, int] | None = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        stamp = None
+    hit = _SERIES_CACHE.get(str(path)) if stamp else None
+    if hit and hit[0] == stamp:
+        return hit[1]
+    out = _series_of(read_chapter(store, region, chapter_id)[1])
+    if stamp:
+        _SERIES_CACHE[str(path)] = (stamp, out)
+    return out
+
+
+def _finished_curves(store: Path, region: str) -> list[dict]:
+    """Every chapter of a region with each finished border's normalised curve, weighted."""
+    out = []
     for meta in list_chapters(store, region):
         cid = meta.get("chapter_id")
-        if not cid or cid == exclude_chapter:
+        if not cid:
             continue
-        _m, recs = read_chapter(store, region, cid)
-        kinds: set[Any] = {r.get("kind") for r in recs if (r.get("kind") or "").split(":", 1)[0] == family}
-        for k in sorted(kinds):
-            curve = normalised_curve(
-                series_for(recs, k, rank), int(meta.get("start_time") or 0), chapter_end(meta)
-            )
-            if curve:
-                out.append(curve)
-                if this_kind and event_kind(meta.get("event_id")) == this_kind:
-                    same_kind.append(curve)
-    # a relay chapter learns from relays when it can: the kinds differ in length and pace
+        start, end = int(meta.get("start_time") or 0), chapter_end(meta)
+        curves = {}
+        for (k, rank), s in chapter_series(store, region, cid).items():
+            c = normalised_curve(s, start, end)
+            if c:
+                w = TEMPLATE_GAP_WEIGHT if max_gap(c[0]) > TEMPLATE_GAP else 1.0
+                curves[(k, rank)] = (c[0], c[1], w)
+        out.append(
+            {"meta": meta, "id": cid, "end": end, "kind": event_kind(meta.get("event_id")), "curves": curves}
+        )
+    return out
+
+
+def _pick_templates(
+    chapters: list[dict], kind: str, rank: int, this_id: str, this_kind: str | None, before: int | None
+) -> list:
+    """One border's templates out of `_finished_curves`: same family and rank, the chapter
+    itself left out, and only chapters ended by `before` when given; a relay learns from
+    relays when it can (the kinds differ in length and pace)."""
+    fam = family(kind)
+    out, same_kind = [], []
+    for ch in chapters:
+        if ch["id"] == this_id or (before is not None and ch["end"] > before):
+            continue
+        for (k, r), curve in sorted(ch["curves"].items()):
+            if r != rank or family(k) != fam:
+                continue
+            out.append(curve)
+            if this_kind and ch["kind"] == this_kind:
+                same_kind.append(curve)
     return same_kind or out
+
+
+def templates_for(
+    store: Path, region: str, kind: str, rank: int, exclude_chapter: str, before: int | None = None
+) -> list:
+    """Normalised curves (xs, ys, weight) of every FINISHED border of this region with the same
+    rank and ranking family (Event Pt; or the best-score rankings, Total Score and every song,
+    together). `before`: only the chapters ended by then (a forecast as it stood then)."""
+    this = next((m for m in list_chapters(store, region) if m.get("chapter_id") == exclude_chapter), None)
+    this_kind = event_kind(this.get("event_id") if this else None)
+    return _pick_templates(_finished_curves(store, region), kind, rank, exclude_chapter, this_kind, before)
+
+
+# the misses of the re-made forecasts, per store, kept while its finished chapters stay the same
+_CALIBRATION_CACHE: dict[str, tuple[tuple, list]] = {}
+
+
+def calibration(store: Path, now: int | None = None) -> list[tuple[str, float, int, float]]:
+    """`[(family, share, chapter end, log(final / forecast))]`: every finished border of every
+    region forecast again at each share in CALIBRATION_AT, with only the chapters that had
+    ended by then (what the page would have shown). A live forecast's band is the spread of
+    these misses near its own share; they pool over the three regions. Only chapters ended by
+    `now` (default: the clock) count: a chapter in its last hour has no final yet."""
+    now = int(time.time() * 1000) if now is None else now
+    per_region = {r: [ch for ch in _finished_curves(store, r) if ch["end"] <= now] for r in REGIONS}
+    stamp = tuple(
+        (r, ch["id"], ch["end"], len(ch["curves"]))
+        + tuple(sorted((k[0], k[1], len(c[0])) for k, c in ch["curves"].items()))
+        for r, chs in per_region.items()
+        for ch in chs
+        if ch["curves"]
+    )
+    hit = _CALIBRATION_CACHE.get(str(store))
+    if hit and hit[0] == stamp:
+        return hit[1]
+    out = []
+    for region, chapters in per_region.items():
+        for ch in chapters:
+            start, end = int(ch["meta"].get("start_time") or 0), ch["end"]
+            every = chapter_series(store, region, ch["id"])
+            for k, rank in ch["curves"]:
+                series = [p for p in every[(k, rank)] if p[0] >= start]
+                final = series[-1][1] if series else 0
+                if final <= 0:
+                    continue
+                for share in CALIBRATION_AT:
+                    t_cut = start + int(share * (end - start))
+                    cut = [p for p in series if p[0] <= t_cut]
+                    if len(cut) < 2 or t_cut - cut[-1][0] > 2 * 3600 * 1000 or cut[-1][1] <= 0:
+                        continue
+                    tpl = _pick_templates(chapters, k, rank, ch["id"], ch["kind"], t_cut)
+                    p = predict(cut, start=start, end=end, now=cut[-1][0], templates=tpl, kind=k)
+                    if p and p["method"] == "template" and p["final"] > 0:
+                        out.append((family(k), share, end, math.log(final / p["final"])))
+    _CALIBRATION_CACHE[str(store)] = (stamp, out)
+    return out
+
+
+def misses_near(cal: list, kind: str, x_now: float, before: int | None = None) -> list[float]:
+    """The calibration misses for a forecast of `kind` at share `x_now`, from chapters ended
+    by `before` when given."""
+    fam = family(kind)
+    return [
+        m
+        for f, share, end, m in cal
+        if f == fam and abs(share - x_now) <= CALIBRATION_NEAR and (before is None or end <= before)
+    ]
 
 
 def event_kind(event_id: str | None) -> str | None:
@@ -372,8 +563,11 @@ def build_view(
     chapter_id: str | None = None,
     kind: str | None = None,
     grades: dict | None = None,
+    at: int | None = None,
 ) -> dict:
-    """The `/api/event/cutoffs` payload. Raises LookupError when nothing is stored."""
+    """The `/api/event/cutoffs` payload. Raises LookupError when nothing is stored.
+    `at` (ms): the chapter as it stood then -- only the reads made by then, the forecast with
+    only the chapters ended by then (a past event replayed, or how a forecast fared)."""
     if region not in REGIONS:
         raise ValueError(f"region must be one of {', '.join(REGIONS)}")
     chapters = list_chapters(store, region)
@@ -394,6 +588,9 @@ def build_view(
     meta = chapters[0]
     cid = meta["chapter_id"]
     _m, recs = read_chapter(store, region, cid)
+    if at is not None:
+        recs = [r for r in recs if int(r.get("captured_at") or 0) <= at]
+        now = at
     # the kinds READ, plus every song ranking the chapter has: its Song Score tab shows before
     # its first read
     read: set[Any] = {r.get("kind") for r in recs if r.get("kind")}
@@ -404,6 +601,10 @@ def build_view(
     of_kind = [r for r in recs if r.get("kind") == kind]
     last = of_kind[-1] if of_kind else None
     grades = grades or {}
+    # the finished chapters' curves and the calibration misses: read once for every tier
+    finished = _finished_curves(store, region)
+    this_kind = event_kind(meta.get("event_id"))
+    cal: list | None = None
 
     tiers = []
     for row in tier_rows(meta, kind):
@@ -416,6 +617,18 @@ def build_view(
         if cur and prev and cur[0] > prev[0]:
             rate = int(round((cur[1] - prev[1]) * 3_600_000 / (cur[0] - prev[0])))
         in_last = bool(last and any(b.get("rank") == rank for b in last.get("borders") or []))
+        prediction = None
+        if in_last and series:
+            # only chapters that had ended by then (a chapter in its last hour has no final yet)
+            tpl = _pick_templates(finished, kind, rank, cid, this_kind, now)  # type: ignore[arg-type]
+            x_now = (series[-1][0] - start) / (end - start) if end > start else 1.0
+            misses = None
+            if tpl and x_now < 1.0:
+                cal = calibration(store) if cal is None else cal
+                misses = misses_near(cal, kind, x_now, now)
+            prediction = predict(
+                series, start=start, end=end, now=now, templates=tpl, misses=misses, kind=kind
+            )
         tiers.append(
             {
                 "rank": rank,
@@ -429,17 +642,7 @@ def build_view(
                 "previous": ({"score": prev[1], "captured_at": prev[0]} if prev else None),
                 "rate_per_hour": rate,
                 "series": [[t, s] for t, s in series],
-                "prediction": (
-                    predict(
-                        series,
-                        start=start,
-                        end=end,
-                        now=now,
-                        templates=templates_for(store, region, kind, rank, cid),  # type: ignore[arg-type]
-                    )
-                    if in_last
-                    else None
-                ),
+                "prediction": prediction,
             }
         )
 
@@ -475,7 +678,10 @@ def build_view(
         ),
         # the player's Event Pt for this chapter as Marathon/Top last gave it: after the end it is
         # final even when no rank was read since (a chapter in its tally refuses the rank read)
-        "own_points": own_points(store, region, meta.get("event_id"), cid),
+        "own_points": (
+            own_points(store, region, meta.get("event_id"), cid) if at is None or at >= end else None
+        ),
+        "at": at,
         "tiers": tiers,
     }
 

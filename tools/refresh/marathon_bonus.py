@@ -32,6 +32,10 @@ from hbuilder import paths  # noqa: E402
 sys.path.insert(0, str(paths.REFRESH_DIR))
 
 OUT = os.path.join(paths.DUMPS, "marathon_bonus.json")
+# Every chapter's bonus rows ever read, kept after the chapter leaves `Event/ListEventInfo`
+# (the server lists only the open events): the Event page's past events show their rules from
+# here. Append-only by chapter; a chapter still listed is replaced by the newer read.
+ARCHIVE = os.path.join(paths.DUMPS, "marathon_bonus_archive.json")
 
 # Attribute ids as this repo already keys them (import_to_cards.py).
 ATTRIBUTE = {1: "Cute", 2: "Pure", 3: "Happy"}
@@ -392,6 +396,8 @@ def main():
 
     atomic_io.write_text(OUT, json.dumps(payload, indent=1, ensure_ascii=False), "utf-8")
     print(f"\nwritten to {OUT}")
+    added = write_archive([payload])
+    print(f"archive: {added} chapter(s) added or updated in {ARCHIVE}")
     if COLLISIONS:
         print(
             f"\n!! {len(COLLISIONS)} bonus row(s) shared a row key with a DIFFERENT row of the "
@@ -435,5 +441,75 @@ def _report_songs(event_songs: dict, found: dict) -> None:
         )
 
 
+def _chapter_key(group_id: str) -> str:
+    """'live_marathon_score_bonus-marathon_event-normal-007-chapter-01' -> 'marathon_event-normal-007-chapter-01'."""
+    at = group_id.find("marathon_event-")
+    return group_id[at:] if at >= 0 else group_id
+
+
+def merge_archive(archive: dict, payload: dict) -> tuple[dict, int]:
+    """`(archive, chapters added or replaced)`: `payload` (one marathon_bonus.json) folded
+    into the archive, one entry per chapter `{fetched_at, groups, event_songs}`. A chapter
+    already archived is replaced only by a read at least as new; no chapter is ever removed.
+    Only groups decrypted exactly are kept."""
+    chapters = dict(archive.get("chapters") or {})
+    fetched = payload.get("live_fetched_at") or 0
+    by_chapter: dict[str, list] = {}
+    for g in payload.get("groups") or []:
+        if g.get("decrypt", "exact") != "exact":
+            continue  # a lossy decrypt may have lost rows: never kept as the event's rules
+        by_chapter.setdefault(_chapter_key(g.get("group_id", "")), []).append(
+            {k: g[k] for k in ("group_id", "kind", "rows") if k in g}
+        )
+    changed = 0
+    for key, groups in sorted(by_chapter.items()):
+        old = chapters.get(key)
+        if old is not None and (old.get("fetched_at") or 0) > fetched:
+            continue
+        entry = {
+            "fetched_at": fetched,
+            "groups": groups,
+            "event_songs": list((payload.get("event_songs") or {}).get(key) or []),
+        }
+        if old != entry:
+            chapters[key] = entry
+            changed += 1
+    return {"chapters": dict(sorted(chapters.items()))}, changed
+
+
+def write_archive(payloads: list[dict], path: str = ARCHIVE) -> int:
+    import atomic_io  # noqa: PLC0415 -- beside this script
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            archive = json.load(f)
+    except FileNotFoundError:
+        archive = {}
+    total = 0
+    for payload in payloads:
+        archive, n = merge_archive(archive, payload)
+        total += n
+    if total:
+        atomic_io.write_text(path, json.dumps(archive, indent=1, ensure_ascii=False), "utf-8")
+    return total
+
+
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    ap = argparse.ArgumentParser(description="The open event's bonus tables, and their archive.")
+    ap.add_argument(
+        "--archive-from",
+        nargs="+",
+        metavar="JSON",
+        help="only fold these older copies of marathon_bonus.json (a snapshot, a backup) into the archive",
+    )
+    args = ap.parse_args()
+    if args.archive_from:
+        docs = []
+        for p in args.archive_from:
+            with open(p, encoding="utf-8") as f:
+                docs.append(json.load(f))
+        print(f"archive: {write_archive(docs)} chapter(s) added or updated in {ARCHIVE}")
+    else:
+        main()

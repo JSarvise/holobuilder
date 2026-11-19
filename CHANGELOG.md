@@ -2,6 +2,12 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.15 (2026-11-19)
+- **Event: past events.** "Past events" opens any event on record with the same view as the running one: the borders of each region with their charts and heatmaps, the top 100, your rank, tier and medal, and its Event Bonus rules when they were kept. Nothing of it changes the Optimizer, which plans the open event as before. Events from before the 24/7 tracker show what is on record: your medal and the final borders.
+- **Replay a finished chapter.** A slider shows the chapter as it stood at any moment: the borders, the forecast made then, your standing and the top 100, with what really happened drawn beside the forecast.
+- **A better forecast of the borders.** Each tier's final is now read from the share of the final that past chapters of the same region and tier had in at this point, and its range from how far earlier forecasts at this point missed. Re-made on every finished event with only the events before it: the Event Pt forecast misses by a median 9 % half-way through a chapter and 5 % at three quarters (it was 21 % and 18 %), and its range holds the final about 8 times in 10 (it was 3 to 5). Song Score and Total Score forecast from each other within a few percent; with no past event of the kind they show none, where they used to overshoot several times over.
+- **Song rankings show their own medal**, with the song's jacket, and the past events list labels Event Pt as Event Pt in a Score Challenge.
+
 ## 0.2.14 (2026-11-19)
 - **Fix: "the wallet cannot fund a plan for this team"** showed on a team's details when another team's details were still being computed (opening one team while another was loading, most often on a Highlight pool). It was never the materials: two board plans at once evicted each other's scorer. Plans now run side by side with the same numbers as one at a time, and a plan that could not be scored says so instead of blaming the wallet.
 - **Event Pt view: the Multi Live calculator in its own window.** It was a block between the figures and the cards that made the view taller than Score's and left the five cards below the leader. It is now a tile under the big Event Pt that shows the last result and opens the calculator in a window: the room's MULTI SCORE + your score = the Event Pt, with what it counts (Event Bonus, Live Boosts, HoloPass, Highlight or length bonus).

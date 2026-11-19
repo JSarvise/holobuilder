@@ -20,6 +20,7 @@ Rules the numbers follow (`src/hbuilder/domain/marathon.py`):
 |---|---|---|
 | GET | `/event` | the page (`static/event.html`) |
 | GET | `/api/event[?event=<key>]` | current event + bonus rows + your bonus cards. 503 `{available:false,error}` if no `marathon_bonus.json` / nothing open |
+| GET | `/api/event/past?event=<event id>[&chapter=<chapter id>]` | a past event for the page's past-event view (below). 400 without `event`; 404 for an event or chapter not on record |
 | GET | `/eventart/<name>.webp[?w=N]` | an event banner / logo (`dumps/event_art/`, written by `event_art.py`); 404 when absent or the name is not `[A-Za-z0-9_-]+.webp` |
 | GET | `/api/event/songs[?boosts=3&difficulty=EXPERT]` | every song ranked by `L` (team-independent). 400 on boosts outside 1..10 or unknown difficulty |
 | POST | `/api/event/run` | start the search job. 202 `{job_id, plan, opts}`; 400 on bad body; 503 if no event file |
@@ -213,7 +214,7 @@ Logic in `tools/web/cutoffs_view.py`; the store
 
 | method | path | what |
 |---|---|---|
-| GET | `/api/event/cutoffs?region=us\|as\|jp[&chapter=<id>][&kind=<kind>]` | stored borders + prediction. Default region `us`, newest chapter, first kind (`points`, else `total`). 400 on a bad region; 503 `{available:false, region, error}` when that region was never synced |
+| GET | `/api/event/cutoffs?region=us\|as\|jp[&chapter=<id>][&kind=<kind>][&at=<ms>]` | stored borders + prediction. Default region `us`, newest chapter, first kind (`points`, else `total`). `at`: the chapter as it stood then (only the reads made by then; the forecast from the chapters ended by then); the body echoes `at`. 400 on a bad region or `at`; 503 `{available:false, region, error}` when that region was never synced |
 
 ### The poller
 
@@ -261,16 +262,19 @@ open chapter → 60 min.
   them (`null` with a single read). This is NOT a fixed "last hour" delta: reads are only as
   frequent as the poller's interval or a hand-run `event_cutoffs.py`.
 - `self`: the user's latest rank on this ranking, `null` unless an `event_cutoffs.py --self` run covered this region.
-- `prediction` (`null` when the tier has no border): `method` `pace` | `template` | `final`;
+- `prediction` (`null` when the tier has no border, and for a Song Score / Total Score ranking
+  with no finished chapter to learn from): `method` `pace` | `template` | `final`;
   `final` / `low` / `high` / `plus_minus` = (high − low)/2; `points` = 25 `[t, v]` from the latest
   read to `end_time` (dashed line); `band` = `[t, lo, hi]` (shaded area; **empty when there is
   only one estimate — draw no band rather than invent one**); `confidence` `low` | `rough` |
   `medium` | `final`; `note` = one human sentence to show under the chart. The pace method
-  under-predicts the end-of-event sprint by construction; show its `note`.
+  under-predicts the end-of-event sprint by construction; show its `note`. A `template`
+  forecast's `inputs.band_from` is `misses` (the band is how far earlier forecasts at the same
+  point of a chapter missed, `inputs.misses` of them) or `floor` (too few on record yet).
 
 ## GET /api/event/top — the top 100 of a chapter
 
-`GET /api/event/top?region=us[&chapter=<id>][&uid=<public id>]`. Read from
+`GET /api/event/top?region=us[&chapter=<id>][&kind=<k>][&uid=<public id>][&past=1][&at=<ms>]`. Read from
 `dumps/cutoffs/<region>/<chapter>.top.jsonl`, which only the **24/7 tracker** writes
 (`tools/refresh/event_tracker.py` on the VPS, pulled in by `tracker_pull.py`; with
 `state/tracker_remote.json` present the server's poller runs the pull instead of
@@ -289,7 +293,8 @@ while that player was in the top 100. Pure computation: `tools/web/top_view.py`.
 VPS tracker for that region (`tracker_pull.py --watch <region>`, in the background, at most once per
 50 s per region): while a lease holds the tracker reads that board every 5 min; with none it is not
 read at all (the borders, every region, every 5 min regardless). The page re-asks every minute while it is
-visible. `watching: true` in the body (also on the 503) says a lease was asked for.
+visible. `watching: true` in the body (also on the 503) says a lease was asked for. `past=1`
+(a past event's board) asks for no lease. `at`: the board as it stood then.
 
 ## GET /api/event/history — every event on record
 
@@ -309,3 +314,16 @@ first build. Opened from the Event page's banner.
                          borders: [{rank, grade_id, grade_name, color1, score|null}],
                          borders_final} ]} ]}
 ```
+
+## GET /api/event/past — one past event
+
+`GET /api/event/past?event=<event id>[&chapter=<chapter id>]`: the Event page's past-event view
+(`/event?event=<event id>`). The event's name, kind, dates, banner and chapters come from the
+event history (`GET /api/event/history`'s build); one chapter's bonus rules (default: the first)
+from `dumps/marathon_bonus_archive.json`, which `marathon_bonus.py` keeps at every refresh (the
+game lists only the open events, so a chapter is archived while it is listed and kept after).
+Same shape as `GET /api/event`, plus `past: true`, `event_id` and `rules_on_record` (false: the
+rules of that event were never read; `live`, `music` and `songs` are then empty);
+`owned_bonus_cards` is always empty and `open_events` too. Nothing here is what `/api/event`,
+`/api/event/run` or the Optimizer read. The rest of the view is the usual routes with
+`chapter=<id>`: `/api/event/cutoffs` (and `at` to replay it) and `/api/event/top?past=1`.

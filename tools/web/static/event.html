@@ -29,6 +29,7 @@
         <div class="ev-kvcol">
           <button type="button" class="ev-kv" id="banner" title="Past events" aria-haspopup="dialog" aria-controls="histdlg"></button>
           <button type="button" class="btn small" id="histopen" aria-haspopup="dialog" aria-controls="histdlg"><img class="ic" src="/ui/nav/ui_999_ico_trophy.png" alt="" style="width:16px;height:16px">Past events · your results</button>
+          <a class="btn small" id="evback" href="/event" hidden>Back to the current event</a>
         </div>
       </div>
     </header>
@@ -46,6 +47,12 @@
           </div></div>
         <div class="dlg-b">
           <p class="ev-stale" id="trackerwarn" role="status" hidden></p>
+          <div class="ev-replay" id="replay" hidden>
+            <span class="lbl">Replay</span>
+            <input type="range" id="replayat" min="0" max="1000" step="1" value="1000" aria-label="The chapter as it stood at this point">
+            <output id="replaynote" for="replayat">Final</output>
+            <button type="button" class="btn small" id="replayend" hidden>Back to the final</button>
+          </div>
           <div class="ev-songs" id="rsongs" role="group" aria-label="Song" hidden></div>
           <div class="ev-target">
             <div class="ev-gap" id="evgap"></div>
@@ -62,9 +69,10 @@
       </section>
 
       <!-- 4. Reference: the bonus rules and every card that carries a bonus. -->
-      <section class="dlg" aria-labelledby="h-bonus">
+      <section class="dlg" aria-labelledby="h-bonus" id="rulesec">
         <div class="dlg-h"><h2 id="h-bonus">Event Bonus rules</h2><span class="r">Adds Event Pt per Live</span></div>
-        <div class="dlg-b ev-rules">
+        <p class="ev-empty ev-rulesnone" id="rulesnone" hidden>This event's bonus rules were not recorded: the game lists only the open events, and this one closed before the app started keeping them.</p>
+        <div class="dlg-b ev-rules" id="rulesbody">
           <div class="ev-rule wide"><p class="ev-sum" id="evrule"></p></div>
           <div class="ev-rule"><h3 class="sh">holomem Bonus</h3><div class="ev-mems" id="mems"></div></div>
           <div class="ev-rule"><h3 class="sh">Bloom Bonus</h3><table class="ev-bloom" id="bloomt"></table></div>
@@ -73,7 +81,7 @@
         </div>
       </section>
 
-      <section class="dlg" aria-labelledby="h-mine">
+      <section class="dlg" aria-labelledby="h-mine" id="minesec">
         <div class="dlg-h"><h2 id="h-mine">Your bonus cards</h2><span class="r" id="minenote"></span></div>
         <div class="dlg-b ev-tablewrap"><table class="ev-table" id="mine"></table></div>
       </section>

@@ -58,8 +58,10 @@ export function lineChart(c, t, opts = {}) {
   const band = (p && p.band) || [], fc = (p && p.points) || [];
   const me = opts.you && c.self && c.self.score && c.self.captured_at >= c.start_time ? c.self : null;
   const mine = opts.you && (c.self_series || []).length > 1 ? c.self_series : null;   // your own line
+  // a replayed chapter (`at`): what the border really did after that instant, beside the forecast
+  const truth = (opts.truth || []).filter(q => q[0] >= c.now);
   const ys = [...series.map(q => q[1]), ...band.map(b => b[2]), ...fc.map(q => q[1]), me ? me.score : 0,
-    ...(mine || []).map(q => q[1])];
+    ...(mine || []).map(q => q[1]), ...truth.map(q => q[1])];
   const step = niceStep(Math.max(1, ...ys), 5), ymax = Math.ceil(Math.max(1, ...ys) * 1.04 / step) * step;
   const x = ms => L + (W - L - R) * Math.min(1, Math.max(0, (ms - c.start_time) / (c.end_time - c.start_time)));
   const y = v => HT - B - (HT - T - B) * (v / ymax);
@@ -77,15 +79,20 @@ export function lineChart(c, t, opts = {}) {
   const edges = band.length ? `<polyline class="bedge" points="${band.map(b => P([b[0], b[2]])).join(" ")}"/><polyline class="bedge" points="${band.map(b => P([b[0], b[1]])).join(" ")}"/>` : "";
   const fline = fc.length ? `<polyline class="fc" points="${fc.map(P).join(" ")}"/>` : "";
   const line = `<polyline class="ln" points="${series.map(P).join(" ")}"/>`;
+  // the two end labels on opposite sides, so they never sit on each other: the higher one above
+  // its line, the lower one below
+  const tEnd = truth.length > 1 ? truth[truth.length - 1][1] : null, fEnd = fc.length ? fc[fc.length - 1][1] : null;
+  const realHigher = tEnd != null && fEnd != null && tEnd > fEnd;
+  const tr = tEnd != null ? `<polyline class="truth" points="${truth.map(P).join(" ")}"/><text class="trutht" x="${(W - R - 4).toFixed(1)}" y="${(y(tEnd) + (realHigher ? -10 : 18)).toFixed(1)}">real ${compact(tEnd)}</text>` : "";
   const dots = series.length <= 60 ? series.slice(1).map(q => `<circle class="dt" cx="${x(q[0]).toFixed(1)}" cy="${y(q[1]).toFixed(1)}" r="3.5"/>`).join("") : "";
   const now = !c.ended && c.now < c.end_time ? `<line class="nowl" x1="${x(c.now).toFixed(1)}" x2="${x(c.now).toFixed(1)}" y1="${T}" y2="${HT - B}"/><text class="nowt" x="${(x(c.now) + 6).toFixed(1)}" y="${T + 12}">now</text>` : "";
-  const end = fc.length ? `<text class="endt" x="${(W - R - 4).toFixed(1)}" y="${(y(fc[fc.length - 1][1]) - 10).toFixed(1)}">${compact(p.final)} ±${compact(p.plus_minus || 0)}</text>` : "";
+  const end = fc.length ? `<text class="endt" x="${(W - R - 4).toFixed(1)}" y="${(y(fc[fc.length - 1][1]) + (realHigher ? 20 : -10)).toFixed(1)}">${compact(p.final)} ±${compact(p.plus_minus || 0)}</text>` : "";
   const you = (mine ? `<polyline class="youln" points="${[[c.start_time, 0], ...mine].map(P).join(" ")}"/>` : "") + (me ? `<circle class="you" cx="${x(me.captured_at).toFixed(1)}" cy="${y(me.score).toFixed(1)}" r="5"/><text class="yout" x="${(x(me.captured_at) + 8).toFixed(1)}" y="${(y(me.score) - 8).toFixed(1)}">You #${F.num(me.rank)}</text>` : "");
   // hover targets: every read and every forecast step, nearest by time
   const pts = [...series.slice(1).map(q => ({ t: q[0], v: q[1], k: "read" })), ...fc.slice(1).map(q => ({ t: q[0], v: q[1], k: "forecast" }))];
   return `<svg class="evc-line" viewBox="0 0 ${W} ${HT}" role="img" aria-label="Top ${F.num(t.rank)} border over the event${p ? ", with its forecast" : ""}"
       data-pts='${esc(JSON.stringify(pts))}' data-x0="${c.start_time}" data-x1="${c.end_time}" data-l="${L}" data-r="${R}" data-w="${W}" data-ymax="${ymax}" data-t="${T}" data-b="${B}" data-h="${HT}">
-    ${grid}${area}${edges}${fline}${line}${dots}${now}${end}${you}
+    ${grid}${area}${edges}${tr}${fline}${line}${dots}${now}${end}${you}
     <line class="hov" x1="0" x2="0" y1="${T}" y2="${HT - B}" visibility="hidden"/><circle class="hovd" r="5" cx="0" cy="0" visibility="hidden"/>
   </svg>`;
 }

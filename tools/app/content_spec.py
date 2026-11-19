@@ -54,6 +54,7 @@ SYNC: list[str] = [
     # the open event (global, not the account's): bonus tables, names, past events
     # the event archive, not event_history.json: that one holds the publisher's own results
     D + "marathon_bonus.json",
+    D + "marathon_bonus_archive.json",
     D + "event_meta.json",
     D + "event_archive.json",
     D + "event_finals.json",

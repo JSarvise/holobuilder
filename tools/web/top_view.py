@@ -121,10 +121,12 @@ def build_top(
     chapter_id: str | None = None,
     uid: str | None = None,
     kind: str | None = None,
+    at: int | None = None,
 ) -> dict:
     """The `/api/event/top` payload. Raises LookupError when nothing is stored. One chapter's
     file holds every ranking's boards (`kind` points / total / music:<id>); `kind` picks one,
-    by default the chapter's main ranking (points, else total)."""
+    by default the chapter's main ranking (points, else total). `at` (ms): the board as it stood
+    then (only the reads made by that instant)."""
     files = {p.name[: -len(".top.jsonl")]: p for p in top_files(store, region)}
     if not files:
         raise LookupError(
@@ -143,6 +145,8 @@ def build_top(
     if kind is None:
         kind = next((k for k in kinds if not k.startswith("music:")), kinds[0] if kinds else "points")
     reads = [r for r in every if (r.get("kind") or "points") == kind]
+    if at is not None:  # the board as it stood then
+        reads = [r for r in reads if r["captured_at"] <= at]
     last = reads[-1] if reads else {}
     out = {
         "region": region,
@@ -157,6 +161,7 @@ def build_top(
         "kinds": kinds,
         "captured_at": last.get("captured_at"),
         "final": bool(last.get("final")),
+        "at": at,
         "reads": len(reads),
         "first_read": reads[0]["captured_at"] if reads else None,
         "chapters": [

@@ -161,6 +161,64 @@ def serve_event(h: Handler) -> None:
     )
 
 
+def _history_doc() -> dict:
+    """`event_history.build()`'s doc, made in memory from what is on disk; the file the refresh
+    wrote when the build cannot run."""
+    try:
+        import event_history  # noqa: PLC0415
+
+        return event_history.build()[0]
+    except Exception:  # noqa: BLE001 -- the stored history still answers
+        return config.read_json(config.EVENT_HISTORY_PATH) or {}
+
+
+def serve_event_past(h: Handler) -> None:
+    """`GET /api/event/past?event=<event id>[&chapter=<chapter id>]` -- one event on record
+    for the Event page's past-event view: name, banner, chapters and one chapter's bonus rules
+    when they were archived (`event_mode.past_event_payload`). Pure read, apart from the open
+    event the Optimizer uses. 400 without `event`, 404 for an event or chapter not on record."""
+    import event_mode  # noqa: PLC0415
+
+    query: dict[str, list[Any]] = parse_qs(urlparse(h.path).query)
+    event_id = (query.get("event") or [None])[0] or None
+    if not event_id:
+        h.reply_json(400, {"error": "'event' (an event id) is required"})
+        return
+    entry = (_history_doc().get("events") or {}).get(event_id)
+    if not entry:
+        h.reply_json(404, {"available": False, "error": f"event {event_id!r} is not on record"})
+        return
+    try:
+        cards, owned, _cfg, _prov = load_inputs(config.CARDS_PATH, config.OWNED_PATH)
+    except _LoadFailure as exc:
+        h.reply_json(500, {"error": f"could not load the catalogue: {exc}"})
+        return
+    collection = (config.read_json(config.COLLECTION_PATH) or {}).get("cards") or {}
+    titles, singers = songs.song_labels()
+    try:
+        archive = config.read_json(config.EVENT_BONUS_ARCHIVE_PATH)
+    except (OSError, ValueError):  # a torn archive costs the rules, not the page
+        archive = None
+    try:
+        payload = event_mode.past_event_payload(
+            entry,
+            archive,
+            (query.get("chapter") or [None])[0] or None,
+            cards_by_id={c.id: c for c in cards},
+            owned_ids=[c.id for c in owned],
+            collection=collection,
+            titles=titles,
+            chr_names=chr_names(cards),
+            art_dir=config.EVENT_ART_DIR,
+            singers=singers,
+            music_meta={str(d.get("id")): d for d in songs.music_rows() if d.get("id")},
+        )
+    except LookupError as exc:
+        h.reply_json(404, {"available": False, "error": str(exc)})
+        return
+    h.reply_json(200, payload)
+
+
 def serve_event_songs(h: Handler) -> None:
     """`GET /api/event/songs[?boosts=3&difficulty=EXPERT]` — every song ranked
     by the song-length multiplier L (an ESTIMATE, team-independent)."""
@@ -264,16 +322,32 @@ def _grades():
     )
 
 
+def _at_of(h: Handler, query: dict) -> int | None | bool:
+    """The `at` (ms since the epoch) of a query; None without one; False after replying 400."""
+    raw = (query.get("at") or [None])[0]
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        h.reply_json(400, {"error": "'at' must be a time in ms since the epoch"})
+        return False
+
+
 def serve_event_cutoffs(h: Handler) -> None:
-    """`GET /api/event/cutoffs?region=us[&chapter=<id>][&kind=points]` — the stored
-    border series per reward tier plus a prediction of each tier's final. Pure read of
-    dumps/cutoffs/ (`cutoffs_view.build_view`). 400 on a bad region, 503
-    `{available:false,error}` when nothing has been synced for that region yet."""
+    """`GET /api/event/cutoffs?region=us[&chapter=<id>][&kind=points][&at=<ms>]` — the stored
+    border series per reward tier plus a prediction of each tier's final; `at`: the chapter as
+    it stood then (a past event replayed). Pure read of dumps/cutoffs/
+    (`cutoffs_view.build_view`). 400 on a bad region or `at`, 503 `{available:false,error}`
+    when nothing has been synced for that region yet."""
     import cutoffs_view  # noqa: PLC0415
 
     query: dict[str, list[Any]] = parse_qs(urlparse(h.path).query)
     region = _region_of(h, query)
     if region is None:
+        return
+    at = _at_of(h, query)
+    if at is False:
         return
     grades = _grades()
     try:
@@ -284,6 +358,7 @@ def serve_event_cutoffs(h: Handler) -> None:
             chapter_id=(query.get("chapter") or [None])[0] or None,
             kind=(query.get("kind") or [None])[0] or None,
             grades=grades,
+            at=at,
         )
     except LookupError as exc:
         h.reply_json(503, {"available": False, "region": region, "error": str(exc)})
@@ -313,7 +388,7 @@ def serve_event_tracker(h: Handler) -> None:
 
 
 def serve_event_top(h: Handler) -> None:
-    """`GET /api/event/top?region=us[&chapter=<id>][&kind=<k>][&uid=<public id>]` -- the latest top-100
+    """`GET /api/event/top?region=us[&chapter=<id>][&kind=<k>][&uid=<public id>][&past=1][&at=<ms>]` -- the latest top-100
     board of a chapter with each player's last-hour movement, and with `uid` that player's
     series (`top_view.build_top` over dumps/cutoffs/<region>/<chapter>.top.jsonl, which the
     24/7 tracker writes). Pure read. 400 on a bad region, 503 `{available:false}` when the
@@ -325,6 +400,9 @@ def serve_event_top(h: Handler) -> None:
     if region is None:
         return
     uid = (query.get("uid") or [None])[0] or None
+    at = _at_of(h, query)
+    if at is False:
+        return
     live = tracker_configured()
     kind = (query.get("kind") or [None])[0] or None
     if kind is not None and not (
@@ -332,7 +410,10 @@ def serve_event_top(h: Handler) -> None:
     ):
         h.reply_json(400, {"error": "kind must be points, total or music:<id>"})
         return
-    if live and not uid:
+    # `past=1`: a past event's board, as stored -- no viewer lease (the tracker only reads
+    # the open chapter's board)
+    past = (query.get("past") or ["0"])[0] == "1"
+    if live and not uid and not past:
         kick_top_watch(region, kind)
     try:
         view = top_view.build_top(
@@ -342,14 +423,17 @@ def serve_event_top(h: Handler) -> None:
             chapter_id=(query.get("chapter") or [None])[0] or None,
             uid=uid,
             kind=kind,
+            at=at,
         )
     except LookupError as exc:
-        h.reply_json(503, {"available": False, "region": region, "error": str(exc), "watching": live})
+        h.reply_json(
+            503, {"available": False, "region": region, "error": str(exc), "watching": live and not past}
+        )
         return
     except (OSError, ValueError) as exc:
         h.reply_json(500, {"error": f"{type(exc).__name__}: {exc}"})
         return
-    view["watching"] = live
+    view["watching"] = live and not past
     h.reply_json(200, view)
 
 
@@ -364,13 +448,5 @@ def serve_event_history(h: Handler) -> None:
     # built per request from what is on disk (the final borders the
     # tracker pull brings in every 5 min must show without a refresh); the file the
     # refresh wrote is the fallback when the build cannot run
-    doc = None
-    try:
-        import event_history  # noqa: PLC0415
-
-        doc = event_history.build()[0]
-    except Exception:  # noqa: BLE001 -- the stored history still answers
-        doc = None
-    if doc is None:
-        doc = config.read_json(config.EVENT_HISTORY_PATH) or {}
+    doc = _history_doc()
     h.reply_json(200, {"events": cutoffs_view.history_view(doc, grades, songs.song_titles())})

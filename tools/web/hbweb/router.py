@@ -84,6 +84,7 @@ GET_ROUTES: dict[str, Route] = {
     "/api/event/top": event.serve_event_top,
     "/api/event/tracker": event.serve_event_tracker,
     "/api/event/history": event.serve_event_history,
+    "/api/event/past": event.serve_event_past,
     "/api/admin/me": admin.serve_me,
     "/api/admin/users": admin.serve_users,
     "/api/park": park.serve_park,

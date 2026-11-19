@@ -37,6 +37,16 @@ dialog.ev-chartdlg::backdrop{background:rgb(5 6 10 / .62)}
 .evc-line .yout{fill:var(--ink);font:800 12px var(--f-ui)}
 .evc-line .hov{stroke:var(--ink-3);stroke-width:1}
 .evc-line .hovd{fill:var(--tc);stroke:#fff;stroke-width:2}
+.evc-line .truth{fill:none;stroke:var(--ink-2);stroke-width:2;opacity:.55;stroke-linejoin:round}
+.evc-line .trutht{fill:var(--ink-2);font:700 12px var(--f-ui);text-anchor:end}
+.ev-fan .truth{fill:none;stroke:var(--ink-2);stroke-width:1.5;opacity:.5;vector-effect:non-scaling-stroke}
+/* a past chapter replayed: the borders, the forecast and the top 100 as they stood at one instant */
+.ev-replay{display:flex;align-items:center;gap:14px;margin:0 0 14px;padding:10px 14px;border-radius:var(--r-tile,12px);background:var(--sheet-2);border:1px solid var(--line)}
+.ev-replay[hidden],#replayend[hidden]{display:none}
+.ev-norecord{border-top:0;padding:4px 18px;border-radius:var(--r-tile,12px);background:var(--sheet-2)}
+.ev-replay .lbl{flex:none;color:var(--ink-3);font:800 12px var(--f-ui);text-transform:uppercase;letter-spacing:.04em}
+.ev-replay input[type=range]{flex:1;min-width:120px;accent-color:var(--ink)}
+.ev-replay output{flex:none;min-width:190px;color:var(--ink);font:800 13px var(--f-ui);text-align:right}
 .evc-tip{position:absolute;pointer-events:none;padding:7px 10px;border-radius:10px;background:var(--sheet-3);border:1px solid var(--line-2);font:700 12px/1.35 var(--f-ui);color:var(--ink-2);white-space:nowrap}
 .evc-tip b{display:block;color:var(--ink);font-size:14px}
 .evc-heat{display:grid;gap:12px}
@@ -62,6 +72,11 @@ dialog.ev-hist::backdrop{background:rgb(5 6 10 / .62)}
 .ev-hrow{padding:14px 16px;border-radius:var(--r-card,14px);background:var(--block);border:1px solid var(--line)}
 .ev-hrow.now{border-color:var(--line-2)}
 .ev-hrow header{display:flex;align-items:center;gap:16px;margin-bottom:10px}
+.ev-hrow header > div:nth-child(2){flex:1;min-width:0}
+.ev-hrow .ev-hopen{flex:none;margin-left:auto}
+#evback[hidden],.ev-chapters[hidden]{display:none}
+.ev-rulesnone{margin:0;padding:18px 20px}
+.ev-rulesnone[hidden],#rulesbody[hidden]{display:none}
 .ev-hrow .art{flex:none;width:150px}
 .ev-hrow .art img{display:block;width:100%;height:auto;border-radius:8px}
 .ev-hrow .art .noart{aspect-ratio:2/1;border-radius:8px;background:var(--sheet-2)}
@@ -70,6 +85,7 @@ dialog.ev-hist::backdrop{background:rgb(5 6 10 / .62)}
 .ev-hchs{border-top:1px solid var(--line)}
 .ev-hline{display:grid;grid-template-columns:150px minmax(150px,1.3fr) 1fr 1fr 1.2fr;gap:18px;align-items:center;padding:10px 0 6px}
 .ev-hline .md .ev-medal{width:150px}
+.ev-hborders .ev-smedal{width:72px;height:auto;margin-right:4px}
 .ev-hline .nomd{width:150px;aspect-ratio:2/1;border-radius:8px;background:var(--sheet-2);opacity:.5}
 .ev-hline .who b{display:block;font:800 14px/1.25 var(--f-ui)}
 .ev-hline .who small{display:block;color:var(--ink-2);font:700 12.5px/1.3 var(--f-ui)}
