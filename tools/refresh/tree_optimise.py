@@ -523,11 +523,14 @@ class Oracle:
         boards of `cooldown_nodes` (`{chr: its Act.CD nodes}`) at each vector's counts of
         them, in order: `screen_song_cooldown_variants`, one set-up for every vector, within
         a few 1e-5 of `score_team`. For ORDERING cooldown counts, never a served number.
+        Over a pool (`pool_songs`), the shares' sum of the screen on each of its charts, as
+        `score_team` sums the exact score, so the screen orders the pool's mean, not `song`'s.
         None off a song (the general scorer has no screen) or with no screen kernel, where
         every vector would be scored exactly (~30 s for 1,024 instead of ~30 ms)."""
         from hbuilder.domain import song  # noqa: PLC0415
 
-        if self._chart is None or song._cooldown_screen_kernel() is None:
+        charts = self._pool or (((self._chart, 1.0),) if self._chart is not None else ())
+        if not charts or song._cooldown_screen_kernel() is None:
             return None
         from hbuilder.domain.song import overall_power_for, screen_song_cooldown_variants  # noqa: PLC0415
 
@@ -555,9 +558,13 @@ class Oracle:
         # the deck power `_score_set` scores this team on, so the screen orders the same score
         modelled = not cfg.song_absolute_deck_power or getattr(_VALUATION, "modelled", False)
         power = None if modelled else overall_power_for(members, leader, cfg)
-        return screen_song_cooldown_variants(
-            members, leader, self._chart, cfg, variants, deck_power=power, auto=cfg.song_auto
-        )
+        total = [0.0] * len(variants)
+        for chart, share in charts:
+            got = screen_song_cooldown_variants(
+                members, leader, chart, cfg, variants, deck_power=power, auto=cfg.song_auto
+            )
+            total = [t + share * g for t, g in zip(total, got)]
+        return total
 
     def _board_state(self) -> dict:
         """`board_state.json` as `_load` returns it, a fresh copy per call: parsed once

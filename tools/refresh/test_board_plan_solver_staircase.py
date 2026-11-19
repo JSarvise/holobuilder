@@ -110,5 +110,46 @@ def test_without_a_screen_kernel_the_oracle_does_not_screen(monkeypatch):
 
     monkeypatch.setattr(song, "COOLDOWN_SCREEN_KERNEL", None)
     monkeypatch.delenv(song.COOLDOWN_SCREEN_KERNEL_ENV, raising=False)
-    oracle = SimpleNamespace(_chart=object())
+    oracle = SimpleNamespace(_chart=object(), _pool=())
     assert tree_optimise.Oracle.screen_cooldown_counts(oracle, "l", [], {}, {}, [(0,)]) is None
+
+
+def test_over_a_pool_the_screen_is_the_shares_sum_of_its_charts(monkeypatch):
+    # a Highlight pool plan scores the shares' sum over the pool (`Oracle.score_team`); a
+    # screen on `song` alone would order another score and could drop the pool's best split
+    import dataclasses
+
+    import tree_optimise
+
+    from hbuilder.domain import song
+
+    @dataclasses.dataclass(frozen=True)
+    class Cfg:
+        board: object = None
+        song_absolute_deck_power: bool = False
+        song_auto: bool = False
+
+    board = SimpleNamespace(name_by_chr={"a": "A"}, uptime_for=lambda _name: (1.0, 0.0))
+    per_chart = {"x": [1.0, 2.0], "y": [10.0, 0.0]}
+    monkeypatch.setattr(song, "COOLDOWN_SCREEN_KERNEL", lambda _spec: None)
+    monkeypatch.setattr(
+        song,
+        "screen_song_cooldown_variants",
+        lambda _members, _leader, chart, _cfg, variants, **_kw: per_chart[chart][: len(variants)],
+    )
+
+    def screen(pool):
+        oracle = SimpleNamespace(
+            _chart="x",
+            _pool=pool,
+            base_cfg=Cfg(),
+            _by_id={"l": "L", "a": "A"},
+            board_for=lambda _state: board,
+            state_from=lambda nodes: nodes,
+        )
+        return tree_optimise.Oracle.screen_cooldown_counts(
+            oracle, "l", ["a"], {"a": set()}, {"a": ["a-cd1"]}, [(0,), (1,)]
+        )
+
+    assert screen(()) == [1.0, 2.0]  # on a song: that song's screen, as before
+    assert screen((("x", 0.25), ("y", 0.75))) == [0.25 * 1.0 + 0.75 * 10.0, 0.25 * 2.0 + 0.75 * 0.0]
