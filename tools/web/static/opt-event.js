@@ -2,7 +2,7 @@
 // (POST /api/event/run, SSE /events/<id>, POST /cancel/<id>; contract in tools/web/EVENT-API.md).
 // Every number is the server's: Event Pt, live score, Event Bonus, the bound.
 import { byId, esc, fmt, dec, sgn, gap, pct, info, AC, INK, thumb, getJSON, postJSON, toast, reveal, normCard, outfitText, stash, unstash, withState, loadStates, cardHook } from "/opt-util.js";
-import { unitPanel, runPanel, timelinePanel, wireTimeline, boardPanel, matchLine, leaderColumn, wakeFigure, wirePlan } from "/opt-detail.js";
+import { unitPanel, runPanel, timelinePanel, wireTimeline, boardPanel, matchLine, leaderColumn, wakeFigure, wirePlan, deckUnit } from "/opt-detail.js";
 import { score } from "/hb-grade.js";
 import { list as rankList } from "/hb-rank.js";
 import { assumptionsOf, leaderOpts, withDistribution, exportFile } from "/opt-score.js";
@@ -246,12 +246,7 @@ function render(ctx, L) {
     if (e.target.closest("[data-diffmode]")) { diffMode = !diffMode; return relist(c); }
     const cp = e.target.closest("[data-copy]"); if (cp) return copy(c, +cp.dataset.copy);
     const ex = e.target.closest("[data-export]"); if (ex) return exportTeam(c, +ex.dataset.export, ex);
-  };
-  ctx.out().oninput = e => {
-    const m = e.target.closest("[data-multi]"); if (!m) return;
-    if (m.dataset.own != null) ownScore = m.value; else multiScore = m.value;
-    clearTimeout(multiTimer);
-    multiTimer = setTimeout(() => fillMulti(c, rows[+m.dataset.multi], +m.dataset.multi), 250);
+    const mc = e.target.closest("[data-multicalc]"); if (mc) return openMulti(c, +mc.dataset.multicalc);
   };
   reveal(ctx.out());
   after(c, rows[sel], sel);
@@ -262,19 +257,70 @@ function render(ctx, L) {
    this team's expected one; empty -> the expected). The server holds the formula, checked
    on real multi Lives. No room score -> a dash */
 async function fillMulti(c, r, i) {
-  const out = document.querySelector(`[data-multi-out="${i}"]`);
-  if (!out || !r) return;
+  // the row's tile and, while it is open, the dialog's result: both carry data-multi-out
+  const outs = document.querySelectorAll(`[data-multi-out="${i}"]`);
+  if (!outs.length || !r) return;
+  const put = v => outs.forEach(o => { o.textContent = v; });
   const room = parseInt(String(multiScore).replace(/\D/g, ""), 10);
-  if (!room) { out.textContent = "—"; return; }
   const own = parseInt(String(ownScore).replace(/\D/g, ""), 10) || Math.round(r.score);
+  document.querySelectorAll(`[data-multi-sub="${i}"]`).forEach(s => {
+    s.textContent = room ? `room ${fmt(room)} · you ${fmt(own)}` : "type the room's MULTI SCORE";
+  });
+  if (!room) { put("—"); return; }
   const asked = multiScore + "|" + ownScore;
   try {
     // the event shown: its kind sets the room term's divisor (`marathon.multi_divisor`)
     const d = await postJSON("/api/event/points", { score: own, live_permil: r.live_permil,
       event: (c.ctx.D.event && c.ctx.D.event.event && c.ctx.D.event.event.key) || undefined,
       multi_score: room, boosts: c.S.boosts, length_permil: c.res.length_permil, holopass: !!c.S.holopass });
-    if (asked === multiScore + "|" + ownScore) out.textContent = fmt(d.event_points);
-  } catch (e) { out.textContent = "—"; toast(e.message); }
+    if (asked === multiScore + "|" + ownScore) put(fmt(d.event_points));
+  } catch (e) { put("—"); toast(e.message); }
+}
+/* the Multi Live tile in the row's figures: its last Event Pt (or a dash) and what it was
+   counted from; a click opens the calculator */
+function multiTile(r, i) {
+  return `<button type="button" class="stat-tile o-mtile" data-multicalc="${i}" aria-haspopup="dialog">
+      <div><span class="lbl">Multi Live Event Pt</span><span class="n o-num" data-multi-out="${i}">—</span>
+        <small data-multi-sub="${i}">type the room's MULTI SCORE</small></div>
+      <span class="o-mtile-go"><svg class="i s"><use href="#i-chev"/></svg></span></button>`;
+}
+/* the calculator: the room's MULTI SCORE + the player's score in that Live (empty: this team's
+   Expected Score) = the Event Pt, counted by the server with this team's Event Bonus, the Live
+   Boosts, HoloPass and the length bonus; the result shows here and in the row's tile */
+function openMulti(c, i) {
+  const dlg = byId("multidlg"), r = c.rows[i];
+  if (!dlg || !r) return;
+  const { S, res } = c, hl = !!res.highlight;
+  const L = { ...(c.ctx.D.cards.get(r.leader.id) || {}), ...r.leader };
+  const exp = fmt(Math.round(r.score));
+  const lenPct = res.length_permil != null ? `+${Math.round((res.length_permil - 1000) / 10)}%` : "—";
+  const terms = [`Event Bonus <b>${pct(r.live_permil)}</b>`, `${S.boosts} Live Boost${S.boosts > 1 ? "s" : ""} <b>×${AC[S.boosts - 1]}</b>`,
+    S.holopass ? "HoloPass" : "no HoloPass", `${hl ? "Highlight Bonus" : "Song length bonus"} <b>${lenPct}</b>`];
+  dlg.innerHTML = `<div class="dlg-h"><h2 id="mdlgtitle">Multi Live Event Pt</h2>
+      <span class="r">Team #${i + 1} · ${esc(L.member || r.leader.id)} leads</span>
+      <button class="o-x" type="button" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="dlg-b o-mdlg-b">
+      <div class="o-mdlg-eq">
+        <label><span class="lbl">Room MULTI SCORE</span><input class="hbc-in" inputmode="numeric" autocomplete="off" placeholder="e.g. 9,283,806" data-dmulti value="${esc(multiScore)}"></label>
+        <span class="o-mdlg-op" aria-hidden="true">+</span>
+        <label><span class="lbl">Your score in that Live</span><input class="hbc-in" inputmode="numeric" autocomplete="off" placeholder="${esc(exp)}" data-dmulti data-own value="${esc(ownScore)}"></label>
+      </div>
+      <div class="o-mdlg-out"><span class="lbl">Event Pt</span><b class="o-num" data-multi-out="${i}">—</b></div>
+      <div class="o-mdlg-terms">${terms.map(t => `<span class="tag muted">${t}</span>`).join("")}</div>
+      <p class="o-mdlg-help">MULTI SCORE is the room's total at the top of the multi result screen. Leave your score empty to use this team's expected score (${esc(exp)}).</p>
+    </div>`;
+  dlg.oninput = e => {
+    const m = e.target.closest("[data-dmulti]"); if (!m) return;
+    if (m.dataset.own != null) ownScore = m.value; else multiScore = m.value;
+    clearTimeout(multiTimer);
+    multiTimer = setTimeout(() => fillMulti(c, r, i), 250);
+  };
+  // a click on the backdrop (the dialog element itself, outside its content) closes it too
+  dlg.onclick = e => { if (e.target === dlg || e.target.closest("[data-close]")) dlg.close(); };
+  dlg.showModal();
+  const first = dlg.querySelector("[data-dmulti]");
+  first.focus(); first.select();
+  fillMulti(c, r, i);
 }
 function listHTML({ S, rows, byMax }) {
   return rankList(rows.map(r => ({ score: headline(S, r, byMax), max: null,
@@ -350,24 +396,20 @@ function block({ ctx, S, res, rows, byMax }, r, i) {
   // grid does not move; a Highlight row's pool has no single run, so no Max
   const pend = `<span class="o-sk" style="width:150px;height:26px;margin-top:6px"></span>`;
   const none = (lbl, why) => `<div class="stat-tile none"><div><span class="lbl">${lbl}</span><span class="n">—</span><small>${why}</small></div></div>`;
-  side.push(rmax != null ? tile(`Max ${info("max")}`, score(rmax), "every Active fires")
+  // Event Pt with a length bonus: the Multi Live tile under the big Event Pt, which opens the
+  // calculator (the view keeps Score's height); on a Highlight pool, with Event Pt, the Max a
+  // pool cannot have is left out so the side figures fit two rows
+  const multiOn = ep && res.length_permil != null;
+  if (!(hl && multiOn)) side.push(rmax != null ? tile(`Max ${info("max")}`, score(rmax), "every Active fires")
     : hl ? none(`Max ${info("max")}`, "a pool has no single run") : tile(`Max ${info("max")}`, det.err ? `<span class="n">—</span>` : pend, "every Active fires"));
+  // a Highlight row has no Unit Score of its own (each pool song on its own board): the one of
+  // the board its detail shows, once that is in
+  const hlUnit = hl && unit == null && det.fig ? deckUnit(det.fig) : null;
   side.push(unit != null ? tile(`Unit Score ${info("grade")}`, score(unit), "this team's board")
-    : tile(`Unit Score ${info("grade")}`, det.err ? `<span class="n">—</span>` : pend, "this team's board"));
+    : hlUnit != null ? tile(`Unit Score ${info("grade")}`, score(hlUnit), onPool ? "the pool's one board" : "this song's board")
+    : tile(`Unit Score ${info("grade")}`, det.err || (hl && det.fig) ? `<span class="n">—</span>` : pend, "this team's board"));
   if (ep && lenPct) side.push(hl ? tile("Highlight Bonus", `<span class="n o-num">${lenPct}</span>`, "in place of the song length bonus")
     : tile("Song length bonus", `<span class="n o-num">${lenPct}</span>`, "estimate"));
-  // Multi Live: the player types the room's MULTI SCORE and their own score (empty: this
-  // team's Expected Score), the server answers the Event Pt. Its own block under the tiles,
-  // every field labelled (as a tile it was unclear and its text was cut off)
-  const multi = ep && res.length_permil != null ? `<div class="o-mcalc" role="group" aria-labelledby="mcalc${i}">
-      <h4 id="mcalc${i}">Multi Live Event Pt calculator</h4>
-      <label><span>Room MULTI SCORE</span><input class="hbc-in" inputmode="numeric" autocomplete="off" placeholder="e.g. 9,283,806" data-multi="${i}" value="${esc(multiScore)}"></label>
-      <span class="o-mcalc-op" aria-hidden="true">+</span>
-      <label><span>Your score in that Live</span><input class="hbc-in" inputmode="numeric" autocomplete="off" placeholder="${esc(fmt(Math.round(r.score)))}" data-multi="${i}" data-own="" value="${esc(ownScore)}"></label>
-      <span class="o-mcalc-op" aria-hidden="true">=</span>
-      <div class="o-mcalc-out"><span>Event Pt</span><b class="o-num" data-multi-out="${i}">—</b></div>
-      <p>MULTI SCORE is the room's total at the top of the multi result screen. Leave your score empty to use this team's expected score (${esc(fmt(Math.round(r.score)))}). Counted with this team's Event Bonus (${pct(r.live_permil)}), ${S.boosts} Live Boost${S.boosts > 1 ? "s" : ""}${S.holopass ? ", HoloPass" : ", no HoloPass"} and the ${hl ? "Highlight Bonus" : "song length bonus"} (${lenPct || "—"}).</p>
-    </div>` : "";
   const L = { ...(ctx.D.cards.get(r.leader.id) || {}), ...r.leader };
   const head = `<div class="o-thead">
       <div class="o-who"><span class="rk-n">${i + 1}</span><h2>${esc(L.member || r.leader.id)} <small>leads${L.costume_name ? " · " + esc(L.costume_name) : ""}</small></h2></div>
@@ -375,7 +417,8 @@ function block({ ctx, S, res, rows, byMax }, r, i) {
         <button class="btn small" type="button" data-export="${i}" title="Save this team as a .hbteam file: the row, its numbers and the account data its score uses, so it can be replayed and checked"><svg class="i s"><use href="#i-down"/></svg>Export</button></div>
     </div>`;
   const tiles = `<div class="o-tiles">
-      <div class="stat-tile prime"><div><span class="lbl">${ep ? `Event Pt per Live · ${S.boosts} Live Boost${S.boosts > 1 ? "s" : ""} (×${AC[S.boosts - 1]})${S.holopass ? " · HoloPass" : ""}` : byMax ? "Event Song Score · Max" : "Event Song Score"} ${info(ep ? "ev_points" : byMax ? "max" : "ev_song")}</span>${headFmt(S, v)}<small>${byMax ? `every Active fires · Expected ${fmt(r.event_song_score)}${delta ? " · " + delta : ""}` : delta}</small></div></div>
+      <div class="o-primecol"><div class="stat-tile prime"><div><span class="lbl">${ep ? `Event Pt per Live · ${S.boosts} Live Boost${S.boosts > 1 ? "s" : ""} (×${AC[S.boosts - 1]})${S.holopass ? " · HoloPass" : ""}` : byMax ? "Event Song Score · Max" : "Event Song Score"} ${info(ep ? "ev_points" : byMax ? "max" : "ev_song")}</span>${headFmt(S, v)}<small>${byMax ? `every Active fires · Expected ${fmt(r.event_song_score)}${delta ? " · " + delta : ""}` : delta}</small></div></div>
+        ${multiOn ? multiTile(r, i) : ""}</div>
       <div class="o-sidetiles">${side.join("")}</div>
     </div>`;
   // slot order: the row's member_order (or its detail's), never the server's listing order
@@ -409,7 +452,7 @@ function block({ ctx, S, res, rows, byMax }, r, i) {
       timelinePanel(T, shown, id => ctx.D.cards.get(id) || r.members.find(m => m.id === id) || null) + plan;
   const body = hl ? `<section class="o-onsong">${perSong}${panels}</section>` : panels;
   const unitBlock = `<div class="o-unit">${leaderColumn(L, { outfit, note: ep ? "no Event Bonus" : "no Song Score Bonus" })}
-    <div class="o-unit-main">${tiles}${multi}${hl ? "" : matchLine(T, det)}${cards}</div></div>`;
+    <div class="o-unit-main">${tiles}${hl ? "" : matchLine(T, det)}${cards}</div></div>`;
   return head + unitBlock + (cert || notes || src || pool ? `<div class="o-sect o-reveal">${cert}${src}${pool}${notes}</div>` : "") + body;
 }
 /* the whole pool's line under the selector: the mean at one board and one order against the
@@ -467,14 +510,10 @@ function repaint(c, r, i) {
   if (!el || !open.has(i) || !live || live.res !== c.res) return;
   const planOpen = el.querySelector("details.o-plan");
   const keepPlan = planOpen ? planOpen.open : i === 0;
-  // the detail repaints the row: a player typing in the Multi Live box keeps it
-  const typing = document.activeElement && el.contains(document.activeElement) && document.activeElement.matches("[data-multi]");
   el.innerHTML = block(c, r, i);
   wakeFigure(el);
   const p = el.querySelector("details.o-plan"); if (p) p.open = keepPlan;
   el.querySelectorAll(".o-reveal").forEach(x => x.classList.add("in"));
-  const box = typing && el.querySelector(document.activeElement.dataset.own != null ? "[data-own]" : "[data-multi]:not([data-own])");
-  if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
   if (multiScore) fillMulti(c, r, i);
   const cardOf = id => c.ctx.D.cards.get(id) || r.members.find(m => m.id === id) || null;
   wireTimeline(el, details.get(keyOf(r)) || {}, cardOf);

@@ -23,6 +23,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -37,7 +38,13 @@ from hbuilder import paths
 # ~15-24 % end to end; the plans are byte-identical): `_ACCOUNT` the Oracle and the account's
 # graphs / prices / owned nodes / wallet, `_BLOCKS` each bench board's MILP block (columns +
 # rows). Both are keyed on `_account_stamp()` and emptied when it moves (a refresh).
+# `_ACCOUNT` holds the last `_ACCOUNT_HELD` Oracles (one per song, pool and scenario; ~2 MB
+# each): a Highlight row detail plans for no song and then for its pool, and the server runs
+# two row details at once when a player opens one team while another's is still computing,
+# so one Oracle per process made each plan evict the other's mid-solve.
 _ACCOUNT: dict = {}
+_ACCOUNT_HELD = 4
+_ACCOUNT_LOCK = threading.Lock()
 _BLOCKS: dict = {}
 # every file the Oracle, `_prices` and `balance_from_disk` read
 _STAMPED = (
@@ -469,21 +476,16 @@ CANDIDATES = ("modelled", "bare", "in_board")  # tie order: the earliest wins
 
 def _plan_score(kw: dict, board: dict) -> float | None:
     """The scorer's figure for a candidate plan: the Oracle (the reported per-song score) on
-    the plan's boards, every other character on its own (`full_state` in the plan)."""
-    held = next(
-        (
-            v
-            for k, v in _ACCOUNT.items()
-            if k[0] == kw["pool"]
-            and k[1] == kw["song"]
-            and k[2] == kw["scenario"]
-            and k[3] == kw["uptime_model"]
-            and k[5] == pool_shares(kw.get("song_pool"))
-        ),
-        None,
-    )
-    if held is None or board is None:
+    the plan's boards, every other character on its own (`full_state` in the plan). The
+    plan's own Oracle, held again if another plan evicted it meanwhile."""
+    if board is None:
         return None
+    got = _held_account(
+        kw["pool"], kw["song"], kw["scenario"], kw["uptime_model"], pool_shares(kw.get("song_pool"))
+    )
+    if got is None:
+        return None
+    held = got[1]
     oracle, graphs, owned = held[0], held[1], held[3]
     state = {
         cid: sorted(board[cid]["nodes"])
@@ -568,6 +570,10 @@ def _best_of_candidates(
         if v is not None:
             scored[name] = v
     if not scored:
+        # None means the wallet funds no plan; a plan that exists but could not be scored is
+        # another failure, and saying "the wallet" there would send the player to the wrong cause
+        if any(boards.get(name) is not None for name in CANDIDATES):
+            raise RuntimeError("the board plan was solved but could not be scored (its scorer did not load)")
         return None
     pick = max(CANDIDATES, key=lambda n: (scored.get(n, float("-inf")), -CANDIDATES.index(n)))
     board = boards[pick]
@@ -907,33 +913,53 @@ def _load_plan(
     highspy,
     shares: tuple = (),
 ) -> _Plan | None:
-    """The account's Oracle and inputs, kept per process (`_ACCOUNT`); None when the Oracle
-    cannot load (an input read failure afterwards raises). `shares` (`pool_shares`): the
-    pool of songs the Oracle scores on instead of `song` alone."""
+    """The account's Oracle and inputs, kept per process (`_held_account`); None when the
+    Oracle cannot load (an input read failure afterwards raises). `shares` (`pool_shares`):
+    the pool of songs the Oracle scores on instead of `song` alone."""
+    got = _held_account(pool, song, scenario, uptime_model, shares)
+    if got is None:
+        return None
+    akey, held = got
+    return _Plan(clock, highspy, akey, held, for_team)
+
+
+def _held_account(pool: int, song: str | None, scenario: str, uptime_model: str | None, shares: tuple):
+    """`(key, (Oracle, *account inputs))` for these options from `_ACCOUNT`, built and held
+    when it is not there (the oldest held one goes past `_ACCOUNT_HELD`); None when the
+    Oracle cannot load. Thread-safe: the server plans several row details at once."""
     try:
         # `uptime_model`: the in-run model the search and the page score with, not
         # `config.json`'s deck-screen `steady` (see `tree_optimise.Oracle`).
         stamp = _account_stamp()
         akey = (pool, song, scenario, uptime_model, stamp, shares)
-        oracle = (_ACCOUNT.get(akey) or (None,))[0]
-        if oracle is None:
-            if any(k[4] != stamp for k in _ACCOUNT):
-                _BLOCKS.clear()  # a bench block holds the account's points / owned nodes
-            _ACCOUNT.clear()  # one Oracle per process: the song of the last plan
-            oracle = to.Oracle(
-                pool_size=pool,
-                song=song,
-                charts_path=None,
-                scenario=scenario,
-                uptime_model=uptime_model,
-                pool_songs=shares or None,
-            )
+        with _ACCOUNT_LOCK:
+            held = _ACCOUNT.pop(akey, None)
+            if held is not None:
+                _ACCOUNT[akey] = held  # the most recently used last
+                return akey, held
+        oracle = to.Oracle(
+            pool_size=pool,
+            song=song,
+            charts_path=None,
+            scenario=scenario,
+            uptime_model=uptime_model,
+            pool_songs=shares or None,
+        )
     except Exception:  # noqa: BLE001
         return None
-    held = _ACCOUNT.get(akey)
-    if held is None:
-        held = _ACCOUNT[akey] = (oracle, *_account_inputs(oracle))
-    return _Plan(clock, highspy, akey, held, for_team)
+    inputs = _account_inputs(oracle)
+    with _ACCOUNT_LOCK:
+        stale = [k for k in _ACCOUNT if k[4] != stamp]
+        if stale:
+            _BLOCKS.clear()  # a bench block holds the account's points / owned nodes
+            for k in stale:
+                del _ACCOUNT[k]
+        held = _ACCOUNT.get(akey)
+        if held is None:
+            while len(_ACCOUNT) >= _ACCOUNT_HELD:
+                del _ACCOUNT[next(iter(_ACCOUNT))]
+            held = _ACCOUNT[akey] = (oracle, *inputs)
+    return akey, held
 
 
 def _value_nodes(plan: _Plan, context: dict | None) -> None:

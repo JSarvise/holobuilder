@@ -2,6 +2,12 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.14 (2026-11-19)
+- **Fix: "the wallet cannot fund a plan for this team"** showed on a team's details when another team's details were still being computed (opening one team while another was loading, most often on a Highlight pool). It was never the materials: two board plans at once evicted each other's scorer. Plans now run side by side with the same numbers as one at a time, and a plan that could not be scored says so instead of blaming the wallet.
+- **Event Pt view: the Multi Live calculator in its own window.** It was a block between the figures and the cards that made the view taller than Score's and left the five cards below the leader. It is now a tile under the big Event Pt that shows the last result and opens the calculator in a window: the room's MULTI SCORE + your score = the Event Pt, with what it counts (Event Bonus, Live Boosts, HoloPass, Highlight or length bonus).
+- **Fix: a Highlight team's Unit Score** stayed a loading bar; it now shows the Unit Score of the board its details show. On Event Pt the Highlight row no longer shows a Max tile, which a pool cannot have.
+- **A smaller window:** the figures beside the big number move under it instead of being cut off.
+
 ## 0.2.13 (2026-11-19)
 - **Board plan with your materials: the interval nodes split across the team.** When the planner chose how many interval (Act.CD) nodes each member's Holomem Board takes, it ranked each board's counts on its own, and missed the splits that only win together (one member giving up its interval nodes so that another's skill fires more often). It now screens every combination and scores the best ones exactly. On our test account, 8 of the 31 rows of a one-song search rise (up to +0.9 %), 2 move down by 0.02 % and the first is unchanged; the search is about 5 % faster, and a Highlight pool plan gains up to 0.2 % in about 30 % less time. Contributed by namirin1 ([pull request #1](https://github.com/JSarvise/holobuilder/pull/1)), the project's first outside contribution.
 
