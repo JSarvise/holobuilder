@@ -427,7 +427,7 @@ def board_state_of(bt: BoardOptimisedTeam) -> dict:
 # ---------------------------------------------------------------------------
 # a two-stage / event row, on its own leaf
 # ---------------------------------------------------------------------------
-_LEAF_CACHE: dict[tuple, tuple[float, dict]] = {}
+_LEAF_CACHE: dict[tuple, tuple[float, tuple, dict]] = {}
 _LEAF_TTL = 120.0
 # leaves held at once: a detail on a shared board reads the song's leaf and the engine's
 _LEAF_HELD = 3
@@ -437,7 +437,8 @@ def _leaf_inputs(
     basis: str, song: str | None, difficulty: str, assumptions=None, play: tuple[str, bool] | None = None
 ) -> dict:
     """The two-stage builder's own leaf inputs for `basis` on `song` (cached a
-    couple of minutes per (basis, song, difficulty): ~0.3 s to build), scored for
+    couple of minutes per (basis, song, difficulty), and only while the account files they
+    were read from are unchanged: ~0.3 s to build), scored for
     `play` (`ondemand.parse_play`: platform, AUTO) as the search that ranked the row.
     `song` None: the builders' own nominal song, the leaf an engine is built on."""
     built = _leaf_inputs_cached(basis, song, difficulty, assumptions)
@@ -451,13 +452,17 @@ def _leaf_inputs(
 def _leaf_inputs_cached(basis: str, song: str | None, difficulty: str, assumptions=None) -> dict:
     import time  # noqa: PLC0415
 
+    import board_plan_solver as bps  # noqa: PLC0415
     import leaf_inputs  # noqa: PLC0415
 
     key = (basis, song, difficulty, assumptions.key() if assumptions is not None else None)
+    # a refresh rewrites the boards, cards and collection: inputs read before it are not served
+    # (a detail opened right after a refresh would show the old boards' figures)
+    stamp = bps._account_stamp()
     held = _LEAF_CACHE.pop(key, None)
-    if held is not None and time.monotonic() - held[0] < _LEAF_TTL:
+    if held is not None and time.monotonic() - held[0] < _LEAF_TTL and held[1] == stamp:
         _LEAF_CACHE[key] = held  # the most recently used last
-        return held[1]
+        return held[2]
     nominal = () if song is None else (song,)
     if assumptions is not None:
         import ondemand  # noqa: PLC0415
@@ -467,7 +472,7 @@ def _leaf_inputs_cached(basis: str, song: str | None, difficulty: str, assumptio
         built = leaf_inputs.leaf_inputs(basis, difficulty, *nominal)
     while len(_LEAF_CACHE) >= _LEAF_HELD:
         del _LEAF_CACHE[next(iter(_LEAF_CACHE))]
-    _LEAF_CACHE[key] = (time.monotonic(), built)
+    _LEAF_CACHE[key] = (time.monotonic(), stamp, built)
     return built
 
 

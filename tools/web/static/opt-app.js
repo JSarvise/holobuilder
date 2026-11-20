@@ -3,8 +3,8 @@
 // Every number on the page comes from the server; this file only lays out the choices.
 import { byId, esc, fmt, dec, mmss, toast, getJSON, postJSON, AC, wirePopovers, normCard, loadRanks, when } from "/opt-util.js";
 import { loadRanks as loadGradeRanks } from "/hb-grade.js";
-import { showScoreIdle, runScore, cancelScore } from "/opt-score.js";
-import { showEventIdle, runEvent, cancelEvent, HL, isHighlight, highlightTile, highlightPool, hlPct } from "/opt-event.js";
+import { showScoreIdle, runScore, cancelScore, forgetDetails, redrawDetails } from "/opt-score.js";
+import { showEventIdle, runEvent, cancelEvent, forgetEventDetails, redrawEventDetails, HL, isHighlight, highlightTile, highlightPool, hlPct } from "/opt-event.js";
 import { initTargets } from "/opt-targets.js";
 import { setPowerUpNote } from "/opt-detail.js";
 import { wireCardDialog } from "/opt-carddlg.js";
@@ -311,11 +311,18 @@ async function refresh() {
       : /DATE_CHANGED/.test(r.stdout || "") ? "The game refused your account for today: open hololive Dreams once, then refresh again."
       : `Refresh exited ${r.returncode}: partial (see the server log).`);
     D.meta = await getJSON("/api/meta");
+    afterRefresh();
   } catch (e) {
     toast("Refresh failed: " + e.message);
     if (/already running/.test(e.message)) return watchRefresh();
   }
   REFRESHING = false; renderFresh();
+}
+// the account changed: every kept team detail is dropped, and the one on screen is computed again
+// on the refreshed boards, cards and cubes (only the goal on screen draws; the other just forgets)
+function afterRefresh() {
+  if (isEvent()) { forgetDetails(); redrawEventDetails(); }
+  else { forgetEventDetails(); redrawDetails(); }
 }
 // a refresh started before this page loaded: wait for the server to finish it
 async function watchRefresh() {
@@ -323,7 +330,7 @@ async function watchRefresh() {
   for (;;) {
     await new Promise(ok => setTimeout(ok, 10000));
     const m = await getJSON("/api/meta").catch(() => null);
-    if (m && !m.refresh_running) { D.meta = m; break; }
+    if (m && !m.refresh_running) { D.meta = m; afterRefresh(); break; }
   }
   REFRESHING = false; renderFresh(); toast("Refresh finished.");
 }

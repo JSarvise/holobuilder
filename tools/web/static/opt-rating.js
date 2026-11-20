@@ -5,7 +5,7 @@
 import { byId, esc, fmt, toast, getJSON, postJSON, thumb, when, info, NOTES, cardHook, stash, unstash } from "/opt-util.js";
 import { score } from "/hb-grade.js";
 import { progressCard } from "/opt-progress.js";
-import { assumptionsOf, renderTeams } from "/opt-score.js";
+import { assumptionsOf, renderTeams, forgetDetails } from "/opt-score.js";
 
 NOTES.rating = "A holomem's rating adds up your three best songs of hers. Each song counts once, at its best difficulty, "
   + "and is worth its highest score divided by 5,000, rounded up. A play counts for the holomem who leads the team, and only on a song she sings "
@@ -150,6 +150,7 @@ function chosenSongs(S) {
 
 export async function runRating(ctx) {
   const S = ctx.S;
+  forgetDetails();  // its teams' details are opt-score.js's: a refresh since the last search changed their boards
   if (!S.rholomem) { toast("Choose a holomem first."); return; }
   await loadStatus(S);
   const songs = chosenSongs(S);

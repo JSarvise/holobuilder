@@ -9,6 +9,7 @@ import { assumptionsOf, leaderOpts, withDistribution, exportFile } from "/opt-sc
 import { progressCard } from "/opt-progress.js";
 
 let live = null, run = null, open = new Set([0]);
+let shownC = null;   // the rows laid out now (render), for a redraw after a refresh
 let sel = 0, diffMode = true;   // the selected row on the right; the list outlines cards not in #1
 const details = new Map();   // row key -> {fig, tl, doc, err…}: /api/row-detail on the event leaf (plain, refine:false)
 let wallet = null;
@@ -124,6 +125,14 @@ export function showEventIdle(ctx, keepLive) {
 /* ------------------------------------------------------------------ search */
 // Cancel answers at once: the page drops the search and goes back to idle; the server is
 // told too and stops at its next check
+// after a refresh: the details and the wallet are read again (opt-score.js forgetDetails)
+export function forgetEventDetails() { details.clear(); wallet = null; }
+// a refresh just ended: the selected team's details on screen are computed again
+export function redrawEventDetails() {
+  forgetEventDetails();
+  const c = shownC;
+  if (c && c.rows[sel] && c.ctx.out().querySelector(".o-sel > .o-team")) select(c, sel);
+}
 export function cancelEvent() {
   if (!run) return;
   if (run.job) postJSON(`/cancel/${encodeURIComponent(run.job)}`, {}).catch(e => toast(e.message));
@@ -224,7 +233,7 @@ function render(ctx, L) {
   const byMax = evMax(S, rows);
   if (byMax) rows.sort((a, b) => b.event_song_score_max - a.event_song_score_max);
   if (!rows.length) { ctx.out().innerHTML = `<div class="o-error">The search returned no team.</div>`; return; }
-  const c = { ctx, res, rows, S, byMax };
+  const c = shownC = { ctx, res, rows, S, byMax };
   loadStates(rows.flatMap(r => [r.leader.id, ...r.members.map(m => m.id)]), isMaxed(S) ? MAXED_LEVERS : eventAssumptions(S))
     .then(changed => { if (changed && live === L) render(ctx, L); });
   if (sel >= rows.length) sel = 0;

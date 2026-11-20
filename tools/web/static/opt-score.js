@@ -216,9 +216,18 @@ function progress(ctx, kind, steps, active, detail, ev) {
   pc.update(upd);
 }
 // "Find best team" searches again now (never on load or on an option change)
-// a new search re-reads the wallet: a refresh since the last one changed the cubes and hexas
-// its plans are made within, and the materials panel must compare with the same figures
-export async function runScore(ctx) { cache = null; wallet = null; searchNow(ctx, optsKey(ctx.S)); }
+// a team's details and the wallet are read again after a new search or a refresh: a refresh
+// changes the boards, cards and cubes the details are computed on, and a detail kept from before
+// it (same options, same team) would show the old boards' figures
+export function forgetDetails() { details.clear(); wallet = null; }
+// a refresh just ended: the selected team's details, if they are on screen, are computed again on
+// the refreshed account (only for the goal that drew them: Event draws its own)
+export function redrawDetails() {
+  forgetDetails();
+  const T = shown;
+  if (T && T.goal === T.ctx.S.goal && T.rows[sel] && T.ctx.out() && T.ctx.out().querySelector(".o-sel > .o-team")) select(T, sel);
+}
+export async function runScore(ctx) { cache = null; forgetDetails(); searchNow(ctx, optsKey(ctx.S)); }
 
 // Another goal's answer laid out as this goal's setlist and team detail (the Holomem Rating
 // goal, opt-rating.js): `ctx` carries that song's options (S.song, S.difficulty, S.sort) and an
@@ -266,7 +275,7 @@ function render(ctx, res) {
     return;
   }
   setProv(res);
-  const ctxT = shown = { ctx, res, rows, cardOf };
+  const ctxT = shown = { ctx, res, rows, cardOf, goal: ctx.S.goal };
   if (sel >= rows.length) { sel = 0; open = new Set([0]); }
   ctx.out().innerHTML = `<div class="o-split">
     <aside class="dlg o-setlist" aria-label="Ranked teams">

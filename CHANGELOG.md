@@ -2,6 +2,9 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.17 (2026-11-20)
+- **Fix: a team's details showed your boards from before a refresh.** After a refresh, the Optimizer kept the details it had already computed. The same team, searched again, still showed the old boards' Overall Power, Holomem Board Bonus and Member Power-Up Bonus. Now a refresh drops what was kept and computes the team on screen again. Every new search does the same, and the server no longer reuses the boards it read before the refresh. On the refreshed boards the details match the game's Unit Score Details: Overall Power, each line and the Unit Score.
+
 ## 0.2.16 (2026-11-20)
 - **Fix: "Not enough required materials" after a refresh.** The board plan's materials compared what the plan needs with the cubes and hexas read when the page first opened a team's details. After refreshing the account from the Optimizer, a new search planned within your new materials but was still checked against the old ones, and could read as short when it fits. Every new search now reads your materials again.
 - **Holomem Board plan: drag the holomem strip** to scroll it, and order or filter it with the small controls above it. Sort by Changes, Resets (most nodes to remove first), Unlocks or Generation (grouped under each generation's name). Show all holomems, only the boards with resets, or only the ones whose Connect cards move. The team stays first, in its order.
