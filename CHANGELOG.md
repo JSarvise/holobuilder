@@ -2,6 +2,12 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.16 (2026-11-20)
+- **Fix: "Not enough required materials" after a refresh.** The board plan's materials compared what the plan needs with the cubes and hexas read when the page first opened a team's details. After refreshing the account from the Optimizer, a new search planned within your new materials but was still checked against the old ones, and could read as short when it fits. Every new search now reads your materials again.
+- **Holomem Board plan: drag the holomem strip** to scroll it, and order or filter it with the small controls above it. Sort by Changes, Resets (most nodes to remove first), Unlocks or Generation (grouped under each generation's name). Show all holomems, only the boards with resets, or only the ones whose Connect cards move. The team stays first, in its order.
+- **Fix: the selected team's panel** sometimes covered only part of the width while its details loaded.
+- **Export search works in the app.** It now opens a save dialog in your Downloads folder; before, the app silently dropped the file.
+
 ## 0.2.15 (2026-11-19)
 - **Event: past events.** "Past events" opens any event on record with the same view as the running one: the borders of each region with their charts and heatmaps, the top 100, your rank, tier and medal, and its Event Bonus rules when they were kept. Nothing of it changes the Optimizer, which plans the open event as before. Events from before the 24/7 tracker show what is on record: your medal and the final borders.
 - **Replay a finished chapter.** A slider shows the chapter as it stood at any moment: the borders, the forecast made then, your standing and the top 100, with what really happened drawn beside the forecast.

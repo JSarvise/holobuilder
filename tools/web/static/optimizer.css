@@ -421,6 +421,9 @@ body.opt .o-top h1{font-size:28px;line-height:1.15;margin:0;white-space:nowrap;o
 .o-listctl{display:flex;gap:8px;padding:12px 16px 4px}
 .o-setlist .o-runinfo{margin:0;padding:10px 16px 16px;border-top:1px solid var(--line);font-size:12px}
 .o-sel{min-width:0}
+/* the results' selected-team column shares .o-sel with the options rows, whose justify-items:start
+   would shrink the team card to its content until a wide part (the board plan strip) loads */
+.o-split > .o-sel{display:block;justify-items:stretch}
 .o-sel > .o-team{background:var(--sheet);border:1px solid var(--line);border-radius:32px;padding:24px 28px 28px;margin:0}
 .o-thead{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 16px;padding:0;border:0}
 .o-who{display:flex;align-items:center;gap:14px;min-width:0}
@@ -639,7 +642,17 @@ dialog.o-tgb::backdrop{background:rgb(5 6 10 / .62);backdrop-filter:blur(4px)}
    The drawing and its pan / zoom are the Holomem Board page's own (hbd-draw.js, holoboard.css). */
 .o-bp-scope{margin:4px 0 12px}
 .o-bp{display:grid;gap:12px}
-.o-bp-strip{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 8px;scrollbar-width:thin}
+.o-bp-strip{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 8px;scrollbar-width:thin;cursor:grab}
+.o-bp-strip.dragging{cursor:grabbing;user-select:none}
+.o-bp-strip.dragging .o-bp-chip{pointer-events:none}
+.o-bp-none{margin:6px 4px;color:var(--ink-3);font-size:12.5px}
+/* the strip's order and filter: quiet text toggles, the chosen one in ink */
+.o-bp-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px 8px;margin-bottom:-4px;font:700 11.5px/1 var(--f-ui)}
+.o-bp-lbl{color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;font-size:10.5px;margin-left:10px}
+.o-bp-seg{display:inline-flex;gap:2px}
+.o-bp-seg button{padding:4px 7px;border-radius:var(--r-pill);background:none;border:0;color:var(--ink-3);font:inherit;cursor:pointer}
+.o-bp-seg button:hover{color:var(--ink)}
+.o-bp-seg button[aria-pressed="true"]{color:var(--ink);background:var(--surface-2)}
 .o-bp-chip{flex:none;display:grid;grid-template-columns:28px auto;grid-template-rows:auto auto;column-gap:8px;align-items:center;
   padding:6px 12px 6px 6px;border-radius:var(--r-pill);background:var(--surface-2);border:1px solid var(--line-2);text-align:left}
 .o-bp-chip img{grid-row:1 / span 2;width:28px;height:28px;border-radius:50%;background:var(--deep)}

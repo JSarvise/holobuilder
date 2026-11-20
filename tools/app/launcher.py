@@ -724,6 +724,9 @@ def main() -> int:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)  # own taskbar entry
     except (AttributeError, OSError):
         pass
+    # a page's file download (the Optimizer's Export search) opens a save dialog in Downloads;
+    # pywebview cancels every download unless this is set
+    webview.settings["ALLOW_DOWNLOADS"] = True
     api = Api()
     window = webview.create_window(
         "holobuilder",

@@ -33,10 +33,67 @@ const moved = k => k.buy + k.sell + k.sock;
 const CHANGE = { add: "A card goes in", swap: "Another card goes in", remove: "The card comes out" };
 const LEAVE_MS = 150;         // how long the side panel keeps a node/socket after the pointer leaves
 
+// the strip's order and filter: the team stays first, in its own order; these order and filter
+// the bench (and the filter the team too). Kept in this browser between visits.
+const SORTS = [["changes", "Changes"], ["resets", "Resets"], ["unlocks", "Unlocks"], ["gen", "Generation"]];
+const SHOWS = [["all", "All"], ["resets", "With resets"], ["cards", "Card moves"]];
+const VIEW_KEY = "hb.boardplan.view";
+const view = (() => {
+  let v = {};
+  try { v = JSON.parse(localStorage.getItem(VIEW_KEY) || "{}") || {}; } catch (_) { v = {}; }
+  return { sort: SORTS.some(x => x[0] === v.sort) ? v.sort : "changes", show: SHOWS.some(x => x[0] === v.show) ? v.show : "all" };
+})();
+const saveView = () => { try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch (_) { /* private window: this page only */ } };
+// a holomem's generation (hb-gens.js, in the official order): its first regular unit
+const GEN_ORDER = (() => {
+  const by = (window.HB_GENS && window.HB_GENS.by) || {}, order = new Map();
+  for (const units of Object.values(by)) for (const u of units) if (u.reg && !order.has(u.n)) order.set(u.n, order.size);
+  return order;
+})();
+const genOf = chr => {
+  const units = ((window.HB_GENS && window.HB_GENS.by) || {})[chr] || [];
+  const u = units.find(x => x.reg) || units[0];
+  return u ? u.n : "Other";
+};
+const SORT_FN = {
+  changes: (a, b) => moved(counts(b)) - moved(counts(a)),
+  resets: (a, b) => counts(b).sell - counts(a).sell || moved(counts(b)) - moved(counts(a)),
+  unlocks: (a, b) => counts(b).buy - counts(a).buy || moved(counts(b)) - moved(counts(a)),
+  gen: (a, b) => (GEN_ORDER.get(genOf(a.chr)) ?? 999) - (GEN_ORDER.get(genOf(b.chr)) ?? 999) || moved(counts(b)) - moved(counts(a)),
+};
+const SHOW_FN = { all: () => true, resets: c => counts(c).sell > 0, cards: c => counts(c).sock > 0 };
+
+// click and drag the strip to scroll it (the scrollbar still works); a drag never picks a chip
+function dragScroll(strip) {
+  if (strip.dataset.drag) return;
+  strip.dataset.drag = "1";
+  let x0 = 0, left0 = 0, down = false, dragged = false;
+  strip.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || e.pointerType !== "mouse") return;   // touch scrolls natively
+    down = true; dragged = false; x0 = e.clientX; left0 = strip.scrollLeft;
+  });
+  strip.addEventListener("pointermove", e => {
+    if (!down) return;
+    const dx = e.clientX - x0;
+    if (!dragged && Math.abs(dx) < 5) return;
+    if (!dragged) { dragged = true; strip.setPointerCapture(e.pointerId); strip.classList.add("dragging"); }
+    strip.scrollLeft = left0 - dx;
+  });
+  const up = () => { down = false; strip.classList.remove("dragging"); };
+  strip.addEventListener("pointerup", up);
+  strip.addEventListener("pointercancel", up);
+  // the click that ends a drag is not a pick
+  strip.addEventListener("click", e => { if (dragged) { e.stopPropagation(); e.preventDefault(); dragged = false; } }, true);
+}
+
 /** The viewer's frame (filled by wireBoardPlan once in the DOM). */
 export function boardPlanHTML(key, doc, loading) {
   if (!doc) return `<div class="o-bp o-bp-empty"><span class="o-sk" style="width:100%;height:${loading ? 420 : 60}px"></span></div>`;
   return `<div class="o-bp hbd" data-bp="${esc(key)}">
+    <div class="o-bp-tools" role="toolbar" aria-label="Order and filter the holomems">
+      <span class="o-bp-lbl">Sort</span><span class="o-bp-seg" data-bpgroup="sort">${SORTS.map(([k, t]) => `<button type="button" data-bpv="${k}">${t}</button>`).join("")}</span>
+      <span class="o-bp-lbl">Show</span><span class="o-bp-seg" data-bpgroup="show">${SHOWS.map(([k, t]) => `<button type="button" data-bpv="${k}">${t}</button>`).join("")}</span>
+    </div>
     <div class="o-bp-strip" role="tablist" aria-label="Holomems"></div>
     <div class="o-bp-body">
       <div class="hbd-viewport o-bp-view">
@@ -81,25 +138,46 @@ export async function wireBoardPlan(root, key, doc, team) {
     SOCKS.set(doc, { now, then });
   }
   const changed = doc.characters.filter(c => moved(counts(c)) > 0);
-  const order = [
-    ...[...teamSet].map(chr => byChr.get(chr)).filter(Boolean),
-    ...changed.filter(c => !teamSet.has(c.chr)).sort((a, b) => {
-      const ka = counts(a), kb = counts(b);
-      return moved(kb) - moved(ka) || a.name.localeCompare(b.name);
-    }),
-  ];
-  if (!order.length) { el.innerHTML = `<p class="o-cap">The plan changes no Holomem Board.</p>`; return; }
+  const onTeam = [...teamSet].map(chr => byChr.get(chr)).filter(Boolean);
+  const bench = changed.filter(c => !teamSet.has(c.chr));
+  if (!onTeam.length && !bench.length) { el.innerHTML = `<p class="o-cap">The plan changes no Holomem Board.</p>`; return; }
   let cur = picked.get(key);
-  if (!order.some(c => c.chr === cur)) cur = order[0].chr;
+  if (![...onTeam, ...bench].some(c => c.chr === cur)) cur = (onTeam[0] || bench[0]).chr;
   const strip = el.querySelector(".o-bp-strip");
-  const benchN = order.length - [...teamSet].filter(c => byChr.has(c)).length;
-  strip.innerHTML = order.map((c, k) => {
+  const chip = c => {
     const n = counts(c);
-    const sep = k === [...teamSet].filter(x => byChr.has(x)).length && benchN ? `<span class="o-bp-sep">Bench · ${benchN}</span>` : "";
-    return `${sep}<button type="button" class="o-bp-chip${teamSet.has(c.chr) ? " team" : ""}" role="tab" data-bpchr="${esc(c.chr)}" aria-selected="${c.chr === cur}">
+    return `<button type="button" class="o-bp-chip${teamSet.has(c.chr) ? " team" : ""}" role="tab" data-bpchr="${esc(c.chr)}" aria-selected="${c.chr === cur}">
       <img src="/chricon/${esc(c.chr)}" alt="" onerror="this.style.visibility='hidden'"><b>${esc(c.name)}</b>
       <span class="n">${n.buy ? `<em class="b">+${n.buy}</em>` : ""}${n.sell ? `<em class="s">−${n.sell}</em>` : ""}${n.sock ? `<em class="k" title="${n.sock} socket${n.sock === 1 ? "" : "s"} change${n.sock === 1 ? "s" : ""} card">⇄${n.sock}</em>` : ""}${!moved(n) ? `<em>no change</em>` : ""}</span></button>`;
-  }).join("");
+  };
+  const sep = t => `<span class="o-bp-sep">${esc(t)}</span>`;
+  const renderStrip = () => {
+    const keep = SHOW_FN[view.show];
+    const t = onTeam.filter(keep);
+    const b = bench.filter(keep).sort((x, y) => SORT_FN[view.sort](x, y) || x.name.localeCompare(y.name));
+    let html = t.map(chip).join("");
+    if (view.sort === "gen") {   // the bench in generations, each under its name
+      let last = null;
+      for (const c of b) {
+        const g = genOf(c.chr);
+        if (g !== last) { html += sep(`${g} · ${b.filter(x => genOf(x.chr) === g).length}`); last = g; }
+        html += chip(c);
+      }
+    } else if (b.length) html += sep(`Bench · ${b.length}`) + b.map(chip).join("");
+    strip.innerHTML = html || `<p class="o-bp-none">${view.show === "resets" ? "No board here needs a node reset." : "No socket here changes its card."}</p>`;
+    el.querySelectorAll(".o-bp-seg").forEach(g => g.querySelectorAll("[data-bpv]").forEach(x =>
+      x.setAttribute("aria-pressed", String(x.dataset.bpv === view[g.dataset.bpgroup]))));
+  };
+  renderStrip();
+  dragScroll(strip);
+  el.querySelector(".o-bp-tools").onclick = e => {
+    const b = e.target.closest("[data-bpv]"); if (!b) return;
+    view[b.closest("[data-bpgroup]").dataset.bpgroup] = b.dataset.bpv;
+    saveView(); renderStrip(); strip.scrollLeft = 0;
+    // the holomem shown went out with the filter: show the first one left
+    const first = strip.querySelector("[data-bpchr]");
+    if (first && !strip.querySelector('[aria-selected="true"]')) show(first.dataset.bpchr);
+  };
   const g = await glyphs();
   const canvas = el.querySelector(".o-bp-canvas");
   initPanZoom(canvas, () => {});

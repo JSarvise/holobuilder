@@ -216,7 +216,9 @@ function progress(ctx, kind, steps, active, detail, ev) {
   pc.update(upd);
 }
 // "Find best team" searches again now (never on load or on an option change)
-export async function runScore(ctx) { cache = null; searchNow(ctx, optsKey(ctx.S)); }
+// a new search re-reads the wallet: a refresh since the last one changed the cubes and hexas
+// its plans are made within, and the materials panel must compare with the same figures
+export async function runScore(ctx) { cache = null; wallet = null; searchNow(ctx, optsKey(ctx.S)); }
 
 // Another goal's answer laid out as this goal's setlist and team detail (the Holomem Rating
 // goal, opt-rating.js): `ctx` carries that song's options (S.song, S.difficulty, S.sort) and an

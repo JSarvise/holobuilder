@@ -201,7 +201,7 @@ export async function runEvent(ctx, { certify = false } = {}) {
     else if (ev.type === "result") {
       finished = true;
       done(true);
-      live = { key, res: ev.payload, cards: ctx.D.cards }; details.clear();
+      live = { key, res: ev.payload, cards: ctx.D.cards }; details.clear(); wallet = null;  // a refresh since the last search changed the cubes and hexas the plan was made within
       open = new Set([0]); sel = 0; remember(ctx); render(ctx, live);
     } else if (ev.type === "error") { finished = true; ctx.out().innerHTML = `<div class="o-error">The event search failed: ${esc(ev.message || "")}</div>`; }
     else if (ev.type === "cancelled") { finished = true; toast("Search cancelled."); showEventIdle(ctx); }
