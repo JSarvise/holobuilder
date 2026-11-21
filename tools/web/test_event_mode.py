@@ -792,6 +792,42 @@ def test_row_payload_serves_the_max_event_song_score():
     assert "song_max" not in plain and "event_song_score_max" not in plain
 
 
+def test_a_multi_event_points_row_shows_a_solo_lives_points_on_its_own_score():
+    """Event Points in Multi Live rank on the fever-weighted score; the Event Pt served are a
+    solo Live's on the score without FEVER (the room's MULTI SCORE is the calculator's)."""
+    cards = _pool()
+    bonus = _bonus(len(cards))
+    row = {
+        "leader": cards[0],
+        "members": (2, 3, 4, 6, 8),
+        "score": 2_400_000.0,
+        "song_solo": 2_200_000.4,
+        "multi_score": 3_000_000.0,
+        "live_permil": 350,
+        "song_permil": 0,
+        "objective": 0.0,
+        "source": "event_search",
+    }
+    kw = dict(
+        reps=cards,
+        bonus_of=lambda c: bonus[cards.index(c)],
+        card_state=lambda _i: {},
+        boosts=3,
+        length_permil=1230,
+        holopass=True,
+        room={"multi_divisor": 75_000, "room_rest": 12_000_000.0},
+    )
+    out = em.row_payload(1, row, **kw)
+    assert out["event_points"] == mar.event_points(
+        2_200_000, 350, boosts=3, length_permil=1230, holopass=True
+    )
+    assert out["event_points_base"] == mar.event_points_base(2_200_000, 350)
+    assert out["song_est_solo"] == 2_200_000.4 and out["multi_score"] == 3_000_000.0
+    # without its split a row has no points to show
+    bare = {k: v for k, v in row.items() if k not in ("song_solo", "multi_score")}
+    assert em.row_payload(1, bare, **kw)["event_points"] is None
+
+
 @pytest.mark.parametrize("refined", [False, True])
 def test_every_served_row_max_is_the_ceiling_on_its_board(refined):
     """On a real leaf: each row's Max is at least its expectation on the same board, and its

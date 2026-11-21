@@ -1099,10 +1099,10 @@ def row_payload(
     holopass: bool,
     room: Mapping | None = None,
 ) -> dict:
-    """One ranked team, as the page reads it. `room` (Event Points in Multi Live,
-    `marathon.event_objective`'s): the row's `score` is `V = S + c F` and its Event Pt are a
-    multi Live's, whose room MULTI SCORE is `V + room_rest` in `event_points_base`'s terms
-    (`k S + M = (k + 1) V + O`, so `score = V` and `multi = V + O` give the same base)."""
+    """One ranked team, as the page reads it. `room` (Event Points in Multi Live): the row is
+    ranked on `V = S + c F` (`marathon.event_objective`), and its Event Pt are a solo Live's on
+    its own score `S` (`song_solo`, `row_split`): the room's MULTI SCORE depends on who plays,
+    so the page's Multi Live calculator reads it. A row without its split has no Event Pt."""
 
     def card(c, counts: bool) -> dict:
         live, song = bonus_of(c)
@@ -1112,10 +1112,11 @@ def row_payload(
 
     raw = round(r["score"])
     e, p = r["live_permil"], r["song_permil"]
-    multi = {"multi_score": raw + round(room["room_rest"]), "divisor": room["multi_divisor"]} if room else {}
+    # the score Event Pt are read on: the row's own, without the fever weight, in Multi Live
+    own: int | None = raw if not room else None if r.get("song_solo") is None else round(r["song_solo"])
     ep = (
-        mar.event_points(raw, e, boosts=boosts, length_permil=length_permil, holopass=holopass, **multi)
-        if length_permil is not None
+        mar.event_points(own, e, boosts=boosts, length_permil=length_permil, holopass=holopass)
+        if length_permil is not None and own is not None
         else None
     )
     out = {
@@ -1126,9 +1127,7 @@ def row_payload(
         "live_permil": e,
         "song_permil": p,
         "objective": r["objective"],
-        "event_points_base": mar.event_points_base(
-            raw, e, multi.get("multi_score"), multi.get("divisor", 75_000)
-        ),
+        "event_points_base": None if own is None else mar.event_points_base(own, e),
         "event_points": ep,
         "event_song_score": mar.event_song_score(raw, p),
         "source": r["source"],

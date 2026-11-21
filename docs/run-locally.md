@@ -31,7 +31,8 @@ do the same thing and take the same options; [On Linux](#on-linux) lists what di
   The easiest is WinLibs: `winget install BrechtSanders.WinLibs.POSIX.UCRT` (or download it from
   [winlibs.com](https://winlibs.com/) and add its `mingw64\bin` folder to the PATH). Open a new
   window afterwards so the PATH is read again.
-- **Git**, to clone and update (optional: the ZIP from the green *Code* button works too).
+- **Git**, to clone and update (optional: the ZIP from the green *Code* button works too; not the
+  *Source code* files on the Releases page, which are an old snapshot of the code).
 - Time and disk: the first refresh takes about **20 minutes** (most of it downloading every
   song's charts at a polite pace), then the pictures keep downloading in the background for about
   an hour. The data takes a few GB.

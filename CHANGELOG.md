@@ -2,6 +2,10 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.19 (2026-11-21)
+- **Event Points with Multi Live (FEVER): the Event Pt shown are a solo Live's.** Teams are still ranked for a multi Live whose fever succeeds, but the big number is now what the team earns on its own score without FEVER, as without the switch: the room's MULTI SCORE depends on who you play with, so the Multi Live Event Pt calculator is back under it to work out a real room's points. Each team still shows its MULTI SCORE contribution and its score without FEVER.
+- **Run it from source:** the *Source code* files on the Releases page are an old snapshot; clone the repository or use the green *Code* button's ZIP.
+
 ## 0.2.18 (2026-11-21)
 - **Multi Live (FEVER) in the Optimizer's Options.** For a Multi Live whose fever succeeds, every note inside the song's fever section adds 1.5 times its score to the room's MULTI SCORE, so the best team can change. With the switch on:
   - **Score** and **Event Song Score** rank teams by your contribution to the room's MULTI SCORE: your score plus 1.5 × what you score inside the fever section (no song bonus: that one counts only for your event record). Fillers in a private room can see which team adds most to the room, on one song or on Highlight.
