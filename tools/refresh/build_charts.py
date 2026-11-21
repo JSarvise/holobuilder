@@ -3,12 +3,14 @@
 `domain/song.py` scores a team on a concrete chart; this module builds those
 charts from two caches (rebuilt here with `--rebuild-caches`):
 
-* `dumps/lattice_charts.json` — `{t, w, cues, f, h}` per chart, parsed from the
+* `dumps/lattice_charts.json` — `{t, w, cues, f, h, fv}` per chart, parsed from the
   `.sus` files in `dumps/charts_cdn/` (`build_chart_cache`). Times and cues are
   **seconds** (the beat→second conversion is `sus_parse._set_times`). `f` lists
   the indices of the FLICK notes — the one kind whose PERFECT weight depends on
   the client (1050 mobile / 1000 PC). `h` counts the slides' invisible points
   (`sus_parse.hidden_points`), which weigh in the divisor and score nothing.
+  `fv` is the Multi Live fever section `[start, end]` from the `#mmm0C`/`#mmm0D`
+  markers (`fever_window`), null when they are invalid and the client uses its default.
 * `dumps/music_coef.json` — `{chart_name: (difficulty_level, permil)}` from
   master `MusicDifficulty` field 3 and `Music` field 17 (`load_music_coefficients`).
 
@@ -48,6 +50,7 @@ MUSIC_CACHE = os.path.join(DUMPS, "music_coef.json")
 OUT = os.path.join(DUMPS, "charts.json")
 
 from hbuilder.domain.song import (  # noqa: E402
+    DEFAULT_FEVER_WINDOW,
     LIVE_COMBO_TIERS,
     ChartLibrary,
     charts_from_mapping,
@@ -87,9 +90,39 @@ PERFECT_PERMIL = {
 }
 
 
+# The Multi Live section markers: `#mmm0C` cells 01/02 = charge start/end, `#mmm0D` cells
+# 01/02 = fever start/end, in the order the client's validator requires them.
+_FEVER_POINTS = (("0C", "01"), ("0C", "02"), ("0D", "01"), ("0D", "02"))
+
+
+def fever_window(events: list[dict]) -> list[float] | None:
+    """`[fever start, fever end]` in seconds from a chart's `chart_timeline.events`, or
+    `None` when the markers are invalid and the client falls back to its default section.
+
+    As the client's section parser: every 0C/0D cell must be 01 or 02, each of the four
+    points must appear exactly once, and they must come in order (charge start, charge
+    end, fever start, fever end); anything else discards them all."""
+    marks = [e for e in events if e["channel"] in ("0C", "0D")]
+    if any(e["value"] not in ("01", "02") for e in marks):
+        return None
+    found = {}
+    for e in marks:
+        point = (e["channel"], e["value"])
+        if point in found:
+            return None
+        found[point] = e
+    if set(found) != set(_FEVER_POINTS):
+        return None
+    beats = [found[p]["beat"] for p in _FEVER_POINTS]
+    if beats != sorted(beats):
+        return None
+    return [found[("0D", "01")]["time"], found[("0D", "02")]["time"]]
+
+
 def build_chart_cache() -> dict:
     """{name: {"t": [note times], "w": [note weights], "cues": [5 cue times], "f": [flick
-    indices], "h": invisible slide points}} parsed from `dumps/charts_cdn/*.sus`.
+    indices], "h": invisible slide points, "fv": [fever start, end] or null}} parsed from
+    `dumps/charts_cdn/*.sus` (`fv` null: no valid section markers, the client's default).
 
     Only the charts carrying five ascending `#mmm0B` cues; the four tutorial `m9999`
     difficulties carry two and are skipped, exactly as `SongChart.__post_init__` demands."""
@@ -106,7 +139,8 @@ def build_chart_cache() -> dict:
             text = open(path, encoding="utf-8", errors="replace").read()
             chart = sp.parse(text)
             kinds = sp.classify(chart)
-            cues = sorted(e["time"] for e in ct.events(text, chart) if e["channel"] == "0B")
+            events = ct.events(text, chart)
+            cues = sorted(e["time"] for e in events if e["channel"] == "0B")
         except Exception:
             continue
         if len(cues) != 5 or sorted(cues) != cues:
@@ -123,7 +157,14 @@ def build_chart_cache() -> dict:
             weights.append(permil * (1.0 + combo_coefficient(combo)))
         if not times or sum(weights) <= 0:
             continue
-        out[name[:-4]] = {"t": times, "w": weights, "cues": cues, "f": flicks, "h": sp.hidden_points(chart)}
+        out[name[:-4]] = {
+            "t": times,
+            "w": weights,
+            "cues": cues,
+            "f": flicks,
+            "h": sp.hidden_points(chart),
+            "fv": fever_window(events),
+        }
         if (i + 1) % 50 == 0:
             print(f"  parsed {i + 1}/{len(names)} ...", file=sys.stderr)
     return out
@@ -282,6 +323,11 @@ def build(difficulty: str = "EXPERT") -> dict:
                 f"{CHART_CACHE} predates the per-note flick flag ({name} has no 'f'); "
                 f"re-run `python build_charts.py --rebuild-caches`."
             )
+        if "fv" not in raw:
+            raise SystemExit(
+                f"{CHART_CACHE} predates the Multi Live fever section ({name} has no 'fv'); "
+                f"re-run `python build_charts.py --rebuild-caches`."
+            )
         if "h" not in raw:
             # a lattice cache from before the invisible-point count: refused, like "f"
             # (`rebuild_caches_if_stale` treats such a cache as stale and rebuilds it)
@@ -310,6 +356,8 @@ def build(difficulty: str = "EXPERT") -> dict:
             "special_cues": [float(cue) for cue in raw.get("cues", ())],
             # the slides' invisible points: in the divisor, never scored
             "hidden_points": int(raw["h"]),
+            # the Multi Live fever section; the client's default when the markers are invalid
+            "fever": [float(t) for t in (raw["fv"] or DEFAULT_FEVER_WINDOW)],
         }
         cast = casts.get(music_id)
         if cast is not None:
@@ -351,6 +399,9 @@ def rebuild_caches_if_stale() -> bool:
                 parsed = -1
             elif any("h" not in rec for rec in cached.values()):
                 print("  lattice cache STALE: records lack the invisible slide-point count 'h'")
+                parsed = -1
+            elif any("fv" not in rec for rec in cached.values()):
+                print("  lattice cache STALE: records lack the Multi Live fever section 'fv'")
                 parsed = -1
         except Exception:  # noqa: BLE001 -- unreadable counts as stale
             parsed = -1

@@ -312,7 +312,7 @@ class _Sweep:
             members = tuple(by_id[card_id] for card_id in member_order)
         times = tuple(note.time for note in chart.notes)
         terms, score_rates, board_score_rate, skill_effect_up = _terms(members, leader, chart, cfg)
-        note_weights, perfect_sum = _chart_weights(chart, cfg.platform, cfg.song_auto)
+        note_weights, perfect_sum = _chart_weights(chart, cfg.platform, cfg.song_auto, cfg.fever_weight)
         constant = (
             float(deck_power)
             * SCORE_COEFFICIENT

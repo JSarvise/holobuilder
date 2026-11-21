@@ -56,6 +56,7 @@ export function toast(msg, ms = 2600) {
 
 /* ---- the explanations that live behind the (i) buttons ---- */
 export const NOTES = {
+  multi: "<b>MULTI SCORE contribution</b> is what this team adds to the room's MULTI SCORE in a Multi Live: its own expected score plus the fever bonus, 1.5 × what it scores inside the chart's fever section. It assumes the room's fever succeeds; your own score, record and rank count without the bonus. The search ranks by it, so the slot order and the team are the best for the room, not for your own score.",
   expected: "<b>Expected Score</b> is the server's mean run score for this team, with its Holomem Boards planned for this song (the objective the search ranks by).",
   expected_cur: "<b>Score</b> with your Holomem Boards exactly as they are on your account.",
   across: "<b>Average score</b> over every chart of this difficulty, with the Holomem Boards planned for the team.",

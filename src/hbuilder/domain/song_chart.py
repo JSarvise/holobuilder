@@ -56,6 +56,22 @@ LIVE_COMBO_TIERS: tuple[tuple[int, int], ...] = (
 )
 
 
+# Multi Live FEVER. A note judged inside the chart's fever section, once the room's fever
+# has succeeded, adds `ceil(awarded x 1.5)` to the player's bonus score
+# (`liveMultiFeverScoreCoefficientPermilMultiply` 500 + `liveMultiBonusScoreCoefficientPermilMultiply`
+# 1000), which counts toward the room's MULTI SCORE and not toward the player's own score.
+FEVER_BONUS_COEFFICIENT = 1.5
+
+# The section a chart without valid `#mmm0D` markers falls back to (`MultiLiveFeverSpec`).
+DEFAULT_FEVER_WINDOW = (60.0, 80.0)
+
+# The client judges a note before it refreshes the section flag for the frame, so a note
+# reads the previous frame's flag: one written on the fever start is outside the section and
+# one written on its end is inside. Note times and the window are rounded apart (6 and 4
+# decimals), so "on" a boundary means within this many seconds of it.
+_FEVER_EDGE = 0.002
+
+
 # Channel `#mmm0B` carries exactly five cues on every real chart, with cell
 # values `01 02 03 04 05` in strictly ascending time order (only the tutorial
 # song `m9999` differs, with two). So slot i fires the i-th cue in time.
@@ -145,10 +161,18 @@ class SongChart:
     # combo, and are not in `notes`; but the client builds a note for each and
     # `GetNotesPerfectCoefficientSum` weighs it as a LONG_RELAY (100 permil) in the divisor.
     hidden_points: int = 0
+    # The Multi Live fever section `(start, end)` in seconds on the notes' axis, from the
+    # chart's `#mmm0D` markers (or the client's fallback when they are missing or invalid).
+    # `None`: a chart file built before the section was read; a Multi score refuses it.
+    fever: tuple[float, float] | None = None
 
     def __post_init__(self) -> None:
         if not self.notes:
             raise SongError(f"chart {self.music_id}/{self.difficulty} has no notes")
+        if self.fever is not None and not self.fever[0] < self.fever[1]:
+            raise SongError(
+                f"chart {self.music_id}/{self.difficulty} fever section {self.fever} does not end after it starts"
+            )
         previous = self.notes[0].time
         for note in self.notes[1:]:
             if note.time < previous:
@@ -226,6 +250,16 @@ class SongChart:
             sum(note.perfect_permil_for(platform) for note in self.notes)
             + HIDDEN_POINT_PERMIL * self.hidden_points
         ) / 1000.0
+
+    def in_fever(self, time: float) -> bool:
+        """Whether a note at `time` is judged inside the fever section."""
+        if self.fever is None:
+            raise SongError(
+                f"chart {self.music_id}/{self.difficulty} carries no fever section; rebuild the "
+                f"chart file (`build_charts.py --rebuild-caches`)"
+            )
+        start, end = self.fever
+        return start + _FEVER_EDGE < time <= end + _FEVER_EDGE
 
     def combo_coefficient(self, combo: int) -> float:
         """`FloatFromPermil` of the highest `LiveCombo` tier the running combo
@@ -383,6 +417,8 @@ def charts_from_mapping(raw: object, *, source: str = "<mapping>") -> ChartLibra
                 singer_type=str(row.get("singer_type", "")),
                 # absent from a chart file without the field: 0
                 hidden_points=int(row.get("hidden_points", 0)),
+                # absent from a chart file built before the fever section was read
+                fever=(float(row["fever"][0]), float(row["fever"][1])) if row.get("fever") else None,
             )
         except SongError as exc:
             # SongChart's own __post_init__ checks (no notes, times out of

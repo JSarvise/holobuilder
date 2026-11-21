@@ -94,7 +94,30 @@ def figures(
     }
     if cfg_off is not None:
         out["song_off"] = score_team_on_chart(team, chart, cfg_off).total_score
+    if cfg_board.fever_weight:
+        out.update(multi_figures(team, chart, cfg_board, est.member_order, est.total_score))
     return out
+
+
+def multi_figures(
+    team: Team, chart: SongChart, cfg_board: ScoringConfig, member_order: Sequence[str], weighted: float
+) -> dict:
+    """A Multi row's split: `weighted` (`S + w x F`, what the row was ranked by) into the
+    player's own score `S` and the score made inside the fever section `F`, both at the row's
+    own slot order and board, and `multi_score`, the player's contribution to the room's
+    MULTI SCORE when the fever succeeds (`S + 1.5 F`)."""
+    from hbuilder.domain.song_chart import FEVER_BONUS_COEFFICIENT  # noqa: PLC0415
+    from hbuilder.domain.song_rank import score_team_at_order  # noqa: PLC0415
+
+    weight = cfg_board.fever_weight
+    plain = score_team_at_order(team, chart, dataclasses.replace(cfg_board, fever_weight=0.0), member_order)
+    fever = (weighted - plain) / weight
+    return {
+        "fever_weight": weight,
+        "song_est_solo": plain,
+        "fever_score": fever,
+        "multi_score": plain + FEVER_BONUS_COEFFICIENT * fever,
+    }
 
 
 # The columns of a row's note-by-note breakdown (`note_breakdown`, the export's CSV).
@@ -434,12 +457,12 @@ _LEAF_HELD = 3
 
 
 def _leaf_inputs(
-    basis: str, song: str | None, difficulty: str, assumptions=None, play: tuple[str, bool] | None = None
+    basis: str, song: str | None, difficulty: str, assumptions=None, play: tuple | None = None
 ) -> dict:
     """The two-stage builder's own leaf inputs for `basis` on `song` (cached a
     couple of minutes per (basis, song, difficulty), and only while the account files they
     were read from are unchanged: ~0.3 s to build), scored for
-    `play` (`ondemand.parse_play`: platform, AUTO) as the search that ranked the row.
+    `play` (`ondemand.parse_play`: platform, AUTO, fever weight) as the search that ranked the row.
     `song` None: the builders' own nominal song, the leaf an engine is built on."""
     built = _leaf_inputs_cached(basis, song, difficulty, assumptions)
     if play is None:
@@ -1000,6 +1023,26 @@ def _shared_board(
 # ---------------------------------------------------------------------------
 # a Highlight row on the WHOLE pool: one board, one slot order
 # ---------------------------------------------------------------------------
+def _pool_multi_figures(
+    team: Team, charts: Sequence, cfg_board: ScoringConfig, order, weighted: float
+) -> dict:
+    """`multi_figures` for a pool row: its mean over the pool split at the row's one slot
+    order and board."""
+    from hbuilder.domain.song_chart import FEVER_BONUS_COEFFICIENT  # noqa: PLC0415
+    from hbuilder.domain.song_rank import score_team_at_order  # noqa: PLC0415
+
+    weight = cfg_board.fever_weight
+    cfg_plain = dataclasses.replace(cfg_board, fever_weight=0.0)
+    plain = sum(score_team_at_order(team, c, cfg_plain, order) for c in charts) / len(charts)
+    fever = (weighted - plain) / weight
+    return {
+        "fever_weight": weight,
+        "song_est_solo": plain,
+        "fever_score": fever,
+        "multi_score": plain + FEVER_BONUS_COEFFICIENT * fever,
+    }
+
+
 def _common_order(team: Team, charts: Sequence, cfg_board) -> tuple[tuple[str, ...], float, list]:
     """The ONE slot order with the best total summed over `charts` on `cfg_board`
     (`song_rank.score_team_orders`, the scorer's reference walk: exact), its mean, and
@@ -1323,6 +1366,8 @@ def pool_detail(
     }
     if label in plan_optimal:
         out["plan_optimal"] = plan_optimal[label]
+    if cfg_board.fever_weight:
+        out.update(_pool_multi_figures(team, charts, cfg_board, order, mean))
     out.update(unit_score_block(team, cfg_board, cfg_off, list(order), chart=None))
     by_card = {c.id: c for c in (team.leader, *team.members)}
     out.update(

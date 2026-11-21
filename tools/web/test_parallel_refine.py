@@ -350,6 +350,34 @@ def test_the_expectation_and_ceiling_of_one_develop_are_the_two_passes_floats(pe
     assert both == list(zip(expect, ceiling))
 
 
+@pytest.mark.parametrize("per_chart", [False, True])
+def test_a_multi_split_is_the_weighted_expectation_its_ceiling_and_the_solo_at_its_order(per_chart):
+    """`batch_split` on a Multi Live context: the expectation `batch_score` gives, the ceiling
+    `batch_ceiling` gives, and the score without the fever weight at the expectation's slot order
+    on that board (`score_team_at_order`), from one develop."""
+    from hbuilder.domain.song_rank import score_team_at_order, score_team_on_chart
+    from hbuilder.solver.parallel_refine import develop_team
+
+    ctx, teams = _context()
+    chart = ctx.charts[0]
+    if chart.fever is None:
+        pytest.skip("the chart file has no fever sections")
+    ctx = dataclasses.replace(
+        ctx, board_per_chart=per_chart, cfg=dataclasses.replace(ctx.cfg, fever_weight=0.25)
+    )
+    with RefinePool(ctx, workers=1) as pool:
+        split = pool.batch_split(teams[:3], [0], [0] * 3, [None] * 3)
+        expect = pool.batch_score(teams[:3], chart_indices=[0], refine_activation=False)
+        ceiling = pool.batch_ceiling(teams[:3], [0], [0] * 3, [None] * 3)
+        for team, (e, top, solo), want_e, want_top in zip(teams[:3], split, expect, ceiling):
+            assert (e, top) == (want_e, want_top)
+            bt = develop_team(ctx, team, pool._tree_for, pool._budget_for, chart)
+            cfg = dataclasses.replace(ctx.cfg, board=bt.board)
+            order = score_team_on_chart(team, chart, cfg).member_order
+            assert solo == score_team_at_order(team, chart, dataclasses.replace(cfg, fever_weight=0.0), order)
+            assert solo < e
+
+
 def test_two_contexts_on_one_shared_pool_score_as_their_own_pools():
     """Two engines' contexts on ONE set of workers (`SharedPool`), batches interleaved so
     each worker switches between them: the same floats, in order, as each context alone."""

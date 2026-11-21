@@ -133,7 +133,7 @@ def parse_run(body: Mapping) -> dict:
         "basis": basis_name,
         "assumptions": assumptions,
         "filters": filters,
-        "play": ondemand.parse_play(body),
+        "play": ondemand.parse_play(body, fever=0.0),  # a Multi run is a Score-goal option
     }
 
 

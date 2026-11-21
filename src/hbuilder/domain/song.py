@@ -81,7 +81,9 @@ from hbuilder.domain.scoring_config import (
 # The chart data types and chart loading live in `song_chart`; re-exported here so
 # `song.X` keeps working for every importer and stays a module global for the hot code.
 from hbuilder.domain.song_chart import _CHARTS_SCHEMA as _CHARTS_SCHEMA
+from hbuilder.domain.song_chart import DEFAULT_FEVER_WINDOW as DEFAULT_FEVER_WINDOW
 from hbuilder.domain.song_chart import DEFAULT_PLATFORM as DEFAULT_PLATFORM
+from hbuilder.domain.song_chart import FEVER_BONUS_COEFFICIENT as FEVER_BONUS_COEFFICIENT
 from hbuilder.domain.song_chart import FLICK_MOBILE_PERMIL as FLICK_MOBILE_PERMIL
 from hbuilder.domain.song_chart import HIDDEN_POINT_PERMIL as HIDDEN_POINT_PERMIL
 from hbuilder.domain.song_chart import LIVE_COMBO_TIERS as LIVE_COMBO_TIERS
@@ -1096,7 +1098,7 @@ def _chart_kernel() -> Callable | None:
 # of the chart alone, which cost ~7 % of every call to rebuild. Keyed by object
 # identity with the chart kept alive in the entry, so a recycled `id()` can never
 # serve another chart's weights.
-_chart_weights_cache: dict[tuple[int, str, bool], tuple] = {}
+_chart_weights_cache: dict[tuple[int, str, bool, float], tuple] = {}
 
 # The chart's note times as one tuple, per chart, keyed as the weights above.
 _chart_times_cache: dict[int, tuple] = {}
@@ -1112,8 +1114,10 @@ def _chart_times(chart: SongChart) -> tuple[float, ...]:
     return hit[1]
 
 
-def _chart_weights(chart: SongChart, platform: str, auto: bool) -> tuple[tuple[float, ...], float]:
-    key = (id(chart), platform, auto)
+def _chart_weights(
+    chart: SongChart, platform: str, auto: bool, fever: float = 0.0
+) -> tuple[tuple[float, ...], float]:
+    key = (id(chart), platform, auto, fever)
     hit = _chart_weights_cache.get(key)
     if hit is None or hit[0] is not chart:
         # the n-th note of a full-perfect manual run carries the LiveCombo tier of combo
@@ -1124,6 +1128,13 @@ def _chart_weights(chart: SongChart, platform: str, auto: bool) -> tuple[tuple[f
             else (note.perfect_permil_for(platform) / 1000.0) * (1.0 + chart.combo_coefficient(index + 1))
             for index, note in enumerate(chart.notes)
         )
+        if fever:
+            # Multi Live: a note inside the fever section also pays `fever` x its award
+            # (`ScoringConfig.fever_weight`); the divisor is the chart's, unchanged
+            note_weights = tuple(
+                weight * (1.0 + fever) if chart.in_fever(note.time) else weight
+                for weight, note in zip(note_weights, chart.notes)
+            )
         if len(_chart_weights_cache) > 4096:
             _chart_weights_cache.clear()
         hit = (chart, note_weights, chart.notes_perfect_coefficient_sum(platform))
@@ -1575,7 +1586,7 @@ def _score_song(
     # not pass it (e.g. `parallel_refine`) still scores an AUTO config on the AUTO column
     if auto is None:
         auto = bool(cfg.song_auto)
-    note_weights, perfect_sum = _chart_weights(chart, platform, auto)
+    note_weights, perfect_sum = _chart_weights(chart, platform, auto, cfg.fever_weight)
 
     # The stat entries are per leader (a leader's stat outfit is one of them), so
     # they cannot be hoisted out of the loop below.

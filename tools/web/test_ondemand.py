@@ -580,8 +580,31 @@ def test_with_play_sets_both_halves_of_auto():
         False,
         cfg.run_state.combo,
     )
-    assert ondemand.parse_play({"platform": "PC", "auto": True}) == ("pc", True)
-    assert ondemand.parse_play({}) == ("mobile", False)
+    assert ondemand.parse_play({"platform": "PC", "auto": True}) == ("pc", True, 0.0)
+    assert ondemand.parse_play({}) == ("mobile", False, 0.0)
+    assert manual.fever_weight == 0.0
+
+
+def test_multi_play_weighs_the_fever_and_reports_it():
+    # "multi": the run scores S + 1.5 F (the player's contribution to the room's MULTI
+    # SCORE); a solo run's report and engine key keep their old shape
+    import dataclasses
+    from pathlib import Path
+
+    from hbuilder.domain.scoring_config import load_scoring_config
+
+    assert ondemand.parse_play({"multi": True, "auto": True}) == ("mobile", True, 1.5)
+    assert ondemand.full_play(("pc", True)) == ("pc", True, 0.0)
+    cfg = load_scoring_config(Path(__file__).resolve().parents[2] / "config.json")
+    ctx = dataclasses.make_dataclass("Ctx", [("cfg", object)])(cfg)
+    assert ondemand.with_play(ctx, ("mobile", True, 1.5)).cfg.fever_weight == 1.5
+    assert ondemand.play_payload(("mobile", False, 0.0)) == {"platform": "mobile", "auto": False}
+    assert ondemand.play_payload(("mobile", True, 1.5)) == {
+        "platform": "mobile",
+        "auto": True,
+        "multi": True,
+        "fever_weight": 1.5,
+    }
 
 
 def test_replan_takes_the_head_and_the_best_singer_led_teams_below_it():

@@ -403,6 +403,12 @@ class ScoringConfig:
     # Charts carry a per-note flick flag, so the choice is made at scoring time. A runtime
     # what-if, not a config.json key: `replace(cfg, platform="pc")`.
     platform: str = DEFAULT_PLATFORM
+    # Multi Live: the extra weight of a note judged inside the chart's fever section, so a
+    # run scores `S + fever_weight x F` (`F` = the score made inside the section). 0 scores
+    # the plain run; 1.5 scores the player's contribution to the room's MULTI SCORE when the
+    # fever succeeds (`song_chart.FEVER_BONUS_COEFFICIENT`). A runtime choice, not a
+    # config.json key: `replace(cfg, fever_weight=1.5)`.
+    fever_weight: float = 0.0
 
 
 def run_state_from_record(record: dict) -> RunState:

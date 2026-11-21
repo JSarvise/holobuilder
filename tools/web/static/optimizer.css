@@ -513,7 +513,7 @@ body.opt .o-top h1{display:flex;align-items:center;gap:10px;min-width:0}
 .o-tiles{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start}
 /* the line under the big score takes the score's width (it wraps), so a longer line arriving
    with the detail never widens the column and pushes the side figures */
-.o-tiles .stat-tile.prime small{width:0;min-width:100%;min-height:34px}
+.o-tiles .stat-tile.prime small{width:0;min-width:100%;min-height:34px;margin-top:8px}
 .o-sidetiles{display:grid;grid-template-columns:repeat(2,minmax(150px,1fr));gap:16px 8px;align-content:start;
   align-self:stretch;border-left:1px solid var(--line);padding:4px 0 4px 8px}
 .o-sidetiles .stat-tile,.o-tiles .o-sidetiles .stat-tile:first-child{padding:2px 14px;border-left:0;min-width:0;min-height:62px;align-items:flex-start}

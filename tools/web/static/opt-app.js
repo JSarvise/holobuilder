@@ -17,7 +17,7 @@ const DEFAULTS = {
   goal: "score", evgoal: "event_points", song: "", difficulty: "EXPERT", cards: "asis", boards: "develop", sort: "avg",
   boosts: 3, holopass: true, pool: "all", platform: "mobile", top: 5, evtop: 5, evsort: "avg",
   lmember: "", loutfit: "", nooverlap: false, maxpoints: false, infmats: false,
-  alevel: "account", abloom: "account", aspt: "account", keephigher: false, maxresets: "-1", resetgain: "0.01", auto: false, exact: false,
+  alevel: "account", abloom: "account", aspt: "account", keephigher: false, maxresets: "-1", resetgain: "0.01", auto: false, multi: false, exact: false,
   allinvited: false, norefund: false, branches: "GBRY", targets: [], lvmode: "expert", lvlo: 25, lvhi: 30,
   require: [], exclude: [],
   // goal "rating" (opt-rating.js): the holomem, the highest level she Full Combos, and the search
@@ -54,7 +54,8 @@ function fixHighlight() {
   if (!isHighlight(S.song)) return false;
   S.song = HL;
   if (S.goal === "score") { S.song = ""; return false; }
-  if (S.goal === "event_song") { S.goal = S.evgoal = "event_points"; return true; }
+  // Event Song Score in Multi Live ranks by the MULTI SCORE contribution, defined on a pool too
+  if (S.goal === "event_song" && !S.multi) { S.goal = S.evgoal = "event_points"; return true; }
   return false;
 }
 function save() {
@@ -239,9 +240,9 @@ const LABEL = {
 function summary() {
   if (isRating()) return ["Holomem Rating", S.rmode === "one" ? `One team${S.rboard === "per" ? ", a setup per song" : ""}` : "A team per song",
     S.rsort === "max" ? "by Max" : "by Expected", LABEL.cards[S.cards], S.cards === "maxed" ? "" : LABEL.boards[S.boards]].filter(Boolean).join(" · ");
-  if (isEvent()) return [S.chapter && chapterShown() ? `Chapter ${chapterShown().number} · ${chapterWho(chapterShown())}` : "", LABEL.evgoal[S.goal], `Live Boost ${S.boosts}`, S.goal === "event_points" ? `HoloPass ${S.holopass ? "on" : "off"}` : LABEL.sort[evMax() ? "max" : "avg"],
+  if (isEvent()) return [S.chapter && chapterShown() ? `Chapter ${chapterShown().number} · ${chapterWho(chapterShown())}` : "", S.goal === "event_song" && S.multi ? "MULTI SCORE contribution" : S.goal === "event_points" && S.multi ? LABEL.evgoal[S.goal] + " · Multi Live (FEVER)" : LABEL.evgoal[S.goal], `Live Boost ${S.boosts}`, S.goal === "event_points" ? `HoloPass ${S.holopass ? "on" : "off"}` : LABEL.sort[evMax() ? "max" : "avg"],
     LABEL.cards[S.cards], S.cards === "maxed" ? "" : LABEL.boards[S.boards]].filter(Boolean).join(" · ");
-  return [LABEL.cards[S.cards], LABEL.boards[S.boards], LABEL.sort[S.sort]].join(" · ");
+  return [LABEL.cards[S.cards], LABEL.boards[S.boards], LABEL.sort[S.sort], S.multi ? "Multi Live (FEVER)" : ""].filter(Boolean).join(" · ");
 }
 // "Upgraded cards" and "Maxed account" score with other account bonuses than the account's
 // own (every card's level raises the Member Power-Up; the maxed account owns every card and
@@ -350,11 +351,10 @@ function bindSeg(id, key, cast = v => v) {
 function applyGoal() {
   // Highlight ranks by Event Points only: Event Song Score is off while it is the song
   const evs = byId("evgoal").querySelector('[data-v="event_song"]');
-  evs.disabled = isHL();
-  evs.title = isHL() ? "Highlight ranks by Event Points only" : "";
+  evs.title = isHL() ? "On Highlight, Event Song Score ranks by the MULTI SCORE contribution (Multi Live)" : "";
   document.querySelectorAll("[data-goal]").forEach(el => {
-    const g = el.dataset.goal;
-    el.hidden = !(g === S.goal || (g === "event" && isEvent()));
+    const g = el.dataset.goal.split(" ");
+    el.hidden = !(g.includes(S.goal) || (g.includes("event") && isEvent()));
   });
   byId("assumerow").hidden = S.cards !== "whatif";
   // every card maxed: the boards are complete by definition (nothing to choose)
@@ -394,11 +394,18 @@ function applyGoal() {
 function moreCount() {
   const shared = [S.lmember, S.nooverlap, S.require.length, S.exclude.length,
     S.boards === "develop" && (S.maxpoints || S.infmats || S.allinvited || S.targets.length || S.branches !== "GBRY" || S.maxresets !== "-1" || S.resetgain !== "0.01")];
-  if (isEvent()) return [...shared, S.platform !== "mobile", S.auto].filter(Boolean).length;
-  return [...shared, S.pool !== "all", S.platform !== "mobile", S.auto, S.exact].filter(Boolean).length;
+  if (isEvent()) return [...shared, S.platform !== "mobile", S.auto, S.multi].filter(Boolean).length;
+  return [...shared, S.pool !== "all", S.platform !== "mobile", S.auto, S.goal === "score" && S.multi, S.exact].filter(Boolean).length;
 }
 async function changed(key) {
   if (key === "pool") prunePins();
+  // Highlight: Event Song Score is the MULTI SCORE contribution, so picking it turns Multi Live on,
+  // and turning Multi Live off gives way to Event Points again
+  if (key === "goal" && isHL() && S.goal === "event_song" && !S.multi) {
+    S.multi = true; byId("multi").checked = true;
+    toast("On Highlight, Event Song Score ranks by the MULTI SCORE contribution: Multi Live (FEVER) is on.");
+  }
+  if (key === "multi" && fixHighlight()) { toast("Highlight ranks by Event Points without Multi Live: switched to Event Points."); key = "goal"; }
   save(); applyGoal();
   if (key === "difficulty") await loadSongs();
   if (key === "chapter") { await loadEvent(); save(); renderChapters(); }
@@ -417,7 +424,7 @@ async function changed(key) {
 function wireMore() {
   byId("optboards").checked = S.boards === "develop";
   byId("optboards").addEventListener("change", e => { S.boards = e.target.checked ? "develop" : "current"; changed("boards"); });
-  const checks = { nooverlap: "nooverlap", maxpoints: "maxpoints", infmats: "infmats", keephigher: "keephigher", allinvited: "allinvited", norefund: "norefund", auto: "auto", exact: "exact" };
+  const checks = { nooverlap: "nooverlap", maxpoints: "maxpoints", infmats: "infmats", keephigher: "keephigher", allinvited: "allinvited", norefund: "norefund", auto: "auto", multi: "multi", exact: "exact" };
   for (const [id, key] of Object.entries(checks)) {
     byId(id).checked = !!S[key];
     byId(id).addEventListener("change", e => { S[key] = e.target.checked; changed(key); });
@@ -626,7 +633,6 @@ async function init() {
   });
   byId("evgoal").addEventListener("click", e => {
     const b = e.target.closest("button[data-v]"); if (!b || b.dataset.v === S.goal) return;
-    if (b.dataset.v === "event_song" && isHL()) { toast("Highlight ranks by Event Points only: choose a song for Event Song Score."); return; }
     S.goal = S.evgoal = b.dataset.v; changed("goal");
   });
   bindSeg("difficulty", "difficulty");

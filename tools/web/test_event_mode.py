@@ -71,6 +71,8 @@ def test_body_defaults():
         "filters": {},
         "platform": "mobile",
         "auto": False,
+        "multi": False,
+        "room_others": None,
         "basis": "account",
     }
 

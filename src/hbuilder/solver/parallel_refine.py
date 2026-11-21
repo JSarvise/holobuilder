@@ -74,7 +74,7 @@ from hbuilder.domain.song import (
     score_song_detailed,
     screen_song_cooldown_variants,
 )
-from hbuilder.domain.song_rank import score_team_ceiling
+from hbuilder.domain.song_rank import score_team_at_order, score_team_ceiling
 from hbuilder.domain.team import Team
 from hbuilder.solver.parallel import default_workers, one_blas_thread
 
@@ -502,8 +502,12 @@ def evaluate(
         ctx = dataclasses.replace(ctx, refine_activation=refine_level(selection[1]))
     ceiling = len(selection) > 2 and bool(selection[2])
     # "both": the expectation AND the ceiling at its slot order, from the one board, as
-    # `(expectation, ceiling)` means (a refinement too dear to develop twice)
-    both = len(selection) > 2 and selection[2] == "both"
+    # `(expectation, ceiling)` means (a refinement too dear to develop twice). "split": also
+    # the score without the fever weight at that same order and board, as
+    # `(expectation, ceiling, solo)` means: a Multi Live row's own score, its weighted value
+    # less the fever section's weighted part
+    split = len(selection) > 2 and selection[2] == "split"
+    both = split or (len(selection) > 2 and selection[2] == "both")
     if len(selection) > 3 and selection[3] is not None:
         team_state, bench = selection[3]
         ctx = dataclasses.replace(ctx, board_state=team_state, bench_characters=bench, socket_bench=True)
@@ -658,14 +662,23 @@ def evaluate(
             joint=ctx.joint_connect,
         )[0].board
 
-    def expectation_and_ceiling(chart, cfg) -> tuple[float, float]:
-        """`served` without and with `ceiling`, on the one board `cfg` carries."""
+    def expectation_and_ceiling(chart, cfg) -> tuple[float, ...]:
+        """`served` without and with `ceiling`, on the one board `cfg` carries; with `split`,
+        also the score without the fever weight at the expectation's slot order."""
         e = song_score(chart, cfg)
         power = (
             overall_power_for(tuple(team.members), team.leader, cfg) if cfg.song_absolute_deck_power else None
         )
         s = score_song_detailed(team.members, (team.leader,), chart, cfg, deck_power=power)
-        return e, (score_team_ceiling(team, chart, cfg, s[0].member_order) if s else 0.0)
+        top = score_team_ceiling(team, chart, cfg, s[0].member_order) if s else 0.0
+        if not split:
+            return e, top
+        solo = (
+            score_team_at_order(team, chart, dataclasses.replace(cfg, fever_weight=0.0), s[0].member_order)
+            if s
+            else 0.0
+        )
+        return e, top, solo
 
     if ctx.board_per_chart and charts:
         # One board per singer context, each chart scored on its own, added in chart order.
@@ -740,8 +753,8 @@ def evaluate(
                     cfg_c = dataclasses.replace(ctx.cfg, board=develop(sings, same, cast))
                 configs[(cast, cast.scope)] = cfg_c
             if both:
-                e, c = expectation_and_ceiling(chart, cfg_c)
-                scores.append(c)
+                e, *rest = expectation_and_ceiling(chart, cfg_c)
+                scores.append(rest)
                 total += e
                 continue
             if lens:
@@ -765,8 +778,9 @@ def evaluate(
                 scores.append((plain_c, s) if counts_both else s)
             total += s
         if both:
-            # the ceilings added in chart order from 0, as a `ceiling` evaluation adds them
-            return total / len(charts), sum(scores) / len(charts)
+            # the ceilings (and solos) added in chart order from 0, as a `ceiling` evaluation
+            # adds them
+            return (total / len(charts), *(sum(col) / len(charts) for col in zip(*scores)))
         if per_chart:
             return scores
         if counts_both:
@@ -788,12 +802,11 @@ def evaluate(
         # the board so this stays one code path with the chart metrics.
         return deck_screen_unit_score(score_with_breakdown(team, cfg_x)).unit_score
     if both:
-        expect = top = 0.0
+        sums = [0.0, 0.0, 0.0] if split else [0.0, 0.0]
         for chart in charts:
-            e, c = expectation_and_ceiling(chart, cfg_x)
-            expect += e
-            top += c
-        return expect / len(charts), top / len(charts)
+            for k, v in enumerate(expectation_and_ceiling(chart, cfg_x)):
+                sums[k] += v
+        return tuple(v / len(charts) for v in sums)
     if lens:
         if len(charts) != 1:
             raise ValueError("the lens and screen modes score one chart")
@@ -2169,6 +2182,25 @@ class RefinePool:
         return self._run(
             [
                 (t.leader.id, tuple(m.id for m in t.members), chosen, refine_level(r), True, p)
+                for t, r, p in zip(teams, refine, planned)
+            ]
+        )
+
+    def batch_split(
+        self,
+        teams: Sequence[Team],
+        chart_indices: Sequence[int],
+        refine: Sequence[bool | int],
+        planned: Sequence[tuple | None],
+    ) -> list[tuple[float, float, float]]:
+        """`(expectation, ceiling, solo)` per team, means over `chart_indices`: a Multi Live
+        row's weighted value, its ceiling, and its score without the fever weight, all at the
+        slot order the expectation plays on each chart and on the board it is served on
+        (`batch_ceiling`'s `refine` and `planned`)."""
+        chosen = tuple(chart_indices)
+        return self._run(
+            [
+                (t.leader.id, tuple(m.id for m in t.members), chosen, refine_level(r), "split", p)
                 for t, r, p in zip(teams, refine, planned)
             ]
         )

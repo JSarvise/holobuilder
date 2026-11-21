@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from hbuilder.domain.card import Card
 from hbuilder.domain.schema import SchemaError
+from hbuilder.domain.song_chart import FEVER_BONUS_COEFFICIENT
 
 # --- Master constants (Setting table) ----------------------------------------
 #
@@ -230,19 +231,43 @@ def card_bonus_table(
     )
 
 
-def event_objective(score: float, *, objective: str, live_permil: int = 0, song_permil: int = 0) -> float:
+def multi_points_fever_weight(divisor: int) -> float:
+    """The fever weight `c` that makes Event Points in Multi Live a function of `S + c F`.
+
+    The base is `120 + S/15000 + (S + 1.5 F + O)/D` (`event_points_base`: the room's MULTI
+    SCORE is the player's own score, the fever bonus `1.5 F` and the other players' `O`).
+    With `V = S + c F` and `c = 1.5 x 15000 / (D + 15000)` that is
+    `120 + V (1/15000 + 1/D) + O/D`: 0.25 at D = 75000 (relay), 0.3 at D = 60000 (normal)."""
+    return FEVER_BONUS_COEFFICIENT * 15_000 / (int(divisor) + 15_000)
+
+
+def event_objective(
+    score: float,
+    *,
+    objective: str,
+    live_permil: int = 0,
+    song_permil: int = 0,
+    multi_divisor: int = 0,
+    room_rest: float = 0.0,
+) -> float:
     """The value a search ranks teams by — continuous, without the game's ceilings, so ties
     do not hide differences. Report with `event_points_base` / `event_song_score`.
 
     - `score`: the score itself.
     - `event_points`: `(120 + S/15000)(1 + E/1000)`, `E` = members' live rows summed. Boosts,
       song length and HoloPass multiply every team alike and drop out of the ranking.
+      In Multi Live (`multi_divisor` D > 0), `score` is `V = S + c F` scored with
+      `multi_points_fever_weight(D)` and `room_rest` is the other players' MULTI SCORE `O`:
+      `(120 + V (1/15000 + 1/D) + O/D)(1 + E/1000)`, `event_points_base` before its ceiling.
     - `event_song`: `S(1 + P/1000)`, `P` = the largest member's song rows.
 
     Event Points do NOT take `P`: whether the song bonus lifts Event Pt is not known."""
     if objective == "score":
         return float(score)
     if objective == "event_points":
+        if multi_divisor:
+            room = (float(score) * (multi_divisor + 15_000) / 15_000 + float(room_rest)) / multi_divisor
+            return (120.0 + room) * (1.0 + live_permil / 1000.0)
         return (120.0 + float(score) / 15000.0) * (1.0 + live_permil / 1000.0)
     if objective == "event_song":
         return float(score) * (1.0 + song_permil / 1000.0)

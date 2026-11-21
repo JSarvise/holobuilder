@@ -63,6 +63,30 @@ def score_team_on_chart(team: Team, chart: SongChart, cfg: ScoringConfig) -> Son
     return _score_one(team, chart, cfg)
 
 
+def score_team_at_order(
+    team: Team, chart: SongChart, cfg: ScoringConfig, member_order: Sequence[str]
+) -> float:
+    """The expected score of `team` played at `member_order` on `cfg`'s board.
+
+    For the figures of a setup chosen under another objective: a Multi row's slot order is
+    the best for `S + w x F`, and its plain score must be read at that same order, not at
+    the order best for `S` alone."""
+    deck_power = (
+        overall_power_for(tuple(team.members), team.leader, cfg) if cfg.song_absolute_deck_power else None
+    )
+    totals: dict = {}
+    score_song_detailed(
+        tuple(team.members),
+        (team.leader,),
+        chart,
+        cfg,
+        deck_power=deck_power,
+        auto=cfg.song_auto,
+        order_totals=totals,
+    )
+    return float(totals[(team.leader.id, tuple(member_order))])
+
+
 def score_team_notes(team: Team, chart: SongChart, cfg: ScoringConfig) -> tuple[SongScore, list]:
     """`score_team_on_chart` and its note-by-note breakdown at the best slot order
     (`song.NoteRow`s, `score_song_detailed(note_rows=)`): the same deck power and AUTO

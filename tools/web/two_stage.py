@@ -26,7 +26,7 @@ import math
 import random
 import sys
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -270,12 +270,14 @@ def objective_scorer(
     score: Callable[[object, list[tuple[int, ...]]], Sequence[float]],
     bonus: Sequence[tuple[int, int]],
     objective: str,
+    room: Mapping | None = None,
 ) -> Callable[[object, list[tuple[int, ...]]], list[float]]:
     """`score(leader, sets)` turned into the event objective, so the whole search —
     screen fit, proposals, neighbours, leader triage — ranks by it instead of
     re-sorting a list found by score. `bonus[i]` = pool card i's
     `(live permil, song permil)` from `marathon.card_bonus_table`; E sums the five
-    members, P takes the largest, the leader slot adds nothing."""
+    members, P takes the largest, the leader slot adds nothing. `room`: Event Points in
+    Multi Live, `marathon.event_objective`'s `multi_divisor` and `room_rest`."""
     from hbuilder.domain.marathon import event_objective  # noqa: PLC0415
 
     many = getattr(score, "many", None)
@@ -289,6 +291,7 @@ def objective_scorer(
                 objective=objective,
                 live_permil=sum(bonus[i][0] for i in members),
                 song_permil=max(bonus[i][1] for i in members),
+                **(room or {}),
             )
             for value, members in zip(values, sets)
         ]

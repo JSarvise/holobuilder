@@ -63,7 +63,12 @@ def _jsonable(o):
 
 
 def cfg_json(cfg: ScoringConfig) -> str:
-    return json.dumps(_jsonable(cfg), sort_keys=True, separators=(",", ":"))
+    doc = _jsonable(cfg)
+    if isinstance(doc, dict) and not doc.get("fever_weight"):
+        # a solo run (no Multi Live fever weight) hashes as it did before the field existed,
+        # so the answers and certificates held under its hash stay valid
+        doc.pop("fever_weight", None)
+    return json.dumps(doc, sort_keys=True, separators=(",", ":"))
 
 
 def inputs_hash(

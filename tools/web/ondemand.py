@@ -35,6 +35,7 @@ import joint_search  # noqa: E402
 import leaf_inputs  # noqa: E402
 import two_stage  # noqa: E402
 
+from hbuilder.domain.song_chart import FEVER_BONUS_COEFFICIENT  # noqa: E402
 from hbuilder.solver import members_first  # noqa: E402
 from hbuilder.solver.parallel import default_workers  # noqa: E402
 from hbuilder.solver.parallel_refine import COUNTS, SEARCH, RefinePool, SharedPool, chart_mean  # noqa: E402
@@ -664,7 +665,8 @@ class Engine:
     """The leaf of one (basis, difficulty[, assumptions]), alive between requests.
     With `assumptions` the basis is the user's account under them (`build_inputs`)."""
 
-    play: tuple[str, bool] = ("mobile", False)  # (platform, auto): how the run is played
+    # (platform, auto, fever weight): how the run is played (`parse_play`)
+    play: tuple = ("mobile", False, 0.0)
 
     def __init__(
         self,
@@ -673,12 +675,12 @@ class Engine:
         workers: int | None = None,
         assumptions: Assumptions | None = None,
         levels: tuple[int, int] | None = None,
-        play: tuple[str, bool] = ("mobile", False),
+        play: tuple = ("mobile", False, 0.0),
         chart_keys: tuple[str, ...] | None = None,
         board_cast: frozenset | None = None,
     ) -> None:
         self.basis = basis
-        self.play = tuple(play)  # type: ignore[assignment]
+        self.play = full_play(play)
         self.assumptions = assumptions
         self.difficulty = leaf_inputs._difficulty(difficulty)
         # holodori.best's "any song" level range: every chart of ANY difficulty whose level
@@ -717,6 +719,9 @@ class Engine:
         else:
             self.charts = leaf_inputs.chart_library(path).at(self.difficulty)
             self.index = {chart.music_id: k for k, chart in enumerate(self.charts)}
+        if self.play[2] and any(c.fever is None for c in self.charts):
+            # a chart file built before the fever section was read cannot score a Multi run
+            raise KeyError("the chart file has no fever sections: update the game data, then search again")
         digests = leaf_inputs.chart_digests(path, self.difficulty)
         if assumptions is not None:
             # any input file moving (a refresh) changes the account basis' key
@@ -1639,6 +1644,12 @@ class Engine:
                 else f"Max (every Active fires) on this song's {self.difficulty} chart"
                 if by_max
                 else f"expected score on this song's {self.difficulty} chart"
+            )
+            + (
+                f" in Multi Live: score + {self.play[2]:g} x the score inside the fever section "
+                "(the player's contribution to the room's MULTI SCORE), the fever assumed to succeed"
+                if self.play[2]
+                else ""
             ),
             "method": (
                 "joint leader + members search on a chart sample, run for this request "
@@ -1656,7 +1667,7 @@ class Engine:
             "on_demand": True,
             # only a search by Max says so: the answer by the expectation is unchanged
             **({"ranked_by": objective} if by_max else {}),
-            "play": {"platform": self.play[0], "auto": self.play[1]},
+            "play": play_payload(self.play),
             "singers": sorted(singers),
             "singer_type": getattr(chart, "singer_type", None),
             "leaders": len(leaders),
@@ -1901,7 +1912,7 @@ class Engine:
             "basis": (a.describe() if a is not None else leaf_inputs.basis_text(self.basis)),
             "assumptions": dataclasses.asdict(a) if a else None,
             "notes": a.notes() if a else [],
-            "play": {"platform": self.play[0], "auto": self.play[1]},
+            "play": play_payload(self.play),
             "filters": dataclasses.asdict(filters),
             "materials_failed": failed,
             "leaders": len(leaders),
@@ -1989,7 +2000,7 @@ def engine(
     current_key: Callable[[], str | None] | None = None,
     assumptions: Assumptions | None = None,
     levels: tuple[int, int] | None = None,
-    play: tuple[str, bool] = ("mobile", False),
+    play: tuple = ("mobile", False, 0.0),
     chart_keys: tuple[str, ...] | None = None,
     board_cast: frozenset | None = None,
 ) -> Engine:
@@ -2005,7 +2016,7 @@ def engine(
         difficulty,
         assumptions.engine_key() if assumptions is not None else None,
         tuple(levels) if levels else None,
-        tuple(play),
+        full_play(play),
         tuple(chart_keys) if chart_keys else None,
         (tuple(sorted(board_cast)), getattr(board_cast, "scope", "")) if board_cast is not None else None,
     )
@@ -2037,22 +2048,51 @@ def engine(
 PLATFORMS = ("mobile", "pc")
 
 
-def parse_play(body: Mapping) -> tuple[str, bool]:
-    """`(platform, auto)` of a request: how the run is played. `platform` picks the
-    LiveNote PERFECT column; `auto` an AUTO run."""
+def parse_play(body: Mapping, fever: float = FEVER_BONUS_COEFFICIENT) -> tuple[str, bool, float]:
+    """`(platform, auto, fever weight)` of a request: how the run is played. `platform` picks
+    the LiveNote PERFECT column; `auto` an AUTO run; `"multi": true` a Multi Live run whose
+    fever succeeds, scored as `S + fever x F` (`ScoringConfig.fever_weight`): by default the
+    player's contribution to the room's MULTI SCORE. A `fever_weight` in (0, 1.5] names
+    another weight (Event Points in Multi Live, `marathon.multi_points_fever_weight`)."""
     platform = str(body.get("platform") or "").lower()
-    return (platform if platform in PLATFORMS else "mobile", body.get("auto") is True)
+    weight = body.get("fever_weight")
+    if (
+        isinstance(weight, bool)
+        or not isinstance(weight, (int, float))
+        or not 0 < weight <= FEVER_BONUS_COEFFICIENT
+    ):
+        weight = fever
+    return (
+        platform if platform in PLATFORMS else "mobile",
+        body.get("auto") is True,
+        float(weight) if body.get("multi") is True else 0.0,
+    )
 
 
-def with_play(ctx: RefineContext, play: tuple[str, bool]) -> RefineContext:
-    """`ctx` (a `RefineContext`) scored for `play`. AUTO sets BOTH halves, as
+def full_play(play) -> tuple[str, bool, float]:
+    """`play` as `(platform, auto, fever weight)`; a two-part `(platform, auto)` is a solo run."""
+    platform, auto, *rest = tuple(play)
+    return (str(platform), bool(auto), float(rest[0]) if rest else 0.0)
+
+
+def play_payload(play) -> dict:
+    """How a run was played, as an answer reports it (a solo run as it always has)."""
+    platform, auto, fever = full_play(play)
+    out: dict = {"platform": platform, "auto": auto}
+    if fever:
+        out.update(multi=True, fever_weight=fever)
+    return out
+
+
+def with_play(ctx: RefineContext, play) -> RefineContext:
+    """`ctx` (a `RefineContext`) scored for `play` (`parse_play`). AUTO sets BOTH halves, as
     `hbweb.basis.auto_premise` does for the other routes: the AUTO judgement column (a
     note scores like a GREAT, ~80 % of manual) AND `run_state.combo = 0`,
     since on AUTO the combo never accumulates and a `combo >= N` override never fires.
     The on-demand and event searches must honour the page's Auto toggle, or every AUTO
-    request is ranked as a manual run."""
-    platform, auto = play
-    cfg = dataclasses.replace(ctx.cfg, platform=platform)
+    request is ranked as a manual run. A Multi run weighs the fever section's notes."""
+    platform, auto, fever = full_play(play)
+    cfg = dataclasses.replace(ctx.cfg, platform=platform, fever_weight=fever)
     if auto:
         cfg = dataclasses.replace(cfg, song_auto=True, run_state=dataclasses.replace(cfg.run_state, combo=0))
     return dataclasses.replace(ctx, cfg=cfg)

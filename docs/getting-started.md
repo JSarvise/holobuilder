@@ -6,7 +6,7 @@ PC instead, with no server and no sign-in, see [Run it from source](run-locally.
 
 ## Install
 
-1. Download **holobuilder-setup.exe** from [Releases](../../../releases/latest) and run it.
+1. Download [**holobuilder-setup.exe**](../../../releases/latest/download/holobuilder-setup.exe) (the [latest release](../../../releases/latest)) and run it.
    Windows SmartScreen may warn that the file is not commonly downloaded: choose *More info → Run anyway*.
 2. **Sign in with Google** and choose a **username** (3–20 characters). Your real name is not kept.
 3. Wait for **approval**. Access is approved by hand; the window tells you when you can continue.

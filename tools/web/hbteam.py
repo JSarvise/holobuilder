@@ -69,6 +69,8 @@ REQUEST_KEYS = (
     "assumptions",
     "platform",
     "auto",
+    "multi",
+    "fever_weight",
     "pool",
     "shared_board",
 )
@@ -237,7 +239,11 @@ def summary(doc: Mapping) -> str:
     req, det = doc["request"], doc["detail"]
     app, game = doc.get("app") or {}, doc.get("game") or {}
     a = req.get("assumptions")
-    play = ("PC" if req.get("platform") == "pc" else "Mobile") + (", AUTO" if req.get("auto") else "")
+    play = (
+        ("PC" if req.get("platform") == "pc" else "Mobile")
+        + (", AUTO" if req.get("auto") else "")
+        + (", Multi (fever)" if req.get("multi") else "")
+    )
     lines = [
         f"{doc.get('created_at')} | holobuilder {app.get('version')}"
         + (f" ({app['commit']})" if app.get("commit") else "")

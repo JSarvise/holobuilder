@@ -78,6 +78,7 @@ from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown
 from hbuilder.domain.scoring_config import ACTIVE_UPTIME_MODELS
 from hbuilder.domain.skilltree import TOTAL_BOARD_POINTS
 from hbuilder.domain.song import SongError, load_charts, song_overall_power
+from hbuilder.domain.song_chart import FEVER_BONUS_COEFFICIENT
 from hbuilder.domain.song_rank import score_team_on_chart
 from hbuilder.domain.team import MEMBER_COUNT, Team, TeamError
 from hbuilder.inputs import (
@@ -242,6 +243,9 @@ def parse_assumptions(body: Mapping) -> dict:
         # `auto` is resolved against a cfg later (it needs run_state), so the
         # raw request flag travels and `basis.auto_premise` does the work once.
         "auto": body.get("auto") is True,
+        # a Multi Live run: the player's contribution to the room's MULTI SCORE (absent on a
+        # solo run, whose inputs hash stays as it was)
+        **({"multi": True} if body.get("multi") is True else {}),
         "distribution": body.get("distribution") is True,
     }
 
@@ -1032,6 +1036,8 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
         cfg = dataclasses.replace(cfg, platform=A["platform"], **A.get("deck_power", {}))
         if A.get("auto"):
             cfg = dataclasses.replace(cfg, **basis_mod.auto_premise(cfg, {"auto": True}))
+        if A.get("multi"):
+            cfg = dataclasses.replace(cfg, fever_weight=FEVER_BONUS_COEFFICIENT)
         cfg = dataclasses.replace(cfg, board=None)
         # the basis AFTER uptime/platform (the maxed-account bench is
         # linearised at, and cached by, the resolved config)
@@ -1190,6 +1196,7 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
                         "member_order": fig["member_order"],
                         "deck_power": fig["deck_power"],
                         "deck_power_basis": fig["deck_power_basis"],
+                        **{k: fig[k] for k in ("song_est_solo", "fever_score", "multi_score") if k in fig},
                     }
                 )
                 if entry.get("member_order") and sorted(entry["member_order"]) == sorted(fig["member_order"]):

@@ -2,6 +2,13 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.18 (2026-11-21)
+- **Multi Live (FEVER) in the Optimizer's Options.** For a Multi Live whose fever succeeds, every note inside the song's fever section adds 1.5 times its score to the room's MULTI SCORE, so the best team can change. With the switch on:
+  - **Score** and **Event Song Score** rank teams by your contribution to the room's MULTI SCORE: your score plus 1.5 × what you score inside the fever section (no song bonus: that one counts only for your event record). Fillers in a private room can see which team adds most to the room, on one song or on Highlight.
+  - **Event Points** ranks teams by the Event Pt of that multi Live, assuming the other 4 players each bring what your best team brings.
+  - Each team shows its contribution, its score without FEVER and the FEVER bonus; on Highlight as the mean over the pool, with its Max.
+- **The installer is one click away:** the README's download link now downloads `holobuilder-setup.exe` directly.
+
 ## 0.2.17 (2026-11-20)
 - **Fix: a team's details showed your boards from before a refresh.** After a refresh, the Optimizer kept the details it had already computed. The same team, searched again, still showed the old boards' Overall Power, Holomem Board Bonus and Member Power-Up Bonus. Now a refresh drops what was kept and computes the team on screen again. Every new search does the same, and the server no longer reuses the boards it read before the refresh. On the refreshed boards the details match the game's Unit Score Details: Overall Power, each line and the Unit Score.
 

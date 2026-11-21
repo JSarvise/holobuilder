@@ -50,6 +50,7 @@ if str(paths.REFRESH_DIR) not in sys.path:
     sys.path.insert(0, str(paths.REFRESH_DIR))
 
 from hbuilder.domain import marathon as mar  # noqa: E402
+from hbuilder.domain.song_chart import FEVER_BONUS_COEFFICIENT  # noqa: E402
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -192,12 +193,24 @@ def parse_event_body(body: Mapping) -> dict:
     song = str(body.get("song") or "").strip()
     if not song:
         raise EventRequestError("'song' (a music id such as m0342, or 'highlight') is required")
+    # Multi Live: with Event Song Score, the ranking is the player's contribution to the
+    # room's MULTI SCORE (score + 1.5 x the fever section's score), which has no song bonus
+    # and so is defined on a Highlight pool too; with Event Points, the Event Pt of a Live
+    # whose room MULTI SCORE carries that contribution (`room_others`: the other players'
+    # MULTI SCORE, else four times the best team's contribution)
+    multi = body.get("multi") is True
+    room_others = body.get("room_others")
+    if room_others in (None, ""):
+        room_others = None
+    elif isinstance(room_others, bool) or not isinstance(room_others, int) or room_others < 0:
+        raise EventRequestError(f"'room_others' must be an integer >= 0, got {room_others!r}")
     if is_highlight(song):
         # a random song of a pool: an Event Song Score has no song to belong to
         song = HIGHLIGHT
-        if objective != "event_points":
+        if objective != "event_points" and not multi:
             raise EventRequestError(
-                "Highlight ranks by Event Points only: Event Song Score belongs to one song"
+                "Highlight ranks by Event Points, or by the MULTI SCORE contribution (multi): "
+                "Event Song Score belongs to one song"
             )
     boosts = body.get("boosts", DEFAULT_BOOSTS)
     if boosts is None:
@@ -258,7 +271,60 @@ def parse_event_body(body: Mapping) -> dict:
         # how the run is played (`ondemand.parse_play`): the page's Platform and Auto
         "platform": "pc" if str(body.get("platform") or "").lower() == "pc" else "mobile",
         "auto": body.get("auto") is True,
+        "multi": multi,
+        "room_others": room_others if multi and objective == "event_points" else None,
     }
+
+
+def contribution_mode(opts: Mapping) -> bool:
+    """Whether a run ranks by the MULTI SCORE contribution: Event Song Score in Multi Live.
+    Its value is `score + 1.5 F`: the fever bonus and no song bonus (the room's MULTI SCORE
+    carries the in-live score; the song bonus is applied to the event record only)."""
+    return bool(opts.get("multi")) and opts.get("objective") == "event_song"
+
+
+def multi_points_mode(opts: Mapping) -> bool:
+    """Whether a run ranks by Event Points in Multi Live (`marathon.event_objective`'s room
+    terms, the fever weighted by `marathon.multi_points_fever_weight`)."""
+    return bool(opts.get("multi")) and opts.get("objective") == "event_points"
+
+
+# the other players of a Multi Live room, when the page names no MULTI SCORE for them: each
+# brings what the best team found brings
+ROOM_OTHERS = 4
+
+
+def row_split(
+    rows: Sequence[dict],
+    reps: Sequence[Card],
+    pool: Any,
+    charts: Sequence[int],
+    weight: float,
+    planned: Mapping[int, tuple] | None = None,
+    with_max: bool = True,
+) -> None:
+    """A Multi Live row's figures from ONE develop of its board (`RefinePool.batch_split`),
+    at the slot order its weighted value plays on each chart: `song_max` (every ACTIVE fires;
+    `with_max`),
+    `song_solo` (the score without the fever weight) and `multi_score`, the contribution to
+    the room's MULTI SCORE (`S + 1.5 F`, F = the fever section's score); means over `charts`
+    on a Highlight pool. On the board each row is served on (`row_ceilings`: a re-planned
+    search's rows on their own plan, a row without one skipped). Rows already holding them
+    are skipped."""
+    from hbuilder.domain.team import Team  # noqa: PLC0415
+
+    todo = [
+        r for r in rows if r.get("song_solo") is None and (planned is None or planned.get(id(r)) is not None)
+    ]
+    teams = [Team(leader=r["leader"], members=tuple(reps[i] for i in r["members"])) for r in todo]
+    refine = [1 if r.get("refined") else 0 for r in todo]
+    boards = [None if planned is None else planned.get(id(r)) for r in todo]
+    for r, (e, top, solo) in zip(todo, pool.batch_split(teams, charts, refine, boards)):
+        if with_max:
+            r["song_max"] = float(top)
+        r["song_solo"] = float(solo)
+        # the fever part from the split's own expectation (the row's score, on the same board)
+        r["multi_score"] = float(solo) + FEVER_BONUS_COEFFICIENT * (float(e) - float(solo)) / weight
 
 
 # --- GET /api/event -------------------------------------------------------------
@@ -717,6 +783,7 @@ def search_event(
     search_options: Mapping | None = None,
     engine: str = "joint",
     certify: bool = True,
+    room: Mapping | None = None,
 ) -> dict:
     """A / B / C on one song. `score(leader, sets) -> raw scores` (cancel by raising
     from it); `bonus[i] = (live permil, song permil)` of pool card i. Returns the
@@ -727,8 +794,12 @@ def search_event(
     search, `joint_search.search_song`, ~5 s a search on the account) or
     "two_stage" (the base search + leader triage + per-leader searches).
     `certify` False skips C's exact check of every set above the threshold (the
-    threshold is still reported; on m0342 the check is 37,350 sets, 61 s)."""
+    threshold is still reported; on m0342 the check is 37,350 sets, 61 s).
+    `room`: Event Points in Multi Live (`marathon.event_objective`'s `multi_divisor` and
+    `room_rest`), the same constants for every value of the search."""
     import two_stage  # noqa: PLC0415
+
+    room = dict(room or {})
 
     if objective not in EVENT_OBJECTIVES:
         raise ValueError(f"unknown objective {objective!r}")
@@ -762,7 +833,7 @@ def search_event(
 
     def value_of(raw: float, members) -> tuple[int, int, float]:
         e, p = _aggregate(bonus, members)
-        return e, p, mar.event_objective(raw, objective=objective, live_permil=e, song_permil=p)
+        return e, p, mar.event_objective(raw, objective=objective, live_permil=e, song_permil=p, **room)
 
     raw_cache: dict[tuple[str, tuple[int, ...]], float] = {}
 
@@ -831,7 +902,7 @@ def search_event(
     # B: the objective inside the search
     t0 = time.perf_counter()
     stage("event_search", "active", {})
-    wrapped = two_stage.objective_scorer(recording, bonus, objective)
+    wrapped = two_stage.objective_scorer(recording, bonus, objective, room)
     b = run_search(wrapped)
     if engine == "joint":
         # the true top teams across leaders (a leader may hold several)
@@ -882,7 +953,8 @@ def search_event(
     s_max = max(best_score, best["score"])
     f_star = best["objective"]
     if objective == "event_points":
-        threshold = 1000.0 * f_star / (120.0 + s_max / 15000.0) - 1000.0
+        # the base at E = 0 (solo: 120 + S/15000)
+        threshold = 1000.0 * f_star / mar.event_objective(s_max, objective=objective, **room) - 1000.0
         values = [b_[0] for b_ in bonus]
         name = "e_min"
     else:
@@ -1025,8 +1097,12 @@ def row_payload(
     boosts: int,
     length_permil: int | None,
     holopass: bool,
+    room: Mapping | None = None,
 ) -> dict:
-    """One ranked team, as the page reads it."""
+    """One ranked team, as the page reads it. `room` (Event Points in Multi Live,
+    `marathon.event_objective`'s): the row's `score` is `V = S + c F` and its Event Pt are a
+    multi Live's, whose room MULTI SCORE is `V + room_rest` in `event_points_base`'s terms
+    (`k S + M = (k + 1) V + O`, so `score = V` and `multi = V + O` give the same base)."""
 
     def card(c, counts: bool) -> dict:
         live, song = bonus_of(c)
@@ -1036,8 +1112,9 @@ def row_payload(
 
     raw = round(r["score"])
     e, p = r["live_permil"], r["song_permil"]
+    multi = {"multi_score": raw + round(room["room_rest"]), "divisor": room["multi_divisor"]} if room else {}
     ep = (
-        mar.event_points(raw, e, boosts=boosts, length_permil=length_permil, holopass=holopass)
+        mar.event_points(raw, e, boosts=boosts, length_permil=length_permil, holopass=holopass, **multi)
         if length_permil is not None
         else None
     )
@@ -1049,7 +1126,9 @@ def row_payload(
         "live_permil": e,
         "song_permil": p,
         "objective": r["objective"],
-        "event_points_base": mar.event_points_base(raw, e),
+        "event_points_base": mar.event_points_base(
+            raw, e, multi.get("multi_score"), multi.get("divisor", 75_000)
+        ),
         "event_points": ep,
         "event_song_score": mar.event_song_score(raw, p),
         "source": r["source"],
@@ -1058,6 +1137,10 @@ def row_payload(
     }
     if "plan_optimal" in r:
         out["plan_optimal"] = r["plan_optimal"]
+    if r.get("song_solo") is not None:
+        # a Multi Live row's own score and MULTI SCORE contribution (`row_split`)
+        out["song_est_solo"] = float(r["song_solo"])
+        out["multi_score"] = float(r["multi_score"])
     if r.get("song_max") is not None:
         # the row's Max (`row_ceilings`) and its Event Song Score
         out["song_max"] = float(r["song_max"])
@@ -1162,7 +1245,7 @@ REPLAN_CANDIDATES = 24  # `ondemand.REPLAN_CANDIDATES` (20 rows shown)
 REPLAN_SCREEN = 96
 
 
-def _screen_rows(rows, reps, bonus, objective, pool):
+def _screen_rows(rows, reps, bonus, objective, pool, room=None):
     """The best REPLAN_SCREEN rows re-ranked by the event objective on their score
     with the activation nodes chosen jointly (each keeps the better of the two), so
     the REPLAN_CANDIDATES the exact plan gets are the ones its staircase favours
@@ -1177,12 +1260,14 @@ def _screen_rows(rows, reps, bonus, objective, pool):
     for r, v in zip(head, refined):
         e, p = _aggregate(bonus, r["members"])
         s = max(float(r["score"]), float(v))
-        keyed.append((mar.event_objective(s, objective=objective, live_permil=e, song_permil=p), r))
+        keyed.append(
+            (mar.event_objective(s, objective=objective, live_permil=e, song_permil=p, **(room or {})), r)
+        )
     keyed.sort(key=lambda t: -t[0])
     return [r for _o, r in keyed] + list(rows[REPLAN_SCREEN:])
 
 
-def _refine_rows(rows, reps, bonus, objective, pool, n):
+def _refine_rows(rows, reps, bonus, objective, pool, n, room=None):
     """The best `n` rows re-scored with the activation nodes chosen jointly for the song
     (`refine_activation`, as the Score search refines its best teams), each keeping the
     better of its two scores, and re-ranked by the event objective. A refined row is
@@ -1200,7 +1285,9 @@ def _refine_rows(rows, reps, bonus, objective, pool, n):
                 **r,
                 "score": float(v),
                 "refined": True,
-                "objective": mar.event_objective(float(v), objective=objective, live_permil=e, song_permil=p),
+                "objective": mar.event_objective(
+                    float(v), objective=objective, live_permil=e, song_permil=p, **(room or {})
+                ),
             }
         out.append(r)
     out.sort(key=lambda r: -float(r["objective"]))
@@ -1221,6 +1308,7 @@ def _replan_rows(
     cancel=None,
     shown=REPLAN_CANDIDATES,
     difficulty="EXPERT",
+    room=None,
 ):
     """The best REPLAN_CANDIDATES rows re-planned exactly under `assumptions`
     (`materials_plan.plan_and_score` in the pool's workers, `materials_plan.dispatch`:
@@ -1275,7 +1363,7 @@ def _replan_rows(
 
     def objective_of(k, value):
         e, p = _aggregate(bonus, cands[k]["members"])
-        return mar.event_objective(value, objective=objective, live_permil=e, song_permil=p)
+        return mar.event_objective(value, objective=objective, live_permil=e, song_permil=p, **(room or {}))
 
     # the rows shown re-planned with the planner's other candidates (only ever higher), each
     # row's as soon as it is sure to be among them; ranked as `ranked` below ranks them
@@ -1308,7 +1396,7 @@ def _replan_rows(
                             source="replanned",
                             plan_optimal=optimal[k],
                             objective=mar.event_objective(
-                                got[k], objective=objective, live_permil=e, song_permil=p
+                                got[k], objective=objective, live_permil=e, song_permil=p, **(room or {})
                             ),
                         ),
                     )
@@ -1387,12 +1475,28 @@ def run_account_search(
     blooms: dict[str, Any] = {k: (v or {}).get("bloom") for k, v in collection.items()}
     cache: dict[str, tuple[int, int]] = {}
 
+    contribution = contribution_mode(opts)
+    # Event Points in Multi Live: ranked on V = S + c F (c from the event's room divisor) with
+    # the other players' MULTI SCORE held at one value for the whole search
+    multi_points = multi_points_mode(opts)
+    divisor = mar.multi_divisor(event.name)
+    fever_weight = (
+        FEVER_BONUS_COEFFICIENT
+        if contribution
+        else mar.multi_points_fever_weight(divisor)
+        if multi_points
+        else 0.0
+    )
+    room: dict = (
+        {"multi_divisor": divisor, "room_rest": float(opts.get("room_others") or 0)} if multi_points else {}
+    )
+
     def bonus_of(card) -> tuple[int, int]:
         if card.id not in cache:
             # Highlight: no song-score bonus (P = 0, HIGHLIGHT_NOTES)
-            cache[card.id] = mar.card_bonus_table(
-                [card], event, blooms=blooms, music_id=None if highlight else song
-            )[0]
+            e, p = mar.card_bonus_table([card], event, blooms=blooms, music_id=None if highlight else song)[0]
+            # the MULTI SCORE contribution carries no song bonus
+            cache[card.id] = (e, 0 if contribution else p)
         return cache[card.id]
 
     def check():
@@ -1444,7 +1548,14 @@ def run_account_search(
     # scored for how the run is played: Auto = the AUTO column AND no combo (`ondemand.with_play`)
     built = dict(
         built,
-        ctx=ondemand.with_play(built["ctx"], (opts.get("platform") or "mobile", bool(opts.get("auto")))),
+        ctx=ondemand.with_play(
+            built["ctx"],
+            (
+                opts.get("platform") or "mobile",
+                bool(opts.get("auto")),
+                fever_weight,
+            ),
+        ),
     )
     proxy, chart = built["proxy"], built["chart"]
     singers = tuple(chart.singers or ())
@@ -1612,7 +1723,11 @@ def run_account_search(
 
         score.many = score_many  # type: ignore[attr-defined]
 
-        score(proxy, two_stage.random_legal_sets(hol, 64, random.Random(0)))
+        warm = score(proxy, two_stage.random_legal_sets(hol, 64, random.Random(0)))
+        if multi_points and opts.get("room_others") is None:
+            # the search's value of the other players until the best team is known: four
+            # times the best of these random teams (its served value is set below)
+            room["room_rest"] = ROOM_OTHERS * max(float(v) for v in warm)
         # Highlight: the exact plan within materials is per song (one board for one chart),
         # so it is not run; the bound's certification neither (HIGHLIGHT notes)
         replan = assumptions is not None and assumptions.replan and not highlight
@@ -1625,6 +1740,7 @@ def run_account_search(
             score=score,
             bonus=bonus,
             objective=objective,
+            room=room,
             base_leader=proxy,
             always=singing,
             gate_of=mf.gate_of,
@@ -1636,7 +1752,12 @@ def run_account_search(
                 else opts["top"]
             ),
             on_stage=on_stage,
-            certify=bool(opts.get("certify")) and not replan and not highlight,
+            # a contribution has no bonus to bound the sets by; the bound has no room term
+            certify=bool(opts.get("certify"))
+            and not replan
+            and not highlight
+            and not contribution
+            and not multi_points,
             search_options=search_options,
         )
         if sampled[0]:
@@ -1657,6 +1778,7 @@ def run_account_search(
                         objective=objective,
                         live_permil=r["live_permil"],
                         song_permil=r["song_permil"],
+                        **room,
                     )
             found["rows"].sort(key=lambda r: -r["objective"])
             # then the rows the unsampled search hands on (`search_event`): the head, and
@@ -1676,7 +1798,7 @@ def run_account_search(
             # on that board, re-ranked by the event objective (the Score search's
             # `_within_materials`, on the event's own leaf)
             on_stage("replan", "active", {})
-            found["rows"] = _screen_rows(found["rows"], reps, bonus, objective, pool)
+            found["rows"] = _screen_rows(found["rows"], reps, bonus, objective, pool, room)
             check()
             found["rows"], replan_failed = _replan_rows(
                 found["rows"],
@@ -1692,10 +1814,13 @@ def run_account_search(
                 cancel=cancel,
                 shown=opts["top"],
                 difficulty=difficulty,
+                room=room,
             )
             found["bound"] = None
-            # the rows served on their own plan: the detail's, and every row's ceiling below
-            for r in found["rows"][: max(DETAIL_ROWS, opts["top"]) if with_max else DETAIL_ROWS]:
+            # the rows served on their own plan: the detail's, and every row's ceiling (or Multi
+            # Live split) below
+            every = with_max or bool(fever_weight)
+            for r in found["rows"][: max(DETAIL_ROWS, opts["top"]) if every else DETAIL_ROWS]:
                 whole = materials_plan_for(r, reps, song, assumptions)  # type: ignore[arg-type]
                 if whole is not None:
                     planned[id(r)] = whole
@@ -1715,7 +1840,7 @@ def run_account_search(
 
             on_stage("refine", "active", {})
             found["rows"] = _refine_rows(
-                found["rows"], reps, bonus, objective, pool, max(opts["top"], _od.REFINE_HEAD)
+                found["rows"], reps, bonus, objective, pool, max(opts["top"], _od.REFINE_HEAD), room
             )
             check()
             on_stage("refine", "done", {})
@@ -1725,6 +1850,41 @@ def run_account_search(
             row_ceilings(found["rows"][: opts["top"]], reps, pool, planned if replan else None)
             check()
             on_stage("ceiling", "done", {})
+        if fever_weight:
+            # Multi Live: each served row's own score and MULTI SCORE contribution (and Max)
+            # at the slot order and board it is served on, a Highlight pool's as its mean
+            on_stage("split", "active", {"teams": min(len(found["rows"]), opts["top"])})
+            charts_of = list(range(len(pool_charts))) if highlight else [0]
+            split_on = planned if replan else None
+            row_split(
+                found["rows"][: opts["top"]], reps, pool, charts_of, fever_weight, split_on, contribution
+            )
+            best_share = found["rows"][0].get("multi_score") if found["rows"] else None
+            if multi_points and opts.get("room_others") is None and best_share is not None:
+                # the other players each bring what the best team brings: one value, the
+                # rows ranked again on it (the served ranking), the new head split too (a
+                # best row with no split keeps the search's provisional value)
+                room["room_rest"] = ROOM_OTHERS * float(best_share)
+                for r in found["rows"]:
+                    r["objective"] = mar.event_objective(
+                        float(r["score"]),
+                        objective=objective,
+                        live_permil=r["live_permil"],
+                        song_permil=r["song_permil"],
+                        **room,
+                    )
+                found["rows"].sort(key=lambda r: -float(r["objective"]))
+                if replan:
+                    for r in found["rows"][: opts["top"]]:
+                        if id(r) not in planned:
+                            whole = materials_plan_for(r, reps, song, assumptions)  # type: ignore[arg-type]
+                            if whole is not None:
+                                planned[id(r)] = whole
+                row_split(
+                    found["rows"][: opts["top"]], reps, pool, charts_of, fever_weight, split_on, contribution
+                )
+            check()
+            on_stage("split", "done", {})
 
     seconds = None if highlight else song_info.get("seconds")
     length = length_permil_estimate(HIGHLIGHT_SECONDS if highlight else seconds, opts["boosts"])
@@ -1742,6 +1902,7 @@ def run_account_search(
             boosts=opts["boosts"],
             length_permil=length,
             holopass=opts["holopass"],
+            room=room,
         )
         for k, r in enumerate(found["rows"][: opts["top"]], 1)
     ]
@@ -1825,6 +1986,23 @@ def run_account_search(
     return {
         "event": event.name,
         "objective": objective,
+        # Event Song Score in Multi Live: every value is the MULTI SCORE contribution
+        **({"multi": True, "fever_weight": FEVER_BONUS_COEFFICIENT} if contribution else {}),
+        # Event Points in Multi Live: the fever weight the rows were scored with, the room
+        # divisor and the other players' MULTI SCORE every Event Pt is read with
+        **(
+            {
+                "multi_points": {
+                    "fever_weight": fever_weight,
+                    "divisor": divisor,
+                    "others": round(room["room_rest"]),
+                    "players": ROOM_OTHERS,
+                    "others_typed": opts.get("room_others") is not None,
+                }
+            }
+            if multi_points
+            else {}
+        ),
         "song": song,
         "highlight": highlight_block,
         "song_info": (

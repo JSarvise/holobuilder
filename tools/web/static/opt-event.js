@@ -19,10 +19,10 @@ let multiTimer = 0;
 const STAGES = { build: "Loading your account", score_search: "Searching by score",
   event_search: "Searching by the event objective", bound: "Checking that nothing beats it",
   replan: "Re-planning the best teams' boards", refine: "Choosing the activation nodes for this song",
-  ceiling: "Every team's best run (Max)", detail: "Reading the best teams' boards" };
+  ceiling: "Every team's best run (Max)", split: "Each team without FEVER", detail: "Reading the best teams' boards" };
 const HL_STAGES = { build: "Loading your account and the Highlight pool",
-  event_search: "Searching by Event Points on a sample of the pool", rescore: "Scoring the best teams on every song of the pool",
-  refine: "Choosing the activation nodes per song" };
+  event_search: "Searching by the event objective on a sample of the pool", rescore: "Scoring the best teams on every song of the pool",
+  refine: "Choosing the activation nodes per song", split: "Each team without FEVER, over the pool" };
 // the Score search's levers and pins on the account; Maxed account (also for
 // Events) is its own basis: every card of the game at max level and bloom 5, complete boards,
 // no account lever (null)
@@ -35,8 +35,11 @@ function eventFilters(S) {
   if (S.exclude.length) f.exclude = S.exclude;
   return f;
 }
+// Multi Live: Event Song Score ranked by the MULTI SCORE contribution (score + 1.5 x fever),
+// Event Points by the Event Pt of a multi Live (event_mode.py, multi_points)
+const multiOn = S => (S.goal === "event_song" || S.goal === "event_points") && !!S.multi;
 const optsKey = S => JSON.stringify([S.goal, S.song, S.difficulty, S.boosts, S.goal === "event_points" ? S.holopass : 0,
-  S.platform, !!S.auto, eventAssumptions(S), eventFilters(S), S.chapter || ""]);
+  S.platform, !!S.auto, eventAssumptions(S), eventFilters(S), S.chapter || "", multiOn(S)]);
 const isEP = S => S.goal === "event_points";
 
 /* ------------------------------------------------------------------ Highlight */
@@ -114,7 +117,7 @@ export function showEventIdle(ctx, keepLive) {
   }
   const songBonus = (ev.music || []).filter(m => m.music_id === S.song);
   ctx.out().innerHTML = `<section class="o-empty">
-    <h2>${isEP(S) ? "Most Event Pt per Live" : "Best Event Song Score"} on this song</h2>
+    <h2>${isEP(S) ? "Most Event Pt per Live" : multiOn(S) ? "Most MULTI SCORE contribution" : "Best Event Song Score"} on this song</h2>
     <p>${isEP(S)
       ? `Event Bonus counts the five members, never the leader. This event’s holomems: ${mems.map(m => `<b>${esc(m.name)}</b> <span class="eb">${pct(m.permil)}</span>`).join(", ") || "none"}.`
       : songBonus.length ? `On this song, ${songBonus.map(m => `<b>${esc(m.card ? `${m.card.member} / ${m.card.costume_name}` : m.name || "")}</b> <span class="eb">${pct(m.permil)}</span>`).join(", ")} ${songBonus.length > 1 ? "lift the score when any one of them is among the five members. One is enough: more do not stack" : "lifts the score when it is one of the five members"}; the leader and the singers’ other cards do not count.`
@@ -176,10 +179,11 @@ export async function runEvent(ctx, { certify = false } = {}) {
   const replan = !!A && A.boards === "plan" && (!A.infinite || A.max_resets != null || A.branches !== "GBRY" || A.targets.length > 0);
   // Highlight: no re-plan, no certification; the search on a sample, its best re-scored (event_mode.py)
   const hl = isHighlight(S.song);
-  let order = hl ? ["build", "event_search", "rescore", ...(!A || A.boards !== "as_is" ? ["refine"] : [])]
+  const split = multiOn(S) ? ["split"] : [];
+  let order = hl ? ["build", "event_search", "rescore", ...(!A || A.boards !== "as_is" ? ["refine"] : []), ...split]
     : certify && !replan ? ["build", "score_search", "event_search", "bound"]
     : ["build", "event_search", ...(replan ? ["replan"] : !A || A.boards !== "as_is" ? ["refine"] : []),
-      ...(S.goal === "event_song" ? ["ceiling"] : []), "detail"];
+      ...(S.goal === "event_song" ? ["ceiling"] : []), ...split, "detail"];
   progress(ctx, order, "build", "");
   // the end of this search, once (an answer, an error, or Cancel): a stale stream is ignored
   const done = (answered = false) => {
@@ -196,7 +200,7 @@ export async function runEvent(ctx, { certify = false } = {}) {
       ...(A ? { assumptions: A } : {}), ...eventFilters(S),
       // the chapter planned for, when it is not the running one (opt-app.js, S.chapter)
       ...(S.chapter ? { event: S.chapter } : {}),
-      platform: S.platform, auto: !!S.auto });
+      platform: S.platform, auto: !!S.auto, multi: multiOn(S) });
   } catch (e) { ctx.out().innerHTML = `<div class="o-error">The event search could not start: ${esc(e.message)}</div>`; done(); return; }
   if (run !== mine) { postJSON(`/cancel/${encodeURIComponent(started.job_id)}`, {}).catch(() => {}); return; }
   run.job = started.job_id;
@@ -241,7 +245,7 @@ function render(ctx, L) {
   const ep = isEP(S);
   ctx.out().innerHTML = `<div class="o-split">
     <aside class="dlg o-setlist" aria-label="Ranked teams">
-      <div class="dlg-h"><h2>Search results</h2><span class="r">${rows.length} teams · ${ep ? "Event Pt per Live" : byMax ? "Event Song Score · Max" : "Event Song Score"}</span></div>
+      <div class="dlg-h"><h2>Search results</h2><span class="r">${rows.length} teams · ${ep ? "Event Pt per Live" : res.multi ? "MULTI SCORE contribution" : byMax ? "Event Song Score · Max" : "Event Song Score"}</span></div>
       <div class="o-listctl" role="group" aria-label="List view">
         <button class="chip" type="button" data-diffmode aria-pressed="${diffMode}" title="Outline the cards that differ from #1">Diff vs #1</button></div>
       <div class="o-list" id="o-list">${listHTML(c)}</div>
@@ -359,7 +363,7 @@ function exportTeam({ ctx, S, rows, byMax }, i, btn) {
   const r = rows[i], song = ctx.song ? ctx.song() : null, det = details.get(keyOf(r));
   if (!det || !det.body) return toast("Wait for the team's details to load, then export");
   const shown = { song: isHighlight(S.song) ? `Highlight (detail on ${det.song})` : song ? song.title : S.song,
-    mode: isEP(S) ? "Event Pt" : byMax ? "Event Song Score (Max)" : "Event Song Score", rank: i + 1, headline: headline(S, r, byMax),
+    mode: isEP(S) ? "Event Pt" : multiOn(S) ? "MULTI SCORE contribution" : byMax ? "Event Song Score (Max)" : "Event Song Score", rank: i + 1, headline: headline(S, r, byMax),
     score: r.score ?? null, boosts: S.boosts, holopass: !!S.holopass };
   return exportFile(det.body, shown, null, btn);
 }
@@ -399,17 +403,37 @@ function block({ ctx, S, res, rows, byMax }, r, i) {
     ?? (own && own.score_bonus && own.score_bonus.unit_score != null ? own.score_bonus.unit_score : own && own.panel ? own.panel.unit_score : null);
   const rmax = r.song_max ?? (own ? own.song_max : null);
   const tile = (lbl, val, small) => `<div class="stat-tile"><div><span class="lbl">${lbl}</span>${val}<small>${small || ""}</small></div></div>`;
-  const side = [tile("Live score", score(r.score), hl ? `mean over ${nPool} song${nPool === 1 ? "" : "s"}` : "this team's board"),
-    tile(ep ? "Event Bonus" : "Song Score Bonus", `<span class="n o-num eb">${pct(ep ? r.live_permil : r.song_permil)}</span>`, ep ? "the five members" : "one card is enough; no stacking")];
+  const pend = `<span class="o-sk" style="width:150px;height:26px;margin-top:6px"></span>`;
+  const meanOf = hl ? `mean over ${nPool} song${nPool === 1 ? "" : "s"}` : "";
+  // a Multi Live row's own score at its order and board (`row_split`; a row past the served ones
+  // from its detail), a Highlight row's as the mean over the pool
+  const solo = r.song_est_solo ?? (!hl && det.fig ? det.fig.solo : null);
+  const soloTile = () => tile("without FEVER", solo != null ? score(solo) : det.err || hl ? `<span class="n">—</span>` : `<span class="o-sk" style="width:150px;height:26px;margin-top:6px"></span>`, meanOf || "this team's own score");
+  const mp = res.multi_points;
+  const contrib = r.multi_score ?? (res.multi && !hl && det.fig ? det.fig.value : null);
+  const fever = contrib != null && solo != null ? contrib - solo : null;
+  const side = res.multi
+    // a MULTI SCORE contribution: no song bonus (the event record's only)
+    ? [soloTile(),
+      // what the fever adds to the room (1.5 x the fever section's score): the contribution less
+      // the team's own score (no song bonus: the event record's only)
+      tile("FEVER bonus", fever != null ? score(fever) : det.err || hl ? `<span class="n">—</span>` : pend, hl ? meanOf : "1.5 × your fever section")]
+    : mp
+    // Event Points in Multi Live: the row's score is weighted by the fever; its contribution and
+    // its own score are what a player reads
+    ? [tile(`MULTI SCORE contribution ${info("multi")}`, r.multi_score != null ? score(r.multi_score) : `<span class="n">—</span>`, meanOf || "your part of the room's MULTI SCORE"),
+      soloTile(),
+      tile("Event Bonus", `<span class="n o-num eb">${pct(r.live_permil)}</span>`, "the five members")]
+    : [tile("Live score", score(r.score), hl ? `mean over ${nPool} song${nPool === 1 ? "" : "s"}` : "this team's board"),
+      tile(ep ? "Event Bonus" : "Song Score Bonus", `<span class="n o-num eb">${pct(ep ? r.live_permil : r.song_permil)}</span>`, ep ? "the five members" : "one card is enough; no stacking")];
   // Max and Unit Score keep their slots while the row's detail fills them in (a skeleton), so the
   // grid does not move; a Highlight row's pool has no single run, so no Max
-  const pend = `<span class="o-sk" style="width:150px;height:26px;margin-top:6px"></span>`;
   const none = (lbl, why) => `<div class="stat-tile none"><div><span class="lbl">${lbl}</span><span class="n">—</span><small>${why}</small></div></div>`;
   // Event Pt with a length bonus: the Multi Live tile under the big Event Pt, which opens the
   // calculator (the view keeps Score's height); on a Highlight pool, with Event Pt, the Max a
   // pool cannot have is left out so the side figures fit two rows
-  const multiOn = ep && res.length_permil != null;
-  if (!(hl && multiOn)) side.push(rmax != null ? tile(`Max ${info("max")}`, score(rmax), "every Active fires")
+  const multiOn = ep && !mp && res.length_permil != null;
+  if (!(hl && multiOn) && !mp) side.push(rmax != null ? tile(`Max ${info("max")}`, score(rmax), hl ? `${meanOf}, all fire` : "every Active fires")
     : hl ? none(`Max ${info("max")}`, "a pool has no single run") : tile(`Max ${info("max")}`, det.err ? `<span class="n">—</span>` : pend, "every Active fires"));
   // a Highlight row has no Unit Score of its own (each pool song on its own board): the one of
   // the board its detail shows, once that is in
@@ -417,6 +441,8 @@ function block({ ctx, S, res, rows, byMax }, r, i) {
   side.push(unit != null ? tile(`Unit Score ${info("grade")}`, score(unit), "this team's board")
     : hlUnit != null ? tile(`Unit Score ${info("grade")}`, score(hlUnit), onPool ? "the pool's one board" : "this song's board")
     : tile(`Unit Score ${info("grade")}`, det.err || (hl && det.fig) ? `<span class="n">—</span>` : pend, "this team's board"));
+  // Event Points in Multi Live: the room the Event Pt are read with
+  if (mp) side.push(tile("Room MULTI SCORE", score((r.multi_score ?? 0) + mp.others), mp.others_typed ? "you + the others' MULTI SCORE typed" : `you + ${mp.players} like your #1`));
   if (ep && lenPct) side.push(hl ? tile("Highlight Bonus", `<span class="n o-num">${lenPct}</span>`, "in place of the song length bonus")
     : tile("Song length bonus", `<span class="n o-num">${lenPct}</span>`, "estimate"));
   const L = { ...(ctx.D.cards.get(r.leader.id) || {}), ...r.leader };
@@ -426,7 +452,7 @@ function block({ ctx, S, res, rows, byMax }, r, i) {
         <button class="btn small" type="button" data-export="${i}" title="Save this team as a .hbteam file: the row, its numbers and the account data its score uses, so it can be replayed and checked"><svg class="i s"><use href="#i-down"/></svg>Export</button></div>
     </div>`;
   const tiles = `<div class="o-tiles">
-      <div class="o-primecol"><div class="stat-tile prime"><div><span class="lbl">${ep ? `Event Pt per Live · ${S.boosts} Live Boost${S.boosts > 1 ? "s" : ""} (×${AC[S.boosts - 1]})${S.holopass ? " · HoloPass" : ""}` : byMax ? "Event Song Score · Max" : "Event Song Score"} ${info(ep ? "ev_points" : byMax ? "max" : "ev_song")}</span>${headFmt(S, v)}<small>${byMax ? `every Active fires · Expected ${fmt(r.event_song_score)}${delta ? " · " + delta : ""}` : delta}</small></div></div>
+      <div class="o-primecol"><div class="stat-tile prime"><div><span class="lbl">${ep ? `Event Pt per Live${mp ? " · Multi Live" : ""} · ${S.boosts} Live Boost${S.boosts > 1 ? "s" : ""} (×${AC[S.boosts - 1]})${S.holopass ? " · HoloPass" : ""}` : res.multi ? (byMax ? "MULTI SCORE contribution · Max" : "MULTI SCORE contribution") : byMax ? "Event Song Score · Max" : "Event Song Score"} ${info(ep ? "ev_points" : res.multi ? "multi" : byMax ? "max" : "ev_song")}</span>${headFmt(S, v)}<small>${byMax ? `every Active fires · Expected ${fmt(r.event_song_score)}${delta ? " · " + delta : ""}` : delta}</small></div></div>
         ${multiOn ? multiTile(r, i) : ""}</div>
       <div class="o-sidetiles">${side.join("")}</div>
     </div>`;
@@ -472,7 +498,8 @@ function poolSummary(r, det, n) {
   if (!f) return `<p>One Holomem Board and one slot order for all ${n} songs: the song is drawn after the team is set. Choosing them…</p>`;
   const d = (f.song_est / r.score - 1) * 100;
   return `<p>One Holomem Board and one slot order for all ${n} songs, since the song is drawn after the team is set.
-    Mean score <b class="num">${fmt(Math.round(f.song_est))}</b>${det.fig.ep != null ? ` · <b class="num">${fmt(det.fig.ep)}</b> Event Pt per Live` : ""},
+    ${f.song_est_solo != null ? `Mean MULTI SCORE contribution <b class="num">${fmt(Math.round(f.multi_score ?? f.song_est))}</b> (without FEVER <b class="num">${fmt(Math.round(f.song_est_solo))}</b>)${det.fig.ep != null ? ` · <b class="num">${fmt(det.fig.ep)}</b> Event Pt per Live` : ""}`
+      : `Mean score <b class="num">${fmt(Math.round(f.song_est))}</b>${det.fig.ep != null ? ` · <b class="num">${fmt(det.fig.ep)}</b> Event Pt per Live` : ""}`},
     <span class="num">${sgn(d)}</span> against the ranking's ${fmt(Math.round(r.score))}, which gives every song its own board and order.
     Board: ${esc(f.board_from)}.</p>`;
 }
@@ -560,18 +587,23 @@ async function songDetail(c, r, i, det) {
     // a Highlight row's member_order is the search's, scored over the pool: the song's own is read
     const onPool = hl && song === HL_POOL, poolIds = hl ? (c.res.highlight.pool || []).map(s => s.music_id) : [];
     const body = { song: onPool ? poolIds[0] : song, difficulty: S.difficulty, basis: isMaxed(S) ? "maxed" : "account", cards,
-      platform: S.platform, auto: !!S.auto,   // the search's play, or the detail is not the row's
+      platform: S.platform, auto: !!S.auto, multi: multiOn(S),   // the search's play, or the detail is not the row's
+      ...(c.res.multi_points ? { fever_weight: c.res.multi_points.fever_weight } : {}),
       refine: !!r.refined, assumptions: eventAssumptions(S) || undefined, member_order: hl ? undefined : r.member_order || undefined };
     // the whole pool: one board and one slot order for every song (`row_detail.pool_detail`)
     det.body = onPool ? { ...body, refine: undefined, pool: poolIds } : body;
     const d = await postJSON("/api/row-detail", onPool ? { ...body, refine: undefined, pool: poolIds } : { ...body, timeline: true, distribution: false });
     if (stale()) return;
     det.fig = { route: onPool ? "one board and one slot order for the whole pool" : "the team's own board", api: "/api/row-detail", value: d.song_est, song_max: d.song_max, member_order: d.member_order, deck_power: d.deck_power,
+      solo: d.song_est_solo ?? null,
       deck_power_basis: d.deck_power_basis, panel: d.panel, score_bonus: d.score_bonus || r.score_bonus, distribution: d.distribution || null,
       board_state: d.board_state || r.board_state, bench_slots: d.bench_slots || r.bench_slots || null, pool: onPool ? d : null };
     if (onPool) {
       // its Event Pt per Live: the server's formula on the pool mean (as the Multi Live box)
+      // in Multi Live the mean is V = S + c F and the room V + the others (event_mode.row_payload)
+      const mp = c.res.multi_points;
       await postJSON("/api/event/points", { score: Math.round(d.song_est), live_permil: r.live_permil,
+        ...(mp ? { multi_score: Math.round(d.song_est) + mp.others } : {}),
         event: (c.ctx.D.event && c.ctx.D.event.event && c.ctx.D.event.event.key) || undefined,
         boosts: S.boosts, length_permil: c.res.length_permil, holopass: !!S.holopass })
         .then(x => { det.fig.ep = x.event_points; }).catch(() => {});

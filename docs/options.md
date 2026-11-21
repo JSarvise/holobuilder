@@ -68,4 +68,5 @@ the page itself (`tools/oss/options_glossary.py`): the wording is the app's own.
 - **Sort by** *(event_song)*: Choices: Expected (default); Max.
 - **Teams to show** *(Event goal only)*: Choices: 5 (default); 10; 20.
 - **Score for AUTO** (switch): Rank teams for auto play: notes score like a GREAT and combo-gated skills stay at their base value.
+- **Multi Live (FEVER)** (switch) *(score event_song event_points)*: Rank teams for a Multi Live whose fever succeeds: Score and Event Song Score by your contribution to the room's MULTI SCORE (your score plus 1.5 × what you score inside the fever section), Event Points by the Event Pt of that Live, the other 4 players each bringing what your best team brings. Works on Highlight too.
 - **Exhaustive search** (switch) *(Score goal only)*: Slower; checks every combination in the first stage.

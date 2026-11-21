@@ -117,6 +117,8 @@ def judged_opts(
                 bool(cfg.song_auto),
                 cfg.run_state.combo,
                 levels,
+                # a Multi run's fever weight; absent on a solo run, so its key is unchanged
+                *([cfg.fever_weight] if getattr(cfg, "fever_weight", 0.0) else []),
             ],
             default=str,
         ),

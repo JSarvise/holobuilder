@@ -28,8 +28,10 @@ const tsBasis = S => {
   }
   return S.maxpoints ? "account-max" : "account";
 };
+// Multi Live (FEVER) is a Score-goal option: no other goal's request carries it
+const multiOn = S => S.goal === "score" && !!S.multi;
 function optsKey(S) {
-  return JSON.stringify([S.song, S.difficulty, S.cards, S.boards, S.maxpoints, S.infmats, S.pool, S.platform, S.auto, S.exact,
+  return JSON.stringify([S.song, S.difficulty, S.cards, S.boards, S.maxpoints, S.infmats, S.pool, S.platform, S.auto, multiOn(S), S.exact,
     S.cards === "whatif" ? [S.alevel, S.abloom, S.aspt, !!S.keephigher] : 0, S.maxresets, S.resetgain,
     S.allinvited, S.norefund, S.branches, JSON.stringify(S.targets), S.lvmode === "range" ? [S.lvlo, S.lvhi] : 0, S.lmember, S.loutfit, S.nooverlap, S.require, S.exclude]);
 }
@@ -93,7 +95,7 @@ function odBody(S) {
   // how the run is played: Platform and Auto must reach the on-demand search, or every
   // request is scored as a manual run on mobile
   const b = { song: S.song, basis: tsBasis(S) || "account", difficulty: S.difficulty, platform: S.platform,
-    auto: !!S.auto, ...leaderOpts(S) };
+    auto: !!S.auto, multi: multiOn(S), ...leaderOpts(S) };
   if (a) b.assumptions = a;
   if (!S.song && S.lvmode === "range") b.levels = [+S.lvlo, +S.lvhi];
   if (S.require.length) b.require = S.require;
@@ -166,13 +168,14 @@ async function searchNow(ctx, key) {
         key: teamKey(r.leader, r.members), source: "cached", od: true, route: "the search", api: "/api/search", boards,
         leader: r.leader, leaderName: r.leader_name, members: r.member_order || r.members, ordered: !!r.member_order,
         expected: r.best, kind: doc.scope === "general" ? "across" : "song", sings: r.sings, status: r.status, refinedLeaf: r.refined,
-        p10: r.p10, p50: r.p50, p90: r.p90, max: r.song_max ?? null,
+        p10: r.p10, p50: r.p50, p90: r.p90, max: r.song_max ?? null, multi: !!(doc.play && doc.play.multi),
       }));
       cache = { url, doc, rows, cards: ctx.D.cards, cached: true };
       sel = 0; open = new Set([0]);
       remember(ctx);
-      // the search's best teams for the Versus page in this tab (vs-app.js optimizerBest)
-      stash("best", ctx, { song: ctx.S.song || "", difficulty: ctx.S.difficulty, cards: ctx.S.cards,
+      // the search's best teams for the Versus page in this tab (vs-app.js optimizerBest); a Multi
+      // search's values are MULTI SCORE contributions, not the scores Versus compares
+      if (!multiOn(ctx.S)) stash("best", ctx, { song: ctx.S.song || "", difficulty: ctx.S.difficulty, cards: ctx.S.cards,
         rows: (doc.ranking || []).slice(0, 20).map(r => ({ leader: r.leader, leader_name: r.leader_name,
           members: r.member_order || r.members, best: r.best })) });
       render(ctx, cache);
@@ -360,8 +363,8 @@ function runLine(res, S) {
 }
 const lineup = (T, cardOf) => [{ c: cardOf(T.leader) || { id: T.leader, member: T.leader }, slot: 0, lead: true },
   ...T.members.map((id, k) => ({ c: cardOf(id) || { id, member: id }, slot: T.ordered ? k + 1 : 0, lead: false }))];
-const scoreLabel = T => T.od ? "Expected Score" : T.source === "cached" ? "Score (cached search)" : T.boards === "current" ? "Score" : T.kind === "song" ? "Expected Score" : T.kind === "across" ? "Average score" : "Unit Score";
-const scoreNote = T => T.boards === "current" ? "expected_cur" : T.kind === "song" ? "expected" : T.kind === "across" ? "across" : "unitscore";
+const scoreLabel = T => T.multi ? "MULTI SCORE contribution" : T.od ? "Expected Score" : T.source === "cached" ? "Score (cached search)" : T.boards === "current" ? "Score" : T.kind === "song" ? "Expected Score" : T.kind === "across" ? "Average score" : "Unit Score";
+const scoreNote = T => T.multi ? "multi" : T.boards === "current" ? "expected_cur" : T.kind === "song" ? "expected" : T.kind === "across" ? "across" : "unitscore";
 
 function perf({ c, slot, lead }, k) {
   return `<figure class="o-perf" style="--i:${k}" ${cardHook(c)}>
@@ -418,6 +421,9 @@ function block(ctxT, T, i) {
   const law = !general && f && f.distribution && f.distribution.available !== false ? f.distribution : null;
   const q = T.p10 != null && T.p90 != null ? T : law && law.p10 != null ? law : null;
   const spread = q ? `p10 ${fmt(q.p10)} · p50 ${fmt(q.p50)} · p90 ${fmt(q.p90)}` : "";
+  // a Multi row: the hero is score + 1.5 x fever; its split at the row's own order and board
+  const feverLine = T.multi && f && f.solo != null
+    ? `without FEVER <b class="num">${fmt(f.solo)}</b><br>` : "";
   // the expected score is never graded: the one grade of the view is the Unit Score below
   const head = `<div class="o-thead">
       <div class="o-who"><span class="rk-n">${i + 1}</span><h2>${esc(L.member || T.leader)} <small>leads${L.costume_name ? " · " + esc(L.costume_name) : ""}</small></h2></div>
@@ -428,7 +434,7 @@ function block(ctxT, T, i) {
       </div>
     </div>`;
   const tiles = `<div class="o-tiles">
-      <div class="stat-tile prime"><div><span class="lbl">${scoreLabel(T)} ${info(scoreNote(T))}</span>${score(T.expected)}<small>${spread}${spread && delta ? " · " : ""}${delta}</small></div></div>
+      <div class="stat-tile prime"><div><span class="lbl">${scoreLabel(T)} ${info(scoreNote(T))}</span>${score(T.expected)}<small>${feverLine}${spread}${spread && delta ? " · " : ""}${delta}</small></div></div>
       <div class="o-sidetiles">${side.join("")}</div>
     </div>`;
   // the slot order is the detail's (the row's own board); a general row has none: it differs per song
@@ -500,20 +506,22 @@ async function resetPrice(ctxT, T, i) {
 function fromCompare(d, route, api = "/api/compare") {
   const t = d.teams[0], s = t.score || {};
   return { route, api, value: s.song_est ?? s.across_mean ?? s.unit_score, song_max: s.song_max ?? null, member_order: s.member_order || null,
+    solo: s.song_est_solo ?? null, fever: s.fever_score ?? null,
     deck_power: s.deck_power ?? null, deck_power_basis: s.deck_power_basis, panel: t.panel, score_bonus: t.score_bonus,
     distribution: t.distribution || null, board_state: t.board_state, unit_off: s.unit_score_board_off };
 }
 /* how the run is played, as the search was asked: a detail scored otherwise is not the row's */
-function playOf(S) { return { platform: S.platform, auto: !!S.auto }; }
+function playOf(S) { return { platform: S.platform, auto: !!S.auto, multi: multiOn(S) }; }
 
 /* one detail's figures from /api/row-detail */
 function fromRowDetail(d) {
   return { route: "the team's own board", api: "/api/row-detail", value: d.song_est, song_max: d.song_max, member_order: d.member_order, deck_power: d.deck_power,
+    solo: d.song_est_solo ?? null, fever: d.fever_score ?? null,
     deck_power_basis: d.deck_power_basis, panel: d.panel, score_bonus: d.score_bonus, distribution: d.distribution || null,
     board_state: d.board_state, bench_sockets: d.bench_sockets || null, bench_slots: d.bench_slots || null, unit_off: null };
 }
 function baseOf(S) {
-  const b = { basis: basisOf(S), song: S.song, across: !S.song, platform: S.platform, uptime_model: "finite", auto: !!S.auto,
+  const b = { basis: basisOf(S), song: S.song, across: !S.song, platform: S.platform, uptime_model: "finite", auto: !!S.auto, multi: multiOn(S),
     assume_level: S.cards === "whatif" ? S.alevel : null, assume_bloom: S.cards === "whatif" ? S.abloom : null, difficulty: S.difficulty };
   if (S.maxpoints) b.budget = "max";
   return b;

@@ -8,7 +8,7 @@
 
 Find the best teams for every song, plan your Holomem Boards and follow the event rankings.
 
-[**Download for Windows**](../../releases/latest) · [**Run it from source**](docs/run-locally.md)
+[**Download holobuilder-setup.exe**](../../releases/latest/download/holobuilder-setup.exe) · [**Run it from source**](docs/run-locally.md)
 
 <br>
 
@@ -56,7 +56,7 @@ model, formula by formula: [How a team is scored](docs/score-model.md).
 
 In both cases the optimizer runs on your PC and your account is read straight from the game.
 
-**The app:** download `holobuilder-setup.exe` from [Releases](../../releases/latest), sign in with
+**The app:** download [`holobuilder-setup.exe`](../../releases/latest/download/holobuilder-setup.exe) (the [latest release](../../releases/latest)), sign in with
 Google and wait for approval; the installer does the rest. See [Getting started](docs/getting-started.md).
 
 **From source:** you need the game installed and started once, Python 3.12 or newer (3.15 and

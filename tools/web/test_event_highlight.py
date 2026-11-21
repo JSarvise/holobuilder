@@ -91,7 +91,9 @@ def test_body_takes_highlight(song):
 
 
 def test_body_refuses_event_song_score_with_highlight():
-    with pytest.raises(em.EventRequestError, match="Event Points only"):
+    with pytest.raises(
+        em.EventRequestError, match="Highlight ranks by Event Points, or by the MULTI SCORE contribution"
+    ):
         em.parse_event_body({"song": "highlight", "objective": "event_song"})
 
 
