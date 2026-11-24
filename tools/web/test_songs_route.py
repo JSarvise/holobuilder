@@ -212,3 +212,33 @@ def test_absent_music_master_degrades_to_filters_available_false(web_base, monke
         assert any(s["singer_type"] for s in before["songs"]), (
             "un-patched fetch carried no singer_type at all -- the degradation test cannot discriminate"
         )
+
+
+@pytest.mark.skipif(not config.CHARTS_ALL_PATH.is_file(), reason="dumps/ is gitignored")
+def test_a_level_cap_lists_each_song_at_its_hardest_chart_within_it(web_base):
+    """`?max_level=N`: one row per song, at the chart a player who clears up to N plays
+    (its hardest within N, `songs.chart_picks`); a cap that leaves every song at its Expert
+    chart is no cap (`max_level` null, the Expert list)."""
+    from hbweb import songs
+
+    with urllib.request.urlopen(f"{web_base}/api/songs?max_level=25", timeout=30) as response:
+        capped = json.loads(response.read().decode("utf-8"))
+    assert capped["max_level"] == 25
+    picks = songs.chart_picks(25)
+    rows = capped["songs"]
+    assert len({r["music_id"] for r in rows}) == len(rows) == len(picks)
+    assert all(r["difficulty"] == picks[r["music_id"]] and r["difficulty_level"] <= 25 for r in rows)
+    assert {r["difficulty"] for r in rows} > {"EXPERT"}, "level 25 sends some songs to their Hard"
+    with urllib.request.urlopen(f"{web_base}/api/songs?max_level=40", timeout=30) as response:
+        anylevel = json.loads(response.read().decode("utf-8"))
+    assert anylevel["max_level"] is None
+    assert {r["difficulty"] for r in anylevel["songs"]} == {"EXPERT"}
+
+
+def test_a_bad_level_cap_is_a_400(web_base):
+    import urllib.error
+
+    for bad in ("x", "0", "2.5"):
+        with pytest.raises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(f"{web_base}/api/songs?max_level={bad}", timeout=30)
+        assert err.value.code == 400

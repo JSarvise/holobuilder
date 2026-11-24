@@ -156,3 +156,19 @@ def test_the_multi_room_divisor_follows_the_event_kind():
         mar.event_points(1_469_887, 1110, boosts=3, length_permil=1310, holopass=True, multi_score=5_143_567)
         == 38_043
     )
+
+
+def test_highlight_weights_give_the_event_songs_half_the_draw_equally():
+    """The event songs share half the draw equally and the other songs the rest equally; a
+    pool with no event song or nothing but event songs is the uniform draw (None)."""
+    from hbuilder.domain import marathon as mar
+
+    w = mar.highlight_weights([True, False, False, False])
+    assert w == [0.5, 0.5 / 3, 0.5 / 3, 0.5 / 3]
+    w = mar.highlight_weights([False, True, True, False, False, False, False])
+    assert w[1] == w[2] == 0.25 and w[0] == w[3] == 0.5 / 5
+    assert sum(w) == pytest.approx(1.0)
+    assert mar.highlight_weights([False, False]) is None
+    assert mar.highlight_weights([True, True]) is None
+    assert mar.highlight_weights([]) is None
+    assert mar.highlight_weights([True, False], 0.75) == [0.75, 0.25]

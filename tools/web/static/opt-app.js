@@ -35,13 +35,13 @@ S.chapter = "";
 if (S.cards === "maxed-account") S.cards = "maxed";
 // boards planned by default; "Optimize Holomem Boards" off = the account's boards as they are
 if (S.boards !== "current") S.boards = "develop";
-{ // deep links: /optimizer?goal=event_points&song=m0342&difficulty=EXPERT&boosts=3&holopass=1[&event=<chapter key>]
+{ // deep links: /optimizer?goal=event_points&song=m0342&level=27&boosts=3&holopass=1[&event=<chapter key>]
   const q = new URLSearchParams(location.search);
   if (["score", "event_points", "event_song", "rating"].includes(q.get("goal"))) S.goal = q.get("goal");
   if (S.goal === "event_points" || S.goal === "event_song") S.evgoal = S.goal;
   if (q.has("holomem")) S.rholomem = q.get("holomem") || "";
   if (q.has("song")) S.song = q.get("song") || "";
-  if (q.has("difficulty")) S.difficulty = String(q.get("difficulty")).toUpperCase();
+  if (q.has("level")) S.rlevel = Math.max(1, Math.min(40, Math.round(+q.get("level") || 30)));
   if (q.has("boosts")) S.boosts = Math.max(1, Math.min(10, +q.get("boosts") || 3));
   if (q.has("holopass")) S.holopass = q.get("holopass") !== "0";
   if (q.has("event")) S.chapter = q.get("event") || "";
@@ -63,9 +63,9 @@ function save() {
   const q = new URLSearchParams();
   q.set("goal", S.goal);
   if (S.song) q.set("song", S.song);
-  if (S.difficulty !== "EXPERT") q.set("difficulty", S.difficulty);
+  if (S.rlevel !== 30) q.set("level", S.rlevel);
   if (isEvent()) { q.set("boosts", S.boosts); if (S.goal === "event_points") q.set("holopass", S.holopass ? "1" : "0"); if (S.chapter) q.set("event", S.chapter); }
-  if (isRating()) { q.delete("song"); q.delete("difficulty"); if (S.rholomem) q.set("holomem", S.rholomem); }
+  if (isRating()) { q.delete("song"); if (S.rholomem) q.set("holomem", S.rholomem); }
   history.replaceState(null, "", "/optimizer?" + q.toString());
 }
 const isEvent = () => S.goal === "event_points" || S.goal === "event_song";
@@ -151,7 +151,7 @@ function showSong() {
     const hp = highlightPool(D);
     const tip = hp.pool.map(s => s.title).join(" · ");
     byId("singer").innerHTML = [
-      `<span class="diff ${S.difficulty.toLowerCase()}">${esc(diff)}</span>`,
+      D.capped ? `<span>Each song at its hardest chart up to level <span class="num">${D.capped}</span></span>` : `<span class="diff ${S.difficulty.toLowerCase()}">${esc(diff)}</span>`,
       chapterNote(),
       `<span title="${esc(tip)}"><span class="num">${fmt(hp.pool.length)}</span> songs of the event holomems</span>`,
       `<span>Highlight Bonus <span class="num">+${hlPct(S.boosts)}%</span> instead of the song length bonus</span>`].join("");
@@ -182,6 +182,7 @@ function showSong() {
     byId("songtitle").textContent = "Every song";
     byId("singer").innerHTML = S.goal === "score" && S.lvmode === "range"
       ? `<span>Average over every chart of level ${S.lvlo}–${S.lvhi}, any difficulty</span>`
+      : D.capped ? `<span>Average over every song at its hardest chart up to level ${D.capped}</span><span><span class="num">${fmt(D.songs.length)}</span> charts</span>`
       : `<span>Average over every ${esc(diff)} chart</span><span><span class="num">${fmt(D.songs.length)}</span> charts</span>`;
     document.title = "Optimizer · hololive builder";
   }
@@ -379,8 +380,6 @@ function applyGoal() {
   byId("boostx").textContent = `×${AC[S.boosts - 1]} Event Pt`;
   setPressed(byId("goal"), isEvent() ? "event" : isRating() ? "rating" : "score");
   // Holomem Rating: each song is played at its own hardest chart within the level; the holomem leads
-  byId("difficulty").hidden = isRating();
-  byId("rlevelwrap").hidden = !isRating();
   byId("leadergroup").hidden = isRating();
   byId("rboardrow").hidden = S.rmode !== "one";
   byId("rteamsrow").hidden = S.rmode === "one";
@@ -407,14 +406,17 @@ async function changed(key) {
   }
   if (key === "multi" && fixHighlight()) { toast("Highlight ranks by Event Points without Multi Live: switched to Event Points."); key = "goal"; }
   save(); applyGoal();
-  if (key === "difficulty") await loadSongs();
+  if (key === "rlevel") await loadSongs();
+  if (key === "song") syncDifficulty();
   if (key === "chapter") { await loadEvent(); save(); renderChapters(); }
-  if (key === "goal" || key === "boosts" || key === "difficulty" || key === "chapter") {
+  if (key === "goal" || key === "boosts" || key === "rlevel" || key === "chapter") {
     if (isEvent()) await loadEventSongs();
     if (isEvent() && !S.song) S.song = defaultEventSong();
   }
-  if (["rholomem", "rlevel", "rowned", "rmode", "rboard", "rsort", "rsongs", "rteams"].includes(key)) { if (isRating()) { showSong(); renderFresh(); showIdle(); } return; }
-  if (["goal", "song", "difficulty", "cards", "boards", "maxpoints", "infmats", "maxresets", "resetgain", "alevel", "abloom", "aspt", "keephigher", "allinvited", "norefund", "branches", "targets", "lvmode", "lvlo", "lvhi", "boosts", "holopass", "chapter"].includes(key)) { setProv(""); showSong(); renderFresh(); showIdle(); }
+  // the song may have changed above (an event's default song): its own chart under the level
+  syncDifficulty();
+  if (["rholomem", "rowned", "rmode", "rboard", "rsort", "rsongs", "rteams"].includes(key) || (key === "rlevel" && isRating())) { if (isRating()) { showSong(); renderFresh(); showIdle(); } return; }
+  if (["goal", "song", "rlevel", "cards", "boards", "maxpoints", "infmats", "maxresets", "resetgain", "alevel", "abloom", "aspt", "keephigher", "allinvited", "norefund", "branches", "targets", "lvmode", "lvlo", "lvhi", "boosts", "holopass", "chapter"].includes(key)) { setProv(""); showSong(); renderFresh(); showIdle(); }
   else if (key === "sort" || key === "evsort" || key === "top") { renderFresh(); showIdle(true); }
   else if (isEvent()) { renderFresh(); showIdle(); }   // a leader or pinned-card change: the event answer shown no longer applies
   else renderFresh();
@@ -541,7 +543,7 @@ function openPicker() {
       const ev = isEvent() ? evSong(s.music_id) : null;
       return ev && ev.length_permil != null
         ? `<span class="evs">+${dec((ev.length_permil - 1000) / 10, 0)}% length${isEventSong(s.music_id) ? " · event song" : ""}</span>`
-        : `<span>${esc(s.singer)} · ${esc(S.difficulty)} ${s.difficulty_level ?? ""}</span>`;
+        : `<span>${esc(s.singer)} · ${esc(s.difficulty || S.difficulty)} ${s.difficulty_level ?? ""}</span>`;
     },
     onPick: key => {
       S.song = key;
@@ -590,13 +592,23 @@ document.querySelectorAll("dialog").forEach(d => {
 /* ------------------------------------------------------------------ loading */
 async function loadSongs() {
   try {
-    const doc = await getJSON(`/api/songs?difficulty=${encodeURIComponent(S.difficulty)}`);
+    // each song at its hardest chart up to the level (`songs.chart_picks`, the Holomem Rating's
+    // rule); `max_level` null: the level leaves every song at its Expert chart
+    const doc = await getJSON(`/api/songs?max_level=${encodeURIComponent(S.rlevel)}`);
     D.songs = (doc.songs || []).filter(s => s.notes != null || s.difficulty_level != null);
-  } catch (e) { D.songs = []; toast("Songs unavailable: " + e.message); }
-  if (S.song && !isHighlight(S.song) && !D.songs.some(s => s.music_id === S.song)) { toast(`No ${S.difficulty} chart for ${S.song}.`); S.song = ""; }
+    D.capped = doc.max_level ?? null;
+  } catch (e) { D.songs = []; D.capped = null; toast("Songs unavailable: " + e.message); }
+  if (S.song && !isHighlight(S.song) && !D.songs.some(s => s.music_id === S.song)) { toast(`No chart of ${S.song} up to level ${S.rlevel}.`); S.song = ""; }
+  syncDifficulty();
+}
+// the chart a song search scores on: the song's own pick under the level; Expert names the
+// nominal chart of Every song and Highlight (their charts are picked server-side, `max_level`)
+function syncDifficulty() {
+  const s = !isHighlight(S.song) && S.song ? D.songs.find(x => x.music_id === S.song) : null;
+  S.difficulty = (s && s.difficulty) || "EXPERT";
 }
 async function loadEventSongs() {
-  try { D.evsongs = (await getJSON(`/api/event/songs?boosts=${S.boosts}&difficulty=${encodeURIComponent(S.difficulty)}${S.chapter ? `&event=${encodeURIComponent(S.chapter)}` : ""}`)).songs || []; }
+  try { D.evsongs = (await getJSON(`/api/event/songs?boosts=${S.boosts}&max_level=${encodeURIComponent(S.rlevel)}${S.chapter ? `&event=${encodeURIComponent(S.chapter)}` : ""}`)).songs || []; }
   catch (_) { D.evsongs = []; }
 }
 const defaultEventSong = () => ((D.evsongs || []).find(s => s.chart_available !== false && s.length_permil != null) || {}).music_id || "";
@@ -604,7 +616,6 @@ const defaultEventSong = () => ((D.evsongs || []).find(s => s.chart_available !=
 async function init() {
   wirePopovers();
   wireCardDialog(CTX);
-  // difficulty segment from /api/meta's list
   const [meta, coll] = await Promise.all([
     getJSON("/api/meta").catch(e => ({ error: e.message })),
     getJSON("/api/collection").catch(() => ({ cards: [] })),
@@ -614,9 +625,6 @@ async function init() {
   showMaxPoints(meta);
   for (const c of coll.cards || []) D.cards.set(c.id, normCard(c));
   D.coll = { gen_labels: coll.gen_labels || {}, skill_bloom_step: coll.skill_bloom_step || {} };
-  const diffs = (meta.difficulties && meta.difficulties.available) || ["EASY", "NORMAL", "HARD", "EXPERT"];
-  if (!diffs.includes(S.difficulty)) S.difficulty = "EXPERT";
-  byId("difficulty").innerHTML = diffs.map(d => `<button type="button" data-v="${d}" aria-pressed="false">${d[0] + d.slice(1).toLowerCase()}</button>`).join("");
   byId("boosts").innerHTML = AC.map((_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("");
   byId("boosts").value = String(S.boosts);
   byId("boosts").onchange = e => { S.boosts = +e.target.value; changed("boosts"); };
@@ -635,7 +643,6 @@ async function init() {
     const b = e.target.closest("button[data-v]"); if (!b || b.dataset.v === S.goal) return;
     S.goal = S.evgoal = b.dataset.v; changed("goal");
   });
-  bindSeg("difficulty", "difficulty");
   bindSeg("cards", "cards"); bindSeg("sort", "sort");
   bindSeg("holopass", "holopass", v => v === "1");
   wireMore(); fillLeaders(); prunePins();
@@ -648,6 +655,7 @@ async function init() {
     S.chapter = b.dataset.chapter; changed("chapter");
   });
   if (isEvent()) { await loadEventSongs(); if (!S.song) S.song = defaultEventSong(); }
+  syncDifficulty();
   save(); applyGoal(); showSong(); renderFresh(); showIdle();
   if (meta.refresh_running) watchRefresh();
 }

@@ -241,6 +241,28 @@ def multi_points_fever_weight(divisor: int) -> float:
     return FEVER_BONUS_COEFFICIENT * 15_000 / (int(divisor) + 15_000)
 
 
+# Highlight's draw: the chapter's event songs come up far more often than the rest of the pool
+# (the client does not show the weights). They are taken to share HIGHLIGHT_EVENT_SHARE of the
+# draws equally, and the other songs of the pool the rest, equally.
+HIGHLIGHT_EVENT_SHARE = 0.5
+
+
+def highlight_weights(
+    event_flags: Sequence[bool], event_share: float = HIGHLIGHT_EVENT_SHARE
+) -> list[float] | None:
+    """Each song's chance in a Highlight draw, in order, adding up to 1: the songs flagged as
+    the chapter's event songs share `event_share` equally, the others the rest equally. None
+    when that is the uniform draw (no event song, or nothing but event songs): the plain mean.
+
+    Applied to any subset of a pool (a sample), the two groups keep their shares: the
+    weighted mean over a sample estimates the pool's."""
+    flags = [bool(f) for f in event_flags]
+    events = sum(flags)
+    if events == 0 or events == len(flags):
+        return None
+    return [event_share / events if f else (1.0 - event_share) / (len(flags) - events) for f in flags]
+
+
 def event_objective(
     score: float,
     *,

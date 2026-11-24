@@ -2,6 +2,10 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.20 (2026-11-24)
+- **Highlight draws the event song more often.** The chapter's event songs now take half of the draw between them, and the rest of the pool shares the other half equally (before, every song was equally likely). The search, the "whole pool" mean and the per-song chart use the same draw; the pool list shows each song's chance. A pool with no event song, or only event songs, is still drawn evenly.
+- **"Up to level" replaces Easy / Normal / Hard / Expert.** Pick the hardest level you clear, as on the Member leaderboard: each song is played at its hardest chart at or below that level (with 25, a song whose Expert is 28 is played on its Hard, and an Expert 25 stays Expert). It applies to one song, to Every song and to Highlight, where each pool song uses its own chart. At 30 / Any every song stays on Expert, as before.
+
 ## 0.2.19 (2026-11-21)
 - **Event Points with Multi Live (FEVER): the Event Pt shown are a solo Live's.** Teams are still ranked for a multi Live whose fever succeeds, but the big number is now what the team earns on its own score without FEVER, as without the switch: the room's MULTI SCORE depends on who you play with, so the Multi Live Event Pt calculator is back under it to work out a real room's points. Each team still shows its MULTI SCORE contribution and its score without FEVER.
 - **Run it from source:** the *Source code* files on the Releases page are an old snapshot; clone the repository or use the green *Code* button's ZIP.

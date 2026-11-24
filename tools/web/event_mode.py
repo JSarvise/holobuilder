@@ -95,8 +95,10 @@ EP_SCORE_NOTE = (
 # character-only live rows), group songs included. Its L is the length formula's for a
 # HIGHLIGHT_SECONDS song whatever is drawn: +54 % at 1 boost, +50 % at 2-3, +42 % at 4+ (result
 # screens show "Highlight Bonus +42%"). The bonus is rounded to a whole percent, so 169 s and
-# 170 s give the same L. The draw is taken as uniform over the pool (the client does not show
-# the weights), so a team's expected score is the mean of its score over the pool's charts.
+# 170 s give the same L. The draw favours the chapter's event songs (the client does not show
+# the weights): they are taken to share half the draws and the rest of the pool the other
+# half (`marathon.highlight_weights`), so a team's expected score is that weighted mean of its
+# score over the pool's charts.
 HIGHLIGHT = "highlight"
 HIGHLIGHT_SECONDS = 170
 # Highlight on a sample (the Score search's In general recipe; the default, opts["hl_sample"]
@@ -107,8 +109,10 @@ HIGHLIGHT_SECONDS = 170
 HIGHLIGHT_SAMPLE = 6
 HIGHLIGHT_RESCORE = 200
 HIGHLIGHT_NOTES = (
-    "Highlight: a random whole song of the event holomems' songs (a uniform draw is "
-    "assumed); each team is ranked by the MEAN of its score over every chart of the pool, "
+    "Highlight: a random whole song of the event holomems' songs; the chapter's event songs "
+    "are taken to come up half the time (sharing it equally) and the other songs of the pool "
+    "the other half, equally (a pool of event songs only, or with none, is drawn uniformly); "
+    "each team is ranked by that weighted MEAN of its score over every chart of the pool, "
     "and its length bonus is a 170 s song's whatever song is drawn (+54 % at 1 boost, +50 % at "
     "2-3, +42 % at 4+; seen in game at 3, 4 and 10 boosts, 1 boost from a player's report).",
     "Highlight: no Event Song Score bonus is counted (P = 0, assumed: the pick is not the "
@@ -129,6 +133,23 @@ def event_holomems(event: mar.MarathonEvent) -> list[str]:
     return out
 
 
+def _bonus_songs(event: mar.MarathonEvent) -> list[str]:
+    """The songs the chapter's song-score bonus rows name, in row order."""
+    out: list[str] = []
+    for row in event.rows_for(mar.MUSIC_CHANNEL):
+        if row.music_id and row.music_id not in out:
+            out.append(row.music_id)
+    return out
+
+
+def chapter_songs(raw: Mapping, event: mar.MarathonEvent) -> list[str]:
+    """Every song of the chapter, as the server lists them (`marathon_bonus.py`'s
+    `event_songs`; a song without a song-score bonus row still earns Event Pt), then any
+    song a bonus row names that the list lacks."""
+    listed = [str(m) for m in (raw.get("event_songs") or {}).get(event.name) or ()]
+    return listed + [m for m in _bonus_songs(event) if m not in listed]
+
+
 def highlight_pool(
     holomems: Sequence[str], music_rows: Sequence[Mapping], charted: Sequence[str] | set | None = None
 ) -> tuple[list[str], list[str]]:
@@ -147,15 +168,47 @@ def highlight_pool(
 
 
 def highlight_context(
-    ctx: RefineContext, library: Iterable[SongChart], pool_ids: Sequence[str]
+    ctx: RefineContext,
+    library: Iterable[SongChart],
+    pool_ids: Sequence[str],
+    event_songs: Iterable[str] = (),
 ) -> tuple[RefineContext, tuple[SongChart, ...], list[str]]:
     """`(ctx, pool charts, lost ids)`: the leaf context scoring every chart of the pool and
-    only those, a board per chart (a batch with no `chart_indices` is then the MEAN over
-    them, `RefinePool.batch_score`). `lost`: pool songs `library` has no chart for."""
+    only those, a board per chart (a batch with no `chart_indices` is then the draw's MEAN
+    over them, `RefinePool.batch_score`: the chapter's `event_songs` weighted as
+    `highlight_weights` says). `lost`: pool songs `library` has no chart for."""
     by_music = {c.music_id: c for c in library}
     charts = tuple(by_music[m] for m in pool_ids if m in by_music)
     lost = [m for m in pool_ids if m not in by_music]
-    return dataclasses.replace(ctx, charts=charts, board_per_chart=True), charts, lost
+    events = set(event_songs)
+    flags = tuple(c.music_id in events for c in charts)
+    draw = (mar.HIGHLIGHT_EVENT_SHARE, flags) if mar.highlight_weights(flags) is not None else None
+    return dataclasses.replace(ctx, charts=charts, board_per_chart=True, chart_draw=draw), charts, lost
+
+
+def highlight_sample(charts: Sequence[SongChart], event_songs: Iterable[str], count: int) -> list[SongChart]:
+    """The `count` charts a Highlight search ranks on (`two_stage.chart_sample`): with the
+    draw weighted (`highlight_weights`), each group gets the slots of its share (at least one
+    each), so the sample's weighted mean stands for the pool's; otherwise one plain sample."""
+    import two_stage  # noqa: PLC0415
+
+    events = set(event_songs)
+    flags = [c.music_id in events for c in charts]
+    if mar.highlight_weights(flags) is None:
+        return two_stage.chart_sample(charts, count)
+    ev = [c for c, f in zip(charts, flags) if f]
+    rest = [c for c, f in zip(charts, flags) if not f]
+    k = min(len(ev), max(1, min(count - 1, round(count * mar.HIGHLIGHT_EVENT_SHARE))))
+    picked = {id(c) for c in two_stage.chart_sample(ev, k) + two_stage.chart_sample(rest, count - k)}
+    return [c for c in charts if id(c) in picked]
+
+
+def pool_weights(pool_ids: Sequence[str], event_songs: Iterable[str]) -> list[float]:
+    """Each pool song's chance in the draw, in order (`highlight_weights`; uniform when it
+    gives None)."""
+    events = set(event_songs)
+    w = mar.highlight_weights([m in events for m in pool_ids])
+    return w if w is not None else [1.0 / len(pool_ids)] * len(pool_ids) if pool_ids else []
 
 
 class EventRequestError(ValueError):
@@ -433,14 +486,8 @@ def event_payload(
     blooms = {k: (v or {}).get("bloom") for k, v in collection.items()}
     live_rows = event.rows_for(mar.LIVE_CHANNEL)
     music = event.rows_for(mar.MUSIC_CHANNEL)
-    song_ids: list[str] = []
-    for row in music:
-        if row.music_id and row.music_id not in song_ids:
-            song_ids.append(row.music_id)
-    # every song of the chapter, as the server lists them (`marathon_bonus.py`'s
-    # `event_songs`): a song without a song-score bonus row still earns Event Pt
-    listed = list((raw.get("event_songs") or {}).get(event.name) or ())
-    listed += [m for m in song_ids if m not in listed]
+    song_ids = _bonus_songs(event)
+    listed = chapter_songs(raw, event)
 
     def permils(card_id: str) -> tuple[int, dict[str, int]]:
         card = cards_by_id.get(card_id)
@@ -668,8 +715,10 @@ def songs_payload(
     charted: Mapping[str, int] | None,
     singers: Mapping[str, str] | None = None,
     difficulty: str = "EXPERT",
+    picks: Mapping[str, str] | None = None,
 ) -> dict:
-    """Songs ranked by the L estimate (team-independent), longest bonus first."""
+    """Songs ranked by the L estimate (team-independent), longest bonus first. `picks`
+    (`{music id: difficulty}`, a level cap's): each song's own chart, `charted` its notes."""
     event_songs: dict[str, list[str]] = {}
     if event is not None:
         for row in event.rows_for(mar.MUSIC_CHANNEL):
@@ -692,7 +741,11 @@ def songs_payload(
         if seconds is not None and int(seconds) <= LENGTH_FREE_SECONDS:
             remarks.append(f"<= {LENGTH_FREE_SECONDS} s: no length bonus")
         if charted is not None and music_id not in charted:
-            remarks.append("no chart on disk at this difficulty: cannot be searched")
+            remarks.append(
+                "no chart on disk at this difficulty: cannot be searched"
+                if picks is None
+                else "every chart is above the level cap: cannot be searched"
+            )
         songs.append(
             {
                 "music_id": music_id,
@@ -704,6 +757,7 @@ def songs_payload(
                 "event_song": music_id in event_songs,
                 "event_song_cards": event_songs.get(music_id, []),
                 "chart_available": None if charted is None else music_id in charted,
+                **({"difficulty": picks.get(music_id)} if picks is not None else {}),
                 "note": "; ".join(remarks),
             }
         )
@@ -1461,6 +1515,10 @@ def run_account_search(
     highlight = is_highlight(song)
     pool_ids: list[str] = []
     pool_skipped: list[str] = []
+    # the chapter's event songs, which the Highlight draw favours (`highlight_weights`)
+    event_songs = [str(m) for m in song_info.get("event_songs") or ()]
+    # Highlight under a level cap: the hardest level the player clears (`ChartLibrary.up_to`)
+    max_level = opts.get("max_level") if highlight else None
     if highlight:
         # the pool of the chapter's holomems (`highlight_pool`); `song_info` carries the
         # music rows and the charts on disk at this difficulty (the server's reads)
@@ -1561,20 +1619,30 @@ def run_account_search(
     pool_charts: tuple = ()
     if highlight:
         # every chart of the pool in the leaf's context, a board per chart: a batch with
-        # no chart_indices scores the MEAN over them (`RefinePool.batch_score`), as the
-        # Score search's In general does (`ondemand.Engine`)
-        library = leaf_inputs.chart_library(leaf_inputs.charts_path(difficulty)).at(difficulty)
-        ctx, pool_charts, lost = highlight_context(built["ctx"], library, pool_ids)
+        # no chart_indices scores the draw's MEAN over them (`RefinePool.batch_score`), as
+        # the Score search's In general does (`ondemand.Engine`)
+        # a level cap: each pool song at its hardest chart within it (`ChartLibrary.up_to`)
+        library = (
+            leaf_inputs.chart_library(leaf_inputs.charts_path(difficulty)).at(difficulty)
+            if max_level is None
+            else leaf_inputs.chart_library(leaf_inputs.charts_path("HARD")).up_to(max_level)
+        )
+        ctx, pool_charts, lost = highlight_context(built["ctx"], library, pool_ids, event_songs)
         pool_skipped = sorted(set(pool_skipped) | set(lost))
         if not pool_charts:
-            raise KeyError(f"Highlight: no chart of the pool loads at {difficulty}")
+            raise KeyError(
+                f"Highlight: no chart of the pool loads at {difficulty}"
+                if max_level is None
+                else f"Highlight: no pool song has a chart of level {max_level} or under"
+            )
         built = dict(built, ctx=ctx)
         singers = tuple(dict.fromkeys(s for c in pool_charts for s in (c.singers or ())))
+    ctx_draw = built["ctx"].chart_draw is not None
     # Highlight on a sample: the search's charts (indices into the pool), None = every chart
     hl_sample = None
     if highlight and opts.get("hl_sample", True) and len(pool_charts) > HIGHLIGHT_SAMPLE:
         at = {id(c): k for k, c in enumerate(pool_charts)}
-        hl_sample = tuple(at[id(c)] for c in two_stage.chart_sample(pool_charts, HIGHLIGHT_SAMPLE))
+        hl_sample = tuple(at[id(c)] for c in highlight_sample(pool_charts, event_songs, HIGHLIGHT_SAMPLE))
     # the pins (`ondemand.Filters`): banned cards leave the pool, the leader filters
     # narrow the leaders, required cards are forced in, no-overlap is a legality rule
     filters = ondemand.parse_filters(opts.get("filters") or {})
@@ -1949,17 +2017,36 @@ def run_account_search(
                     "title": titles.get(c.music_id, c.music_id),
                     "singer": (song_info.get("singers") or {}).get(c.music_id, ""),
                     "notes": len(c.notes),
+                    "difficulty": c.difficulty,
+                    "level": c.difficulty_level,
+                    "event_song": c.music_id in event_songs,
+                    "weight": w,
                 }
-                for c in pool_charts
+                for c, w in zip(pool_charts, pool_weights([c.music_id for c in pool_charts], event_songs))
             ],
             "skipped": [{"music_id": m, "title": titles.get(m, m)} for m in pool_skipped],
-            "draw": "uniform (assumed)",
-            "score": "mean over the pool's charts",
+            "draw": (
+                f"the event songs {round(mar.HIGHLIGHT_EVENT_SHARE * 100)} % (equally), the rest equally (assumed)"
+                if ctx_draw
+                else "uniform (assumed)"
+            ),
+            "event_share": mar.HIGHLIGHT_EVENT_SHARE if ctx_draw else None,
+            **({"max_level": max_level} if max_level is not None else {}),
+            "score": "weighted mean over the pool's charts" if ctx_draw else "mean over the pool's charts",
         }
         highlight_notes = list(HIGHLIGHT_NOTES) + [
-            f"Highlight pool: {len(pool_charts)} songs at {difficulty}"
+            f"Highlight pool: {len(pool_charts)} songs "
             + (
-                "; skipped (no chart at this difficulty on disk): "
+                f"at {difficulty}"
+                if max_level is None
+                else f"each at its hardest chart up to level {max_level}"
+            )
+            + (
+                (
+                    "; skipped (no chart at this difficulty on disk): "
+                    if max_level is None
+                    else "; skipped (every chart above the level, or none on disk): "
+                )
                 + ", ".join(titles.get(m, m) for m in pool_skipped)
                 if pool_skipped
                 else ""
@@ -1970,7 +2057,8 @@ def run_account_search(
         ]
         if hl_sample is not None:
             highlight_notes.append(
-                f"Highlight: the search ranked by the mean over {len(hl_sample)} songs of the pool, "
+                f"Highlight: the search ranked by the {'weighted ' if ctx_draw else ''}mean over "
+                f"{len(hl_sample)} songs of the pool, "
                 f"then its best {HIGHLIGHT_RESCORE} teams were scored on all {len(pool_charts)}; the "
                 "ranking shown is that full mean (checked: the same top teams as searching every "
                 "song, in about half the time)."
@@ -2004,6 +2092,8 @@ def run_account_search(
         ),
         "song": song,
         "highlight": highlight_block,
+        # Highlight under a level cap (`ChartLibrary.up_to`); absent: every song at `difficulty`
+        **({"max_level": max_level} if max_level is not None else {}),
         "song_info": (
             {
                 "music_id": HIGHLIGHT,

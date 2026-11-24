@@ -328,6 +328,24 @@ class ChartLibrary:
             chart for _key, chart in sorted(self.charts.items()) if chart.difficulty.upper() == wanted
         )
 
+    def up_to(self, max_level: int) -> tuple[SongChart, ...]:
+        """Each song at the chart a player who clears up to `max_level` plays: its hardest
+        chart within that level (`rating.pick_chart`: the highest level, a tie going to the
+        harder difficulty), in music-id order. A song whose every chart is above it is left
+        out."""
+        from hbuilder.domain.rating import pick_chart  # noqa: PLC0415
+
+        by_song: dict[str, dict[str, SongChart]] = {}
+        for chart in self.charts.values():
+            by_song.setdefault(chart.music_id, {})[chart.difficulty.upper()] = chart
+        out = []
+        for music_id in sorted(by_song):
+            charts = by_song[music_id]
+            picked = pick_chart({d: c.difficulty_level for d, c in charts.items()}, max_level)
+            if picked is not None:
+                out.append(charts[picked])
+        return tuple(out)
+
     def select(self, music_ids: Sequence[str] | None, difficulty: str = "EXPERT") -> tuple[SongChart, ...]:
         """The charts a run is ranked on: `music_ids` at `difficulty`, in
         music-id order. `None` or empty means every song, i.e. `at()`.

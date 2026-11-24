@@ -31,7 +31,7 @@ const tsBasis = S => {
 // Multi Live (FEVER) is a Score-goal option: no other goal's request carries it
 const multiOn = S => S.goal === "score" && !!S.multi;
 function optsKey(S) {
-  return JSON.stringify([S.song, S.difficulty, S.cards, S.boards, S.maxpoints, S.infmats, S.pool, S.platform, S.auto, multiOn(S), S.exact,
+  return JSON.stringify([S.song, S.difficulty, S.song ? 0 : S.rlevel, S.cards, S.boards, S.maxpoints, S.infmats, S.pool, S.platform, S.auto, multiOn(S), S.exact,
     S.cards === "whatif" ? [S.alevel, S.abloom, S.aspt, !!S.keephigher] : 0, S.maxresets, S.resetgain,
     S.allinvited, S.norefund, S.branches, JSON.stringify(S.targets), S.lvmode === "range" ? [S.lvlo, S.lvhi] : 0, S.lmember, S.loutfit, S.nooverlap, S.require, S.exclude]);
 }
@@ -98,6 +98,8 @@ function odBody(S) {
     auto: !!S.auto, multi: multiOn(S), ...leaderOpts(S) };
   if (a) b.assumptions = a;
   if (!S.song && S.lvmode === "range") b.levels = [+S.lvlo, +S.lvhi];
+  // Every song: each song at its hardest chart up to the level (a song's own chart is S.difficulty)
+  else if (!S.song) b.max_level = S.rlevel;
   if (S.require.length) b.require = S.require;
   if (S.exclude.length) b.exclude = S.exclude;
   // Card pool "5★ only": the five members; the leader slot stays any rarity
@@ -523,6 +525,8 @@ function fromRowDetail(d) {
 function baseOf(S) {
   const b = { basis: basisOf(S), song: S.song, across: !S.song, platform: S.platform, uptime_model: "finite", auto: !!S.auto, multi: multiOn(S),
     assume_level: S.cards === "whatif" ? S.alevel : null, assume_bloom: S.cards === "whatif" ? S.abloom : null, difficulty: S.difficulty };
+  // Every song under a level cap: the charts the search averaged (each song at its pick)
+  if (!S.song && S.lvmode !== "range") b.max_level = S.rlevel;
   if (S.maxpoints) b.budget = "max";
   return b;
 }
@@ -588,7 +592,9 @@ async function perSongDetail(ctxT, T, i, det) {
   try {
     // an on-demand row carries the search's levers, as the song rows do, so an "In general"
     // search's detail does not fall back to boards and cards as they are
-    const body = { song, difficulty: S.difficulty, basis: tsBasis(S) || "account", cards, ...playOf(S),
+    // the song's own chart under the level (Every song averages each song at its pick)
+    const own = (ctxT.ctx.D.songs || []).find(s => s.music_id === song);
+    const body = { song, difficulty: (own && own.difficulty) || S.difficulty, basis: tsBasis(S) || "account", cards, ...playOf(S),
       ...(T.od ? { refine: refineOf(T.refinedLeaf), ...(assumptionsOf(S) ? { assumptions: assumptionsOf(S) } : {}) } : {}) };
     det.body = body;
     const d = await postJSON("/api/row-detail", { ...body, timeline: true });

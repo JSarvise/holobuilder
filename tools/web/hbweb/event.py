@@ -234,9 +234,12 @@ def serve_event_songs(h: Handler) -> None:
         return
     try:
         difficulty = basis.parse_difficulty({"difficulty": (query.get("difficulty") or [None])[0]})
+        # `max_level`: each song at its hardest chart up to that level (`songs.chart_picks`)
+        max_level = songs.parse_max_level({"max_level": (query.get("max_level") or [""])[0]})
     except basis.HttpError as exc:
         h.reply_json(exc.code, exc.obj)
         return
+    picks = songs.chart_picks(max_level) if max_level is not None else None
     try:
         # `event`: one chapter (a Spotlight event's chapters each have their own bonuses)
         _raw, event, _keys = event_mode.load_event_bundle(
@@ -253,8 +256,9 @@ def serve_event_songs(h: Handler) -> None:
             singers=singers,
             boosts=boosts,
             event=event,
-            charted=songs.chart_note_counts(difficulty),
+            charted=songs.chart_note_counts(difficulty) if picks is None else songs.picked_note_counts(picks),
             difficulty=difficulty,
+            picks=picks,
         ),
     )
 
@@ -290,6 +294,9 @@ def start_event_run(h: Handler) -> None:
         opts["difficulty"] = basis.parse_difficulty(
             body, "" if event_mode.is_highlight(opts["song"]) else opts["song"]
         )
+        # Highlight: the hardest level the player clears, each pool song at its hardest chart
+        # within it (`songs.chart_picks`); one song's chart is the page's own pick (`difficulty`)
+        opts["max_level"] = songs.parse_max_level(body) if event_mode.is_highlight(opts["song"]) else None
     except event_mode.EventRequestError as exc:
         h.reply_json(400, {"error": str(exc)})
         return

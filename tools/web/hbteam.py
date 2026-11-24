@@ -72,6 +72,8 @@ REQUEST_KEYS = (
     "multi",
     "fever_weight",
     "pool",
+    "pool_event",
+    "max_level",
     "shared_board",
 )
 # Detail fields a file does not carry: the timeline is drawn from the rest and is large.

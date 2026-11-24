@@ -102,6 +102,13 @@ def start_search(h: Handler) -> None:
             h.reply_json(400, {"error": "levels need no song (In general) and 1 <= lowest <= highest <= 40"})
             return
         levels = (lo, hi)
+    # the hardest level the player clears: In general on each song's hardest chart within it
+    # (`songs.chart_picks`); a song search's chart is the page's own pick (`difficulty`)
+    try:
+        max_level = None if song or levels else songs.parse_max_level(body)
+    except basis.HttpError as exc:
+        h.reply_json(exc.code, exc.obj)
+        return
     opts = {
         "song": song,
         "basis": basis_name,
@@ -110,6 +117,7 @@ def start_search(h: Handler) -> None:
         "filters": ondemand.parse_filters(body),
         "assumptions": assumptions,
         "levels": levels,
+        "max_level": max_level,
         "play": ondemand.parse_play(body),
     }
     job = jobs.launch(jobs.run_search_job, opts, "search")
@@ -148,6 +156,12 @@ def row_request(body: Mapping) -> dict:
         except (TypeError, ValueError) as exc:
             raise basis.HttpError(400, {"error": f"assumptions: {exc}"}) from None
     pool = [str(s) for s in body.get("pool") or [] if s] if isinstance(body.get("pool"), list) else []
+    # the pool's songs the Highlight draw favours (the chapter's event songs)
+    pool_event = (
+        [str(s) for s in body.get("pool_event") or [] if s]
+        if isinstance(body.get("pool_event"), list)
+        else []
+    )
     shared = body.get("shared_board")
     if shared is not None:
         if (
@@ -174,6 +188,9 @@ def row_request(body: Mapping) -> dict:
         "order": [str(c) for c in order] if order else None,
         "assumptions": assumptions,
         "pool": pool,
+        "pool_event": pool_event,
+        # a pool under a level cap: each song at its hardest chart within it
+        "max_level": songs.parse_max_level(body) if pool else None,
         # a Holomem Rating row on ONE board for every song (the merged search's `shared_board`)
         "shared": shared,
         # the search's platform and AUTO, or the row is not its own
@@ -197,6 +214,8 @@ def row_figures(req: Mapping, body: Mapping, *, keep_law: bool = False) -> dict:
             assumptions=req["assumptions"],
             refine=req["refine"] is not False,
             play=req["play"],
+            event_songs=req.get("pool_event") or (),
+            max_level=req.get("max_level"),
         )
         out.update(
             {

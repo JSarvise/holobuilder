@@ -378,6 +378,34 @@ def test_a_multi_split_is_the_weighted_expectation_its_ceiling_and_the_solo_at_i
             assert solo < e
 
 
+@pytest.mark.parametrize("per_chart", [False, True])
+def test_a_draw_over_the_charts_makes_the_mean_its_weighted_mean(per_chart):
+    """`RefineContext.chart_draw` (a Highlight pool): the score a batch gives is the draw's
+    weighted mean of each chart's score (`marathon.highlight_weights`), over all the charts or
+    over the ones selected, where each group keeps its share; without it, the plain mean."""
+    from hbuilder.domain.marathon import highlight_weights
+
+    ctx, teams = _context()
+    library = load_charts(str(config.CHARTS_PATH))
+    others = [library.get(m) for m in sorted(library.music_ids) if m != ctx.charts[0].music_id][:2]
+    if len(others) < 2:
+        pytest.skip("fewer than three charts in the library")
+    flags = (True, False, False)
+    ctx = dataclasses.replace(
+        ctx, charts=(ctx.charts[0], *others), board_per_chart=per_chart, chart_draw=(0.5, flags)
+    )
+    with RefinePool(ctx, workers=1) as pool:
+        per = pool.batch_score_per_chart(teams[:2])
+        got = pool.batch_score(teams[:2])
+        two = pool.batch_score(teams[:2], chart_indices=[0, 2])
+    w = highlight_weights(flags)
+    for row, mean, sub in zip(per, got, two):
+        assert mean == pytest.approx(sum(x * y for x, y in zip(row, w)), rel=1e-12)
+        assert mean != pytest.approx(sum(row) / 3, rel=1e-9)
+        # the selected event chart keeps half the draw
+        assert sub == pytest.approx(0.5 * row[0] + 0.5 * row[2], rel=1e-12)
+
+
 def test_two_contexts_on_one_shared_pool_score_as_their_own_pools():
     """Two engines' contexts on ONE set of workers (`SharedPool`), batches interleaved so
     each worker switches between them: the same floats, in order, as each context alone."""

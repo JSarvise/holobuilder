@@ -38,7 +38,7 @@ function eventFilters(S) {
 // Multi Live: Event Song Score ranked by the MULTI SCORE contribution (score + 1.5 x fever),
 // Event Points by the Event Pt of a multi Live (event_mode.py, multi_points)
 const multiOn = S => (S.goal === "event_song" || S.goal === "event_points") && !!S.multi;
-const optsKey = S => JSON.stringify([S.goal, S.song, S.difficulty, S.boosts, S.goal === "event_points" ? S.holopass : 0,
+const optsKey = S => JSON.stringify([S.goal, S.song, S.difficulty, isHighlight(S.song) ? S.rlevel : 0, S.boosts, S.goal === "event_points" ? S.holopass : 0,
   S.platform, !!S.auto, eventAssumptions(S), eventFilters(S), S.chapter || "", multiOn(S)]);
 const isEP = S => S.goal === "event_points";
 
@@ -76,12 +76,18 @@ export function highlightPool(D) {
 }
 // the pool, collapsed: titles, and the songs left out for want of a chart
 const poolTitle = (hl, id) => ((hl && hl.pool || []).find(s => s.music_id === id) || {}).title || id || "";
+// a song's chance in the draw (`event_mode.pool_weights`), when the run says
+const drawPct = s => s.weight != null ? `${dec(s.weight * 100, 1)}%` : "";
 function poolHTML(hl, from) {
   const pool = (hl && hl.pool) || [], skipped = (hl && hl.skipped) || [];
   if (!pool.length && !skipped.length) return "";
-  return `<details class="o-hlpool"><summary>Highlight pool: ${pool.length} song${pool.length === 1 ? "" : "s"}${skipped.length ? ` · ${skipped.length} skipped` : ""} <small>${esc(from)}</small></summary>
-    <ul>${pool.map(s => `<li><img src="/jacket/${encodeURIComponent(s.music_id)}" alt="" loading="lazy"><span><b>${esc(s.title)}</b><small>${esc(s.singer || "")}</small></span></li>`).join("")}</ul>
-    ${skipped.length ? `<p class="o-cap">Skipped (no chart at this difficulty on disk): ${skipped.map(s => esc(s.title || s.music_id)).join(", ")}.</p>` : ""}
+  const nEv = pool.filter(s => s.event_song).length;
+  const draw = hl.event_share != null && nEv
+    ? `<p class="o-cap">Draw: the ${nEv} event song${nEv === 1 ? "" : "s"} ${Math.round(hl.event_share * 100)}% of the time, the other ${pool.length - nEv} the rest, equally (an estimate until more draws are counted).</p>` : "";
+  return `<details class="o-hlpool"><summary>Highlight pool: ${pool.length} song${pool.length === 1 ? "" : "s"}${nEv && hl.event_share != null ? ` · ${nEv} event song${nEv === 1 ? "" : "s"}` : ""}${skipped.length ? ` · ${skipped.length} skipped` : ""} <small>${esc(from)}</small></summary>
+    ${draw}
+    <ul>${pool.map(s => `<li><img src="/jacket/${encodeURIComponent(s.music_id)}" alt="" loading="lazy"><span><b>${esc(s.title)}</b><small>${esc(s.singer || "")}${hl.max_level && s.difficulty ? ` · ${esc(s.difficulty[0] + s.difficulty.slice(1).toLowerCase())} ${s.level ?? ""}` : ""}${s.event_song && hl.event_share != null ? ` · event song` : ""}${drawPct(s) ? ` · ${drawPct(s)}` : ""}</small></span></li>`).join("")}</ul>
+    ${skipped.length ? `<p class="o-cap">Skipped (no chart ${hl.max_level ? "up to the level" : "at this difficulty"} on disk): ${skipped.map(s => esc(s.title || s.music_id)).join(", ")}.</p>` : ""}
   </details>`;
 }
 
@@ -200,7 +206,9 @@ export async function runEvent(ctx, { certify = false } = {}) {
       ...(A ? { assumptions: A } : {}), ...eventFilters(S),
       // the chapter planned for, when it is not the running one (opt-app.js, S.chapter)
       ...(S.chapter ? { event: S.chapter } : {}),
-      platform: S.platform, auto: !!S.auto, multi: multiOn(S) });
+      platform: S.platform, auto: !!S.auto, multi: multiOn(S),
+      // Highlight: each pool song at its hardest chart up to the level
+      ...(isHighlight(S.song) ? { max_level: S.rlevel } : {}) });
   } catch (e) { ctx.out().innerHTML = `<div class="o-error">The event search could not start: ${esc(e.message)}</div>`; done(); return; }
   if (run !== mine) { postJSON(`/cancel/${encodeURIComponent(started.job_id)}`, {}).catch(() => {}); return; }
   run.job = started.job_id;
@@ -249,7 +257,7 @@ function render(ctx, L) {
       <div class="o-listctl" role="group" aria-label="List view">
         <button class="chip" type="button" data-diffmode aria-pressed="${diffMode}" title="Outline the cards that differ from #1">Diff vs #1</button></div>
       <div class="o-list" id="o-list">${listHTML(c)}</div>
-      <p class="o-runinfo">${esc([`Event search · ${res.basis || "account"}`, res.highlight ? `Highlight · mean over ${(res.highlight.pool || []).length} songs` : "", `${fmt(res.pool)} cards in the pool`, res.elapsed_s != null ? `${res.elapsed_s.toFixed(1)} s` : ""].filter(Boolean).join(" · "))}${window.hbExportButton ? window.hbExportButton() : ""}</p>
+      <p class="o-runinfo">${esc([`Event search · ${res.basis || "account"}`, res.highlight ? `Highlight · ${res.highlight.event_share != null ? "draw-weighted " : ""}mean over ${(res.highlight.pool || []).length} songs` : "", `${fmt(res.pool)} cards in the pool`, res.elapsed_s != null ? `${res.elapsed_s.toFixed(1)} s` : ""].filter(Boolean).join(" · "))}${window.hbExportButton ? window.hbExportButton() : ""}</p>
     </aside>
     <section class="o-sel" aria-label="Selected team"><article class="o-team" data-open="true" id="team${sel}">${block(c, rows[sel], sel)}</article></section>
   </div>`;
@@ -407,7 +415,7 @@ function block({ ctx, S, res, rows, byMax }, r, i) {
   const rmax = r.song_max ?? (own ? own.song_max : null);
   const tile = (lbl, val, small) => `<div class="stat-tile"><div><span class="lbl">${lbl}</span>${val}<small>${small || ""}</small></div></div>`;
   const pend = `<span class="o-sk" style="width:150px;height:26px;margin-top:6px"></span>`;
-  const meanOf = hl ? `mean over ${nPool} song${nPool === 1 ? "" : "s"}` : "";
+  const meanOf = hl ? `${hl.event_share != null ? "draw-weighted " : ""}mean over ${nPool} song${nPool === 1 ? "" : "s"}` : "";
   // a Multi Live row's own score at its order and board (`row_split`; a row past the served ones
   // from its detail), a Highlight row's as the mean over the pool
   const solo = r.song_est_solo ?? (!hl && det.fig ? det.fig.solo : null);
@@ -427,7 +435,7 @@ function block({ ctx, S, res, rows, byMax }, r, i) {
     ? [tile(`MULTI SCORE contribution ${info("multi")}`, r.multi_score != null ? score(r.multi_score) : `<span class="n">—</span>`, meanOf || "your part of the room's MULTI SCORE"),
       soloTile(),
       tile("Event Bonus", `<span class="n o-num eb">${pct(r.live_permil)}</span>`, "the five members")]
-    : [tile("Live score", score(r.score), hl ? `mean over ${nPool} song${nPool === 1 ? "" : "s"}` : "this team's board"),
+    : [tile("Live score", score(r.score), meanOf || "this team's board"),
       tile(ep ? "Event Bonus" : "Song Score Bonus", `<span class="n o-num eb">${pct(ep ? r.live_permil : r.song_permil)}</span>`, ep ? "the five members" : "one card is enough; no stacking")];
   // Max and Unit Score keep their slots while the row's detail fills them in (a skeleton), so the
   // grid does not move; a Highlight row's pool has no single run, so no Max
@@ -471,7 +479,7 @@ function block({ ctx, S, res, rows, byMax }, r, i) {
     ${L.costume_skill || L.costume_text ? `<span aria-hidden="true">·</span><span class="fx">${esc(outfitText(L.costume_skill, L.costume_text))}</span>` : ""}</div>` : "";
   const cert = i === 0 ? (hl ? `<div class="o-cert warn"><svg class="i s"><use href="#i-info"/></svg><span>The best team the search found, not proven best: the bound check is per song and does not run on Highlight.</span></div>` : certBlock(res, ep)) : "";
   const notes = i === 0 && !hl && (res.notes || []).length ? `<ul class="o-notes">${res.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : "";
-  const pool = i === 0 && hl ? poolHTML(hl, `at ${res.difficulty || S.difficulty}, read by the search`) : "";
+  const pool = i === 0 && hl ? poolHTML(hl, `${res.max_level ? `each at its hardest chart up to level ${res.max_level}` : `at ${res.difficulty || S.difficulty}`}, read by the search`) : "";
   const src = r.source === "replanned" ? `<p class="o-cap">Boards re-planned under your board options.</p>`
     : r.source && r.source !== "event_search" ? `<p class="o-cap">Found by the ${r.source === "bound" ? "bound check" : "score search"}.</p>` : "";
   const T = hl ? { ...detailRow(r), expected: det.fig ? det.fig.value : null, max: det.fig ? det.fig.song_max ?? null : null } : detailRow(r);
@@ -481,7 +489,7 @@ function block({ ctx, S, res, rows, byMax }, r, i) {
   const perSong = hl ? `<div class="o-sect o-persong">
       <h3><label for="hlsong${i}">On</label> <select id="hlsong${i}" data-hlsong="${i}"><option value="${HL_POOL}"${onPool ? " selected" : ""}>The whole pool</option>${(hl.pool || []).map(s => `<option value="${esc(s.music_id)}"${s.music_id === det.song ? " selected" : ""}>${esc(s.title || s.music_id)}</option>`).join("")}</select></h3>
       ${onPool ? poolSummary(r, det, nPool)
-      : `<p>This team on one song of the Highlight pool, its Holomem Board rebuilt for that song. The figures above are the mean over ${nPool} songs, each on its own board and slot order.</p>`}</div>` : "";
+      : `<p>This team on one song of the Highlight pool, its Holomem Board rebuilt for that song. The figures above are the ${hl.event_share != null ? "draw-weighted " : ""}mean over ${nPool} songs, each on its own board and slot order.</p>`}</div>` : "";
   const plan = (eventAssumptions(S) || {}).boards === "plan" ? boardPanel(T, shown, wallet, i === 0, id => ctx.D.cards.get(id) || null) : "";
   const panels = onPool
     ? `<div class="o-sect"><div class="o-duo">${unitPanel(T, shown)}${poolSongs(hl, det)}</div>${detErr}</div>` + plan
@@ -507,26 +515,31 @@ function poolSummary(r, det, n) {
 }
 /* the whole pool's card, beside the Unit Score one (a song table would be too
    tall): the score on each pool song at the one board and order, a bar per song sorted low to
-   high (each song is drawn 1 time in N), its quantiles, the mean and the spread across songs;
+   high, each as wide as its chance in the draw (the event songs come up more often), its quantiles, the mean and the spread across songs;
    the per-song list folds away. The in-song Active roll is not in it: that law is per song. */
 function poolSongs(hl, det) {
   const f = det.fig && det.fig.pool;
   if (!f) return `<div class="o-card o-pending o-reveal"><span class="o-sk" style="width:100%;height:120px"></span></div>`;
   const rows = [...f.per_song].sort((a, b) => a.score - b.score), n = rows.length;
+  // each song's chance in the draw (`row_detail.pool_detail`'s weights; 1 in n without them)
+  const w = rows.map(s => s.weight ?? 1 / n), weighted = rows.some(s => s.weight != null && Math.abs(s.weight - 1 / n) > 1e-9);
   const v = rows.map(s => s.score), lo = v[0], hi = v[n - 1], mean = f.song_est;
-  const at = q => v[Math.min(n - 1, Math.max(0, Math.round(q * (n - 1))))];
-  const sd = Math.sqrt(v.reduce((a, x) => a + (x - mean) ** 2, 0) / n);
+  // the draw's quantiles: the first song whose cumulative chance reaches q
+  const cum = []; w.reduce((a, x, k) => (cum[k] = a + x), 0);
+  const at = q => { const k = cum.findIndex(c => c >= q - 1e-9); return v[k < 0 ? n - 1 : k]; };
+  const sd = Math.sqrt(v.reduce((a, x, k) => a + w[k] * (x - mean) ** 2, 0));
   const own = f.own_order_mean ? (mean / f.own_order_mean - 1) * 100 : 0;
-  // bars from 12 % (the lowest song) to 100 % (the highest), the mean as the Expected mark
+  // bars from 12 % (the lowest song) to 100 % (the highest), each as wide as its chance
   const H = x => 12 + (hi > lo ? (x - lo) / (hi - lo) : 1) * 88;
-  const bars = rows.map((s, k) => `<i style="left:${(k / n * 100).toFixed(3)}%;width:${(100 / n).toFixed(3)}%;height:${H(s.score).toFixed(1)}%" data-tip="${esc(poolTitle(hl, s.music_id))}|${fmt(Math.round(s.score))}|${s.score >= mean ? "+" : ""}${dec((s.score / mean - 1) * 100, 1)}% vs the mean"></i>`).join("");
+  const left = k => (k ? cum[k - 1] : 0) * 100;
+  const bars = rows.map((s, k) => `<i style="left:${left(k).toFixed(3)}%;width:${(w[k] * 100).toFixed(3)}%;height:${H(s.score).toFixed(1)}%" data-tip="${esc(poolTitle(hl, s.music_id))}${weighted ? ` (${dec(w[k] * 100, 1)}% of draws)` : ""}|${fmt(Math.round(s.score))}|${s.score >= mean ? "+" : ""}${dec((s.score / mean - 1) * 100, 1)}% vs the mean"></i>`).join("");
   const q = [["Worst", lo], ["25%", at(0.25)], ["Median", at(0.5)], ["75%", at(0.75)], ["Best", hi]];
   const list = [...rows].reverse().map(s => {
     const loss = s.own_order_best > 0 ? (s.score / s.own_order_best - 1) * 100 : 0;
-    return `<tr><td>${esc(poolTitle(hl, s.music_id))}</td><td class="num">${fmt(Math.round(s.score))}</td><td class="num">${Math.abs(loss) < 0.005 ? "same" : sgn(-loss)}</td></tr>`;
+    return `<tr><td>${esc(poolTitle(hl, s.music_id))}</td>${weighted ? `<td class="num">${dec((s.weight ?? 1 / n) * 100, 1)}%</td>` : ""}<td class="num">${fmt(Math.round(s.score))}</td><td class="num">${Math.abs(loss) < 0.005 ? "same" : sgn(-loss)}</td></tr>`;
   }).join("");
   return `<div class="o-card o-reveal o-poolsongs">
-    <div class="o-sh"><h3>Score by song drawn</h3><span class="right"><span class="o-preview">each song 1 in ${n}</span></span></div>
+    <div class="o-sh"><h3>Score by song drawn</h3><span class="right"><span class="o-preview">${weighted ? "event songs drawn more often" : `each song 1 in ${n}`}</span></span></div>
     <div class="o-law" role="img" aria-label="Score on each of the ${n} pool songs, ${fmt(Math.round(lo))} to ${fmt(Math.round(hi))}">
       <div class="bars">${bars}</div>
       <div class="ax"><span>${esc(poolTitle(hl, rows[0].music_id))}</span><span>${esc(poolTitle(hl, rows[n - 1].music_id))}</span></div>
@@ -534,7 +547,7 @@ function poolSongs(hl, det) {
     <div class="o-stats o-qs">${q.map(([lab, x]) => `<div><span>${lab}</span><b>${fmt(Math.round(x))}</b></div>`).join("")}</div>
     <div class="o-stats o-s3"><div><span>Expected</span><b>${score(mean, 7)}</b></div><div title="Standard deviation of the score across the pool's songs"><span>Spread (sd)</span><b>±${fmt(Math.round(sd))}</b></div><div title="What each song's own best slot order would add on the same board"><span>Own order per song</span><b>${sgn(-own)}</b></div></div>
     <details class="o-poolall"><summary>Every song</summary>
-      <table><thead><tr><th>Song</th><th>Score</th><th>Own order</th></tr></thead><tbody>${list}</tbody></table></details>
+      <table><thead><tr><th>Song</th>${weighted ? "<th>Drawn</th>" : ""}<th>Score</th><th>Own order</th></tr></thead><tbody>${list}</tbody></table></details>
   </div>`;
 }
 // the row as the detail sections read it: the event search's live score is the Expected Score
@@ -588,13 +601,19 @@ async function songDetail(c, r, i, det) {
     // the figures first; the run distribution (~5 s more) after them
     // a Highlight row's member_order is the search's, scored over the pool: the song's own is read
     const onPool = hl && song === HL_POOL, poolIds = hl ? (c.res.highlight.pool || []).map(s => s.music_id) : [];
-    const body = { song: onPool ? poolIds[0] : song, difficulty: S.difficulty, basis: isMaxed(S) ? "maxed" : "account", cards,
+    // the songs the draw favours (the run's own weights: `event_mode.pool_weights`)
+    const poolEvent = hl && c.res.highlight.event_share != null ? (c.res.highlight.pool || []).filter(s => s.event_song).map(s => s.music_id) : [];
+    // a pool song's own chart (the search's pick under the level), the nominal Expert for the pool
+    const own = hl && !onPool ? (c.res.highlight.pool || []).find(s => s.music_id === song) : null;
+    const body = { song: onPool ? poolIds[0] : song, difficulty: (own && own.difficulty) || S.difficulty, basis: isMaxed(S) ? "maxed" : "account", cards,
       platform: S.platform, auto: !!S.auto, multi: multiOn(S),   // the search's play, or the detail is not the row's
       ...(c.res.multi_points ? { fever_weight: c.res.multi_points.fever_weight } : {}),
       refine: !!r.refined, assumptions: eventAssumptions(S) || undefined, member_order: hl ? undefined : r.member_order || undefined };
     // the whole pool: one board and one slot order for every song (`row_detail.pool_detail`)
-    det.body = onPool ? { ...body, refine: undefined, pool: poolIds } : body;
-    const d = await postJSON("/api/row-detail", onPool ? { ...body, refine: undefined, pool: poolIds } : { ...body, timeline: true, distribution: false });
+    const poolBody = { ...body, refine: undefined, pool: poolIds, ...(poolEvent.length ? { pool_event: poolEvent } : {}),
+      ...(c.res.max_level ? { max_level: c.res.max_level } : {}) };
+    det.body = onPool ? poolBody : body;
+    const d = await postJSON("/api/row-detail", onPool ? poolBody : { ...body, timeline: true, distribution: false });
     if (stale()) return;
     det.fig = { route: onPool ? "one board and one slot order for the whole pool" : "the team's own board", api: "/api/row-detail", value: d.song_est, song_max: d.song_max, member_order: d.member_order, deck_power: d.deck_power,
       solo: d.song_est_solo ?? null,

@@ -86,6 +86,26 @@ def test_at_returns_only_the_asked_difficulty_in_music_id_order():
     assert library.music_ids == ("m0001", "m0002")
 
 
+def test_up_to_plays_each_song_at_its_hardest_chart_within_the_level():
+    """A player who clears up to level 25: a song whose Expert is 26 is played at its Hard,
+    one whose Expert is 25 at its Expert; a level tie goes to the harder difficulty; a song
+    with every chart above the level is left out."""
+    library = charts_from_mapping(
+        _document(
+            a=_chart("m0001", "EXPERT", difficulty_level=26),
+            b=_chart("m0001", "HARD", difficulty_level=19),
+            c=_chart("m0002", "EXPERT", difficulty_level=25),
+            d=_chart("m0002", "HARD", difficulty_level=18),
+            e=_chart("m0003", "HARD", difficulty_level=24),
+            f=_chart("m0003", "EXPERT", difficulty_level=24),
+            g=_chart("m0004", "EXPERT", difficulty_level=28),
+        )
+    )
+    got = [(c.music_id, c.difficulty) for c in library.up_to(25)]
+    assert got == [("m0001", "HARD"), ("m0002", "EXPERT"), ("m0003", "EXPERT")]
+    assert [c.difficulty for c in library.up_to(40)] == ["EXPERT"] * 4
+
+
 # ==========================================================================
 # 2. The failures that would otherwise become a plausible wrong number
 # ==========================================================================

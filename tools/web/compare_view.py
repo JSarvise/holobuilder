@@ -199,6 +199,16 @@ def parse_teams(body: Mapping) -> list[dict]:
     return teams
 
 
+def _max_level(body: Mapping) -> int | None:
+    """The across compare's level cap (`songs.parse_max_level`), a `CompareError` on a bad one."""
+    from hbweb import songs  # noqa: PLC0415
+
+    try:
+        return songs.parse_max_level(body)
+    except basis_mod.HttpError as exc:
+        raise CompareError(exc.code, exc.obj.get("error") if isinstance(exc.obj, dict) else str(exc)) from exc  # type: ignore[arg-type]
+
+
 def parse_assumptions(body: Mapping) -> dict:
     """The SAME tokens the Optimizer's routes read, through the server's own
     parsers where one exists (`basis.parse_assume`, `basis.parse_platform`)."""
@@ -234,6 +244,8 @@ def parse_assumptions(body: Mapping) -> dict:
         "song": song,
         "difficulty": difficulty,
         "across": bool(body.get("across")) and not song,
+        # across under a level cap: each song at its hardest chart within it (`ChartLibrary.up_to`)
+        "max_level": _max_level(body) if bool(body.get("across")) and not song else None,
         "platform": basis_mod.parse_platform(body),
         "uptime_model": uptime,
         # `server` (the default) | `modelled` — see `basis.DECK_POWER_BASES`.
@@ -1012,6 +1024,10 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
                     f"(build it with tools/refresh/build_charts.py)"
                 ),
             )
+    elif A["across"] and A.get("max_level") is not None:
+        charts_file = basis_mod.charts_path("HARD")  # charts_all.json: every difficulty
+        library = load_charts(str(charts_file))
+        all_charts = list(library.up_to(A["max_level"])) if library is not None else []
     elif A["across"]:
         library = load_charts(str(charts_file))
         all_charts = [

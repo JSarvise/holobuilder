@@ -64,8 +64,7 @@
             <button type="button" data-v="rating" aria-pressed="false" title="Climb a holomem's high-score ranking">Holomem Rating</button>
           </div>
           <div class="seg o-chapters" id="chapter" role="group" aria-label="Event chapter" hidden></div>
-          <div class="seg" id="difficulty" role="group" aria-label="Difficulty"></div>
-          <label class="o-rtlv" id="rlevelwrap" hidden title="The hardest chart you Full Combo with few Greats: each song is played at its hardest chart up to this level"><span>Up to level</span><select id="rlevel" aria-label="Highest level you Full Combo"></select></label>
+          <label class="o-rtlv" id="rlevelwrap" title="The hardest level you clear: each song is played at its hardest chart up to this level (a song whose Expert is above it at its Hard, and so on)"><span>Up to level</span><select id="rlevel" aria-label="Highest level you clear"></select></label>
         </div>
         <div class="o-actions">
           <button class="btn" id="change" type="button">Change song</button>
@@ -204,7 +203,7 @@
       <h4>Song: in general</h4>
       <div class="o-sel"><span>Charts averaged</span>
         <div class="seg" id="lvmode" role="group" aria-label="Charts averaged">
-          <button type="button" data-v="expert" aria-pressed="true">Every chart at the chosen difficulty</button>
+          <button type="button" data-v="expert" aria-pressed="true">Every song, at its hardest chart up to your level</button>
           <button type="button" data-v="range" aria-pressed="false">A level range, any difficulty</button>
         </div></div>
       <div class="o-two" id="lvrow">

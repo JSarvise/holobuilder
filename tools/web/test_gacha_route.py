@@ -147,4 +147,7 @@ def test_refresh_refuses_a_second_run_while_one_is_running(web_base, monkeypatch
     held.release()
     monkeypatch.setattr(admin, "refresh", lambda h: h.reply_json(200, {"returncode": 0}))
     assert _post(web_base + "/api/refresh")[0] == 200
-    assert not held.locked()
+    # the reply goes out before the handler's `finally` releases the lock on the
+    # server's thread: wait for the release rather than race it
+    assert held.acquire(timeout=5)
+    held.release()

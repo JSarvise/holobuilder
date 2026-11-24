@@ -1023,17 +1023,27 @@ def _shared_board(
 # ---------------------------------------------------------------------------
 # a Highlight row on the WHOLE pool: one board, one slot order
 # ---------------------------------------------------------------------------
+def _pool_weights(charts: Sequence, event_songs: Sequence[str]) -> list[float]:
+    """Each chart's chance in the Highlight draw (`marathon.highlight_weights`: the chapter's
+    `event_songs` favoured), uniform when it gives None."""
+    from hbuilder.domain.marathon import highlight_weights  # noqa: PLC0415
+
+    events = set(event_songs)
+    w = highlight_weights([c.music_id in events for c in charts])
+    return w if w is not None else [1.0 / len(charts)] * len(charts)
+
+
 def _pool_multi_figures(
-    team: Team, charts: Sequence, cfg_board: ScoringConfig, order, weighted: float
+    team: Team, charts: Sequence, cfg_board: ScoringConfig, order, weighted: float, weights: Sequence[float]
 ) -> dict:
-    """`multi_figures` for a pool row: its mean over the pool split at the row's one slot
-    order and board."""
+    """`multi_figures` for a pool row: its mean over the pool (the draw's, `weights`) split at
+    the row's one slot order and board."""
     from hbuilder.domain.song_chart import FEVER_BONUS_COEFFICIENT  # noqa: PLC0415
     from hbuilder.domain.song_rank import score_team_at_order  # noqa: PLC0415
 
     weight = cfg_board.fever_weight
     cfg_plain = dataclasses.replace(cfg_board, fever_weight=0.0)
-    plain = sum(score_team_at_order(team, c, cfg_plain, order) for c in charts) / len(charts)
+    plain = sum(w * score_team_at_order(team, c, cfg_plain, order) for c, w in zip(charts, weights))
     fever = (weighted - plain) / weight
     return {
         "fever_weight": weight,
@@ -1043,23 +1053,26 @@ def _pool_multi_figures(
     }
 
 
-def _common_order(team: Team, charts: Sequence, cfg_board) -> tuple[tuple[str, ...], float, list]:
-    """The ONE slot order with the best total summed over `charts` on `cfg_board`
-    (`song_rank.score_team_orders`, the scorer's reference walk: exact), its mean, and
-    `[(music_id, total at that order, the chart's own best)]`. Ties: the first order
-    the walk reaches, as the scorer's own tie-break."""
+def _common_order(
+    team: Team, charts: Sequence, cfg_board, weights: Sequence[float]
+) -> tuple[tuple[str, ...], float, list]:
+    """The ONE slot order with the best mean over `charts` on `cfg_board`, each chart
+    weighted by its chance in the draw (`weights`, adding up to 1; `song_rank.score_team_orders`,
+    the scorer's reference walk: exact), that mean, and `[(music_id, total at that order, the
+    chart's own best)]`. Ties: the first order the walk reaches, as the scorer's own
+    tie-break."""
     from hbuilder.domain.song_rank import score_team_orders  # noqa: PLC0415
 
     per = [(c.music_id, score_team_orders(team, c, cfg_board)) for c in charts]
     sums: dict = {}
-    for _m, totals in per:
+    for (_m, totals), w in zip(per, weights):
         for order, total in totals.items():
-            sums[order] = sums.get(order, 0.0) + total
+            sums[order] = sums.get(order, 0.0) + w * total
     best = None
     for order, total in sums.items():
         if best is None or total > sums[best]:
             best = order
-    return best, sums[best] / len(charts), [(m, tot[best], max(tot.values())) for m, tot in per]  # type: ignore[return-value,index]
+    return best, sums[best], [(m, tot[best], max(tot.values())) for m, tot in per]  # type: ignore[return-value,index]
 
 
 # How many of a pool's charts the plan's valuation scores (`pool_yellow`'s `share`): every
@@ -1069,21 +1082,26 @@ def _common_order(team: Team, charts: Sequence, cfg_board) -> tuple[tuple[str, .
 POOL_PLAN_CHARTS = 6
 
 
-def pool_yellow(team: Team, charts: Sequence[SongChart], cfg_board: ScoringConfig) -> list[dict]:
+def pool_yellow(
+    team: Team, charts: Sequence[SongChart], cfg_board: ScoringConfig, event_songs: Sequence[str] = ()
+) -> list[dict]:
     """The pool's songs as the plan solver reads them (`board_plan_solver.solve_team_board`'s
     `song_pool`): `[{"music_id", "singers", "singer_type", "slope", "share"}]`, one per song.
 
     `slope`: the team's score per permil of that song's yellow bonus on `cfg_board` --
     `total / (1000 x (1 + bonus))`, the bonus multiplying every note (`score_song_detailed`'s
     `1 + board_score_rate`) -- over the pool's size, so the capped terms add up to the pool
-    MEAN the view ranks by (`_pool_yellow_terms`); 0 for a song without a cast.
+    MEAN the view ranks by (`_pool_yellow_terms`), weighted by the song's chance in the draw
+    (`_pool_weights`: the chapter's `event_songs` favoured); 0 for a song without a cast.
 
     `share`: the song's part in the mean the plan values every other node on
-    (`pool_shares`): 1 / n over the n charts the valuation scores (`POOL_PLAN_CHARTS`), 0
-    for the rest of a larger pool."""
-    import two_stage  # noqa: PLC0415
+    (`pool_shares`): its weight in the draw over the charts the valuation scores
+    (`POOL_PLAN_CHARTS`, `event_mode.highlight_sample`), 0 for the rest of a larger pool."""
+    import event_mode  # noqa: PLC0415
 
-    scored = {id(c) for c in two_stage.chart_sample(charts, POOL_PLAN_CHARTS)}
+    sample = event_mode.highlight_sample(charts, event_songs, POOL_PLAN_CHARTS)
+    scored = {id(c): w for c, w in zip(sample, _pool_weights(sample, event_songs))}
+    weight = {id(c): w for c, w in zip(charts, _pool_weights(charts, event_songs))}
     out = []
     for c in sorted(charts, key=lambda c: c.music_id):
         slope = 0.0
@@ -1094,14 +1112,14 @@ def pool_yellow(team: Team, charts: Sequence[SongChart], cfg_board: ScoringConfi
                 if cfg_board.board is not None
                 else 0.0
             )
-            slope = total / (1000.0 * (1.0 + rate)) / len(charts)
+            slope = total / (1000.0 * (1.0 + rate)) * weight[id(c)]
         out.append(
             {
                 "music_id": c.music_id,
                 "singers": sorted(c.singers or ()),
                 "singer_type": c.singer_type or "",
                 "slope": slope,
-                "share": 1.0 / len(scored) if id(c) in scored else 0.0,
+                "share": scored.get(id(c), 0.0),
             }
         )
     return out
@@ -1197,6 +1215,8 @@ def pool_detail(
     assumptions: Assumptions | None = None,
     refine: bool = True,
     play: tuple[str, bool] | None = None,
+    event_songs: Sequence[str] = (),
+    max_level: int | None = None,
 ) -> dict:
     """The Highlight pool's "whole pool" view of a row: the best team order in general
     and boards optimised for the whole pool, rather than per song. The song is drawn
@@ -1218,7 +1238,11 @@ def pool_detail(
 
     The best of these candidates, not a proof of the best board; every score is exact. On a
     23-song pool (account, developed boards, top 3 rows) the refined board at the one order
-    is +0.3..+1.9 % over the search's per-song mean, the unrefined candidates -4.1..-6.1 %."""
+    is +0.3..+1.9 % over the search's per-song mean, the unrefined candidates -4.1..-6.1 %.
+
+    Every mean and sum over the pool is the draw's: the chapter's `event_songs` weighted as
+    the search weights them (`_pool_weights`). `max_level`: each song at its hardest chart
+    up to that level (`ChartLibrary.up_to`), as the search took it; None: at `difficulty`."""
     import leaf_inputs  # noqa: PLC0415
 
     from hbuilder.solver.parallel_refine import (  # noqa: PLC0415
@@ -1232,11 +1256,16 @@ def pool_detail(
     if not songs:
         raise ValueError("no pool songs")
     built = _leaf_inputs(basis, songs[0], difficulty, assumptions, play)
-    library = leaf_inputs.chart_library(leaf_inputs.charts_path(difficulty)).at(difficulty)
+    library = (
+        leaf_inputs.chart_library(leaf_inputs.charts_path(difficulty)).at(difficulty)
+        if max_level is None
+        else leaf_inputs.chart_library(leaf_inputs.charts_path("HARD")).up_to(max_level)
+    )
     by_music = {c.music_id: c for c in library}
     charts = [by_music[m] for m in songs if m in by_music]
     if not charts:
         raise ValueError(f"no chart of the pool loads at {difficulty}")
+    weights = _pool_weights(charts, event_songs)
     by_id = built["by_id"]
     missing = [c for c in (leader_id, *member_ids) if c not in by_id]
     if missing:
@@ -1268,7 +1297,7 @@ def pool_detail(
                         continue
                     last = cands[0]
                     opts["song_pool"] = pool_yellow(
-                        team, charts, dataclasses.replace(last[2].cfg, board=last[3].board)
+                        team, charts, dataclasses.replace(last[2].cfg, board=last[3].board), event_songs
                     )
                 planned = materials_plan.plan_for(leader_id, list(member_ids), song, opts)
                 if planned is None:
@@ -1287,7 +1316,9 @@ def pool_detail(
 
                 def plan_pool_sum(board, cfg=ctx.cfg):
                     cfg_b = dataclasses.replace(cfg, board=board)
-                    return sum(score_team_on_chart(team, c, cfg_b).total_score for c in charts)
+                    return sum(
+                        w * score_team_on_chart(team, c, cfg_b).total_score for c, w in zip(charts, weights)
+                    )
 
                 # the plan's Connect cards for the pool's casts, not for one song's
                 bt, deal = pool_connect(ctx, team, charts, tree_for, budget_for, plan_pool_sum)
@@ -1314,7 +1345,9 @@ def pool_detail(
 
                 def pool_sum(board):
                     cfg_b = dataclasses.replace(ctx0.cfg, board=board)
-                    return sum(score_team_on_chart(team, c, cfg_b).total_score for c in charts)
+                    return sum(
+                        w * score_team_on_chart(team, c, cfg_b).total_score for c, w in zip(charts, weights)
+                    )
 
                 top = max(cands, key=lambda cd: pool_sum(cd[3].board))
                 bt = develop_refined_team(
@@ -1345,7 +1378,7 @@ def pool_detail(
     best = None
     for label, song, ctx, bt in cands:
         cfg_board = dataclasses.replace(ctx.cfg, board=bt.board)
-        order, mean, per = _common_order(team, charts, cfg_board)
+        order, mean, per = _common_order(team, charts, cfg_board, weights)
         if best is None or mean > best[1]:
             best = (label, mean, order, per, song, ctx, bt, cfg_board)
     label, mean, order, per, song, ctx, bt, cfg_board = best  # type: ignore[misc]
@@ -1354,8 +1387,11 @@ def pool_detail(
         "pool": True,
         "song_est": mean,
         "member_order": list(order),
-        "per_song": [{"music_id": m, "score": s, "own_order_best": b} for m, s, b in per],
-        "own_order_mean": sum(b for _m, _s, b in per) / len(per),
+        "per_song": [
+            {"music_id": m, "score": s, "own_order_best": b, "weight": w}
+            for (m, s, b), w in zip(per, weights)
+        ],
+        "own_order_mean": sum(w * b for (_m, _s, b), w in zip(per, weights)),
         "board_from": label,
         "plan_song": song if ctx0.board_state is None else None,
         # the plan's pool yellows: /api/board-plan-account re-plans with them (same plan)
@@ -1367,7 +1403,7 @@ def pool_detail(
     if label in plan_optimal:
         out["plan_optimal"] = plan_optimal[label]
     if cfg_board.fever_weight:
-        out.update(_pool_multi_figures(team, charts, cfg_board, order, mean))
+        out.update(_pool_multi_figures(team, charts, cfg_board, order, mean, weights))
     out.update(unit_score_block(team, cfg_board, cfg_off, list(order), chart=None))
     by_card = {c.id: c for c in (team.leader, *team.members)}
     out.update(

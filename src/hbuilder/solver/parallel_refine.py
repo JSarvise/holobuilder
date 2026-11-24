@@ -63,6 +63,7 @@ from hbuilder.domain.board_refine import (
     respend_freed_points,
 )
 from hbuilder.domain.card import Card
+from hbuilder.domain.marathon import highlight_weights
 from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.song import (
@@ -185,6 +186,21 @@ class RefineContext:
     # Holomem Rating team plays): then it is planned as for one of her songs, and each chart's
     # scorer still pays its own cast's conditional terms.
     board_cast: frozenset | None = None
+    # A DRAW OVER THE CHARTS (a Highlight pool): `(event share, each chart's flag)`. The mean
+    # over the charts is then the draw's weighted mean (`marathon.highlight_weights`: the
+    # flagged charts share `event share` equally, the others the rest), over all of them or
+    # over the ones an evaluation selects. None: the plain mean.
+    chart_draw: tuple[float, tuple[bool, ...]] | None = None
+
+
+def draw_weights(ctx: RefineContext, positions: Sequence[int] | None = None) -> list[float] | None:
+    """The weights of the charts at `positions` (indices into `ctx.charts`, None = all) in
+    the mean an evaluation returns (`RefineContext.chart_draw`); None for the plain mean."""
+    if ctx.chart_draw is None:
+        return None
+    share, flags = ctx.chart_draw
+    chosen = range(len(ctx.charts)) if positions is None else positions
+    return highlight_weights([flags[i] for i in chosen], share)
 
 
 class PlanStore:
@@ -515,6 +531,14 @@ def evaluate(
     charts = (
         ctx.charts if not selection or selection[0] is None else tuple(ctx.charts[i] for i in selection[0])
     )
+    # a draw over the charts (`RefineContext.chart_draw`): each chart's value scaled by its
+    # weight times the count, so the sum over the count is the draw's weighted mean
+    weights = draw_weights(ctx, None if not selection or selection[0] is None else selection[0])
+    scale = None if weights is None else {id(c): w * len(charts) for c, w in zip(charts, weights)}
+
+    def scaled(chart, value):
+        return value if scale is None else value * scale[id(chart)]
+
     if part is not None and (not per_chart or not ctx.board_per_chart or not charts or both or lens):
         raise ValueError(
             "`part` scores some charts of a per-chart evaluation (`per_chart`, `RefineContext.board_per_chart`)"
@@ -604,7 +628,7 @@ def evaluate(
                 cfg_r = dataclasses.replace(ctx.cfg, board=board)
                 total = 0.0
                 for chart in charts_for:
-                    total += song_score(chart, cfg_r)
+                    total += scaled(chart, song_score(chart, cfg_r))
                 return total
 
             def charts_score_variants(board, variants):
@@ -619,7 +643,7 @@ def evaluate(
                             team.members, team.leader, chart, cfg_r, variants, deck_power=power
                         )
                     ):
-                        totals[i] += s
+                        totals[i] += scaled(chart, s)
                 return totals
 
             return develop_and_refine(
@@ -754,8 +778,8 @@ def evaluate(
                 configs[(cast, cast.scope)] = cfg_c
             if both:
                 e, *rest = expectation_and_ceiling(chart, cfg_c)
-                scores.append(rest)
-                total += e
+                scores.append([scaled(chart, v) for v in rest])
+                total += scaled(chart, e)
                 continue
             if lens:
                 if len(charts) != 1:
@@ -771,12 +795,12 @@ def evaluate(
                 plain_c, s, *_counts = chooser.choose(chart)
             else:
                 plain_c = s = served(chart, cfg_c)
-            plain_total += plain_c
+            plain_total += scaled(chart, plain_c)
             if count_screen:
                 s = count_screen_value(team, chart, cfg_c, s, power_of(cfg_c))
             if per_chart:
                 scores.append((plain_c, s) if counts_both else s)
-            total += s
+            total += scaled(chart, s)
         if both:
             # the ceilings (and solos) added in chart order from 0, as a `ceiling` evaluation
             # adds them
@@ -805,7 +829,7 @@ def evaluate(
         sums = [0.0, 0.0, 0.0] if split else [0.0, 0.0]
         for chart in charts:
             for k, v in enumerate(expectation_and_ceiling(chart, cfg_x)):
-                sums[k] += v
+                sums[k] += scaled(chart, v)
         return tuple(v / len(charts) for v in sums)
     if lens:
         if len(charts) != 1:
@@ -824,7 +848,7 @@ def evaluate(
             s = count_screen_value(team, chart, cfg_x, s, power_of(cfg_x))
         if per_chart:
             scores.append(s)
-        total += s
+        total += scaled(chart, s)
     return scores if per_chart else total / len(charts)
 
 
@@ -1635,13 +1659,19 @@ def _ctx_task_part(item):
     return _task_part(tuple(rest))
 
 
-def chart_mean(values: Sequence[float]) -> float:
+def chart_mean(values: Sequence[float], weights: Sequence[float] | None = None) -> float:
     """The mean `evaluate` returns from the per-chart values it adds up: their sum, added in
     chart order from 0.0, over their count. Not `sum`, which compensates the rounding and can
-    differ in the last bit."""
+    differ in the last bit. `weights` (`draw_weights`): each value scaled by its weight times
+    the count before it is added, as `evaluate` adds them."""
     total = 0.0
-    for value in values:
-        total += value
+    if weights is None:
+        for value in values:
+            total += value
+    else:
+        n = len(values)
+        for value, w in zip(values, weights):
+            total += value * (w * n)
     return total / len(values)
 
 
@@ -2373,6 +2403,9 @@ class RefinePool:
         `(plain mean, mean)`), the same floats: each team's `batch_counts_per_chart` values
         added in chart order (`chart_mean`), its charts spread over the workers."""
         rows = self.batch_counts_per_chart(teams, chart_indices, both=both, known=known)
+        w = draw_weights(self.ctx, chart_indices)
         if both:
-            return [(chart_mean([p for p, _s in row]), chart_mean([s for _p, s in row])) for row in rows]
-        return [chart_mean(row) for row in rows]
+            return [
+                (chart_mean([p for p, _s in row], w), chart_mean([s for _p, s in row], w)) for row in rows
+            ]
+        return [chart_mean(row, w) for row in rows]

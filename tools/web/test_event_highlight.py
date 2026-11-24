@@ -74,6 +74,7 @@ def test_pool_of_the_real_open_event_is_the_holomems_songs():
 class _Ctx:
     charts: tuple = ()
     board_per_chart: bool = False
+    chart_draw: tuple | None = None
 
 
 def test_the_leaf_scores_exactly_the_pool_charts_a_board_per_chart():
@@ -82,6 +83,42 @@ def test_the_leaf_scores_exactly_the_pool_charts_a_board_per_chart():
     assert [c.music_id for c in charts] == ["m0002", "m0001"]
     assert ctx.charts == charts and ctx.board_per_chart is True
     assert lost == ["m0009"]  # the non-pool m0003 never enters
+    assert ctx.chart_draw is None  # no event song: the plain mean
+
+
+def test_the_pool_draw_gives_the_event_songs_half_of_it():
+    """The chapter's event songs among the pool: the leaf weights its charts with them
+    (`RefineContext.chart_draw`), and the payload's weights add up to 1."""
+    library = [SimpleNamespace(music_id=m) for m in ("m0001", "m0002", "m0003")]
+    ctx, charts, _lost = em.highlight_context(
+        _Ctx(), library, ["m0001", "m0002", "m0003"], event_songs=["m0002", "m9999"]
+    )
+    assert ctx.chart_draw == (mar.HIGHLIGHT_EVENT_SHARE, (False, True, False))
+    assert em.pool_weights(["m0001", "m0002", "m0003"], ["m0002"]) == [0.25, 0.5, 0.25]
+    assert em.pool_weights(["m0001", "m0003"], ["m0002"]) == [0.5, 0.5]  # uniform
+    # every song an event song: the uniform draw
+    ctx, _c, _l = em.highlight_context(_Ctx(), library, ["m0002"], event_songs=["m0002"])
+    assert ctx.chart_draw is None
+
+
+def test_the_highlight_sample_holds_both_groups_by_their_share():
+    """The search's sample of a large pool keeps event songs and the rest, half the slots
+    each (`highlight_sample`); without event songs it is the plain sample."""
+    import two_stage
+
+    charts = [
+        SimpleNamespace(music_id=f"m{k:04d}", notes=[0] * (100 + k), singer_type="solo" if k % 3 else "group")
+        for k in range(23)
+    ]
+    events = [c.music_id for c in charts[:6]]
+    got = em.highlight_sample(charts, events, 6)
+    assert len(got) == 6
+    assert sum(c.music_id in events for c in got) == 3
+    assert [c.music_id for c in got] == sorted(c.music_id for c in got)  # pool order
+    assert em.highlight_sample(charts, [], 6) == two_stage.chart_sample(charts, 6)
+    # one event song: it is always in
+    got = em.highlight_sample(charts, ["m0010"], 6)
+    assert "m0010" in [c.music_id for c in got] and len(got) == 6
 
 
 @pytest.mark.parametrize("song", ["highlight", "Highlight", " HIGHLIGHT "])

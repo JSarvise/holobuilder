@@ -46,7 +46,7 @@ the page itself (`tools/oss/options_glossary.py`): the wording is the app's own.
 
 ## Song: in general *(Score goal only)*
 
-- **Charts averaged**: Choices: Every chart at the chosen difficulty (default); A level range, any difficulty.
+- **Charts averaged**: Choices: Every song, at its hardest chart up to your level (default); A level range, any difficulty.
 - **From level**
 - **To level**
 

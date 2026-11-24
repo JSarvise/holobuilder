@@ -79,6 +79,78 @@ def chart_note_counts(difficulty: str) -> dict[str, int] | None:
     return out
 
 
+# `chart_levels`' table, kept while charts_all.json is the same file version
+_LEVELS: dict[str, Any] = {}
+# the highest level a "level cap" may name; "Any" is no cap
+MAX_LEVEL_CAP = 99
+
+
+def chart_levels() -> dict[str, dict[str, int]]:
+    """`{music id: {DIFFICULTY: level}}` of every chart on disk (charts_all.json, every
+    difficulty), read once per version of the file. `{}` without it."""
+    path = config.CHARTS_ALL_PATH
+    try:
+        stamp = path.stat().st_mtime_ns
+    except OSError:
+        return {}
+    if _LEVELS.get("stamp") != stamp:
+        raw = config.read_json(path) or {}
+        table: dict[str, dict[str, int]] = {}
+        notes: dict[str, dict[str, int]] = {}
+        for chart in (raw.get("charts") or {}).values():
+            if isinstance(chart, dict) and chart.get("music_id"):
+                music_id, diff = str(chart["music_id"]), str(chart.get("difficulty") or "").upper()
+                table.setdefault(music_id, {})[diff] = int(chart.get("difficulty_level") or 0)
+                notes.setdefault(music_id, {})[diff] = len(chart.get("notes") or [])
+        _LEVELS.clear()
+        _LEVELS.update(stamp=stamp, table=table, notes=notes)
+    return _LEVELS["table"]
+
+
+def picked_note_counts(picks: Mapping[str, str]) -> dict[str, int]:
+    """`{music id: note count}` of each song's picked chart (`chart_picks`)."""
+    chart_levels()
+    notes = _LEVELS.get("notes") or {}
+    return {m: notes[m][d] for m, d in picks.items() if d in notes.get(m, {})}
+
+
+def chart_picks(max_level: int) -> dict[str, str]:
+    """`{music id: difficulty}`: each song at the chart a player who clears up to `max_level`
+    plays, its hardest one within that level (`rating.pick_chart`, the Holomem Rating's
+    rule: a tie goes to the harder difficulty). A song whose every chart is above it is
+    left out."""
+    from hbuilder.domain.rating import pick_chart  # noqa: PLC0415
+
+    out: dict[str, str] = {}
+    for music_id, levels in chart_levels().items():
+        picked = pick_chart(levels, max_level)
+        if picked is not None:
+            out[music_id] = picked
+    return out
+
+
+def parse_max_level(body: Mapping) -> int | None:
+    """The request's `max_level` (the hardest level the player clears), or None for no cap:
+    absent, or a level that leaves every song at its EXPERT chart (the plain EXPERT search,
+    its caches and keys). Raises `basis.HttpError` (400) on a bad value."""
+    raw = body.get("max_level")
+    if raw in (None, ""):
+        return None
+    try:
+        level = int(raw)
+        if isinstance(raw, bool) or str(level) != str(raw).strip():
+            raise ValueError
+    except (TypeError, ValueError):
+        raise basis.HttpError(400, {"error": f"'max_level' must be a whole level, got {raw!r}"}) from None
+    if not 1 <= level <= MAX_LEVEL_CAP:
+        raise basis.HttpError(400, {"error": f"'max_level' must be 1..{MAX_LEVEL_CAP}, got {level}"})
+    table = chart_levels()
+    picks = chart_picks(level)
+    if all(picks.get(m) == "EXPERT" for m, levels in table.items() if "EXPERT" in levels):
+        return None
+    return level
+
+
 def difficulties_listing() -> dict[str, Any]:
     """`/api/meta`'s `difficulties`: `{"default": "EXPERT", "available": [...],
     "charts": {difficulty: count}, "missing": {difficulty: [music ids]}}` —
@@ -176,9 +248,14 @@ def serve_songs(h: Handler) -> None:
     query = parse_qs(h.path.split("?", 1)[1]) if "?" in h.path else {}
     try:
         difficulty = basis.parse_difficulty({"difficulty": (query.get("difficulty") or [""])[0]})
+        # `max_level`: each song at its hardest chart up to that level (`chart_picks`)
+        max_level = parse_max_level({"max_level": (query.get("max_level") or [""])[0]})
     except basis.HttpError as exc:
         h.reply_json(exc.code, exc.obj)
         return
+    picks = chart_picks(max_level) if max_level is not None else None
+    if picks is not None:
+        difficulty = "HARD"  # charts_all.json: every difficulty
     charts_file = basis.charts_path(difficulty)
     raw = config.read_json(charts_file)
     if not raw:
@@ -205,17 +282,28 @@ def serve_songs(h: Handler) -> None:
     titles, singers = song_labels()
     music = _music_by_id()
     names = _character_names()
-    songs = [
-        _song_row(charts[key] or {}, difficulty, titles, singers, music, names)
-        for key in sorted(charts)
-        if str((charts[key] or {}).get("difficulty") or "").upper() == difficulty
-    ]
+    if picks is not None:
+        songs = [
+            _song_row(charts[key] or {}, picks[m], titles, singers, music, names)
+            for key in sorted(charts)
+            if (m := str((charts[key] or {}).get("music_id") or "")) in picks
+            and str((charts[key] or {}).get("difficulty") or "").upper() == picks[m]
+        ]
+        difficulty = "EXPERT"
+    else:
+        songs = [
+            _song_row(charts[key] or {}, difficulty, titles, singers, music, names)
+            for key in sorted(charts)
+            if str((charts[key] or {}).get("difficulty") or "").upper() == difficulty
+        ]
 
     h.reply_json(
         200,
         {
             "available": True,
             "difficulty": difficulty,
+            # set: each song is at its own chart (`difficulty` on each row)
+            "max_level": max_level,
             "difficulties": list(difficulties_listing()["available"]),
             "source": raw.get("source") or str(charts_file.name),
             "titles_available": bool(titles),

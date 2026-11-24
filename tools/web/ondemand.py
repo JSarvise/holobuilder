@@ -667,6 +667,8 @@ class Engine:
 
     # (platform, auto, fever weight): how the run is played (`parse_play`)
     play: tuple = ("mobile", False, 0.0)
+    # the level cap of an In general search (`ChartLibrary.up_to`); None: one difficulty
+    max_level: int | None = None
 
     def __init__(
         self,
@@ -678,6 +680,7 @@ class Engine:
         play: tuple = ("mobile", False, 0.0),
         chart_keys: tuple[str, ...] | None = None,
         board_cast: frozenset | None = None,
+        max_level: int | None = None,
     ) -> None:
         self.basis = basis
         self.play = full_play(play)
@@ -686,6 +689,9 @@ class Engine:
         # holodori.best's "any song" level range: every chart of ANY difficulty whose level
         # is in it (In general only; `difficulty` then only names the leaf's nominal chart)
         self.levels = tuple(levels) if levels else None
+        # the hardest level the player clears: each song at its hardest chart within it
+        # (`ChartLibrary.up_to`, the Holomem Rating's rule; In general only, as `levels`)
+        self.max_level = int(max_level) if max_level is not None else None
         # a fixed list of charts (`"<music>/<DIFFICULTY>"`, any difficulty), indexed by those
         # keys: the songs one Holomem Rating team is searched for (`search_merged`)
         self.chart_keys = tuple(chart_keys) if chart_keys else None
@@ -716,6 +722,12 @@ class Engine:
             if not self.charts:
                 raise KeyError(f"no chart has a level in {lo}..{hi}")
             self.index = {}
+        elif self.max_level is not None:
+            library = leaf_inputs.chart_library(leaf_inputs.charts_path("HARD"))  # charts_all.json
+            self.charts = library.up_to(self.max_level)
+            if not self.charts:
+                raise KeyError(f"no song has a chart of level {self.max_level} or under")
+            self.index = {chart.music_id: k for k, chart in enumerate(self.charts)}
         else:
             self.charts = leaf_inputs.chart_library(path).at(self.difficulty)
             self.index = {chart.music_id: k for k, chart in enumerate(self.charts)}
@@ -768,7 +780,13 @@ class Engine:
         state, bench) it is served on})`."""
         import materials_plan  # noqa: PLC0415
 
-        opts = materials_plan.judged_opts(a.plan_opts(), a, self.difficulty, self.pool.ctx, self.levels)
+        opts = materials_plan.judged_opts(
+            a.plan_opts(),
+            a,
+            self.difficulty,
+            self.pool.ctx,
+            self.levels if self.max_level is None else ["up to", self.max_level],
+        )
         # every team on the planner's first plan; its other candidates below, for the rows
         # shown on a song and for every row off a song (`SHOWN_ROWS`)
         first = materials_plan.first_opts(opts)
@@ -1057,7 +1075,7 @@ class Engine:
         climb."""
         if self._sample is not None:
             return self._sample
-        if self.basis not in GENERAL_FITTED or self.levels:
+        if self.basis not in GENERAL_FITTED or self.levels or self.max_level is not None:
             by_obj = {id(c): k for k, c in enumerate(self.charts)}
             count = GENERAL_SAMPLE_BY_BASIS.get(self.basis, GENERAL_SAMPLE)
             self._sample = tuple(by_obj[id(c)] for c in two_stage.chart_sample(self.charts, count))
@@ -1609,7 +1627,13 @@ class Engine:
             extra = {
                 "charts": len(self.charts),
                 "levels": list(self.levels) if self.levels else None,
-                "sample": [f"{c.music_id}/{c.difficulty}" if self.levels else c.music_id for c in sample],
+                **({"max_level": self.max_level} if self.max_level is not None else {}),
+                "sample": [
+                    f"{c.music_id}/{c.difficulty}"
+                    if self.levels or self.max_level is not None
+                    else c.music_id
+                    for c in sample
+                ],
                 "rescored": len(ranking),
                 # where the served #1 stood in the sample's order (1 = the sample agreed)
                 "best_sample_rank": sample_rank.get(first),
@@ -1639,6 +1663,11 @@ class Engine:
                     f"({len(self.charts)} charts, any difficulty), {per_song}"
                 )
                 if general and self.levels
+                else (
+                    f"mean score over every song at its hardest chart up to level {self.max_level} "
+                    f"({len(self.charts)} charts), {per_song}"
+                )
+                if general and self.max_level is not None
                 else f"mean score over every {self.difficulty} chart, {per_song}"
                 if general
                 else f"Max (every Active fires) on this song's {self.difficulty} chart"
@@ -2003,6 +2032,7 @@ def engine(
     play: tuple = ("mobile", False, 0.0),
     chart_keys: tuple[str, ...] | None = None,
     board_cast: frozenset | None = None,
+    max_level: int | None = None,
 ) -> Engine:
     """The live engine of (basis, difficulty[, assumptions]), rebuilt when the
     inputs' key moved (`current_key()` -> today's key, or None when it cannot
@@ -2019,6 +2049,7 @@ def engine(
         full_play(play),
         tuple(chart_keys) if chart_keys else None,
         (tuple(sorted(board_cast)), getattr(board_cast, "scope", "")) if board_cast is not None else None,
+        max_level,
     )
     with _ENGINES_LOCK:
         held = _ENGINES.pop(slot, None)
@@ -2040,6 +2071,7 @@ def engine(
                 play=play,
                 chart_keys=chart_keys,
                 board_cast=board_cast,
+                max_level=max_level,
             )
         _ENGINES[slot] = held  # re-inserted last: most recently used
         return held.acquire()

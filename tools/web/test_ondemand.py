@@ -651,6 +651,7 @@ def test_a_replanned_team_is_remembered_under_its_own_name(monkeypatch):
     engine = SimpleNamespace(
         difficulty="EXPERT",
         levels=None,
+        max_level=None,
         charts=[SimpleNamespace(singers=("chr-00031",))],
         index={"m0020": 0},
         pool=SimpleNamespace(

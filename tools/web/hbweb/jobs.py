@@ -122,6 +122,7 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for: Callable[[str, str], 
                     workers=basis.web_workers(),
                     assumptions=assumptions,
                     levels=levels,
+                    max_level=opts.get("max_level"),
                     play=opts.get("play") or ("mobile", False),
                     current_key=lambda: ondemand.account_key(difficulty),
                 )
@@ -131,6 +132,7 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for: Callable[[str, str], 
                     difficulty,
                     workers=basis.web_workers(),
                     levels=levels,
+                    max_level=opts.get("max_level"),
                     play=opts.get("play") or ("mobile", False),
                     current_key=lambda: ondemand.basis_key(basis_name, difficulty),
                 )
@@ -183,7 +185,12 @@ def _event_song_info(opts: Mapping) -> dict:
             "music_rows": songs.music_rows(),
             "titles": titles,
             "singers": singers,
-            "charted": set(songs.chart_note_counts(opts["difficulty"]) or ()),
+            # a level cap: each song at its own chart (`songs.chart_picks`)
+            "charted": (
+                set(songs.chart_note_counts(opts["difficulty"]) or ())
+                if opts.get("max_level") is None
+                else set(songs.chart_picks(opts["max_level"]))
+            ),
         }
     return song_info
 
@@ -220,9 +227,12 @@ def run_event_job(job: Job, opts: Mapping, *, runner: Callable[..., Any] | None 
                 str(opts.get("basis") or "account"),
                 plan.get("boards") == "plan" and not plan.get("infinite"),
             )
-        _raw, event, _keys = event_mode.load_event_bundle(config.EVENT_BONUS_PATH, opts.get("event"))
+        raw, event, _keys = event_mode.load_event_bundle(config.EVENT_BONUS_PATH, opts.get("event"))
         collection = (config.read_json(config.COLLECTION_PATH) or {}).get("cards") or {}
         song_info = _event_song_info(opts)
+        if event_mode.is_highlight(opts["song"]):
+            # the songs the Highlight draw favours (`event_mode.highlight_weights`)
+            song_info["event_songs"] = event_mode.chapter_songs(raw, event)
         run = runner or event_mode.run_account_search
         payload = run(
             opts,
