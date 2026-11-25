@@ -17,7 +17,7 @@ const DEFAULTS = {
   goal: "score", evgoal: "event_points", song: "", difficulty: "EXPERT", cards: "asis", boards: "develop", sort: "avg",
   boosts: 3, holopass: true, pool: "all", platform: "mobile", top: 5, evtop: 5, evsort: "avg",
   lmember: "", loutfit: "", nooverlap: false, maxpoints: false, infmats: false,
-  alevel: "account", abloom: "account", aspt: "account", keephigher: false, maxresets: "-1", resetgain: "0.01", auto: false, multi: false, exact: false,
+  alevel: "account", abloom: "account", aspt: "account", keephigher: false, maxresets: "-1", resetgain: "0.01", auto: false, multi: false,
   allinvited: false, norefund: false, branches: "GBRY", targets: [], lvmode: "expert", lvlo: 25,
   require: [], exclude: [],
   // goal "rating" (opt-rating.js): the holomem, the highest level she Full Combos, and the search
@@ -410,7 +410,7 @@ function moreCount() {
   const shared = [S.lmember, S.nooverlap, S.require.length, S.exclude.length,
     S.boards === "develop" && (S.maxpoints || S.infmats || S.allinvited || S.targets.length || S.branches !== "GBRY" || S.maxresets !== "-1" || S.resetgain !== "0.01")];
   if (isEvent()) return [...shared, S.platform !== "mobile", S.auto, S.multi].filter(Boolean).length;
-  return [...shared, S.pool !== "all", S.platform !== "mobile", S.auto, S.goal === "score" && S.multi, S.exact].filter(Boolean).length;
+  return [...shared, S.pool !== "all", S.platform !== "mobile", S.auto, S.goal === "score" && S.multi].filter(Boolean).length;
 }
 async function changed(key) {
   if (key === "pool") prunePins();
@@ -433,7 +433,7 @@ async function changed(key) {
   syncDifficulty();
   if (["rholomem", "rowned", "rmode", "rboard", "rsort", "rsongs", "rteams"].includes(key) || (key === "rlevel" && isRating())) { if (isRating()) { showSong(); renderFresh(); showIdle(); } return; }
   if (["goal", "song", "rlevel", "cards", "boards", "maxpoints", "infmats", "maxresets", "resetgain", "alevel", "abloom", "aspt", "keephigher", "allinvited", "norefund", "branches", "targets", "lvmode", "lvlo", "boosts", "holopass", "chapter"].includes(key)) { setProv(""); showSong(); renderFresh(); showIdle(); }
-  else if (key === "sort" || key === "evsort" || key === "top") { renderFresh(); showIdle(true); }
+  else if (key === "sort" || key === "evsort" || key === "top" || key === "evtop") { renderFresh(); showIdle(true); }
   else if (isEvent()) { renderFresh(); showIdle(); }   // a leader or pinned-card change: the event answer shown no longer applies
   else renderFresh();
 }
@@ -442,7 +442,7 @@ async function changed(key) {
 function wireMore() {
   byId("optboards").checked = S.boards === "develop";
   byId("optboards").addEventListener("change", e => { S.boards = e.target.checked ? "develop" : "current"; changed("boards"); });
-  const checks = { nooverlap: "nooverlap", maxpoints: "maxpoints", infmats: "infmats", keephigher: "keephigher", allinvited: "allinvited", norefund: "norefund", auto: "auto", multi: "multi", exact: "exact" };
+  const checks = { nooverlap: "nooverlap", maxpoints: "maxpoints", infmats: "infmats", keephigher: "keephigher", allinvited: "allinvited", norefund: "norefund", auto: "auto", multi: "multi" };
   for (const [id, key] of Object.entries(checks)) {
     byId(id).checked = !!S[key];
     byId(id).addEventListener("change", e => { S[key] = e.target.checked; changed(key); });
@@ -498,22 +498,24 @@ function prunePins() {
   if (pinDraw.require) pinDraw.require();
 }
 function fillLeaders() {
-  const owned = [...D.cards.values()].filter(c => c.owned);
+  // every card the game has, the account's own first: a maxed basis (or a collection that adds
+  // cards) plays cards the account does not hold, so the lists cannot stop at owned.json
+  const owned = [...D.cards.values()].sort((a, b) => (b.owned ? 1 : 0) - (a.owned ? 1 : 0));
   const members = [...new Set(owned.map(c => c.member))].sort((a, b) => a.localeCompare(b));
   byId("lmember").insertAdjacentHTML("beforeend", members.map(m => `<option>${esc(m)}</option>`).join(""));
   const outfits = () => {
     const o = byId("loutfit");
     o.innerHTML = `<option value="">The best outfit she has</option>` + owned.filter(c => c.member === S.lmember)
-      .map(c => `<option value="${esc(c.id)}">${esc(c.costume_name || c.id)} · ${c.rarity}★</option>`).join("");
+      .map(c => `<option value="${esc(c.id)}">${esc(c.costume_name || c.id)} · ${c.rarity}★${c.owned ? "" : " · not owned"}</option>`).join("");
     o.disabled = !S.lmember; o.value = S.loutfit || "";
   };
   byId("lmember").value = S.lmember || ""; if (byId("lmember").value !== (S.lmember || "")) S.lmember = "";
   outfits();
   byId("lmember").onchange = e => { S.lmember = e.target.value; S.loutfit = ""; outfits(); changed("lmember"); };
   byId("loutfit").onchange = e => { S.loutfit = e.target.value; changed("loutfit"); };
-  // the card pins: Must include / Ban (ids of owned cards). The leader is chosen above
-  // (holomem + outfit), so there is no separate "Leader card" pin
-  const label = c => `${c.member} / ${c.costume_name || c.id} (${c.rarity}★)`;
+  // the card pins: Must include / Ban (every card, the account's own first). The leader is chosen
+  // above (holomem + outfit), so there is no separate "Leader card" pin
+  const label = c => `${c.member} / ${c.costume_name || c.id} (${c.rarity}★)${c.owned ? "" : " · not owned"}`;
   const byLabel = new Map(owned.map(c => [label(c), c.id]));
   byId("cardlist").innerHTML = owned.map(c => `<option value="${esc(label(c))}">`).join("");
   // Must include = a MEMBER: with Card pool "5★ only" it offers 5★ cards only; the leader pin
@@ -528,7 +530,11 @@ function fillLeaders() {
         + `<input list="${list}" placeholder="Type a holomem or outfit, pick a card${list === "cardlist5" ? " (5★ only)" : ""}" aria-label="Add a card">`;
       box.querySelector("input").addEventListener("change", e => {
         const id = byLabel.get(e.target.value);
-        if (id && !S[key].includes(id) && (key !== "require" || memberOK(id))) { S[key] = [...S[key], id]; changed(key); draw(); }
+        if (id && !S[key].includes(id) && (key !== "require" || memberOK(id))) {
+          S[key] = [...S[key], id]; changed(key); draw();
+          // the account's own pool holds only its cards: a card it does not own plays on a maxed account
+          if (key === "require" && !(D.cards.get(id) || {}).owned && S.cards !== "maxed") toast("That card is not on your account: Must include finds it with Cards set to Maxed account.", 6000);
+        }
         else e.target.value = "";
       });
     };

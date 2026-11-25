@@ -2,6 +2,10 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.22 (2026-11-25)
+- **Must include, Ban and the leader lists offer every card.** They listed only the cards on your account; now every card the game has is there, yours first and the rest marked "not owned" (a card you do not own plays with Cards set to Maxed account).
+- **Fewer stale answers.** With one song, Sort by Max and Expected are separate searches (the Hard check runs only on Expected); in Event, raising "Teams to show" searches again, and Live Boost no longer re-runs an Event Song Score search. "Exhaustive search", which did nothing, is gone.
+
 ## 0.2.21 (2026-11-25)
 - **The new leader node and the Red Star Cube.** The game's update adds a red node to every Holomem Board that raises the whole team's Active Skill activation rate by 10% while that holomem leads. The optimizer scores it (before this version, a refresh after the update made searches and board plans fail) and plans it only on the leader. It costs a new material, the Red Star Cube: with your account's materials it is planned only once you hold some; with Unlimited materials, or on a maxed account, it is always available. The Inventory and the board plans list the new material.
 - **The four new cards.** Sakura Miko (Behold, the Elite Santa!), Ninomae Ina'nis, Shiori Novella and Himemori Luna (Resplendent Princess Symphony) are in. Miko's and Luna's Active Skills need 2 or more Cute members, and Luna's Passive raises the Skill Activation Rate of 2 Cute members as well as their Sense; teams are built around these conditions.

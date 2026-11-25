@@ -38,8 +38,10 @@ function eventFilters(S) {
 // Multi Live: Event Song Score ranked by the MULTI SCORE contribution (score + 1.5 x fever),
 // Event Points by the Event Pt of a multi Live (event_mode.py, multi_points)
 const multiOn = S => (S.goal === "event_song" || S.goal === "event_points") && !!S.multi;
-const optsKey = S => JSON.stringify([S.goal, S.song, S.difficulty, isHighlight(S.song) ? S.rlevel : 0, S.boosts, S.goal === "event_points" ? S.holopass : 0,
-  S.platform, !!S.auto, eventAssumptions(S), eventFilters(S), S.chapter || "", multiOn(S)]);
+// Live Boost changes Event Points only; "Teams to show" is how many rows the search refines and
+// serves, so a longer list is another search
+const optsKey = S => JSON.stringify([S.goal, S.song, S.difficulty, isHighlight(S.song) ? S.rlevel : 0, S.goal === "event_points" ? S.boosts : 0, S.goal === "event_points" ? S.holopass : 0,
+  S.platform, !!S.auto, eventAssumptions(S), eventFilters(S), S.chapter || "", multiOn(S), S.evtop]);
 const isEP = S => S.goal === "event_points";
 
 /* ------------------------------------------------------------------ Highlight */

@@ -36,10 +36,16 @@ const lvRange = S => {
   const top = Math.max(1, Math.min(+S.rlevel || 40, 40));
   return [Math.max(1, Math.min(+S.lvlo, top)), top];
 };
+// Every song "From a level" with a lowest level above 1; from level 1 it is "Up to level", the
+// same charts, sent the same way (one engine, one answer)
+const fromLevel = S => !S.song && S.lvmode === "range" && lvRange(S)[0] > 1;
 function optsKey(S) {
-  return JSON.stringify([S.song, S.difficulty, S.song ? 0 : S.rlevel, S.cards, S.boards, S.maxpoints, S.infmats, S.pool, S.platform, S.auto, multiOn(S), S.exact,
+  // one song: whether its other chart is checked (`chart_check`) decides the answer, so Sort by
+  // Max (not checked) and Expected (checked) are two searches; Every song sorts its one answer
+  return JSON.stringify([S.song, S.difficulty, S.song ? 0 : S.rlevel, S.cards, S.boards, S.maxpoints, S.infmats, S.pool, S.platform, S.auto, multiOn(S),
+    S.song ? S.sort === "max" : 0,
     S.cards === "whatif" ? [S.alevel, S.abloom, S.aspt, !!S.keephigher] : 0, S.maxresets, S.resetgain,
-    S.allinvited, S.norefund, S.branches, JSON.stringify(S.targets), !S.song && S.lvmode === "range" ? lvRange(S) : 0, S.lmember, S.loutfit, S.nooverlap, S.require, S.exclude]);
+    S.allinvited, S.norefund, S.branches, JSON.stringify(S.targets), fromLevel(S) ? lvRange(S) : 0, S.lmember, S.loutfit, S.nooverlap, S.require, S.exclude]);
 }
 const teamKey = (leader, members) => leader + "|" + [...members].sort().join(",");
 // a row's refinement level as its detail asks for it: 2 (every frequency count tried) and
@@ -105,7 +111,7 @@ function odBody(S) {
   const b = { song: S.song, basis: tsBasis(S) || "account", difficulty: S.difficulty, platform: S.platform,
     auto: !!S.auto, multi: multiOn(S), ...leaderOpts(S) };
   if (a) b.assumptions = a;
-  if (!S.song && S.lvmode === "range") b.levels = lvRange(S);
+  if (fromLevel(S)) b.levels = lvRange(S);
   // Every song: each song at its hardest chart up to the level; one song: its chart is
   // S.difficulty and the level bounds the other chart the server also tries (`chart_check`)
   else b.max_level = S.rlevel;
