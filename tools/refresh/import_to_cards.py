@@ -191,7 +191,10 @@ def _rider_payload(cond_effect, loss, card_id, slot_kind):
 def _stat_first(principal, second):
     """Whether a slot's two effects swap so the stat effect leads: the second is a stat
     effect and the first is not."""
-    return FAMILY_BY_EFFECT[second["effect"]][0] == "stat_up" and FAMILY_BY_EFFECT[principal["effect"]][0] != "stat_up"
+    return (
+        FAMILY_BY_EFFECT[second["effect"]][0] == "stat_up"
+        and FAMILY_BY_EFFECT[principal["effect"]][0] != "stat_up"
+    )
 
 
 def _costume_slot(costume, loss, card_id):
@@ -360,7 +363,9 @@ def untranslated(card, record):
             continue
         said = len(_GATE_PHRASE.findall(_NOT_A_GATE.sub("", text)))
         if said != _gates_in(slot):
-            reasons.append(f"{kind}: the game's text names {said} gate(s), the slot carries {_gates_in(slot)}")
+            reasons.append(
+                f"{kind}: the game's text names {said} gate(s), the slot carries {_gates_in(slot)}"
+            )
     return reasons
 
 
