@@ -34,6 +34,7 @@ import argparse
 import difflib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -187,6 +188,12 @@ def _rider_payload(cond_effect, loss, card_id, slot_kind):
     }
 
 
+def _stat_first(principal, second):
+    """Whether a slot's two effects swap so the stat effect leads: the second is a stat
+    effect and the first is not."""
+    return FAMILY_BY_EFFECT[second["effect"]][0] == "stat_up" and FAMILY_BY_EFFECT[principal["effect"]][0] != "stat_up"
+
+
 def _costume_slot(costume, loss, card_id):
     """The COSTUME slot = the card's outfit / leader skill.
 
@@ -202,20 +209,25 @@ def _costume_slot(costume, loss, card_id):
     if not costume or not costume.get("skill"):
         return None
     sk = costume["skill"]
+    principal, gate = sk["effect"], sk["gate"]
     rider = {"kind": "none"}
     if sk.get("conditional") and sk["conditional"].get("effect"):
-        cond_effect = dict(sk["conditional"]["effect"], gate=sk["conditional"]["gate"])
-        rider = _rider_payload(cond_effect, loss, card_id, "COSTUME")
-    family, effect_type = FAMILY_BY_EFFECT[sk["effect"]["effect"]]
+        second, second_gate = sk["conditional"]["effect"], sk["conditional"]["gate"]
+        if _stat_first(principal, second) and second_gate == gate:
+            # the catalogue's order for a two-effect outfit: the stat effect is the slot's
+            # own, the other its rider (only a score-support rider is scored on an outfit)
+            principal, second = second, principal
+        rider = _rider_payload(dict(second, gate=second_gate), loss, card_id, "COSTUME")
+    family, effect_type = FAMILY_BY_EFFECT[principal["effect"]]
     return {
         "family": family,
         "effect_type": effect_type,
         "duration": None,
         "interval": None,
         "probability_tier": None,
-        "magnitude": sk["effect"]["magnitude_permil"] / 10,
-        "condition": _condition(sk["gate"]),
-        "target": _target(sk["effect"].get("target"), loss, card_id, "COSTUME"),
+        "magnitude": principal["magnitude_permil"] / 10,
+        "condition": _condition(gate),
+        "target": _target(principal.get("target"), loss, card_id, "COSTUME"),
         "override": {"kind": "none"},
         "rider": rider,
     }
@@ -230,6 +242,15 @@ def _slot(kind, sk, loss, card_id):
         return None
     principal, conditional = sk["effect"], sk.get("conditional")
     override, rider = {"kind": "none"}, {"kind": "none"}
+    gate = sk.get("gate") if kind in ("ACTIVE", "PASSIVE") else None
+    additional = sk.get("additional") if kind == "PASSIVE" else None
+    if additional and additional.get("effect"):
+        # a PASSIVE's second effect (f5/f6) with its own gate and target: the stat effect
+        # leads (the recipients rule a stat passive uses), the other is its rider
+        second, second_gate = additional["effect"], additional["gate"]
+        if _stat_first(principal, second):
+            principal, second, gate, second_gate = second, principal, second_gate, gate
+        rider = _rider_payload(dict(second, gate=second_gate), loss, card_id, kind)
 
     if conditional and conditional["effect"]:
         cond_effect = conditional["effect"]
@@ -276,7 +297,8 @@ def _slot(kind, sk, loss, card_id):
         # default, never something read from the source.
         target = {"kind": "all"} if raw_target is None else _target(raw_target, loss, card_id, kind)
 
-    condition = _condition(sk["gate"]) if (kind == "PASSIVE" and sk.get("gate")) else {"kind": "ungated"}
+    # ACTIVE (f3) and PASSIVE (f3) carry the principal effect's gate; SPECIAL has none
+    condition = _condition(gate) if gate else {"kind": "ungated"}
 
     slot = {
         "family": family,
@@ -294,6 +316,52 @@ def _slot(kind, sk, loss, card_id):
         "rider": rider,
     }
     return slot
+
+
+# A gate in the game's own skill text: "With 2 or more Cute Type Members", "When LIFE is 600
+# or higher", "With a Combo of 40 or more". "GOOD or higher becomes PERFECT" is the judgement
+# effect, not a gate.
+_GATE_PHRASE = re.compile(r"\b(?:or more|or higher|or lower|or less|or above|or below)\b", re.I)
+_NOT_A_GATE = re.compile(r"\bGOOD or higher\b")
+
+
+def _gates_in(slot):
+    """The gated conditions a translated slot carries: its own, its override's, its rider's."""
+    if not slot:
+        return 0
+    parts = [slot.get("condition")]
+    if (slot.get("override") or {}).get("kind") == "override":
+        parts.append(slot["override"].get("condition"))
+    if (slot.get("rider") or {}).get("kind") == "rider":
+        parts.append(slot["rider"].get("condition"))
+    return sum(1 for c in parts if (c or {}).get("kind", "ungated") != "ungated")
+
+
+def untranslated(card, record):
+    """Why `record` (the draft of the enriched `card`) is not a faithful translation, or [].
+
+    Two checks that read the game, not this translator: a populated level-row field no
+    resolver reads (`skills.unread`), and the game's own English skill text naming a
+    different number of gates than the slot carries. A card with either is reported and
+    never added to the catalogue (`card_append`)."""
+    reasons = []
+    for kind, levels in (card.get("skills_by_level") or {}).items():
+        for level, sk in (levels or {}).items():
+            if sk and sk.get("unread"):
+                reasons.append(f"{kind} level {level}: unread master fields {sk['unread']}")
+    costume = (card.get("costume") or {}).get("skill") or {}
+    if costume.get("unread"):
+        reasons.append(f"COSTUME: unread master fields {costume['unread']}")
+    texts = card.get("descriptions") or {}
+    slots = {**(record.get("skills") or {}), "COSTUME": record.get("costume_skill")}
+    for kind, slot in slots.items():
+        text = texts.get(kind)
+        if not text or slot is None:
+            continue
+        said = len(_GATE_PHRASE.findall(_NOT_A_GATE.sub("", text)))
+        if said != _gates_in(slot):
+            reasons.append(f"{kind}: the game's text names {said} gate(s), the slot carries {_gates_in(slot)}")
+    return reasons
 
 
 def to_records(cards):
@@ -450,6 +518,13 @@ def main():
         cards = json.load(fh)
     valid, review, loss = to_records(cards)
     draft_doc = {"schema_version": SCHEMA_VERSION, "cards": valid}
+    # the cards this translator cannot render faithfully: `card_append` adds none of them
+    by_id = {c["id"]: c for c in cards}
+    problems = {r["id"]: why for r in valid if (why := untranslated(by_id[r["id"]], r))}
+    with open(os.path.join(DUMPS, "cards_untranslated.json"), "w", encoding="utf-8") as fh:
+        json.dump(problems, fh, indent=2, ensure_ascii=False, sort_keys=True)
+    for card_id, why in sorted(problems.items()):
+        print(f"  ! {card_id}: " + "; ".join(why))
 
     errors = [e for i, r in enumerate(valid) for e in validate_card(r, i)]
     with open(os.path.join(DUMPS, "cards_import_draft.json"), "w", encoding="utf-8") as fh:

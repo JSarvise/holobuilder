@@ -976,11 +976,16 @@ def _value_nodes(plan: _Plan, context: dict | None) -> None:
 
 
 def _set_act_nodes(plan: _Plan) -> None:
-    """The Act.CD / Act.Prob nodes, priced by the per-board level tables, never per node."""
+    """The Act.CD / Act.Prob nodes, priced by the per-board level tables, never per node.
+
+    Only the blue (own card) ones: a leader-scoped Act.Prob (R-064, red) raises every
+    member while its holomem leads, so it keeps the real-score marginal `_branch_values`
+    gives it on the leader's board, like any other red node (Act.Prob never lowers a score,
+    and the candidate plans are scored exactly afterwards)."""
     act_kind = {
         n: (m.get("e") or {}).get("t")
         for n, m in plan.oracle.skilltree.get("nodes", {}).items()
-        if (m.get("e") or {}).get("t") in ("Act.CD", "Act.Prob")
+        if (m.get("e") or {}).get("t") in ("Act.CD", "Act.Prob") and m.get("br", "B") == "B"
     }
     plan.act_kind = act_kind
     plan.act_value = {

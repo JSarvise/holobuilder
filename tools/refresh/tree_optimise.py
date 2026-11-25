@@ -20,6 +20,7 @@ Reads only gitignored account data already on disk. Writes nothing.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 from collections.abc import Sequence
@@ -56,8 +57,10 @@ from hbuilder.domain.skilltree import neighbours  # noqa: E402
 from hbuilder.domain.team import MEMBER_COUNT  # noqa: E402,F401  (the planner reads to.MEMBER_COUNT)
 from hbuilder.inputs import apply_collection, default_paths  # noqa: E402
 
-# The eight account-wide skill-tree currencies, in the node-price table's order.
-CURRENCIES = (
+# The eight account-wide skill-tree currencies every board has had, in the node-price
+# table's order; `CURRENCIES` adds any other a node of the master costs (the Red Star Cube
+# of R-064), so a material the game adds is priced and held to the wallet, never free.
+BASE_CURRENCIES = (
     "item-skill_tree_leader-1",
     "item-skill_tree_leader-2",
     "item-skill_tree_card-1",
@@ -70,6 +73,7 @@ CURRENCIES = (
 PRETTY = {
     "item-skill_tree_leader-1": "Red Cube",
     "item-skill_tree_leader-2": "Red Hexa",
+    "item-skill_tree_leader-3": "Red Star Cube",
     "item-skill_tree_card-1": "Blue Cube",
     "item-skill_tree_card-2": "Blue Hexa",
     "item-skill_tree_allmember-1": "Green Cube",
@@ -77,6 +81,31 @@ PRETTY = {
     "item-skill_tree_content-1": "Yellow Cube",
     "item-skill_tree_content-2": "Yellow Hexa",
 }
+_CURRENCY_RE = re.compile(r"item-skill_tree_[a-z]+-\d+")
+
+
+def _master_currencies(directory: Path = DUMPS) -> tuple[str, ...]:
+    """Every skill-tree item a node of the master `SkillTreeNode` costs (field 1000), beyond
+    `BASE_CURRENCIES`, in id order; their English names join `PRETTY` from
+    `LangItem_Eng`. Empty when the master export is absent."""
+    try:
+        text = (directory / "master_SkillTreeNode.json").read_text("utf8")
+    except OSError:
+        return ()
+    extra = tuple(sorted(set(_CURRENCY_RE.findall(text)) - set(BASE_CURRENCIES)))
+    try:
+        names = json.loads((directory / "holodori" / "main_LangItem_Eng.json").read_text("utf8"))
+    except (OSError, ValueError):
+        names = []
+    for row in names if isinstance(names, list) else ():
+        data = (row or {}).get("data") or {}
+        key = str(data.get("id") or "")
+        if key.startswith("la-") and key.endswith("-name") and key[3:-5] in extra:
+            PRETTY.setdefault(key[3:-5], str(data.get("text") or key[3:-5]))
+    return extra
+
+
+CURRENCIES = BASE_CURRENCIES + _master_currencies()
 
 
 def _load(path: Path):
@@ -215,8 +244,10 @@ def balance_from_disk(directory: Path = DUMPS) -> tuple[dict, str] | tuple[None,
 
     Returns the figures and the source they came from (with its capture time), or
     `(None, None)` when the file is absent, unreadable or lacks one of the eight
-    currencies. Never a default: a balance nobody measured must not be
-    indistinguishable from a balance that is zero."""
+    `BASE_CURRENCIES`. Never a default: a balance nobody measured must not be
+    indistinguishable from a balance that is zero. A currency the game added later (the
+    Red Star Cube) that `items` does not list is held at 0: `items` is the account's whole
+    `User/Get` item list, written verbatim, so its absence is the measurement."""
     stock = directory / "inventory.json"
     try:
         document = json.loads(stock.read_text("utf8"))
@@ -228,8 +259,10 @@ def balance_from_disk(directory: Path = DUMPS) -> tuple[dict, str] | tuple[None,
         held = {k: int(v) for k, v in (document.get("items") or {}).items() if k in CURRENCIES}
     except (AttributeError, TypeError, ValueError):
         return None, None
-    if len(held) != len(CURRENCIES):
+    if any(cur not in held for cur in BASE_CURRENCIES):
         return None, None
+    for cur in CURRENCIES:
+        held.setdefault(cur, 0)
     return held, f"{stock.name} ({document.get('_captured_at', 'undated')})"
 
 

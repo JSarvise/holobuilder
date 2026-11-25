@@ -215,3 +215,16 @@ def test_account_develop_never_sells_a_node_the_points_left_could_keep(web_base)
                 assert more == (), (c["chr"], c["sell"], c["points_used"], c["points_max"])
                 checked += 1
     assert checked
+
+
+def test_min_level_is_read_for_an_across_compare_only():
+    """In general "From a level": the across compare keeps the songs whose chart within the cap
+    is that level or harder; a song compare, a level of 1 or no value carry no `min_level`."""
+    import compare_view
+
+    assert compare_view.parse_assumptions({"across": True, "min_level": 20})["min_level"] == 20
+    for body in ({"across": True}, {"across": True, "min_level": 1}, {"song": "m0384", "min_level": 20}):
+        assert "min_level" not in compare_view.parse_assumptions(body)
+    for bad in ("x", 0, 41, True, "20.5"):
+        with pytest.raises(compare_view.CompareError):
+            compare_view.parse_assumptions({"across": True, "min_level": bad})

@@ -203,8 +203,8 @@ def serve_resources(h: Handler) -> None:
         h.reply_json(200, {"available": False, "reason": f"board/inventory capture unavailable: {exc}"})
         return
 
-    # Iterate CURRENCIES (not the dicts' own keys) so all 8 cube/hexa lines
-    # always appear, even a genuinely-zero one _spent drops.
+    # Iterate CURRENCIES (not the dicts' own keys) so every board material line
+    # (the eight cubes/hexas and any the master adds) appears, even a genuinely-zero one.
     board_materials = [
         {
             "name": to.PRETTY.get(cur, cur),

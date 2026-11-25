@@ -258,7 +258,7 @@ export function drawBoard(host, ch, opts) {
   const values = opts.values || {};
   for (const n of nodes) {
     const cx = px(n.pos[0]), cy = py(n.pos[1]);
-    const r = n.star === 2 ? R2 : R1;
+    const r = n.star >= 2 ? R2 : R1;  // grade 3 (R-064) is drawn at grade 2's size
     const on = V.final.has(n.id), buy = V.buy.has(n.id), sell = V.sell.has(n.id);
     const lvl = (opts.reqLevel || {})[n.id];
     const gated = !on && opts.playerLevel != null && lvl != null && lvl > opts.playerLevel;

@@ -109,9 +109,10 @@ function branches(data) {
   const by = {};
   for (const m of data.board_materials || []) by[m.item_id] = m;
   $("#branches").innerHTML = BRANCHES.map(b => {
-    const rows = [1, 2].map(tier => {
+    // a third tier (the Red Star Cube) only where the game prices a node in it
+    const rows = [1, 2, 3].filter(tier => tier < 3 || by[`item-skill_tree_${b.key}-${tier}`]).map(tier => {
       const id = `item-skill_tree_${b.key}-${tier}`;
-      const m = by[id] || { name: `${b.colour} ${tier === 1 ? "Cube" : "Hexa"}`, spent: 0, wallet: 0, total: 0 };
+      const m = by[id] || { name: `${b.colour} ${tier === 1 ? "Cube" : tier === 2 ? "Hexa" : "Star Cube"}`, spent: 0, wallet: 0, total: 0 };
       const total = m.total || 0;
       const sp = total ? (m.spent / total) * 100 : 0;
       return `<div class="mat">

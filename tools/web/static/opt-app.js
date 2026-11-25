@@ -18,11 +18,15 @@ const DEFAULTS = {
   boosts: 3, holopass: true, pool: "all", platform: "mobile", top: 5, evtop: 5, evsort: "avg",
   lmember: "", loutfit: "", nooverlap: false, maxpoints: false, infmats: false,
   alevel: "account", abloom: "account", aspt: "account", keephigher: false, maxresets: "-1", resetgain: "0.01", auto: false, multi: false, exact: false,
-  allinvited: false, norefund: false, branches: "GBRY", targets: [], lvmode: "expert", lvlo: 25, lvhi: 30,
+  allinvited: false, norefund: false, branches: "GBRY", targets: [], lvmode: "expert", lvlo: 25,
   require: [], exclude: [],
   // goal "rating" (opt-rating.js): the holomem, the highest level she Full Combos, and the search
   rholomem: "", rlevel: 30, rowned: true, rmode: "each", rboard: "one", rsort: "max", rsongs: "5", rteams: 3,
 };
+// In general "From a level": the songs at their hardest chart up to the level the player clears
+// (Up to level; "Any" = 40), only those of level lvFrom() or harder
+const lvTop = () => Math.max(1, Math.min(+S.rlevel || 40, 40));
+const lvFrom = () => Math.max(1, Math.min(S.lvlo, lvTop()));
 const KEEP = Object.keys(DEFAULTS).filter(k => !["require", "exclude"].includes(k));
 const S = { ...DEFAULTS };
 try { Object.assign(S, JSON.parse(localStorage.getItem("hb.optimizer") || "{}")); } catch (_) { /* private mode */ }
@@ -94,6 +98,8 @@ export const CTX = {
   setBusy, rerenderIdle: () => showIdle(),
   // goal Holomem Rating: the header line follows the account's rating once it is read
   onStatus: () => showSong(),
+  // a song search served the song's other chart (`chart_check`): the header names it
+  onChart: () => showSong(),
 };
 
 /* ------------------------------------------------------------------ hero */
@@ -166,9 +172,16 @@ function showSong() {
     const evTag = isEvent() && isEventSong(song.music_id) ? ` <span class="tag">Event song</span>` : "";
     byId("songtitle").innerHTML = esc(song.title || song.music_id) + evTag;
     // one line under the title: singer, the chart's level, notes and length
+    // the rows shown may be on the song's other chart (HARD against EXPERT, opt-score.js showView)
+    const v = !isEvent() && !isRating() && D.view && D.view.song === song.music_id ? D.view : null;
+    const shown = v ? v.difficulty : S.difficulty;
+    const shownName = shown.charAt(0) + shown.slice(1).toLowerCase();
+    const level = v ? v.level : song.difficulty_level;
+    const gain = v && v.gain > 0
+      ? ` <span class="tag" title="Its best team against ${esc(v.over.charAt(0) + v.over.slice(1).toLowerCase())}'s best team">+${(Math.round(v.gain * 1000) / 10).toFixed(1)}% over ${esc(v.over.charAt(0) + v.over.slice(1).toLowerCase())}</span>` : "";
     const bits = [song.singer ? esc(song.singer) : "",
-      `<span class="diff ${S.difficulty.toLowerCase()}">${song.difficulty_level != null ? `<b>${song.difficulty_level}</b>` : ""}${esc(diff)}</span>`,
-      song.notes != null ? `<span class="num">${fmt(song.notes)}</span> notes` : "",
+      `<span class="diff ${shown.toLowerCase()}">${level != null ? `<b>${level}</b>` : ""}${esc(shownName)}</span>${gain}`,
+      song.notes != null && !v ? `<span class="num">${fmt(song.notes)}</span> notes` : "",
       song.seconds != null ? `<span class="num">${mmss(song.seconds)}</span>` : ""];
     const ev = evSong(song.music_id);
     if (isEvent() && ev && ev.length_permil != null) bits.push(`Song length bonus <span class="num">+${dec((ev.length_permil - 1000) / 10, 0)}%</span> (estimate)`);
@@ -181,7 +194,7 @@ function showSong() {
     untint();
     byId("songtitle").textContent = "Every song";
     byId("singer").innerHTML = S.goal === "score" && S.lvmode === "range"
-      ? `<span>Average over every chart of level ${S.lvlo}–${S.lvhi}, any difficulty</span>`
+      ? `<span>Average over every song at its hardest chart${lvTop() >= 40 ? "" : ` up to level ${lvTop()}`}, the charts of level ${lvFrom()} or more</span>`
       : D.capped ? `<span>Average over every song at its hardest chart up to level ${D.capped}</span><span><span class="num">${fmt(D.songs.length)}</span> charts</span>`
       : `<span>Average over every ${esc(diff)} chart</span><span><span class="num">${fmt(D.songs.length)}</span> charts</span>`;
     document.title = "Optimizer · hololive builder";
@@ -377,6 +390,9 @@ function applyGoal() {
   emx.title = isHL() ? "A Highlight pool has no single best run to rank by"
     : "Rank by each team's Event Song Score if every Active skill fires on this chart";
   byId("lvrow").hidden = S.lvmode !== "range";
+  byId("lvlo").max = String(lvTop());
+  byId("lvlo").value = String(lvFrom());
+  byId("lvnote").textContent = `Up to level ${lvTop() >= 40 ? "any" : lvTop()}, your level next to the song.`;
   byId("boostx").textContent = `×${AC[S.boosts - 1]} Event Pt`;
   setPressed(byId("goal"), isEvent() ? "event" : isRating() ? "rating" : "score");
   // Holomem Rating: each song is played at its own hardest chart within the level; the holomem leads
@@ -416,7 +432,7 @@ async function changed(key) {
   // the song may have changed above (an event's default song): its own chart under the level
   syncDifficulty();
   if (["rholomem", "rowned", "rmode", "rboard", "rsort", "rsongs", "rteams"].includes(key) || (key === "rlevel" && isRating())) { if (isRating()) { showSong(); renderFresh(); showIdle(); } return; }
-  if (["goal", "song", "rlevel", "cards", "boards", "maxpoints", "infmats", "maxresets", "resetgain", "alevel", "abloom", "aspt", "keephigher", "allinvited", "norefund", "branches", "targets", "lvmode", "lvlo", "lvhi", "boosts", "holopass", "chapter"].includes(key)) { setProv(""); showSong(); renderFresh(); showIdle(); }
+  if (["goal", "song", "rlevel", "cards", "boards", "maxpoints", "infmats", "maxresets", "resetgain", "alevel", "abloom", "aspt", "keephigher", "allinvited", "norefund", "branches", "targets", "lvmode", "lvlo", "boosts", "holopass", "chapter"].includes(key)) { setProv(""); showSong(); renderFresh(); showIdle(); }
   else if (key === "sort" || key === "evsort" || key === "top") { renderFresh(); showIdle(true); }
   else if (isEvent()) { renderFresh(); showIdle(); }   // a leader or pinned-card change: the event answer shown no longer applies
   else renderFresh();
@@ -451,15 +467,13 @@ function wireMore() {
     S.branches = next; paintBranches(); changed("branches");
   });
   bindSeg("lvmode", "lvmode");
-  for (const id of ["lvlo", "lvhi"]) {
-    byId(id).value = S[id];
-    byId(id).onchange = e => {
-      const v = Math.max(1, Math.min(40, Math.round(+e.target.value || 1)));
-      S[id] = v; e.target.value = v;
-      if (S.lvlo > S.lvhi) { S.lvlo = S.lvhi = v; byId("lvlo").value = byId("lvhi").value = v; }
-      changed(id);
-    };
-  }
+  // From level: the lowest chart level kept, never above the level the player clears
+  byId("lvlo").value = String(lvFrom());
+  byId("lvlo").onchange = e => {
+    S.lvlo = Math.max(1, Math.min(lvTop(), Math.round(+e.target.value || 1)));
+    e.target.value = String(S.lvlo);
+    changed("lvlo");
+  };
   initTargets(S, D.cards.values(), () => changed("targets"));
   bindSeg("pool", "pool"); bindSeg("platform", "platform");
   bindSeg("rmode", "rmode"); bindSeg("rboard", "rboard"); bindSeg("rsort", "rsort"); bindSeg("rsongs", "rsongs");

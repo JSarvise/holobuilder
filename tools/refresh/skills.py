@@ -5,9 +5,11 @@
 # (per-level BLOB; skills cap at level 2).
 #
 # Level BLOB fields (verified against a hand transcription of 50 SSR cards):
-#   ACTIVE : f4 principal effect, f5 GATE for the conditional effect, f6 conditional effect,
-#            f7 cooldown(ms), f8 activation chance(permil), f10 duration(ms)
-#   PASSIVE: f3 GATE, f4 effect(+target)
+#   ACTIVE : f3 GATE for the principal effect (4 rows of 429: Sakura Miko 0120, Himemori Luna
+#            0121), f4 principal effect, f5 GATE for the conditional effect, f6 conditional
+#            effect, f7 cooldown(ms), f8 activation chance(permil), f10 duration(ms)
+#   PASSIVE: f3 GATE, f4 effect(+target), f5 GATE + f6 a second effect(+target) (2 rows of
+#            426: Himemori Luna 0121)
 #   SPECIAL: f3 principal effect, f4 GATE for the conditional effect, f5 conditional effect,
 #            f6 duration(ms)
 #
@@ -121,6 +123,22 @@ def parse_gate(s):
     return {"kind": "unknown", "target": body, "count": None, "raw": s}
 
 
+# The level-row fields each resolver reads (1 id, 2 level) or knowingly leaves (1000, the
+# description key). A populated field outside these is a field nobody translated: the card
+# is reported, never imported (`unread`, read by `import_to_cards`).
+READ_FIELDS = {
+    "ACTIVE": frozenset({1, 2, 3, 4, 5, 6, 7, 8, 10, 1000}),
+    "PASSIVE": frozenset({1, 2, 3, 4, 5, 6, 1000}),
+    "SPECIAL": frozenset({1, 2, 3, 4, 5, 6, 1000}),
+    "COSTUME": frozenset({1, 2, 3, 4, 5, 1000}),
+}
+
+
+def unread(kind, f):
+    """The populated fields of a level row that `READ_FIELDS[kind]` does not cover."""
+    return sorted(k for k, v in f.items() if k not in READ_FIELDS[kind] and v not in (None, [], [None]))
+
+
 def _s(f, k):
     v = f.get(k, [None])[0]
     return v.decode("utf-8", "replace") if isinstance(v, bytes) else v
@@ -131,10 +149,12 @@ def _n(f, k):
 
 
 def resolve_active(f):
-    """f7 cooldown / f8 chance / f10 duration; f5 gates the f6 conditional effect."""
+    """f3 gates the principal effect; f7 cooldown / f8 chance / f10 duration; f5 gates the
+    f6 conditional effect."""
     permil = _n(f, 8)
     return {
         "kind": "ACTIVE",
+        "gate": parse_gate(_s(f, 3)),
         "effect": parse_effect(_s(f, 4)),
         "conditional": {"gate": parse_gate(_s(f, 5)), "effect": parse_effect(_s(f, 6))} if _s(f, 6) else None,
         "duration_ms": _n(f, 10),
@@ -142,16 +162,20 @@ def resolve_active(f):
         "activation_permil": permil,
         "probability_tier": PROBABILITY_TIER_BY_PERMIL.get(permil),
         "level": _n(f, 2),
+        "unread": unread("ACTIVE", f),
     }
 
 
 def resolve_passive(f):
-    """f3 is the deck gate; f4 is the effect plus who it buffs."""
+    """f3 is the deck gate; f4 is the effect plus who it buffs; f5 gates a second effect f6
+    (its own target), which is not a conditional variant of the first."""
     return {
         "kind": "PASSIVE",
         "gate": parse_gate(_s(f, 3)),
         "effect": parse_effect(_s(f, 4)),
+        "additional": {"gate": parse_gate(_s(f, 5)), "effect": parse_effect(_s(f, 6))} if _s(f, 6) else None,
         "level": _n(f, 2),
+        "unread": unread("PASSIVE", f),
     }
 
 
@@ -164,6 +188,7 @@ def resolve_leader(f):
         "gate": parse_gate(_s(f, 2)),
         "effect": parse_effect(_s(f, 3)),
         "conditional": {"gate": parse_gate(_s(f, 4)), "effect": parse_effect(_s(f, 5))} if _s(f, 5) else None,
+        "unread": unread("COSTUME", f),
     }
 
 
@@ -176,4 +201,5 @@ def resolve_special(f):
         "conditional": {"gate": parse_gate(_s(f, 4)), "effect": parse_effect(_s(f, 5))} if _s(f, 5) else None,
         "duration_ms": _n(f, 6),
         "level": _n(f, 2),
+        "unread": unread("SPECIAL", f),
     }

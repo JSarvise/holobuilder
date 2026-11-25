@@ -30,10 +30,16 @@ const tsBasis = S => {
 };
 // Multi Live (FEVER) is a Score-goal option: no other goal's request carries it
 const multiOn = S => S.goal === "score" && !!S.multi;
+// In general "From a level": [lowest, highest] = each song at its hardest chart up to the level the
+// player clears (Up to level; "Any" = 40), kept when it is the lowest level or harder
+const lvRange = S => {
+  const top = Math.max(1, Math.min(+S.rlevel || 40, 40));
+  return [Math.max(1, Math.min(+S.lvlo, top)), top];
+};
 function optsKey(S) {
   return JSON.stringify([S.song, S.difficulty, S.song ? 0 : S.rlevel, S.cards, S.boards, S.maxpoints, S.infmats, S.pool, S.platform, S.auto, multiOn(S), S.exact,
     S.cards === "whatif" ? [S.alevel, S.abloom, S.aspt, !!S.keephigher] : 0, S.maxresets, S.resetgain,
-    S.allinvited, S.norefund, S.branches, JSON.stringify(S.targets), S.lvmode === "range" ? [S.lvlo, S.lvhi] : 0, S.lmember, S.loutfit, S.nooverlap, S.require, S.exclude]);
+    S.allinvited, S.norefund, S.branches, JSON.stringify(S.targets), !S.song && S.lvmode === "range" ? lvRange(S) : 0, S.lmember, S.loutfit, S.nooverlap, S.require, S.exclude]);
 }
 const teamKey = (leader, members) => leader + "|" + [...members].sort().join(",");
 // a row's refinement level as its detail asks for it: 2 (every frequency count tried) and
@@ -59,6 +65,8 @@ function restore(ctx) {
   restored = true;
   const k = unstash("score", ctx); if (!k) return;
   if (k.cache) cache = { ...k.cache, cards: ctx.D.cards };
+  // a check that was running when the page closed is not followed any more: its stream is gone
+  if (cache && cache.check && cache.check.state === "checking") cache.check = null;
   sel = k.sel || 0; open = new Set([sel]);
 }
 
@@ -97,9 +105,12 @@ function odBody(S) {
   const b = { song: S.song, basis: tsBasis(S) || "account", difficulty: S.difficulty, platform: S.platform,
     auto: !!S.auto, multi: multiOn(S), ...leaderOpts(S) };
   if (a) b.assumptions = a;
-  if (!S.song && S.lvmode === "range") b.levels = [+S.lvlo, +S.lvhi];
-  // Every song: each song at its hardest chart up to the level (a song's own chart is S.difficulty)
-  else if (!S.song) b.max_level = S.rlevel;
+  if (!S.song && S.lvmode === "range") b.levels = lvRange(S);
+  // Every song: each song at its hardest chart up to the level; one song: its chart is
+  // S.difficulty and the level bounds the other chart the server also tries (`chart_check`)
+  else b.max_level = S.rlevel;
+  // the other-chart check is calibrated on the expected score of a manual, solo run
+  if (S.song && (S.sort === "max" || multiOn(S) || S.auto)) b.chart_check = false;
   if (S.require.length) b.require = S.require;
   if (S.exclude.length) b.exclude = S.exclude;
   // Card pool "5★ only": the five members; the leader slot stays any rarity
@@ -109,12 +120,24 @@ function odBody(S) {
 // idle with on-demand options: the last result when it is for these options, else a
 // prompt; a search still running for OTHER options no longer applies and is cancelled
 function idleOnDemand(ctx, key) {
-  if (cache && cache.url === "search:" + key) { render(ctx, cache); return; }
+  if (cache && cache.url === "search:" + key) { setView(ctx); render(ctx, cache); return; }
   if (od && od.key === key) return;                 // already searching these options
   cancelOnDemand();
+  if (ctx.D.view) { ctx.D.view = null; if (ctx.onChart) ctx.onChart(); }
   ctx.out().innerHTML = `<section class="o-empty"><h2>Ready to search</h2><p>Set the options, then press <b>Find best team</b>. With a song the search takes about 15-40 seconds.</p></section>`;
 }
+// the other-chart check that follows a song's answer on the same stream (`gotChart`)
+let chk = null;
+function cancelCheck() {
+  if (!chk) return;
+  const { ctx } = chk;
+  chk.es.close();
+  fetch("/cancel/" + chk.job, { method: "POST" }).catch(() => {});
+  chk = null;
+  if (cache && cache.check && cache.check.state === "checking") { cache.check = null; remember(ctx); }
+}
 function cancelOnDemand() {
+  cancelCheck();
   if (!od) return;
   if (od.es) od.es.close();
   if (od.job) fetch("/cancel/" + od.job, { method: "POST" }).catch(() => {});
@@ -146,44 +169,162 @@ async function searchNow(ctx, key) {
   if (od !== mine) { fetch("/cancel/" + started.job_id, { method: "POST" }).catch(() => {}); return; }
   mine.job = started.job_id;
   const es = mine.es = new EventSource("/events/" + started.job_id);
+  // one song: after the answer the server checks the song's other chart (HARD against EXPERT,
+  // `jobs._check_chart`) on the same stream; the page shows the answer at once and keeps
+  // listening, and switches to the other chart's teams if they score enough more
+  const contender = (started.opts && started.opts.contender) || null;
   let doc = null, failed = null;
+  const answer = () => {
+    od = null;
+    endCard(true);
+    if (optsKey(ctx.S) !== key) { es.close(); return; }
+    const rows = rowsOf(ctx, doc);
+    const S = ctx.S, skipped = (started.opts && started.opts.unchecked) || null;
+    const why = S.sort === "max" ? "with Sort by Max" : multiOn(S) ? "with Multi Live" : S.auto ? "with AUTO" : "";
+    cache = { url, doc, rows, cards: ctx.D.cards, cached: true,
+      check: contender ? { state: "checking", other: contender.other, other_level: (contender.levels || {})[contender.other] }
+        : skipped && why ? { state: "skipped", other: skipped.other, other_level: (skipped.levels || {})[skipped.other], why } : null };
+    if (contender) chk = { es, job: mine.job, url, ctx };
+    else es.close();
+    sel = 0; open = new Set([0]);
+    showView(ctx);
+    render(ctx, cache);
+  };
+  const checkOver = () => {
+    if (!chk || chk.job !== mine.job) return;
+    chk = null;
+    if (cache && cache.check && cache.check.state === "checking") { cache.check = null; remember(ctx); paintChartNote(ctx); }
+  };
   es.onmessage = m => {
     let ev; try { ev = JSON.parse(m.data); } catch (_) { return; }
     // build (the account; instant when the engine is warm) -> search -> refine / materials
-    if (ev.type === "stage" && ev.state === "active") show({ build: 0, search: 1, refine: 2 }[ev.stage] ?? 1, null);
-    else if (ev.type === "progress") show(ev.stage === "refine" ? 2 : 1, ev);
-    else if (ev.type === "result") doc = ev.payload;
+    if (ev.type === "stage" && ev.state === "active") { if (od === mine) show({ build: 0, search: 1, refine: 2 }[ev.stage] ?? 1, null); }
+    else if (ev.type === "progress") { if (od === mine) show(ev.stage === "refine" ? 2 : 1, ev); }
+    else if (ev.type === "result") { doc = ev.payload; if (od === mine) answer(); }
+    else if (ev.type === "chart") { if (chk && chk.job === mine.job) gotChart(ctx, ev); }
     else if (ev.type === "error") failed = ev.message || "the search failed";
     else if (ev.type === "end") {
       es.close();
+      checkOver();
       if (od !== mine) return;
       od = null;
-      endCard(!!doc);
-      if (!doc) { ctx.out().innerHTML = `<div class="o-error">The search failed: ${esc(failed || "no result")}</div>`; return; }
-      if (optsKey(ctx.S) !== key) return;
-      // the board mode of THIS search: with "As they are" the rows are scored on the account's
-      // boards (no plan to show, and "Now" would be the same team on the same boards); planned
-      // boards (and every card maxed, whose boards are complete) carry a plan
-      const A = assumptionsOf(ctx.S);
-      const boards = A && A.boards === "as_is" ? "current" : "develop";
-      const rows = (doc.ranking || []).map(r => ({
-        key: teamKey(r.leader, r.members), source: "cached", od: true, route: "the search", api: "/api/search", boards,
-        leader: r.leader, leaderName: r.leader_name, members: r.member_order || r.members, ordered: !!r.member_order,
-        expected: r.best, kind: doc.scope === "general" ? "across" : "song", sings: r.sings, status: r.status, refinedLeaf: r.refined,
-        p10: r.p10, p50: r.p50, p90: r.p90, max: r.song_max ?? null, multi: !!(doc.play && doc.play.multi),
-      }));
-      cache = { url, doc, rows, cards: ctx.D.cards, cached: true };
-      sel = 0; open = new Set([0]);
-      remember(ctx);
-      // the search's best teams for the Versus page in this tab (vs-app.js optimizerBest); a Multi
-      // search's values are MULTI SCORE contributions, not the scores Versus compares
-      if (!multiOn(ctx.S)) stash("best", ctx, { song: ctx.S.song || "", difficulty: ctx.S.difficulty, cards: ctx.S.cards,
-        rows: (doc.ranking || []).slice(0, 20).map(r => ({ leader: r.leader, leader_name: r.leader_name,
-          members: r.member_order || r.members, best: r.best })) });
-      render(ctx, cache);
+      endCard(false);
+      ctx.out().innerHTML = `<div class="o-error">The search failed: ${esc(failed || "no result")}</div>`;
     }
   };
-  es.onerror = () => { es.close(); if (od === mine && !doc) { od = null; endCard(); ctx.out().innerHTML = `<div class="o-error">Lost the search's event stream.</div>`; } };
+  es.onerror = () => {
+    es.close();
+    checkOver();
+    if (od === mine && !doc) { od = null; endCard(); ctx.out().innerHTML = `<div class="o-error">Lost the search's event stream.</div>`; }
+  };
+}
+
+/* ------------------------------------------------------------------ the song's other chart */
+// the rows of one search's answer; a row of the other chart carries it in its key, so its
+// details are its own
+function rowsOf(ctx, doc, other = false) {
+  // the board mode of THIS search: with "As they are" the rows are scored on the account's
+  // boards (no plan to show, and "Now" would be the same team on the same boards); planned
+  // boards (and every card maxed, whose boards are complete) carry a plan
+  const A = assumptionsOf(ctx.S);
+  const boards = A && A.boards === "as_is" ? "current" : "develop";
+  return (doc.ranking || []).map(r => ({
+    key: teamKey(r.leader, r.members) + (other ? "@" + doc.difficulty : ""), source: "cached", od: true, route: "the search", api: "/api/search", boards,
+    leader: r.leader, leaderName: r.leader_name, members: r.member_order || r.members, ordered: !!r.member_order,
+    expected: r.best, kind: doc.scope === "general" ? "across" : "song", sings: r.sings, status: r.status, refinedLeaf: r.refined,
+    p10: r.p10, p50: r.p50, p90: r.p90, max: r.song_max ?? null, multi: !!(doc.play && doc.play.multi),
+    difficulty: doc.scope === "general" ? null : doc.difficulty,
+  }));
+}
+function gotChart(ctx, ev) {
+  const cc = ev.check || {};
+  if (!cache || !chk || cache.url !== chk.url) return;
+  if (ev.payload && cc.wins) {
+    // the other chart's best team scores at least the minimum more: show its teams
+    const before = cache.rows;
+    cache.other = { doc: cache.doc, rows: cache.rows };
+    cache.doc = ev.payload; cache.rows = rowsOf(ctx, ev.payload, true);
+    cache.check = { state: "won", ...cc };
+    reselect(ctx, before, cache.rows, cc.other);
+    showView(ctx);
+    render(ctx, cache);
+    return;
+  }
+  // the check failed (an error on the server): say so, it is not "the other chart loses"
+  cache.check = cc.error ? { state: "failed", other: cc.other, other_level: cc.other_level ?? cache.check?.other_level ?? null } : null;
+  remember(ctx);
+  paintChartNote(ctx);
+}
+function swapChart(ctx) {
+  if (!cache || !cache.other) return;
+  const shown = { doc: cache.doc, rows: cache.rows };
+  cache.doc = cache.other.doc; cache.rows = cache.other.rows; cache.other = shown;
+  reselect(ctx, shown.rows, cache.rows, cache.doc.difficulty);
+  showView(ctx);
+  render(ctx, cache);
+}
+// the rows switch to the other chart's (or back): the selected team stays selected when it is in
+// the new list too, else the list opens on #1 and says why
+function reselect(ctx, before, after, difficulty) {
+  const was = sorted(ctx, { rows: before })[sel];
+  const now = sorted(ctx, { rows: after });
+  // only a row the list shows ("Teams to show", "One per leader") can stay selected
+  const visible = new Set(shownRows(now.map(T => ({ leader: { id: T.leader } })), listOpts(ctx.S)).map(([, k]) => k));
+  const i = was ? now.findIndex((r, k) => visible.has(k) && teamKey(r.leader, r.members) === teamKey(was.leader, was.members)) : -1;
+  if (i < 0 && sel > 0) toast(`Your selected team is not among ${titleCase(difficulty)}'s best: showing its #1.`);
+  sel = Math.max(0, i); open = new Set([sel]);
+}
+// what the page says about the chart the rows are on: the header names it, Versus gets its teams
+function setView(ctx) {
+  const d = cache && cache.doc, S = ctx.S;
+  const cc = (d && d.chart_check) || {};
+  const song = S.song && d && d.scope !== "general";
+  ctx.D.view = song && d.difficulty && d.difficulty !== S.difficulty
+    ? { song: S.song, difficulty: d.difficulty, level: cc.other_level ?? null, gain: cc.gain ?? null, over: cc.difficulty || S.difficulty }
+    : null;
+  if (ctx.onChart) ctx.onChart();
+}
+function showView(ctx) {
+  const d = cache && cache.doc, S = ctx.S;
+  setView(ctx);
+  remember(ctx);
+  // the search's best teams for the Versus page in this tab (vs-app.js optimizerBest); a Multi
+  // search's values are MULTI SCORE contributions, not the scores Versus compares
+  if (d && !multiOn(S)) stash("best", ctx, { song: S.song || "", difficulty: d.difficulty || S.difficulty, cards: S.cards,
+    rows: (d.ranking || []).slice(0, 20).map(r => ({ leader: r.leader, leader_name: r.leader_name,
+      members: r.member_order || r.members, best: r.best })) });
+}
+const titleCase = d => d ? d.charAt(0) + d.slice(1).toLowerCase() : "";
+const pct = x => (Math.round(x * 1000) / 10).toFixed(1);
+// "Expert 26": the chart a song's rows are scored on
+function chartName(ctx, doc) {
+  const d = (doc && doc.difficulty) || ctx.S.difficulty, cc = (doc && doc.chart_check) || null;
+  const song = ctx.song ? ctx.song() : null;
+  const level = cc && d === cc.other ? cc.other_level
+    : d === ctx.S.difficulty && song ? song.difficulty_level
+    : cc && d === cc.difficulty ? cc.level : null;
+  return `${titleCase(d)}${level != null ? ` ${level}` : ""}`;
+}
+function chartNoteHTML(ctx, res = cache) {
+  const c = res && res === cache && cache.check;
+  if (!c) return "";
+  const other = `${titleCase(c.other)}${c.other_level != null ? ` ${c.other_level}` : ""}`;
+  const cards = basisOf(ctx.S) === "account" ? "with your cards" : "with these cards";
+  if (c.state === "checking") return `<span class="o-chk-spin" aria-hidden="true"></span>Checking whether ${esc(other)} scores more ${cards}…`;
+  if (c.state === "failed") return `Couldn't check whether ${esc(other)} scores more: the check failed on the server. These teams are still the best on this chart.`;
+  // the check is calibrated on the expected score of a manual, solo run: it is not tried otherwise
+  if (c.state === "skipped") return `${esc(other)} was not checked ${esc(c.why)}: the check compares the expected score of a manual, solo run.`;
+  if (c.state !== "won") return "";
+  const picked = `${titleCase(c.difficulty)}${c.level != null ? ` ${c.level}` : ""}`;
+  return cache.doc && cache.doc.difficulty === c.other
+    ? `<b>Showing ${esc(other)}:</b> its best team scores +${pct(c.gain)}% more than ${esc(picked)}'s best. Your Holomem Rating keeps your best score on any difficulty. <button class="o-link" type="button" data-chartswap>Show ${esc(picked)}</button>`
+    : `<b>${esc(other)} scores +${pct(c.gain)}% more</b> than ${esc(picked)}, each with its own best team. <button class="o-link" type="button" data-chartswap>Show ${esc(other)}</button>`;
+}
+function paintChartNote(ctx) {
+  const el = ctx.out().querySelector("[data-chartnote]");
+  if (!el) return;
+  const html = chartNoteHTML(ctx);
+  el.innerHTML = html; el.hidden = !html;  // its button is wired by render's click handler
 }
 
 /* ------------------------------------------------------------------ cancel and progress */
@@ -284,7 +425,8 @@ function render(ctx, res) {
   if (sel >= rows.length) { sel = 0; open = new Set([0]); }
   ctx.out().innerHTML = `<div class="o-split">
     <aside class="dlg o-setlist" aria-label="Ranked teams">
-      <div class="dlg-h"><h2>${res.cached ? "Setlist of best teams" : "Search results"}</h2><span class="r"><span data-shown>${shownLine(rows, S)}</span> · ${res.cached ? (res.doc.scope === "general" ? "average over every chart" : byMax(ctx, rows) ? "Max: every Active skill fires" : "expected score on this chart") : "this search"}</span></div>
+      <div class="dlg-h"><h2>${res.cached ? "Setlist of best teams" : "Search results"}</h2><span class="r"><span data-shown>${shownLine(rows, S)}</span> · ${res.cached ? (res.doc.scope === "general" ? "average over every chart" : byMax(ctx, rows) ? `Max on ${esc(chartName(ctx, res.doc))}: every Active skill fires` : `expected score on ${esc(chartName(ctx, res.doc))}`) : "this search"}</span></div>
+      <p class="o-chartnote" data-chartnote${chartNoteHTML(ctx, res) ? "" : " hidden"}>${chartNoteHTML(ctx, res)}</p>
       <div class="o-listctl" role="group" aria-label="List view">
         <button class="chip" type="button" data-diffmode aria-pressed="${diffMode}" title="Outline the cards that differ from #1">Diff vs #1</button>
         <button class="chip" type="button" data-oneper aria-pressed="${onePer}" title="Show only each leader card's best team">One per leader</button></div>
@@ -297,6 +439,7 @@ function render(ctx, res) {
     const r = e.target.closest(".rk-row[data-i]"); if (r) return select(ctxT, +r.dataset.i);
     if (e.target.closest("[data-diffmode]")) { diffMode = !diffMode; return relist(ctxT); }
     if (e.target.closest("[data-oneper]")) { onePer = !onePer; return relist(ctxT); }
+    if (e.target.closest("[data-chartswap]")) return swapChart(ctx);
     const tg = e.target.closest("[data-toggle]"); if (tg) return select(ctxT, +tg.dataset.toggle);
     const cp = e.target.closest("[data-copy]"); if (cp) return copy(ctxT, +cp.dataset.copy);
     const ex = e.target.closest("[data-export]"); if (ex) return exportTeam(ctxT, +ex.dataset.export, ex);
@@ -526,7 +669,8 @@ function baseOf(S) {
   const b = { basis: basisOf(S), song: S.song, across: !S.song, platform: S.platform, uptime_model: "finite", auto: !!S.auto, multi: multiOn(S),
     assume_level: S.cards === "whatif" ? S.alevel : null, assume_bloom: S.cards === "whatif" ? S.abloom : null, difficulty: S.difficulty };
   // Every song under a level cap: the charts the search averaged (each song at its pick)
-  if (!S.song && S.lvmode !== "range") b.max_level = S.rlevel;
+  if (!S.song) b.max_level = S.rlevel;
+  if (!S.song && S.lvmode === "range") b.min_level = lvRange(S)[0];
   if (S.maxpoints) b.budget = "max";
   return b;
 }
@@ -621,7 +765,7 @@ async function after(ctxT, T, i) {
   if (det && det.optsKey === optsKey(S) && !det.err) { repaint(ctxT, T, i); return; }
   det = { optsKey: optsKey(S), unlimited: basisOf(S) === "maxed" }; details.set(T.source + ":" + T.key, det);
   const cards = [T.leader, ...T.members];
-  const base = baseOf(S);
+  const base = { ...baseOf(S), ...(T.difficulty ? { difficulty: T.difficulty } : {}) };
   const cmp = (board, extra = {}) => postJSON("/api/compare", { ...base, board, ...extra });
   const jobs = [];
   if (!wallet) jobs.push(getJSON("/api/resources").then(w => { wallet = w; }).catch(() => { wallet = {}; }));
@@ -637,7 +781,7 @@ async function after(ctxT, T, i) {
   } else if (T.source === "cached") {
     jobs.push((async () => {
       try {
-        const body = { song: S.song, difficulty: S.difficulty, basis: tsBasis(S) || "account", cards, ...playOf(S),
+        const body = { song: S.song, difficulty: T.difficulty || S.difficulty, basis: tsBasis(S) || "account", cards, ...playOf(S),
           member_order: T.ordered ? T.members : undefined,
           ...(T.od ? { refine: refineOf(T.refinedLeaf), ...(assumptionsOf(S) ? { assumptions: assumptionsOf(S) } : {}) } : {}),
           ...(T.shared ? { shared_board: T.shared } : {}) };
@@ -681,10 +825,12 @@ function exportTeam({ ctx, rows }, i, btn) {
   return exportFile(det.body, shown, T.od ? odBody(S) : null, btn);
 }
 
-function copy({ ctx, rows, cardOf }, i) {
+function copy({ ctx, res, rows, cardOf }, i) {
   const T = rows[i], song = ctx.song();
   const name = id => { const c = cardOf(id) || {}; return `${c.costume_name || id} (${c.member || ""})`; };
-  const txt = [`${song ? song.title : "Every song"} · team #${i + 1} · ${fmt(T.expected)}`, `Leader: ${name(T.leader)}`,
+  // a song's team names its chart: after the Hard check the rows may be Hard's, not the page's pick
+  const where = song ? `${song.title}${T.difficulty ? ` (${chartName(ctx, res.doc)})` : ""}` : "Every song";
+  const txt = [`${where} · team #${i + 1} · ${fmt(T.expected)}`, `Leader: ${name(T.leader)}`,
     ...T.members.map((id, k) => `${T.ordered ? k + 1 + ". " : "· "}${name(id)}`)].join("\n");
   navigator.clipboard?.writeText(txt).then(() => toast("Team copied"), () => toast("Couldn't copy"));
 }

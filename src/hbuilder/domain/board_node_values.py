@@ -8,6 +8,7 @@ Split out of `board_plan.py`, which re-exports every name here."""
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
@@ -31,6 +32,46 @@ def node_costs_from_master(master_rows: Sequence[Mapping]) -> dict[str, int]:
         if f9:
             costs[row["group_id"]] = int(f9[0])
     return costs
+
+
+_ITEM_RE = re.compile(r"item-skill_tree_[a-z]+-\d+")
+
+
+def node_items_from_master(master_rows: Sequence[Mapping]) -> dict[str, frozenset[str]]:
+    """`group_id -> the skill-tree items its price names`, master `SkillTreeNode` field
+    1000 (a repeated `Consumption`: the ids are read, the quantities are not)."""
+    out: dict[str, frozenset[str]] = {}
+    for row in master_rows:
+        f1000 = row.get("data", {}).get("1000") or ()
+        items = frozenset(item for entry in f1000 for item in _ITEM_RE.findall(str(entry)))
+        if items:
+            out[row["group_id"]] = out.get(row["group_id"], frozenset()) | items
+    return out
+
+
+def gate_unheld_materials(
+    skilltree_json: Mapping, master_rows: Sequence[Mapping], held: Mapping[str, int]
+) -> tuple[dict, tuple[str, ...]]:
+    """`skilltree_json` with every node whose price names an item the account holds none
+    of (`held[item] == 0`) gated past any player level, and the gated node ids.
+
+    With the account's materials the plan may not buy such a node anywhere: the leaf's
+    points-only plans read the same `req` gate every planner reads (the materials re-plan
+    holds the wallet itself). An item absent from `held` is not gated: unknown is not 0."""
+    blocked = {item for item, qty in held.items() if int(qty) <= 0}
+    if not blocked:
+        return dict(skilltree_json), ()
+    nodes = dict(skilltree_json.get("nodes") or {})
+    gated = []
+    for group, items in node_items_from_master(master_rows).items():
+        if group in nodes and items & blocked:
+            nodes[group] = {**nodes[group], "req": f"cd-player_level-{UNREACHABLE_PLAYER_LEVEL}"}
+            gated.append(group)
+    return {**skilltree_json, "nodes": nodes}, tuple(sorted(gated))
+
+
+# a player level no account reaches: a node gated at it is never bought
+UNREACHABLE_PLAYER_LEVEL = 10**6
 
 
 def node_effect_ids_from_master(master_rows: Sequence[Mapping]) -> dict[str, list[str]]:
@@ -340,10 +381,17 @@ def node_values_from_recipes(
                 # One team-wide addend that multiplies the whole ACTIVE pool.
                 row += active_pool_rate * eff.value * d_us_per_bonus
             elif eff.kind in ("activation_rate_up", "cooldown_shorten"):
+                if eff.scope == "leader":
+                    # R-064: every member's activation rate while this holomem leads,
+                    # about the whole pool (each member's share, once per member reached)
+                    if reached and member_cards:
+                        row += len(reached) * (
+                            (active_pool_rate / len(member_cards)) * eff.value * d_us_per_bonus
+                        )
                 # Raises one member's active occupancy -> about its share of the
                 # pool, and only if that member actually fields an active in it
                 # (a pure outfit-leader's own active is not in the pool).
-                if own_in_members and member_cards:
+                elif own_in_members and member_cards:
                     row += (active_pool_rate / len(member_cards)) * eff.value * d_us_per_bonus
             # A `music_skill_tree_character` trigger fires only when this
             # holomem sings the song: worth `singer_weight` of its full value.

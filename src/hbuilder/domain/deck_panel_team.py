@@ -43,6 +43,8 @@ from hbuilder.domain.scoring import (
     _pool_for,
     _resolve_skill,
     active_magnitude_by_card,
+    leader_activation_rate,
+    with_passive_activation_rates,
 )
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.song import SongChart, _support_state
@@ -131,9 +133,11 @@ def panel_cards_for_team(
     order = tuple(member_order) if member_order else tuple(c.id for c in members)
     if sorted(order) != sorted(by_id):
         raise ValueError(f"member_order {list(order)} is not a permutation of the members")
+    cfg = with_passive_activation_rates(members, cfg)
     gates = resolve_card_set_gates(members, cfg.run_state)
     normal = [r for card in members for r in gates.normal_by_card_id[card.id]]
-    team_rate_up = _fold_activation_rate_up(tuple(normal), cfg)
+    lead_rate = leader_activation_rate(cfg, team.leader)
+    team_rate_up = _fold_activation_rate_up(tuple(normal), cfg) + lead_rate
     active_rank = active_magnitude_by_card(normal)
     unmodelled: list[str] = []
 
@@ -187,6 +191,8 @@ def panel_cards_for_team(
         act = active.get(cid) or {}
         spec = special.get(cid, (0, 0, 0))
         rate_up, shorten = board.uptime_for(card.member) if board is not None else (0.0, 0.0)
+        # the leader's team-wide rate (R-064) is a per-position board term as well
+        rate_up += lead_rate
         cards.append(
             PanelCard(
                 magnitude_permil=act.get("magnitude_permil", 0),

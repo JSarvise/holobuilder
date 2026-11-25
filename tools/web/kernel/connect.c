@@ -131,7 +131,11 @@ static double node_value(const Node *nd, const Eff *effs, int is_leader, int own
         } else if (e->kind == K_SKILL_EFFECT_UP) {
             if (nreach) row += apr * e->value * db;
         } else if (e->kind == K_UPTIME) {
-            if (own >= 0 && nm) row += (apr / (double)nm) * e->value * db;
+            /* a leader-scoped rate (R-064) raises every member's: the member's share of
+               the pool once per member reached (board_node_values, the same expression) */
+            if (e->scope == S_LEADER) {
+                if (nreach && nm) row += (double)nreach * ((apr / (double)nm) * e->value * db);
+            } else if (own >= 0 && nm) row += (apr / (double)nm) * e->value * db;
         }
         if (e->flags & F_CONDITIONAL) row *= singer_weight;
         if (row > best) best = row;

@@ -9,9 +9,10 @@ reduction.
 
 ⚠ **Keyed by HOLOMEM, and that follows from the game data rather than
 convenience.** Over all master `SkillTreeNode` rows — the whole game, not one
-account — every node carrying either effect is branch **B**, scope **member**,
-non-conditional: 10 `activation_rate_up` and 3
-`cooldown_shorten`, zero at leader, account or grouping scope. `board._reaches` resolves
+account — every member-scoped node carrying either effect is branch **B** and
+non-conditional: 10 `activation_rate_up` and 3 `cooldown_shorten`; the one other shape
+is R-064, a red leader-scoped `activation_rate_up` routed apart
+(`tests/test_board_leader_activation_rate.py`). `board._reaches` resolves
 `"member"` to exactly `card.member == holomem`, so each term is a per-character CONSTANT: it
 depends on neither the team nor the leader, which is why it is precomputed once rather than
 memoised per arrangement. `BoardModel` asserts the property instead of assuming it, so a node

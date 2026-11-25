@@ -46,12 +46,13 @@ OUT = DUMPS / "inventory.json"
 ITEM_FIELD = 208896283
 ITEM_SUB = {2: "item_id", 3: "expired_time", 4: "quantity", 5: "last_acquired_time"}
 
-# The eight skill-tree currencies, named so the report is readable without a
+# The skill-tree currencies (cube, hexa, and the Red Star Cube), named so the report is readable without a
 # lookup. Everything else the account holds is still written out verbatim --
 # naming a subset must never mean dropping the rest.
 SKILL_TREE = {
     "item-skill_tree_leader-1": "Red Cube",
     "item-skill_tree_leader-2": "Red Hexa",
+    "item-skill_tree_leader-3": "Red Star Cube",
     "item-skill_tree_card-1": "Blue Cube",
     "item-skill_tree_card-2": "Blue Hexa",
     "item-skill_tree_allmember-1": "Green Cube",
@@ -92,7 +93,7 @@ def write(items: list[dict], source: str) -> None:
         "_captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "_note": (
             "Every item the account holds, from UserData.user_item_list. "
-            "skill_tree carries the eight board currencies by their English "
+            "skill_tree carries the board currencies by their English "
             "names; items carries all of them verbatim."
         ),
         "skill_tree": {

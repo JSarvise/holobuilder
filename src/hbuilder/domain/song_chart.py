@@ -37,6 +37,12 @@ SCORE_COEFFICIENT = 2.300
 # to the LONG_RELAY row, whose PERFECT weight is 100 permil on both columns.
 HIDDEN_POINT_PERMIL = 100
 
+# `ChartLibrary.contender`: a song's other chart (HARD against EXPERT) is searched too when its
+# team-free base is at least this share of the picked chart's. Over every song, with two fixed
+# teams, the lowest base ratio at which HARD still matched EXPERT was 0.9585 and a searched
+# team moves the ratio by up to ~2 % more; 0.94 keeps those with margin.
+CONTENDER_BASE_RATIO = 0.94
+
 
 # The `LiveCombo` master table, group `live_combo-1`, all 11 rows:
 # `(combo_count_from, permil)`. `CalcScore`'s `(1 + ComboCoefficient)` reads the
@@ -271,6 +277,21 @@ class SongChart:
                 permil = tier_permil
         return permil / 1000.0
 
+    def team_free_base(self, platform: str = DEFAULT_PLATFORM) -> float:
+        """What a chart pays before any team: the music coefficient, times the mean combo
+        multiplier weighted by each note's value, times the share of the divisor the real
+        notes hold (the slides' invisible points take the rest). A team without skills scores
+        a fixed multiple of it, so two charts of a song compare by it; a team's skills move
+        the comparison by a few percent more, as their windows fall on different notes."""
+        weights = [note.perfect_permil_for(platform) for note in self.notes]
+        total = sum(weights)
+        if not total:
+            return 0.0
+        combo = sum(w * (1.0 + self.combo_coefficient(k + 1)) for k, w in enumerate(weights)) / total
+        return (
+            self.music_coefficient() * combo * (total / 1000.0) / self.notes_perfect_coefficient_sum(platform)
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SongScore:
@@ -345,6 +366,25 @@ class ChartLibrary:
             if picked is not None:
                 out.append(charts[picked])
         return tuple(out)
+
+    def contender(self, music_id: str, difficulty: str, max_level: int | None = None) -> SongChart | None:
+        """The other chart worth searching for a song played at `difficulty`: HARD for an
+        EXPERT pick and EXPERT for a HARD one (within `max_level`, when given), when its
+        `team_free_base` is at least `CONTENDER_BASE_RATIO` of the picked chart's. A lower
+        chart can outscore EXPERT (EXPERTs with many slide points pay each note less), and
+        the team decides by a few percent; EASY and NORMAL never come close."""
+        pair = {"EXPERT": "HARD", "HARD": "EXPERT"}
+        other = pair.get(difficulty.upper())
+        picked = self.get(music_id, difficulty.upper())
+        alt = self.get(music_id, other) if other else None
+        if picked is None or alt is None:
+            return None
+        if max_level is not None and alt.difficulty_level > max_level:
+            return None
+        base = picked.team_free_base()
+        if not base or alt.team_free_base() < CONTENDER_BASE_RATIO * base:
+            return None
+        return alt
 
     def select(self, music_ids: Sequence[str] | None, difficulty: str = "EXPERT") -> tuple[SongChart, ...]:
         """The charts a run is ranked on: `music_ids` at `difficulty`, in

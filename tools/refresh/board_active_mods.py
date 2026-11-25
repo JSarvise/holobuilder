@@ -36,6 +36,8 @@ def node_effects():
     for node_id, node in tree["nodes"].items():
         effect = node.get("e") or {}
         kind = effect.get("t")
+        if node.get("br", "B") != "B":  # R-064 is the leader's, for the whole team
+            continue
         if kind == "Act.CD":
             out[node_id] = ("cooldown", effect["v"] / 10.0 / 100.0)
         elif kind == "Act.Prob":

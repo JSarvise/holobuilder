@@ -791,3 +791,170 @@ def test_leader_heads_keeps_the_head_of_every_leader_near_the_best():
     # a leader whose best team is outside the margin is left out even when a later team of
     # another leader is inside it
     assert all(li != 2 for li, _s in ondemand.leader_heads(ranking, per_leader=5, margin=0.045))
+
+
+def test_a_song_s_other_chart_is_offered_only_when_its_best_team_scores_the_minimum_more():
+    """`jobs._check_chart`, after the song's answer: the #1 team is scored on the other chart
+    first (a one-team search); only a probe at CHART_PROBE_GATE or above earns that chart a full
+    search, and its #1 wins when it scores CHART_MIN_GAIN more. The event names both charts,
+    their levels and the gain, and carries the other chart's payload only when it wins."""
+    members = ["c1", "c2", "c3", "c4", "c5"]
+    first = {"difficulty": "EXPERT", "ranking": [{"best": 100.0, "leader": "L", "members": members}]}
+    contender = {"other": "HARD", "levels": {"EXPERT": 26, "HARD": 18}}
+
+    def searcher(probe_value, full_value):
+        calls = []
+
+        def search_at(diff, filters, *, top, progress=None, eng=None):
+            pinned = bool(filters.leader_card)
+            calls.append((diff, pinned))
+            if pinned:
+                assert filters.leader_card == "L" and tuple(filters.require) == tuple(members)
+            value = probe_value if pinned else full_value
+            return {"difficulty": diff, "ranking": [{"best": value, "leader": "M", "members": members}]}
+
+        return search_at, calls
+
+    def check(probe_value, full_value):
+        search_at, calls = searcher(probe_value, full_value)
+        return jobs._check_chart(first, "EXPERT", contender, ondemand.Filters(), search_at, 5), calls
+
+    ev, calls = check(99.0, 103.0)  # searched, HARD wins by 3 %
+    assert calls == [("HARD", True), ("HARD", False)]
+    cc = ev["check"]
+    assert ev["type"] == "chart" and cc["wins"] and cc["searched"] and cc["gain"] == pytest.approx(0.03)
+    assert (cc["level"], cc["other_level"]) == (26, 18) and ev["payload"]["difficulty"] == "HARD"
+    assert ev["payload"]["chart_check"] is cc
+
+    ev, calls = check(99.0, 100.0 * (1 + jobs.CHART_MIN_GAIN) - 0.01)  # ahead, but under the minimum gain
+    assert ev["check"]["searched"] and not ev["check"]["wins"] and ev["payload"] is None
+
+    ev, calls = check(100.0 * jobs.CHART_PROBE_GATE - 0.01, 200.0)  # the probe cannot reach the minimum
+    assert calls == [("HARD", True)] and not ev["check"]["searched"] and ev["payload"] is None
+    assert jobs.CHART_PROBE_GATE * (1 + jobs.CHART_SEARCH_GAP) == pytest.approx(1 + jobs.CHART_MIN_GAIN)
+
+
+class _ChartStub:
+    """An engine per difficulty for the job's other-chart check: its #1 scores `best`; a team
+    search pinned to one leader and five members (the probe) scores `probe`."""
+
+    def __init__(self, best, probe=None, raise_=None):
+        self.best, self.probe, self.raise_ = best, probe, raise_
+        self.calls = []
+
+    def search(self, song, filters, *, emit, cancel, top):
+        pinned = bool(filters.leader_card)
+        self.calls.append(("probe" if pinned else "search", top))
+        if self.raise_ and pinned:
+            raise self.raise_
+        members = ["c1", "c2", "c3", "c4", "c5"]
+        value = self.probe if pinned else self.best
+        return {
+            "scope": "song",
+            "song": song,
+            "ranking": [{"best": value, "leader": "L", "members": members}],
+        }
+
+
+CONTENDER = {"other": "HARD", "levels": {"EXPERT": 26, "HARD": 18}}
+
+
+def _chart_job(engines, **kw):
+    job = jobs.Job(job_id="c1")
+    jobs.run_search_job(job, _opts(contender=CONTENDER, **kw), engine_for=lambda b, d: engines[d])
+    return _drain(job)
+
+
+def test_a_song_s_answer_comes_first_then_its_other_chart_then_the_end():
+    """One song with a contender: `result` (the picked chart's answer) -> `chart` (the other
+    chart's check, its payload when it wins) -> `end`; each with the time since the request."""
+    engines = {"EXPERT": _ChartStub(100.0), "HARD": _ChartStub(110.0, probe=104.0)}
+    events = _chart_job(engines)
+    kinds = [e["type"] for e in events]
+    assert kinds[-3:] == ["result", "chart", "end"]
+    result, chart = events[-3], events[-2]
+    assert result["payload"]["ranking"][0]["best"] == 100.0
+    assert chart["check"]["wins"] and chart["payload"]["chart_check"]["gain"] == pytest.approx(0.10)
+    assert chart["elapsed_ms"] >= result["elapsed_ms"]
+    assert engines["HARD"].calls == [("probe", 1), ("search", 50)]
+
+
+def test_a_failed_check_is_a_chart_event_with_its_error_and_the_answer_stands():
+    engines = {"EXPERT": _ChartStub(100.0), "HARD": _ChartStub(110.0, raise_=RuntimeError("bad chart"))}
+    events = _chart_job(engines)
+    assert [e["type"] for e in events][-3:] == ["result", "chart", "end"]
+    chart = events[-2]
+    assert chart["payload"] is None and chart["check"] == {"other": "HARD", "error": "bad chart"}
+
+
+def test_a_cancel_during_the_check_ends_the_job_after_its_answer():
+    engines = {"EXPERT": _ChartStub(100.0), "HARD": _ChartStub(110.0, raise_=ondemand.Cancelled())}
+    events = _chart_job(engines)
+    assert [e["type"] for e in events][-3:] == ["result", "cancelled", "end"]
+
+
+def test_no_contender_no_check():
+    engines = {"EXPERT": _ChartStub(100.0), "HARD": _ChartStub(110.0, probe=104.0)}
+    job = jobs.Job(job_id="c2")
+    jobs.run_search_job(job, _opts(contender=None), engine_for=lambda b, d: engines[d])
+    assert [e["type"] for e in _drain(job)][-2:] == ["result", "end"]
+    assert engines["HARD"].calls == []
+
+
+class _Chart:
+    def __init__(self, difficulty, level):
+        self.difficulty, self.difficulty_level = difficulty, level
+
+
+class _Library:
+    """`ChartLibrary.contender`/`get` for one song: EXPERT 26 and HARD 18; the contender is
+    HARD within the cap; `raise_` makes `contender` fail."""
+
+    def __init__(self, raise_=None):
+        self.raise_ = raise_
+        self.caps = []
+
+    def contender(self, song, difficulty, cap):
+        self.caps.append(cap)
+        if self.raise_:
+            raise self.raise_
+        return _Chart("HARD", 18) if difficulty == "EXPERT" and (cap is None or cap >= 18) else None
+
+    def get(self, song, difficulty):
+        return _Chart(difficulty, {"EXPERT": 26, "HARD": 18}[difficulty])
+
+
+def test_contender_of_reads_the_level_and_the_opt_out(monkeypatch):
+    from hbweb import search
+
+    lib = _Library()
+    monkeypatch.setattr(search, "_charts_all", lambda: lib)
+    assert search.contender_of("m0459", "EXPERT", {"max_level": 30}) == {
+        "other": "HARD",
+        "levels": {"EXPERT": 26, "HARD": 18},
+    }
+    assert search.contender_of("m0459", "EXPERT", {"max_level": 17}) is None  # HARD 18 above the cap
+    assert search.contender_of("m0459", "EXPERT", {"chart_check": False}) is None
+    assert lib.caps == [30, 17]
+    # the page opted out: the 202 still names the chart it did not try
+    assert search.chart_check_of("m0459", "EXPERT", {"chart_check": False}) == {
+        "contender": None,
+        "unchecked": {"other": "HARD", "levels": {"EXPERT": 26, "HARD": 18}},
+    }
+    assert search.chart_check_of("m0459", "EXPERT", {})["contender"]["other"] == "HARD"
+    assert search.chart_check_of("", "EXPERT", {}) == {"contender": None}  # In general: no check
+
+
+def test_contender_of_never_fails_the_search(monkeypatch):
+    """The check is an extra after the answer: a library that cannot answer leaves the search
+    without it (None), never a 500 from the route."""
+    from hbweb import search
+
+    monkeypatch.setattr(search, "_charts_all", lambda: _Library(raise_=ValueError("broken chart")))
+    assert search.contender_of("m0459", "EXPERT", {}) is None
+
+    def missing():
+        raise FileNotFoundError("charts_all.json")
+
+    monkeypatch.setattr(search, "_charts_all", missing)
+    assert search.contender_of("m0459", "EXPERT", {}) is None

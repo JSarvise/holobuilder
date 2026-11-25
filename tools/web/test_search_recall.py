@@ -77,7 +77,9 @@ PINNED = (
     "card-00018-5-uniq-0068-00",  # Hoshimachi Suisei / Melody of the Tides
     "card-04014-5-uniq-0094-00",  # Koseki Bijou / Glittering Gem
 )
-CASES = pytest.mark.parametrize("levels", [None, (25, 30)], ids=["every EXPERT chart", "levels 25-30"])
+CASES = pytest.mark.parametrize(
+    "levels", [None, (25, 30)], ids=["every EXPERT chart", "every song from level 25"]
+)
 
 
 @pytest.fixture

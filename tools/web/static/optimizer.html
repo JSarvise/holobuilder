@@ -201,14 +201,14 @@
     </div>
     <div class="o-group" data-goal="score" id="lvgroup">
       <h4>Song: in general</h4>
-      <div class="o-sel"><span>Charts averaged</span>
+      <div class="o-sel" title="Each song is played at its hardest chart up to your level (Up to level, next to the song)"><span>Charts averaged</span>
         <div class="seg" id="lvmode" role="group" aria-label="Charts averaged">
-          <button type="button" data-v="expert" aria-pressed="true">Every song, at its hardest chart up to your level</button>
-          <button type="button" data-v="range" aria-pressed="false">A level range, any difficulty</button>
+          <button type="button" data-v="expert" aria-pressed="true">Every song</button>
+          <button type="button" data-v="range" aria-pressed="false">From a level</button>
         </div></div>
       <div class="o-two" id="lvrow">
-        <label class="o-sel"><span>From level</span><input type="number" id="lvlo" min="1" max="40"></label>
-        <label class="o-sel"><span>To level</span><input type="number" id="lvhi" min="1" max="40"></label>
+        <label class="o-sel" title="Only the songs whose chart, up to your level, is this level or harder"><span>From level</span><input type="number" id="lvlo" min="1" max="40"></label>
+        <p class="o-note" id="lvnote"></p>
       </div>
     </div>
     <div class="o-group" id="leadergroup">

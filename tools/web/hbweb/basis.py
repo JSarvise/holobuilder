@@ -29,9 +29,8 @@ import certificate as cert_mod
 
 from hbuilder.domain.board import board_from_mapping
 from hbuilder.domain.scoring_config import DEFAULT_PLATFORM, PLATFORMS
-from hbuilder.domain.skilltree import TOTAL_BOARD_POINTS
 from hbuilder.errors import MissingInput
-from hbuilder.inputs import apply_collection, max_level_board_points
+from hbuilder.inputs import apply_collection, max_level_board_points, total_board_points
 from hbweb import config
 
 if TYPE_CHECKING:
@@ -84,7 +83,7 @@ def parse_budget(raw: Any) -> int | None:
     if str(raw).strip().lower() == "max":
         return maxed_account_budget()
     try:
-        return max(0, min(TOTAL_BOARD_POINTS, int(raw)))
+        return max(0, min(total_board_points(), int(raw)))
     except (TypeError, ValueError):
         return None
 

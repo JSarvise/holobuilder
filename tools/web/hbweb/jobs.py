@@ -6,6 +6,7 @@ job's progress and result off `GET /events/<id>` as Server-Sent Events, and
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import queue
 import threading
@@ -82,6 +83,55 @@ def _unclaimed(job: Job, poll_s: float = 1.0) -> None:
             JOBS.pop(job.job_id, None)
 
 
+# A song's other chart (`ChartLibrary.contender`: HARD against EXPERT) is offered only when its
+# best team scores at least CHART_MIN_GAIN more: our HARD/EXPERT ratios agree with a user's
+# simulated sheet to a correlation of 0.90, so a smaller gain is within the model's error and not
+# worth an unfamiliar chart. A full search on the other chart found its own #1 up to
+# CHART_SEARCH_GAP above the picked chart's #1 scored there (0 on 21 of 30 songs, 1.85 % at most):
+# a probe below CHART_PROBE_GATE cannot reach the minimum gain, so its full search is skipped.
+CHART_MIN_GAIN = 0.005
+CHART_SEARCH_GAP = 0.0185
+CHART_PROBE_GATE = (1.0 + CHART_MIN_GAIN) / (1.0 + CHART_SEARCH_GAP)
+
+
+def _check_chart(payload: dict, difficulty: str, contender: Mapping, filters, search_at, top: int) -> dict:
+    """The `chart` event that follows a song's result: is the song's other chart worth playing?
+    The served #1 team is scored on it first (the same leader and members, a one-team search);
+    only a probe at CHART_PROBE_GATE or above earns the other chart a full search, and its #1
+    wins when it scores CHART_MIN_GAIN more. `check` says what was tried; `payload` is the other
+    chart's search when it wins (its rows are what the page then shows), else None."""
+    other = contender["other"]
+    levels = contender.get("levels") or {}
+    first = payload["ranking"][0]
+    check: dict[str, Any] = {
+        "difficulty": difficulty,
+        "level": levels.get(difficulty),
+        "other": other,
+        "other_level": levels.get(other),
+        "searched": False,
+        "wins": False,
+    }
+    pinned = dataclasses.replace(
+        filters, leader_member="", leader_card=first["leader"], require=tuple(first["members"])
+    )
+    probe = search_at(other, pinned, top=1)
+    rescored = ((probe.get("ranking") or [{}])[0]).get("best")
+    check["probe"] = rescored
+    if rescored is None or rescored < CHART_PROBE_GATE * first["best"]:
+        return {"type": "chart", "check": check, "payload": None}
+    alt = search_at(other, filters, top=top)
+    best_other = ((alt.get("ranking") or [{}])[0]).get("best")
+    check.update(searched=True, other_best=best_other)
+    if best_other is None:
+        return {"type": "chart", "check": check, "payload": None}
+    check["gain"] = best_other / first["best"] - 1.0
+    check["wins"] = check["gain"] >= CHART_MIN_GAIN
+    if not check["wins"]:
+        return {"type": "chart", "check": check, "payload": None}
+    alt["chart_check"] = check
+    return {"type": "chart", "check": check, "payload": alt}
+
+
 def run_search_job(job: Job, opts: Mapping, *, engine_for: Callable[[str, str], Any] | None = None) -> None:
     """The job behind `POST /api/search` (the optimiser on demand):
     `ondemand.engine(basis, difficulty)` -- started once, kept alive
@@ -110,51 +160,66 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for: Callable[[str, str], 
         assumptions = opts.get("assumptions")
         if engine_for is None:
             require_search_inputs(basis_name, bool(getattr(assumptions, "materials", False)))
-        # the engine keeps the account loaded between searches and reloads it when a
-        # refresh moved its inputs (`ondemand.account_key`): `build` is instant when warm
-        emit({"type": "stage", "stage": "build", "state": "active"})
-        if engine_for is None:
-            levels = opts.get("levels")
+
+        def engine_at(diff: str):
+            # the engine keeps the account loaded between searches and reloads it when a
+            # refresh moved its inputs (`ondemand.account_key`): instant when warm
+            if engine_for is not None:
+                return engine_for(basis_name, diff)
+            common: dict[str, Any] = {
+                "workers": basis.web_workers(),
+                "levels": opts.get("levels"),
+                "max_level": opts.get("max_level"),
+                "play": opts.get("play") or ("mobile", False),
+            }
             if assumptions is not None:
-                eng = ondemand.engine(
+                return ondemand.engine(
                     basis_name,
-                    difficulty,
-                    workers=basis.web_workers(),
+                    diff,
                     assumptions=assumptions,
-                    levels=levels,
-                    max_level=opts.get("max_level"),
-                    play=opts.get("play") or ("mobile", False),
-                    current_key=lambda: ondemand.account_key(difficulty),
+                    current_key=lambda: ondemand.account_key(diff),
+                    **common,
                 )
-            else:
-                eng = ondemand.engine(
-                    basis_name,
-                    difficulty,
-                    workers=basis.web_workers(),
-                    levels=levels,
-                    max_level=opts.get("max_level"),
-                    play=opts.get("play") or ("mobile", False),
-                    current_key=lambda: ondemand.basis_key(basis_name, difficulty),
-                )
-        else:
-            eng = engine_for(basis_name, difficulty)
-        emit({"type": "stage", "stage": "build", "state": "done"})
-        emit({"type": "stage", "stage": "search", "state": "active"})
+            return ondemand.engine(
+                basis_name, diff, current_key=lambda: ondemand.basis_key(basis_name, diff), **common
+            )
+
         # this request's plan options: one engine serves every option of the re-plan
         own = {"assumptions": assumptions} if assumptions is not None and engine_for is None else {}
-        try:
-            payload = eng.search(
-                opts["song"],
-                opts["filters"],
-                emit=emit,
-                cancel=job.cancel,
-                top=opts.get("top") or ondemand.RANKING,
-                **own,
-            )
-        finally:
-            if engine_for is None:
-                eng.release()  # `ondemand.engine` took it for this search
+
+        def search_at(diff: str, filters, *, top: int, progress=None, eng=None) -> dict:
+            eng = eng if eng is not None else engine_at(diff)
+            try:
+                return eng.search(opts["song"], filters, emit=progress, cancel=job.cancel, top=top, **own)
+            finally:
+                if engine_for is None:
+                    eng.release()  # `ondemand.engine` took it for this search
+
+        emit({"type": "stage", "stage": "build", "state": "active"})
+        first = engine_at(difficulty)
+        emit({"type": "stage", "stage": "build", "state": "done"})
+        emit({"type": "stage", "stage": "search", "state": "active"})
+        top = opts.get("top") or ondemand.RANKING
+        payload = search_at(difficulty, opts["filters"], top=top, progress=emit, eng=first)
         emit({"type": "result", "payload": payload, "elapsed_ms": round((time.monotonic() - t0) * 1000)})
+        # after the answer: the song's other chart, checked while the page shows this one
+        contender = opts.get("contender")
+        if contender and payload.get("ranking"):
+            try:
+                event = _check_chart(payload, difficulty, contender, opts["filters"], search_at, top)
+            except ondemand.Cancelled:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- the answer above stands; say the check failed
+                import traceback  # noqa: PLC0415
+
+                print(traceback.format_exc(), flush=True)
+                event = {
+                    "type": "chart",
+                    "check": {"other": contender["other"], "error": str(exc)},
+                    "payload": None,
+                }
+            event["elapsed_ms"] = round((time.monotonic() - t0) * 1000)
+            emit(event)
     except ondemand.Cancelled:
         emit({"type": "cancelled", "elapsed_ms": round((time.monotonic() - t0) * 1000)})
     except KeyError as exc:

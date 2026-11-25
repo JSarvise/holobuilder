@@ -106,6 +106,33 @@ def test_up_to_plays_each_song_at_its_hardest_chart_within_the_level():
     assert [c.difficulty for c in library.up_to(40)] == ["EXPERT"] * 4
 
 
+def test_a_hard_chart_contends_with_an_expert_whose_slide_points_dilute_its_notes():
+    """The invisible slide points count in the divisor and score nothing: an EXPERT with many
+    of them pays each note less, and its HARD can pay more (`team_free_base`). A song's other
+    chart is searched too (`contender`) when its base comes within CONTENDER_BASE_RATIO, both
+    ways, and only within the level the player clears; a far weaker HARD is not."""
+    from hbuilder.domain.song_chart import CONTENDER_BASE_RATIO
+
+    library = charts_from_mapping(
+        _document(
+            a=_chart("m0001", "EXPERT", difficulty_level=26, hidden_points=2),
+            b=_chart("m0001", "HARD", difficulty_level=18),
+            c=_chart("m0002", "EXPERT", difficulty_level=30, live_score_coefficient_permil=40),
+            d=_chart("m0002", "HARD", difficulty_level=10, live_score_coefficient_permil=40),
+        )
+    )
+    expert, hard = library.get("m0001", "EXPERT"), library.get("m0001", "HARD")
+    assert hard.team_free_base() > expert.team_free_base()
+    assert library.contender("m0001", "EXPERT") is hard
+    assert library.contender("m0001", "HARD") is expert
+    assert library.contender("m0001", "HARD", max_level=25) is None  # its EXPERT is above the level
+    assert library.contender("m0001", "EXPERT", max_level=26) is hard
+    weak = library.get("m0002", "HARD").team_free_base() / library.get("m0002", "EXPERT").team_free_base()
+    assert weak < CONTENDER_BASE_RATIO
+    assert library.contender("m0002", "EXPERT") is None
+    assert library.contender("m0003", "EXPERT") is None  # no such song
+
+
 # ==========================================================================
 # 2. The failures that would otherwise become a plausible wrong number
 # ==========================================================================

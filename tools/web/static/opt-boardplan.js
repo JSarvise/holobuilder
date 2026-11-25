@@ -20,11 +20,11 @@ const glyphs = () => (glyphsP = glyphsP || fetch("/api/board").then(r => r.json(
   .catch(() => ({})));
 
 // a board material by its game name: family (leader / card / allmember / content = the branch
-// colour) and tier (1 Cube, 2 Hexa), as the Required Materials list names them
+// colour) and tier (1 Cube, 2 Hexa, 3 Star Cube), as the Required Materials list names them
 const MAT_FAM = { leader: "Red", card: "Blue", allmember: "Green", content: "Yellow" };
 const matName = id => {
   const m = /^item-skill_tree_([a-z]+)-(\d)$/.exec(id || "");
-  return m ? `${MAT_FAM[m[1]] || m[1]} ${m[2] === "1" ? "Cube" : m[2] === "2" ? "Hexa" : "tier " + m[2]}` : id;
+  return m ? `${MAT_FAM[m[1]] || m[1]} ${m[2] === "1" ? "Cube" : m[2] === "2" ? "Hexa" : m[2] === "3" ? "Star Cube" : "tier " + m[2]}` : id;
 };
 // nodes to unlock / reset, and sockets whose card the plan changes (the server's `change`)
 const counts = c => ({ buy: ((c.plan || {}).to_buy || []).length, sell: ((c.plan || {}).to_sell || []).length,

@@ -467,7 +467,8 @@ def test_a_self_targeted_costume_never_merges():
 
 def test_batched_path_calls_combine_inside_the_per_leader_loop_never_before_it():
     tree = ast.parse(SCORING_PATH.read_text(encoding="utf-8"), filename=str(SCORING_PATH))
-    score_card_set_def = _find_function(tree, "score_card_set")
+    # the per-leader body (`score_card_set` batches leaders by their activation rate first)
+    score_card_set_def = _find_function(tree, "_score_card_set_at")
 
     leader_loops = [
         node

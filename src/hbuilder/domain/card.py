@@ -77,7 +77,8 @@ class SlotRider:
     """A slot's second, differently-typed effect, retained rather than
     dropped — e.g. a 3-star SP carrying both `score_support` and
     `life_recovery`. Represented, but not scored, except for the outfit
-    riders in `SCORED_COSTUME_RIDER_FAMILIES`.
+    riders in `SCORED_COSTUME_RIDER_FAMILIES` and a PASSIVE's `activation_rate_up`
+    rider (`scoring.with_passive_activation_rates`).
 
     `condition`/`target` follow the slot's own three-state contract: `None` is
     ungated/team-wide, `UNKNOWN` taints, a populated value is a

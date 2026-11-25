@@ -202,7 +202,7 @@ export const matName = id => {
   const f = matFamily(id);
   if (!f) return id;
   const col = { leader: "Red", card: "Blue", allmember: "Green", content: "Yellow" }[f.fam];
-  return `${col} ${f.tier === 1 ? "Cube" : "Hexa"}`;
+  return `${col} ${f.tier === 1 ? "Cube" : f.tier === 2 ? "Hexa" : "Star Cube"}`;
 };
 export const goldHeld = () => {
   const g = ((D.res && D.res.currencies) || []).find(c => c.item_id === "item-gold");

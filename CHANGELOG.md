@@ -2,6 +2,11 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.21 (2026-11-25)
+- **The new leader node and the Red Star Cube.** The game's update adds a red node to every Holomem Board that raises the whole team's Active Skill activation rate by 10% while that holomem leads. The optimizer scores it (before this version, a refresh after the update made searches and board plans fail) and plans it only on the leader. It costs a new material, the Red Star Cube: with your account's materials it is planned only once you hold some; with Unlimited materials, or on a maxed account, it is always available. The Inventory and the board plans list the new material.
+- **The four new cards.** Sakura Miko (Behold, the Elite Santa!), Ninomae Ina'nis, Shiori Novella and Himemori Luna (Resplendent Princess Symphony) are in. Miko's and Luna's Active Skills need 2 or more Cute members, and Luna's Passive raises the Skill Activation Rate of 2 Cute members as well as their Sense; teams are built around these conditions.
+- **Hard against Expert on one song.** A song search shows its answer, then checks the song's other chart within your level; when its best team scores at least 0.5% more, the page switches to it ("Show Expert" goes back). With Sort by Max, Multi Live or AUTO the page says the check was not made. Every song can start from a level ("From a level").
+
 ## 0.2.20 (2026-11-24)
 - **Highlight draws the event song more often.** The chapter's event songs now take half of the draw between them, and the rest of the pool shares the other half equally (before, every song was equally likely). The search, the "whole pool" mean and the per-song chart use the same draw; the pool list shows each song's chance. A pool with no event song, or only event songs, is still drawn evenly.
 - **"Up to level" replaces Easy / Normal / Hard / Expert.** Pick the hardest level you clear, as on the Member leaderboard: each song is played at its hardest chart at or below that level (with 25, a song whose Expert is 28 is played on its Hard, and an Expert 25 stays Expert). It applies to one song, to Every song and to Highlight, where each pool song uses its own chart. At 30 / Any every song stays on Expert, as before.

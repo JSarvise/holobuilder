@@ -18,7 +18,8 @@ from hbuilder.domain.collection import (
     connect_bonus_level,
     resolve_card_state,
 )
-from hbuilder.domain.skilltree import ROOT_NODE, TOTAL_BOARD_POINTS, player_level_requirement
+from hbuilder.domain.skilltree import ROOT_NODE, player_level_requirement
+from hbuilder.inputs import total_board_points
 from hbweb import config
 
 if TYPE_CHECKING:
@@ -291,7 +292,7 @@ def serve_board(h: Handler) -> None:
         {
             "available": True,
             "root": ROOT_NODE,
-            "total_points": TOTAL_BOARD_POINTS,
+            "total_points": total_board_points(),
             "branches": tree.get("branches") or {},
             "nodes": nodes,
             "models": tree.get("models") or {},

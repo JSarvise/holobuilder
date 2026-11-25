@@ -89,7 +89,8 @@ GENERAL_SAMPLE_BY_BASIS = {"maxed": 16}
 # search's best CLIMB_START teams (two tiers, like holodori.best's 2 / 6 pseudo-maps). On maxed
 # EXPERT 8 fitted charts put every run within 0.08 % of the best known team in 16-19 s (6 leave
 # some ~1 % low; 16 note-spread charts take 60-87 s). Not used with a level range (0/5 runs,
-# the note sample 4/5) nor on the account (same answer, 29 s instead of 12 s)
+# the note sample 4/5, measured when a range took every chart of any difficulty in it) nor on
+# the account (same answer, 29 s instead of 12 s)
 GENERAL_FITTED = frozenset({"maxed"})
 FITTED_SAMPLE = 8
 GENERAL_WIDE = 24
@@ -636,6 +637,11 @@ def build_inputs(
     from hbuilder.domain import board_plan as _bp  # noqa: PLC0415
 
     ctx = built["ctx"]
+    if not a.infinite:
+        # with the account's materials, a node priced in an item the account holds none of
+        # (the Red Star Cube of R-064) is not bought by any plan (`gate_unheld_materials`);
+        # inventory.json is in the engine's key, so a refresh that brings one rebuilds it
+        ctx = dataclasses.replace(ctx, skilltree=_gate_unheld(ctx.skilltree, ctx.node_master))
     room = _bp.grouping_room(ctx.skilltree, ctx.bench_characters, ctx.name_by_chr)
     supply = _bp.grouping_supply(ctx.skilltree, ctx.bench_characters, ctx.name_by_chr)
     built = dict(
@@ -652,6 +658,20 @@ def build_inputs(
         ),
     )
     return built
+
+
+def _gate_unheld(skilltree: Mapping, node_master) -> Mapping:
+    """`skilltree` with the nodes the account's wallet cannot pay at all gated
+    (`board_node_values.gate_unheld_materials`); as it is when the wallet is unknown."""
+    import tree_optimise as to  # noqa: PLC0415
+
+    from hbuilder.domain.board_node_values import gate_unheld_materials  # noqa: PLC0415
+
+    held, _source = to.balance_from_disk()
+    if held is None or not node_master:
+        return skilltree
+    gated, _ids = gate_unheld_materials(skilltree, node_master, held)
+    return gated
 
 
 def bench_sockets_of(state: Mapping) -> dict:
@@ -686,8 +706,9 @@ class Engine:
         self.play = full_play(play)
         self.assumptions = assumptions
         self.difficulty = leaf_inputs._difficulty(difficulty)
-        # holodori.best's "any song" level range: every chart of ANY difficulty whose level
-        # is in it (In general only; `difficulty` then only names the leaf's nominal chart)
+        # In general "From a level" [lo, hi]: each song at its hardest chart up to hi
+        # (`ChartLibrary.up_to`), kept when that chart is lo or harder; one chart per song
+        # (In general only; `difficulty` then only names the leaf's nominal chart)
         self.levels = tuple(levels) if levels else None
         # the hardest level the player clears: each song at its hardest chart within it
         # (`ChartLibrary.up_to`, the Holomem Rating's rule; In general only, as `levels`)
@@ -714,14 +735,14 @@ class Engine:
             self.charts = tuple(library.charts[k] for k in self.chart_keys)
             self.index = {k: i for i, k in enumerate(self.chart_keys)}
         elif self.levels:
+            # [lo, hi]: each song at its hardest chart up to hi (the level the player clears),
+            # kept when that chart is lo or harder -- one chart per song, the one played
             lo, hi = self.levels
             library = leaf_inputs.chart_library(leaf_inputs.charts_path("HARD"))  # charts_all.json
-            self.charts = tuple(
-                c for _k, c in sorted(library.charts.items()) if lo <= c.difficulty_level <= hi
-            )
+            self.charts = tuple(c for c in library.up_to(hi) if c.difficulty_level >= lo)
             if not self.charts:
-                raise KeyError(f"no chart has a level in {lo}..{hi}")
-            self.index = {}
+                raise KeyError(f"no song has a chart of level {lo} to {hi}")
+            self.index = {chart.music_id: k for k, chart in enumerate(self.charts)}
         elif self.max_level is not None:
             library = leaf_inputs.chart_library(leaf_inputs.charts_path("HARD"))  # charts_all.json
             self.charts = library.up_to(self.max_level)
@@ -1659,8 +1680,8 @@ class Engine:
             "written": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "objective": (
                 (
-                    f"mean score over every chart of level {self.levels[0]}-{self.levels[1]} "
-                    f"({len(self.charts)} charts, any difficulty), {per_song}"
+                    f"mean score over every song at its hardest chart up to level {self.levels[1]}, "
+                    f"the charts of level {self.levels[0]} or more ({len(self.charts)} charts), {per_song}"
                 )
                 if general and self.levels
                 else (

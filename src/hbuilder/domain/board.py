@@ -308,6 +308,7 @@ class BoardDigest:
         "conditional_skill_effect_up",
         "conditional_stat",
         "uptime",
+        "leader_rate",
         "uptime_error",
         "stat_effects",
         "flat_exact",
@@ -325,10 +326,11 @@ class BoardDigest:
         conditional_skill_effect_up: list[BoardEffect] = []
         conditional_stat: list[BoardEffect] = []
         stat_effects: list[BoardEffect] = []
-        rate = cooldown = 0.0
-        # `(node_id, kind, scope)` of the first uptime effect at a scope other
-        # than "member". The model raises it (`__post_init__`), naming the holomem
-        # it keys this board by.
+        rate = cooldown = leader_rate = 0.0
+        # `(node_id, kind, scope)` of the first uptime effect of a shape the model does
+        # not route: anything but a "member" one or an unconditional "leader" activation
+        # rate (R-064). The model raises it (`__post_init__`), naming the holomem it
+        # keys this board by.
         uptime_error: tuple[str, str, str] | None = None
         for node in board.nodes:
             for raw_effect in node.effects:
@@ -347,7 +349,14 @@ class BoardDigest:
                         skill_effect_up.append(effect)
                 elif kind in ("activation_rate_up", "cooldown_shorten"):
                     if uptime_error is None:
-                        if effect.scope != "member":
+                        if (
+                            kind == "activation_rate_up"
+                            and effect.scope == "leader"
+                            and not effect.conditional
+                        ):
+                            # R-064: every member's rate, while this holomem leads
+                            leader_rate += effect.value
+                        elif effect.scope != "member":
                             uptime_error = (node.node_id, kind, effect.scope)
                         elif not effect.conditional:
                             if kind == "activation_rate_up":
@@ -367,6 +376,7 @@ class BoardDigest:
         self.conditional_skill_effect_up = tuple(conditional_skill_effect_up)
         self.conditional_stat = tuple(conditional_stat)
         self.uptime = (rate, cooldown)
+        self.leader_rate = leader_rate
         self.uptime_error = uptime_error
         self.stat_effects = tuple(stat_effects)
         # Whether every flat stat value on this board is a whole number small
@@ -387,6 +397,7 @@ class BoardDigest:
             or uptime_error is not None
             or rate
             or cooldown
+            or leader_rate
         )
         self._stat_ops: dict[tuple, tuple[tuple, tuple, tuple]] = {}
         # The same memo reached by the card OBJECT: `(id(card), leader_here) ->
@@ -548,6 +559,9 @@ class BoardModel:
     # holomem -> (activation_rate_up, cooldown_shorten), summed over that
     # character's own board: a constant per character (`uptime_for`).
     _uptime: Mapping[str, tuple[float, float]] = field(default_factory=dict, repr=False)
+    # holomem -> the activation rate its board adds to EVERY member while it leads
+    # (R-064, `skill_tree_effect_target-all-set_live_leader`): `leader_activation_rate`.
+    _leader_activation_rate: Mapping[str, float] = field(default_factory=dict, repr=False)
     # holomem -> that board's `BoardDigest`. A caller that keeps boards alive
     # across models (`PlanCache`) passes the digests it kept; `__post_init__`
     # builds whichever are missing or belong to another board object.
@@ -608,6 +622,9 @@ class BoardModel:
         # scope guard is here, so a model that cannot be summarised this way is
         # never built.
         uptime: dict[str, tuple[float, float]] = {}
+        # The leader-scoped activation rate (R-064) per holomem, added to every
+        # member's rate while that holomem leads (`leader_activation_rate`).
+        leader_rate: dict[str, float] = {}
         pos = 0
         for holomem, board in self.characters.items():
             digest = given.get(holomem)
@@ -642,16 +659,17 @@ class BoardModel:
                 node_id, kind, scope = digest.uptime_error
                 raise BoardError(
                     f"{holomem} node {node_id}: "
-                    f"{kind} at scope {scope!r}. "
-                    f"Over all 323 master SkillTreeNode rows, every "
-                    f"node of these two families is branch B / scope 'member', "
-                    f"which is what makes this term a per-character constant. "
-                    f"A node at another scope invalidates that and must be "
-                    f"routed per (card, role), not summed here"
+                    f"{kind} at scope {scope!r}. The model routes these two families "
+                    f"as a per-character term (branch B, scope 'member') and as an "
+                    f"unconditional leader-scoped activation rate (R-064, added to every "
+                    f"member while that holomem leads); a node of another shape must be "
+                    f"routed before it is scored"
                 )
             rate, cooldown = digest.uptime
             if rate or cooldown:
                 uptime[holomem] = (rate, cooldown)
+            if digest.leader_rate:
+                leader_rate[holomem] = digest.leader_rate
         if not flat_exact:
             base = None
         if base is None:
@@ -672,6 +690,7 @@ class BoardModel:
         setter(self, "_conditional_stat_terms", tuple(conditional_stat_terms))
         setter(self, "_song_score_bonus_by_holomem", song_by_holomem)
         setter(self, "_uptime", uptime)
+        setter(self, "_leader_activation_rate", leader_rate)
 
     def board_for(self, holomem: str) -> CharacterBoard | None:
         return self.characters.get(holomem)
@@ -874,11 +893,24 @@ class BoardModel:
         They belong to the ACTIVE uptime, not to a score pool: `cooldown_effective =
         cooldown / (1 + reduction)`, and the rate raises the activation probability.
 
-        One number per character, not per (card, role): in the master `SkillTreeNode`
-        every node of either family is branch B, scope `member`, non-conditional, so
-        the value depends on neither the team nor the leader. `__post_init__` refuses
-        a model that breaks this, so a future node at another scope fails loudly."""
+        One number per character, not per (card, role): every member-scoped node of
+        either family is branch B and non-conditional, so the value depends on neither
+        the team nor the leader. The leader-scoped activation rate (R-064) is the
+        other routed shape, read through `leader_activation_rate`; `__post_init__`
+        refuses any other, so a future node of a new shape fails loudly."""
         return self._uptime.get(holomem, (0.0, 0.0))
+
+    def leader_activation_rate(self, holomem: str | None) -> float:
+        """The activation rate (a fraction) the `holomem` leader's board adds to every
+        member's ACTIVE while she leads (R-064: `..._activation_probability_up_permil_up
+        -100-skill_tree_effect_target-all-set_live_leader`); 0.0 for no leader or none.
+
+        A team-wide constant once the leader is known, so the scorers add it to the
+        team's `team_rate_up` (the same bracket as the board's own rate and the
+        SPECIAL riders, `CalcActivationProbabilityPermil`)."""
+        if holomem is None:
+            return 0.0
+        return self._leader_activation_rate.get(holomem, 0.0)
 
     def with_cooldowns(self, cooldowns: Mapping[str, float]) -> BoardModel:
         """This model with some holomems' activation-frequency term (`uptime_for`'s
@@ -893,6 +925,19 @@ class BoardModel:
             uptime[holomem] = (rate, float(shorten))
         object.__setattr__(new, "_uptime", uptime)
         object.__setattr__(new, "_cooldown_source", self.power_identity)
+        return new
+
+    def with_activation_rates(self, rates: Mapping[str, float]) -> BoardModel:
+        """This model with `rates` (`{holomem: fraction}`) added to some holomems' own
+        activation rate (`uptime_for`'s first term): the per-position term a member's card
+        receives from a teammate's skill (a PASSIVE Activation Rate UP to N members), which
+        the client adds in the same bracket as the board's own. Everything else is shared."""
+        new = copy.copy(self)
+        uptime = dict(self._uptime)
+        for holomem, add in rates.items():
+            rate, cooldown = uptime.get(holomem, (0.0, 0.0))
+            uptime[holomem] = (rate + float(add), cooldown)
+        object.__setattr__(new, "_uptime", uptime)
         return new
 
     @property

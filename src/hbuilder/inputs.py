@@ -143,6 +143,31 @@ def max_level_board_points(
     return total
 
 
+NODE_MASTER_PATH = f"{paths.DUMPS_REL}/master_SkillTreeNode.json"
+
+
+def total_board_points(path: Path | str = paths.REPO / NODE_MASTER_PATH) -> int:
+    """What the whole Holomem Board costs: master `SkillTreeNode` field 9 summed over its
+    node groups (each group's first row; a group's rows share the cost). Read from the
+    master rather than fixed, so a node the game adds is counted.
+
+    Falls back to `skilltree.TOTAL_BOARD_POINTS` when the export cannot be read: the
+    figure only labels and clamps budgets, it never prices a node."""
+    from hbuilder.domain.skilltree import TOTAL_BOARD_POINTS  # noqa: PLC0415
+
+    try:
+        rows = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return TOTAL_BOARD_POINTS
+    costs: dict[str, int] = {}
+    for row in rows if isinstance(rows, list) else ():
+        data = (row or {}).get("data") or {}
+        group = (data.get("1") or [None])[0]
+        if group is not None and group not in costs:
+            costs[group] = int((data.get("9") or [0])[0])
+    return sum(costs.values()) or TOTAL_BOARD_POINTS
+
+
 # Which load step was in flight when a load failure was raised, so the shared
 # guard routes to EXIT_INPUT_DATA or EXIT_CONFIG.
 _STEP_CARDS = "cards"

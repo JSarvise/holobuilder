@@ -72,7 +72,9 @@ from hbuilder.domain.scoring import (
     _support_targets,
     active_magnitude_by_card,
     deck_screen_unit_score,
+    leader_activation_rate,
     score_with_breakdown,
+    with_passive_activation_rates,
 )
 from hbuilder.domain.scoring_config import (
     ScoringConfig,
@@ -680,6 +682,8 @@ def overall_power_board_key(members: tuple[Card, ...], leader: Card, board: Boar
         tuple(board.uptime_for(card.member) for card in (*members, leader)),
         tuple(board.power_bonus_for((card,), holomem) for card in members),
         board.power_bonus_for(members, holomem),
+        # the leader's team-wide activation rate (R-064) moves every member's uptime
+        board.leader_activation_rate(holomem),
     )
 
 
@@ -836,8 +840,12 @@ def timeline(
     chart: SongChart,
     cfg: ScoringConfig,
     member_order: tuple[str, ...],
+    leader: Card | None = None,
 ) -> dict:
     """When each of the five members' skills is actually live, on one axis.
+
+    `leader`: the team's leader, whose board may raise every member's activation rate
+    (`scoring.leader_activation_rate`, R-064); None reads no leader term.
 
     Five lanes, the chart's own SPECIAL cues, and each ACTIVE's cooldown
     lattice.
@@ -850,6 +858,7 @@ def timeline(
     Returns plain data. Times are seconds from measure 0, and windows are half-open
     `[start, end)`, unclamped, exactly as `_active_windows` produces them."""
     by_id = {card.id: card for card in members}
+    cfg = with_passive_activation_rates(tuple(members), cfg)
     gates = resolve_card_set_gates(members, cfg.run_state)
     song_seconds = chart.notes[-1].time if chart.notes else 0.0
     times = _chart_times(chart)
@@ -857,7 +866,7 @@ def timeline(
     # team's and the board's Activation Rate UP folded in) and, inside a SPECIAL rider's
     # window, the boosted roll -- the same hosts, gates and spans `_rider_terms` scores
     normal = [r for cid in member_order for r in gates.normal_by_card_id.get(cid, ())]
-    team_rate_up = _fold_activation_rate_up(tuple(normal), cfg)
+    team_rate_up = _fold_activation_rate_up(tuple(normal), cfg) + leader_activation_rate(cfg, leader)
     slot_of = {cid: slot for slot, cid in enumerate(member_order)}
     riders = _rider_hosts(normal, slot_of, cfg, chart, times)
 
@@ -1309,18 +1318,19 @@ def score_song_and_screen(
     )
 
 
-def _member_setup(members: tuple[Card, ...], cfg: ScoringConfig) -> tuple:
+def _member_setup(members: tuple[Card, ...], cfg: ScoringConfig, leader_rate: float = 0.0) -> tuple:
     """The member half of `_score_song` that no chart moves: the resolved skills, the team
     activation-rate fold, each term-bearing skill's recipe, the flat score rates and the
-    members' stat entries. A function of the members and the config (its board included)
-    alone, so one call serves every chart the same members are scored on with that config.
+    members' stat entries. A function of the members, the config (its board included) and
+    the leader's activation rate (`scoring.leader_activation_rate`, R-064) alone, so one
+    call serves every chart the same members are scored on with that config and that rate.
     The lists are read, never written, by `_score_song`."""
     card_set_gates = resolve_card_set_gates(members, cfg.run_state)
 
     normal_resolved: list[ResolvedSkill] = []
     for card in members:
         normal_resolved.extend(card_set_gates.normal_by_card_id[card.id])
-    team_rate_up = _fold_activation_rate_up(tuple(normal_resolved), cfg)
+    team_rate_up = _fold_activation_rate_up(tuple(normal_resolved), cfg) + leader_rate
     active_rank = active_magnitude_by_card(normal_resolved)
 
     # --- the member half, shared by every candidate leader ------------------
@@ -1470,6 +1480,43 @@ def _support_tie_outcomes(
     return tuple(outcomes)
 
 
+def _score_song_by_rate(
+    members: tuple[Card, ...],
+    leaders: tuple[Card, ...],
+    rates: list[float],
+    chart: SongChart,
+    cfg: ScoringConfig,
+    **kw,
+):
+    """`_score_song` for leaders that add different activation rates (R-064): one call per
+    rate, the per-leader answers put back in `leaders` order, in each shape `_score_song`
+    returns (a tuple per leader; with `cooldown_variants`, a list per variant of such
+    tuples). A screen (`cooldown_screen`) answers for `leaders[0]`, so only its rate is
+    scored."""
+    by_rate: dict[float, list[int]] = {}
+    for index, rate in enumerate(rates):
+        by_rate.setdefault(rate, []).append(index)
+    if kw.get("cooldown_screen"):
+        first = by_rate[rates[0]]
+        return _score_song(members, tuple(leaders[i] for i in first), chart, cfg, **kw)
+    parts = {
+        rate: (indices, _score_song(members, tuple(leaders[i] for i in indices), chart, cfg, **kw))
+        for rate, indices in by_rate.items()
+    }
+
+    def stitch(pick) -> tuple:
+        out: list = [None] * len(leaders)
+        for indices, answer in parts.values():
+            for index, value in zip(indices, pick(answer), strict=True):
+                out[index] = value
+        return tuple(out)
+
+    if kw.get("cooldown_variants") is None:
+        return stitch(lambda answer: answer)
+    variants = len(kw["cooldown_variants"])
+    return [stitch(lambda answer, v=v: answer[v]) for v in range(variants)]
+
+
 def _score_song(
     members: tuple[Card, ...],
     leaders: tuple[Card, ...],
@@ -1499,16 +1546,39 @@ def _score_song(
         resolve_power = deck_power
     else:
         raise _not_overall_power("deck_power", deck_power)
+    # a member's PASSIVE Activation Rate UP to N members (`with_passive_activation_rates`)
+    cfg = with_passive_activation_rates(members, cfg)
+    # A leader whose board has a leader-scoped activation rate (R-064) raises every
+    # member's: the member half below holds one rate, so leaders that add different rates
+    # are scored apart and their answers put back in `leaders` order.
+    rates = [leader_activation_rate(cfg, leader) for leader in leaders]
+    if len(set(rates)) > 1:
+        return _score_song_by_rate(
+            members,
+            leaders,
+            rates,
+            chart,
+            cfg,
+            deck_power=deck_power,
+            auto=auto,
+            order_totals=order_totals,
+            note_rows=note_rows,
+            cooldown_variants=cooldown_variants,
+            cooldown_screen=cooldown_screen,
+            team_setup=team_setup,
+        )
+    leader_rate = rates[0] if rates else 0.0
     times = _chart_times(chart)
     song_seconds = times[-1]
     # the member half no chart moves, and each leader's (`leader_base`): built once per
     # call, or held in the caller's `team_setup` for every chart it scores these members
-    # on with this config
+    # on with this config and this leader rate
     held = None if team_setup is None else team_setup.get(id(cfg))
-    if held is None or held[0] is not cfg or held[1] is not members:
+    if held is None or held[0] is not cfg or held[1] is not members or held[7] != leader_rate:
         # (config, members, the member half, each leader's base, the chart kernel's specs,
-        # each leader's outfit skills, each (leader, cast)'s singer-conditional terms)
-        held = (cfg, members, _member_setup(members, cfg), {}, {}, {}, {})
+        # each leader's outfit skills, each (leader, cast)'s singer-conditional terms, the
+        # leader rate the member half was built with)
+        held = (cfg, members, _member_setup(members, cfg, leader_rate), {}, {}, {}, {}, leader_rate)
         if team_setup is not None:
             team_setup[id(cfg)] = held
     (

@@ -15,6 +15,7 @@ import datetime as _dt
 import json
 import types
 from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
@@ -89,8 +90,8 @@ def start_search(h: Handler) -> None:
             h.reply_json(400, {"error": f"assumptions: {exc}"})
             return
         basis_name = "account"
-    # holodori.best-style "any song" level range: In general over every chart of any
-    # difficulty whose level is in [lo, hi]
+    # In general from a level: [lo, hi] = each song at its hardest chart up to hi (the level the
+    # player clears), only the songs whose chart is lo or harder
     levels = None
     if body.get("levels") not in (None, "", []):
         try:
@@ -119,6 +120,7 @@ def start_search(h: Handler) -> None:
         "levels": levels,
         "max_level": max_level,
         "play": ondemand.parse_play(body),
+        **chart_check_of(song, difficulty, body),
     }
     job = jobs.launch(jobs.run_search_job, opts, "search")
     h.reply_json(
@@ -128,6 +130,71 @@ def start_search(h: Handler) -> None:
             "opts": {k: v for k, v in opts.items() if k not in ("filters", "assumptions")},
         },
     )
+
+
+_LIBRARY: dict = {}
+
+
+def _charts_all():
+    """charts_all.json's library, kept while the file is unchanged (a 10 MB parse)."""
+    import leaf_inputs  # noqa: PLC0415
+
+    path = Path(leaf_inputs.charts_path("HARD"))  # charts_all.json: every difficulty
+    key = (str(path), path.stat().st_mtime_ns)
+    if _LIBRARY.get("key") != key:
+        _LIBRARY.update(key=key, library=leaf_inputs.chart_library(path))
+    return _LIBRARY["library"]
+
+
+def chart_check_of(song: str, difficulty: str, body: Mapping) -> dict:
+    """A search's other-chart keys: `contender`, the song's other chart within the level the
+    player clears, checked after the answer (`jobs._check_chart`; None in general or when there
+    is none); and, when the client turned the check off (`chart_check: false`: Sort by Max,
+    Multi Live, AUTO, where it is not calibrated), `unchecked`, the chart it did not try, so the
+    page can say so."""
+    if not song:
+        return {"contender": None}
+    out: dict[str, Any] = {"contender": contender_of(song, difficulty, body)}
+    if body.get("chart_check") is False:
+        unchecked = contender_of(song, difficulty, {**body, "chart_check": True})
+        if unchecked is not None:
+            out["unchecked"] = unchecked
+    return out
+
+
+def contender_of(song: str, difficulty: str, body: Mapping) -> dict | None:
+    """`song`'s other chart worth checking after its search (`ChartLibrary.contender`): HARD for
+    an EXPERT pick, EXPERT for a HARD one within the body's `max_level` (the level the player
+    clears; absent = any), as `{"other": difficulty, "levels": {difficulty: level}}`. None when
+    there is none, or `chart_check` is false. The check is an extra after the answer: a failure
+    here (no chart file, a chart it cannot read) leaves the search without it, never a 500."""
+    if body.get("chart_check") is False:
+        return None
+    raw = body.get("max_level")
+    try:
+        cap = int(raw) if raw not in (None, "") and not isinstance(raw, bool) else None
+    except (TypeError, ValueError):
+        cap = None
+    try:
+        library = _charts_all()
+        alt = library.contender(song, difficulty, cap)
+        picked = library.get(song, difficulty) if alt is not None else None
+    except (MissingInput, FileNotFoundError):  # the search itself reports a missing chart file
+        return None
+    except Exception:  # noqa: BLE001 -- logged; the answer comes without the check
+        import traceback  # noqa: PLC0415
+
+        print(traceback.format_exc(), flush=True)
+        return None
+    if alt is None:
+        return None
+    return {
+        "other": alt.difficulty.upper(),
+        "levels": {
+            difficulty.upper(): picked.difficulty_level if picked else None,
+            alt.difficulty.upper(): alt.difficulty_level,
+        },
+    }
 
 
 def row_request(body: Mapping) -> dict:
@@ -468,7 +535,7 @@ def serve_timeline(h: Handler) -> None:
         cfg_board = dataclasses.replace(cfg, board=board_model)
 
         fig = row_detail.figures(team, chart, cfg_board)  # type: ignore[arg-type]
-        drawing = timeline(team.members, chart, cfg_board, tuple(fig["member_order"]))  # type: ignore[arg-type]
+        drawing = timeline(team.members, chart, cfg_board, tuple(fig["member_order"]), team.leader)  # type: ignore[arg-type]
         law = (
             row_detail.distribution(
                 team,

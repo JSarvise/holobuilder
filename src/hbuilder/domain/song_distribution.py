@@ -43,6 +43,8 @@ from hbuilder.domain.scoring import (
     _pool_for,
     _resolve_skill,
     active_magnitude_by_card,
+    leader_activation_rate,
+    with_passive_activation_rates,
 )
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.song import (
@@ -120,11 +122,12 @@ def _terms(members: tuple[Card, ...], leader: Card, chart: SongChart, cfg: Scori
     `score_song_detailed` builds them for `leader`."""
     times = tuple(note.time for note in chart.notes)
     song_seconds = times[-1]
+    cfg = with_passive_activation_rates(members, cfg)
     gates = resolve_card_set_gates(members, cfg.run_state)
     normal = []
     for card in members:
         normal.extend(gates.normal_by_card_id[card.id])
-    team_rate_up = _fold_activation_rate_up(tuple(normal), cfg)
+    team_rate_up = _fold_activation_rate_up(tuple(normal), cfg) + leader_activation_rate(cfg, leader)
     active_rank = active_magnitude_by_card(normal)
     index_of = {card.id: i for i, card in enumerate(members)}
     terms = []

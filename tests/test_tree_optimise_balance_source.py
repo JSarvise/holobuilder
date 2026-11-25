@@ -77,7 +77,7 @@ def test_a_partial_inventory_is_refused_rather_than_read_as_zero(tmp_path):
     """Seven of eight currencies is not a balance: treating the missing currency as
     zero would make an unaffordable plan look affordable, which is the one
     direction this cost model must never round."""
-    partial = {item: 10 for item in _TREE.CURRENCIES[:-1]}
+    partial = {item: 10 for item in _TREE.BASE_CURRENCIES[:-1]}
     _write_inventory(tmp_path, partial, "2026-08-09T02:50:04+0200")
 
     balance, source = _TREE.balance_from_disk(tmp_path)
@@ -85,6 +85,19 @@ def test_a_partial_inventory_is_refused_rather_than_read_as_zero(tmp_path):
     assert balance is None and source is None, (
         f"an incomplete inventory means UNKNOWN, never a partial balance; got {balance!r} from {source!r}"
     )
+
+
+def test_a_material_the_game_added_later_is_held_at_zero_when_unlisted(tmp_path):
+    """The eight cubes and hexas must all be listed. A material the master added later
+    (the Red Star Cube) that the account never held is absent from `items`, the account's
+    whole item list: that absence is the measurement, so it reads 0 and its nodes stay
+    unaffordable instead of the whole wallet turning unknown."""
+    base = {item: 10 for item in _TREE.BASE_CURRENCIES}
+    _write_inventory(tmp_path, base, "2026-11-25T08:37:00+0100")
+
+    balance, _source = _TREE.balance_from_disk(tmp_path)
+
+    assert balance == {**base, **{item: 0 for item in _TREE.CURRENCIES if item not in base}}
 
 
 def test_an_unreadable_inventory_does_not_kill_the_run(tmp_path):

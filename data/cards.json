@@ -4755,6 +4755,119 @@
       "type": "Pure"
     },
     {
+      "costume_name": "Starlight Tartan",
+      "costume_skill": {
+        "condition": {
+          "count": 3,
+          "kind": "type",
+          "target": "Cute"
+        },
+        "duration": null,
+        "effect_type": "technique",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 135.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "kind": "none"
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "0期生"
+      ],
+      "id": "card-00015-5-uniq-0120-00",
+      "member": "Sakura Miko",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "count": 2,
+            "kind": "type",
+            "target": "Cute"
+          },
+          "duration": 10.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 31.0,
+          "magnitude": 130.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": "High",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "count": 3,
+            "kind": "type",
+            "target": "Cute"
+          },
+          "duration": null,
+          "effect_type": "technique",
+          "family": "stat_up",
+          "interval": null,
+          "magnitude": 30.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 3,
+            "kind": "type",
+            "value": "Cute"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 11.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 130.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "condition": {
+              "kind": "ungated"
+            },
+            "effect_type": "activation_rate",
+            "family": "activation_rate_up",
+            "kind": "rider",
+            "magnitude": 45.0,
+            "target": null
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 6947,
+        "sense": 7828,
+        "technique": 11146
+      },
+      "title": "Behold, the Elite Santa!",
+      "type": "Cute"
+    },
+    {
       "costume_name": "Default",
       "costume_skill": {
         "condition": {
@@ -9169,6 +9282,142 @@
       },
       "title": "Spoiled Beach Princess",
       "type": "Pure"
+    },
+    {
+      "costume_name": "Regal Fluff Pastel",
+      "costume_skill": {
+        "condition": {
+          "count": 3,
+          "kind": "type",
+          "target": "Cute"
+        },
+        "duration": null,
+        "effect_type": "sense",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 50.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "condition": {
+            "count": 3,
+            "kind": "type",
+            "target": "Cute"
+          },
+          "effect_type": "score",
+          "family": "score_support",
+          "kind": "rider",
+          "magnitude": 45.0,
+          "target": {
+            "kind": "all"
+          }
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "4期生"
+      ],
+      "id": "card-00028-5-uniq-0121-00",
+      "member": "Himemori Luna",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "count": 2,
+            "kind": "type",
+            "target": "Cute"
+          },
+          "duration": 7.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 22.0,
+          "magnitude": 140.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": "Medium",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "count": 3,
+            "kind": "type",
+            "target": "Cute"
+          },
+          "duration": null,
+          "effect_type": "sense",
+          "family": "stat_up",
+          "interval": null,
+          "magnitude": 17.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "condition": {
+              "count": 3,
+              "kind": "type",
+              "target": "Cute"
+            },
+            "effect_type": "activation_rate",
+            "family": "activation_rate_up",
+            "kind": "rider",
+            "magnitude": 19.0,
+            "target": {
+              "count": 2,
+              "kind": "type",
+              "value": "Cute"
+            }
+          },
+          "target": {
+            "count": 2,
+            "kind": "type",
+            "value": "Cute"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 12.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 70.0,
+          "override": {
+            "condition": {
+              "count": 1000,
+              "kind": "run_state",
+              "target": "life"
+            },
+            "kind": "override",
+            "magnitude": 145.0
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 6947,
+        "sense": 11146,
+        "technique": 7828
+      },
+      "title": "Resplendent Princess Symphony",
+      "type": "Cute"
     },
     {
       "costume_name": "Default",
@@ -17602,6 +17851,133 @@
       "type": "Happy"
     },
     {
+      "costume_name": "Winter White Fairy",
+      "costume_skill": {
+        "condition": {
+          "count": 3,
+          "kind": "type",
+          "target": "Cute"
+        },
+        "duration": null,
+        "effect_type": "performance",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 85.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "condition": {
+            "count": 3,
+            "kind": "type",
+            "target": "Cute"
+          },
+          "effect_type": "score",
+          "family": "score_support",
+          "kind": "rider",
+          "magnitude": 25.0,
+          "target": {
+            "kind": "all"
+          }
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "Myth"
+      ],
+      "id": "card-04003-5-uniq-0122-00",
+      "member": "Ninomae Ina'nis",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 10.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 29.0,
+          "magnitude": 60.0,
+          "override": {
+            "condition": {
+              "count": 40,
+              "kind": "run_state",
+              "target": "combo"
+            },
+            "kind": "override",
+            "magnitude": 120.0
+          },
+          "probability_tier": "High",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "count": 3,
+            "kind": "type",
+            "target": "Cute"
+          },
+          "duration": null,
+          "effect_type": "performance",
+          "family": "stat_up",
+          "interval": null,
+          "magnitude": 45.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "type",
+            "value": "Cute"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 10.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 85.0,
+          "override": {
+            "condition": {
+              "count": 3,
+              "kind": "type",
+              "target": "Cute"
+            },
+            "kind": "override",
+            "magnitude": 175.0
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 11381,
+        "sense": 6803,
+        "technique": 7683
+      },
+      "title": "Sweet Snow INAvitation",
+      "type": "Cute"
+    },
+    {
       "costume_name": "Default",
       "costume_skill": {
         "condition": {
@@ -19226,6 +19602,133 @@
       },
       "title": "Archived Night Pool",
       "type": "Cute"
+    },
+    {
+      "costume_name": "Holly Jolly Gothmas",
+      "costume_skill": {
+        "condition": {
+          "count": 3,
+          "kind": "type",
+          "target": "Pure"
+        },
+        "duration": null,
+        "effect_type": "technique",
+        "family": "stat_up",
+        "interval": null,
+        "magnitude": 85.0,
+        "override": {
+          "kind": "none"
+        },
+        "probability_tier": null,
+        "rider": {
+          "condition": {
+            "count": 3,
+            "kind": "type",
+            "target": "Pure"
+          },
+          "effect_type": "score",
+          "family": "score_support",
+          "kind": "rider",
+          "magnitude": 25.0,
+          "target": {
+            "kind": "all"
+          }
+        },
+        "target": {
+          "kind": "all"
+        }
+      },
+      "generation": [
+        "Advent"
+      ],
+      "id": "card-04013-5-uniq-0123-00",
+      "member": "Shiori Novella",
+      "rarity": "5★",
+      "skills": {
+        "ACTIVE": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 7.0,
+          "effect_type": "score",
+          "family": "conditional_score_up",
+          "interval": 21.0,
+          "magnitude": 60.0,
+          "override": {
+            "condition": {
+              "count": 600,
+              "kind": "run_state",
+              "target": "life"
+            },
+            "kind": "override",
+            "magnitude": 125.0
+          },
+          "probability_tier": "High",
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        },
+        "PASSIVE": {
+          "condition": {
+            "count": 3,
+            "kind": "type",
+            "target": "Pure"
+          },
+          "duration": null,
+          "effect_type": "technique",
+          "family": "stat_up",
+          "interval": null,
+          "magnitude": 45.0,
+          "override": {
+            "kind": "none"
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "count": 2,
+            "kind": "type",
+            "value": "Pure"
+          }
+        },
+        "SPECIAL": {
+          "condition": {
+            "kind": "ungated"
+          },
+          "duration": 13.0,
+          "effect_type": "score",
+          "family": "score_support",
+          "interval": null,
+          "magnitude": 65.0,
+          "override": {
+            "condition": {
+              "count": 3,
+              "kind": "type",
+              "target": "Pure"
+            },
+            "kind": "override",
+            "magnitude": 135.0
+          },
+          "probability_tier": null,
+          "rider": {
+            "kind": "none"
+          },
+          "target": {
+            "kind": "all"
+          }
+        }
+      },
+      "stats": {
+        "performance": 7683,
+        "sense": 6803,
+        "technique": 11381
+      },
+      "title": "Lured by Candlelight",
+      "type": "Pure"
     },
     {
       "costume_name": "Default",

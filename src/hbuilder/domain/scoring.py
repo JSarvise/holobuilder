@@ -1068,9 +1068,12 @@ def _score_team(team: Team, cfg: ScoringConfig, *, with_breakdown: bool = False)
     `_resolve_skill` and allocates no `SkillContribution`. `True` keeps every resolved skill
     as a contribution in `resolve_team_gates` order and returns a `ScoreBreakdown`. Both read
     the one pass over `resolved_skills`."""
+    cfg = with_passive_activation_rates(tuple(team.members), cfg)
     resolved_skills = resolve_team_gates(team, cfg.run_state)
-    team_rate_up = _fold_activation_rate_up(resolved_skills, cfg) + _fold_rider_activation_rate_up(
-        resolved_skills, cfg
+    team_rate_up = (
+        _fold_activation_rate_up(resolved_skills, cfg)
+        + _fold_rider_activation_rate_up(resolved_skills, cfg)
+        + leader_activation_rate(cfg, team.leader)
     )
     cards = team.members  # gates and stats are the 5 members'
     active_rank = active_magnitude_by_card(resolved_skills)
@@ -1399,11 +1402,110 @@ def _leader_class_key(
     return ("costume", costume)
 
 
+def leader_activation_rate(cfg: ScoringConfig, leader: Card | None) -> float:
+    """The activation rate the leader's board adds to every member's ACTIVE while she leads
+    (`BoardModel.leader_activation_rate`, R-064); 0.0 without a board or a leader."""
+    if cfg.board is None or leader is None:
+        return 0.0
+    return cfg.board.leader_activation_rate(leader.member)
+
+
+def _passive_rate_rider(card: Card) -> SlotRider | None:
+    """The card's PASSIVE `activation_rate_up` rider (Himemori Luna 0121: Skill Activation
+    Rate UP to 2 Cute members, beside her Sense UP), or None."""
+    slot = card.skill("PASSIVE")
+    rider = getattr(slot, "rider", None)
+    return rider if isinstance(rider, SlotRider) and rider.family == "activation_rate_up" else None
+
+
+# (the config handed in, the members' rates) -> that config with the rates on its board: one
+# object per pair, so the callers' per-config memos (`team_setup`) keep working across charts
+_PASSIVE_RATE_CFGS: dict[tuple[int, frozenset], tuple[ScoringConfig, ScoringConfig]] = {}
+
+
+def with_passive_activation_rates(members: tuple[Card, ...], cfg: ScoringConfig) -> ScoringConfig:
+    """`cfg` with the activation rate the members' PASSIVE riders give their recipients added
+    to those holomems' own rate (`BoardModel.with_activation_rates`); `cfg` itself when no
+    member carries one (checked on the cards, before any gate is resolved).
+
+    The rider fires on its own gate (3+ Cute) and reaches `target.count` members of its
+    target; which ones the server picks is not measured, and they are ranked here as a
+    count-limited Score Support's are, by ACTIVE magnitude (`active_magnitude_by_card`)."""
+    if not any(_passive_rate_rider(card) is not None for card in members):
+        return cfg
+    gates = resolve_card_set_gates(members, cfg.run_state)
+    resolved = [r for card in members for r in gates.normal_by_card_id[card.id]]
+    active_rank = active_magnitude_by_card(resolved)
+    rates: dict[str, float] = {}
+    for r in resolved:
+        rider = r.skill.rider
+        if (
+            r.skill.kind != "PASSIVE"
+            or not isinstance(rider, SlotRider)
+            or rider.family != "activation_rate_up"
+        ):
+            continue
+        if not is_known(rider.magnitude) or not is_known(rider.condition):
+            continue
+        if r.rider_gate is not None and not r.rider_gate.fired:
+            continue
+        ids = targets.resolve_target_card_ids(
+            rider.target,
+            r.card_id,
+            members,
+            STAT_NAMES,
+            cfg.target_selection_model,
+            cfg.target_under_supply,
+            rank_values=active_rank,
+        )
+        for card in members:
+            if card.id in ids:
+                rates[card.member] = rates.get(card.member, 0.0) + _as_rate(float(rider.magnitude))
+    if not rates:
+        return cfg
+    key = (id(cfg), frozenset(rates.items()))
+    held = _PASSIVE_RATE_CFGS.get(key)
+    if held is not None and held[0] is cfg:
+        return held[1]
+    from hbuilder.domain.board import BoardModel  # noqa: PLC0415
+
+    board = cfg.board if cfg.board is not None else BoardModel(characters={})
+    out = replace(cfg, board=board.with_activation_rates(rates))
+    if len(_PASSIVE_RATE_CFGS) > 4096:
+        _PASSIVE_RATE_CFGS.clear()
+    _PASSIVE_RATE_CFGS[key] = (cfg, out)
+    return out
+
+
 def score_card_set(
     members: tuple[Card, ...], leaders: tuple[Card, ...], cfg: ScoringConfig
 ) -> tuple[LeaderScore, ...]:
     """The set-level batch entry point the solver calls: one `LeaderScore` per entry of
     `leaders`, in order.
+
+    The member-set work is shared by every leader adding the same activation rate to the
+    team (`leader_activation_rate`, R-064: a leader-scoped board term); leaders that add
+    different rates are scored in one batch per rate and the answers put back in order."""
+    cfg = with_passive_activation_rates(members, cfg)
+    rates = [leader_activation_rate(cfg, leader) for leader in leaders]
+    if not any(rates):
+        return _score_card_set_at(members, leaders, cfg, 0.0)
+    by_rate: dict[float, list[int]] = {}
+    for index, rate in enumerate(rates):
+        by_rate.setdefault(rate, []).append(index)
+    scores: list[LeaderScore | None] = [None] * len(leaders)
+    for rate, indices in by_rate.items():
+        batch = _score_card_set_at(members, tuple(leaders[i] for i in indices), cfg, rate)
+        for index, score in zip(indices, batch, strict=True):
+            scores[index] = score
+    return tuple(score for score in scores if score is not None)
+
+
+def _score_card_set_at(
+    members: tuple[Card, ...], leaders: tuple[Card, ...], cfg: ScoringConfig, leader_rate: float
+) -> tuple[LeaderScore, ...]:
+    """`score_card_set` for leaders that all add `leader_rate` to the team's activation
+    rate.
 
     `members` is the set of 5; `leaders` are candidate outfit cards and need not be drawn
     from `members` (the leader slot is outside the five). Everything that depends only on
@@ -1413,10 +1515,11 @@ def score_card_set(
     leader-scoped holomems and the final combines vary per leader. Each costume is resolved
     against the members' aggregates, so a gated outfit cannot satisfy its own condition.
 
-    `team_rate_up` is leader-invariant because no COSTUME slot can carry
-    `activation_rate_up` as its principal family (`schema.FAMILY_REQUIRES_SLOT_KIND`,
-    enforced at load by `validate_skill_slot`); the check below raises `ScoringError` for a
-    record that bypassed validation. A costume rider is never `activation_rate_up`.
+    `team_rate_up` is the same for every leader here: the leaders share `leader_rate`, and
+    no COSTUME slot can carry `activation_rate_up` as its principal family
+    (`schema.FAMILY_REQUIRES_SLOT_KIND`, enforced at load by `validate_skill_slot`); the
+    check below raises `ScoringError` for a record that bypassed validation. A costume
+    rider is never `activation_rate_up`.
 
     Per leader, the cached entries are walked in `resolve_team_gates` order and routed
     exactly as `_score_team` routes them, and every `combine()` runs over the full list,
@@ -1443,8 +1546,10 @@ def score_card_set(
     normal_resolved: list[ResolvedSkill] = []
     for card in members:
         normal_resolved.extend(card_set_gates.normal_by_card_id[card.id])
-    team_rate_up = _fold_activation_rate_up(tuple(normal_resolved), cfg) + _fold_rider_activation_rate_up(
-        tuple(normal_resolved), cfg
+    team_rate_up = (
+        _fold_activation_rate_up(tuple(normal_resolved), cfg)
+        + _fold_rider_activation_rate_up(tuple(normal_resolved), cfg)
+        + leader_rate
     )
     active_rank = active_magnitude_by_card(normal_resolved)
 

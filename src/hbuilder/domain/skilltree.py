@@ -53,9 +53,11 @@ __all__ = [
 # every one of the four models.
 ROOT_NODE = "S-001"
 
-# Σ field 9 over all 154 node groups (including G-024 and G-025, two 3-point
-# minigame-reward nodes).
-TOTAL_BOARD_POINTS = 453
+# Σ field 9 over all 156 node groups (including G-024, G-025 and G-026, three
+# 3-point minigame-reward nodes, and R-064, the 6-point leader Act.Prob node). The
+# web reads the live figure from the master (`inputs.total_board_points`); this is its
+# fallback and the measured total the tests pin.
+TOTAL_BOARD_POINTS = 462
 
 _PLAYER_LEVEL_RE = re.compile(r"cd-player_level-(\d+)")
 

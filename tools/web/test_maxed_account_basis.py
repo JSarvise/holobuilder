@@ -177,17 +177,17 @@ def test_bench_is_54_boards_at_max_level_with_level_2_sockets():
         assert any(r.get("connect_multiplier", 1) > 1 for r in rows), f"{name}: no socket reached a node"
     # one green socket per board, and each singer's yellow-only socket (her own song yellows
     # take the cards the greens leave, in a second pass (`precompute.maxed_account_bench`)
-    assert scenario.bench_sockets == 104, scenario.bench_sockets
+    assert scenario.bench_sockets == 107, scenario.bench_sockets
     # the account bonuses of the scenario, not the account's own
     # every poster the game has and the roster's power-up ceiling: both move as cards ship
-    assert cfg.account.posters == 48
-    assert cfg.account.power_up_permyriad == 1294
-    assert scenario.bonuses.posters == 48 and scenario.bonuses.power_up_permyriad == 1294
+    assert cfg.account.posters == 49
+    assert cfg.account.power_up_permyriad == 1326
+    assert scenario.bonuses.posters == 49 and scenario.bonuses.power_up_permyriad == 1326
     # the "current" board of this basis is the bench as a BoardModel
     assert scenario.board_model is not None
     assert len(scenario.board_model.characters) == 54
     # the catalogue-wide, level-2 Connect pool
-    assert len(scenario.connect_cards) == 155  # every 4★/5★ of the 209 (209 - 54 three-stars)
+    assert len(scenario.connect_cards) == 159  # every 4★/5★ the game ships (213 - 54 three-stars)
     # cached per process: a second build at the same cfg IS the same object
     _c2, _cfg2, _b2, again = basis.apply_basis(
         *load_inputs(config.CARDS_PATH, config.OWNED_PATH)[:3], "maxed-account"

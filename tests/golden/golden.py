@@ -231,6 +231,10 @@ def _stream(base: str, job_id: str, t0: float) -> tuple[dict | None, list]:
             if kind == "result":
                 result = ev.get("payload")
                 events.append({"t": now, "type": "result", "elapsed_ms": ev.get("elapsed_ms")})
+            if kind == "chart":  # a song's other-chart check, after its answer (`jobs._check_chart`)
+                events.append(
+                    {"t": now, "type": "chart", "elapsed_ms": ev.get("elapsed_ms"), "check": ev.get("check")}
+                )
             if kind == "end":
                 break
     return result, events
@@ -470,7 +474,10 @@ def run(code: Path, frozen: Path, out: Path, workers: int | None, only: set[str]
                 if status != 202 or "job_id" not in started:
                     raise RuntimeError(f"{name}: {route} answered {status}: {started}")
                 payload, events = _stream(server.base, started["job_id"], t0)
-                wall = round(time.perf_counter() - t0, 3)
+                # the wall time is the time to the answer; a song's other-chart check runs after
+                # it on the same stream, timed apart (`stream_s`, and its `chart` event)
+                stream_s = round(time.perf_counter() - t0, 3)
+                wall = next((e["t"] for e in events if e.get("type") == "result"), stream_s)
                 docs = [
                     (
                         name,
@@ -490,6 +497,7 @@ def run(code: Path, frozen: Path, out: Path, workers: int | None, only: set[str]
             timings["cases"][name].update(
                 {
                     "server_boot_s": boot,
+                    "stream_s": stream_s,
                     "events": events,
                     # the server's own wall-clock stage timers (stripped from the compared output)
                     "server_timings": (payload or {}).get("timings"),

@@ -369,7 +369,7 @@ def detail(
         order = fig["member_order"]
     out.update(unit_score_block(team, cfg_board, cfg_off, order, chart=chart))
     if chart is not None and want_timeline:
-        out["timeline"] = song_timeline(tuple(team.members), chart, cfg_board, tuple(order))  # type: ignore[arg-type]
+        out["timeline"] = song_timeline(tuple(team.members), chart, cfg_board, tuple(order), team.leader)  # type: ignore[arg-type]
     if chart is not None and want_distribution:
         out["distribution"] = distribution(
             team,

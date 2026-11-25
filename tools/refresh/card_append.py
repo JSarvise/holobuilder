@@ -54,6 +54,8 @@ from hbuilder.domain.unknown import is_known  # noqa: E402
 
 CARDS_JSON = paths.DATA / "cards.json"
 DRAFT_JSON = paths.DUMPS / "cards_import_draft.json"
+# the drafted cards `import_to_cards.untranslated` found unfaithful: never added
+UNTRANSLATED_JSON = paths.DUMPS / "cards_untranslated.json"
 
 
 # --------------------------------------------------------------------------
@@ -208,8 +210,12 @@ class Plan:
         return bool(self.additions) or bool(self.rejections)
 
 
-def plan_additions(catalogue_doc: dict, draft_doc: dict) -> Plan:
+def plan_additions(catalogue_doc: dict, draft_doc: dict, untranslated: dict | None = None) -> Plan:
     """What the draft has that the catalogue lacks, screened.
+
+    `untranslated` (`{card id: [reasons]}`, `import_to_cards.untranslated`): drafts the
+    translator itself found unfaithful (a master field nobody read, a gate the game's text
+    names and the slot lacks), rejected whatever the schema says.
 
     Only ids ABSENT from the catalogue are ever considered, so a card the
     catalogue already carries is untouchable by construction -- there is no
@@ -230,6 +236,9 @@ def plan_additions(catalogue_doc: dict, draft_doc: dict) -> Plan:
             rejections.append(Rejection(str(card_id), "duplicate", "appears twice in the draft"))
             continue
         seen.add(str(card_id))
+        if untranslated and card_id in untranslated:
+            rejections.append(Rejection(str(card_id), "untranslated", "; ".join(untranslated[card_id])))
+            continue
         card, rejection = screen(record, index, allowed)
         if rejection is not None:
             rejections.append(rejection)
@@ -303,7 +312,11 @@ def apply_additions(
             "would reformat the whole file rather than add to it. Refusing."
         )
 
-    plan = plan_additions(catalogue, draft)
+    try:
+        untranslated = json.loads(UNTRANSLATED_JSON.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        untranslated = None
+    plan = plan_additions(catalogue, draft, untranslated)
     if not plan.additions:
         return Result([], plan.rejections, len(raw), len(raw), False)
 

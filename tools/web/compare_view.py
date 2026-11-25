@@ -76,7 +76,6 @@ from hbuilder.domain.collection import (
 from hbuilder.domain.schema import COSTUME_SLOT_KIND
 from hbuilder.domain.scoring import deck_screen_unit_score, score_with_breakdown
 from hbuilder.domain.scoring_config import ACTIVE_UPTIME_MODELS
-from hbuilder.domain.skilltree import TOTAL_BOARD_POINTS
 from hbuilder.domain.song import SongError, load_charts, song_overall_power
 from hbuilder.domain.song_chart import FEVER_BONUS_COEFFICIENT
 from hbuilder.domain.song_rank import score_team_on_chart
@@ -88,6 +87,7 @@ from hbuilder.inputs import (
     _LoadFailure,
     load_board_basis,
     load_inputs,
+    total_board_points,
 )
 
 if TYPE_CHECKING:
@@ -100,7 +100,6 @@ TEAM_LABELS = ("A", "B")
 BOARD_MODES = ("captured", "develop", "off", "state")
 LEVEL_RANGE = (1, 80)
 BLOOM_RANGE = (0, 6)
-FULL_TREE = TOTAL_BOARD_POINTS  # what the whole tree costs
 
 # The panel lines, in the order the deck screen lists them. `kind` says how the Δ is read:
 # a POWER line is absolute points of Overall Power; a RATE line is percentage points.
@@ -209,6 +208,22 @@ def _max_level(body: Mapping) -> int | None:
         raise CompareError(exc.code, exc.obj.get("error") if isinstance(exc.obj, dict) else str(exc)) from exc  # type: ignore[arg-type]
 
 
+def _min_level(body: Mapping) -> int | None:
+    """The across compare's lowest chart level (In general from a level), None when absent."""
+    raw = body.get("min_level")
+    if raw in (None, ""):
+        return None
+    try:
+        level = int(raw)
+        if isinstance(raw, bool) or str(level) != str(raw).strip():
+            raise ValueError
+    except (TypeError, ValueError):
+        raise CompareError(400, f"'min_level' must be a whole level, got {raw!r}") from None
+    if not 1 <= level <= 40:
+        raise CompareError(400, f"'min_level' must be 1..40, got {level}")
+    return level if level > 1 else None
+
+
 def parse_assumptions(body: Mapping) -> dict:
     """The SAME tokens the Optimizer's routes read, through the server's own
     parsers where one exists (`basis.parse_assume`, `basis.parse_platform`)."""
@@ -235,7 +250,11 @@ def parse_assumptions(body: Mapping) -> dict:
         difficulty = basis_mod.parse_difficulty(body, song)
     except basis_mod.HttpError as exc:
         raise CompareError(exc.code, exc.obj.get("error") if isinstance(exc.obj, dict) else str(exc)) from exc  # type: ignore[arg-type]
+    across = bool(body.get("across")) and not song
+    min_level = _min_level(body) if across else None
     return {
+        # In general from a level: only the songs whose chart within the cap is this level or harder
+        **({"min_level": min_level} if min_level else {}),
         "basis": basis_name,
         "assume_level": basis_mod.parse_assume(body, "assume_level", *LEVEL_RANGE),
         "assume_bloom": basis_mod.parse_assume(body, "assume_bloom", *BLOOM_RANGE),
@@ -634,7 +653,7 @@ def _board_plan_summary(
         "developed": developed,
         "gain_pct": round(100.0 * (developed - board_off) / board_off, 1) if board_off else 0.0,
         "budget_kind": "full_tree"
-        if budget_kind == "flat" and all(c["points_max"] == FULL_TREE for c in per_character)
+        if budget_kind == "flat" and all(c["points_max"] == total_board_points() for c in per_character)
         else budget_kind,
         "develop_only": develop_only,
         "per_character": per_character,
@@ -1024,10 +1043,18 @@ def build_compare(body: Mapping, *, art_dir: Path) -> dict:
                     f"(build it with tools/refresh/build_charts.py)"
                 ),
             )
-    elif A["across"] and A.get("max_level") is not None:
+    elif A["across"] and (A.get("max_level") is not None or A.get("min_level")):
+        from hbweb import songs  # noqa: PLC0415
+
         charts_file = basis_mod.charts_path("HARD")  # charts_all.json: every difficulty
         library = load_charts(str(charts_file))
-        all_charts = list(library.up_to(A["max_level"])) if library is not None else []
+        top = A.get("max_level") or songs.MAX_LEVEL_CAP
+        lowest = A.get("min_level") or 1
+        all_charts = (
+            [c for c in library.up_to(top) if c.difficulty_level >= lowest] if library is not None else []
+        )
+        if not all_charts:
+            raise CompareError(400, f"no song has a chart of level {lowest} to {top}")
     elif A["across"]:
         library = load_charts(str(charts_file))
         all_charts = [
