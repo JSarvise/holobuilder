@@ -5,6 +5,9 @@
 # plain UTF-8 SUS (the open text chart format) and were never obfuscated: do NOT run them through
 # octo_crypto, that destroys them. Their raw bytes start with `#CREATE_APP_`.
 #
+# A master whose rows lack field 5 (client 1.3.0 removed it) cannot name the files: the
+# tool says so and stops; chart_download.py fetches the charts from the CDN instead.
+#
 # Only charts the client has actually downloaded are present; it fetches one when you play that
 # difficulty, so the cache fills as you play rather than all at once.
 #
@@ -29,10 +32,12 @@ DIFF = {1: "easy", 2: "normal", 3: "hard", 4: "expert"}
 
 def index():
     """md5 -> (music_id, difficulty, total_notes, flick_notes_unknown_until_read)."""
-    return {
-        r["data"][5][0]: (r["music_id"], int(r["difficulty_type"]), r["data"][3][0])
-        for r in mc.rows("MusicDifficultyChart")
-    }
+    out = {}
+    for r in mc.rows("MusicDifficultyChart"):
+        md5 = r["data"].get(5)
+        if md5:  # absent from a master that no longer carries the chart hash
+            out[md5[0]] = (r["music_id"], int(r["difficulty_type"]), r["data"][3][0])
+    return out
 
 
 def cached(want):
@@ -47,6 +52,11 @@ def cached(want):
 
 def main():
     want = index()
+    if not want:
+        raise SystemExit(
+            "MusicDifficultyChart carries no chart hash (field 5) in this master, so the cached "
+            "charts cannot be named; use chart_download.py to fetch them from the CDN"
+        )
     have = cached(want)
     songs_all = {v[0] for v in want.values()}
     songs_have = {want[m][0] for m in have}

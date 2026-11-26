@@ -2,6 +2,14 @@
 
 Every app version, newest first. The app updates itself; the same notes show in its update banner.
 
+## 0.2.23 (2026-11-26)
+- **The new songs' own score factor.** The game's 1.3.0 update gives five songs a factor on every note: Holiday Dream ×1.0904, TAKO∞TAKOVER ×1.0855, Zettai Chuusei Nanonanora ×1.0214, Whisper Whisper Whisper ×1.0164 and SUNAO ×0.9807. Before this version, the scores, Event Points, Event Song Score and comparisons involving these songs were off by that much.
+- **Sort by Max is a real Max search.** On Score and Event Song Score, teams are now ranked by their Max, as in Holomem Rating, and each team is shown on the board that gives it the highest Max. Before, the Expected search's teams were re-sorted.
+- **Holomem Rating tries each song's Hard.** With a team per song, each song's Hard chart within your level is checked too, and the song moves to Hard when it rates higher; the list names the chart. Max rows are shown on their best board.
+- **Board plans on the chart you play.** With your account's boards planned, a Hard play is planned on the Hard notes; before, every plan was valued on Expert's. Score's Hard check is faster.
+- **Maxed boards buy red nodes only for the leader**, the only board where they score.
+- **Steadier Optimizer page.** A change of goal, song, holomem or option cancels the running search, and Cancel stops it whatever goal started it. A row's details, compare and export use the request its answer was found with, and each goal sends only the options it uses.
+
 ## 0.2.22 (2026-11-25)
 - **Must include, Ban and the leader lists offer every card.** They listed only the cards on your account; now every card the game has is there, yours first and the rest marked "not owned" (a card you do not own plays with Cards set to Maxed account).
 - **Fewer stale answers.** With one song, Sort by Max and Expected are separate searches (the Hard check runs only on Expected); in Event, raising "Teams to show" searches again, and Live Boost no longer re-runs an Event Song Score search. "Exhaustive search", which did nothing, is gone.

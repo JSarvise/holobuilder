@@ -25,6 +25,14 @@ export const thumb = id => `/cardart/thumb/${encodeURIComponent(id)}?w=160`;
 export const INK = { Cute: "#F24068", Pure: "#0DC134", Happy: "#FFA712" };
 export const chrOf = id => "chr-" + String(id).split("-")[1];
 export const AC = [8, 16, 24, 30, 37, 42, 46, 50, 53, 56];   // Live Boost Event Pt multiplier (marathon.live_stamina_score)
+// The options a goal acts on: what its panel hides travels in no request and counts in no
+// summary. Holomem Rating hides the leader (she always leads), the card pool, the leader overlap
+// and Multi Live; the card pool is a Score option.
+export function effective(S) {
+  if (S.goal === "rating") return { ...S, lmember: "", loutfit: "", nooverlap: false, pool: "all", multi: false };
+  if (S.goal !== "score") return { ...S, pool: "all" };
+  return S;
+}
 
 // a network failure means the app's own local engine is not answering (stopped, or restarting
 // after an update): say so instead of the browser's bare "Failed to fetch"
@@ -201,6 +209,8 @@ export async function loadStates(ids, assumptions) {
   statesKey = key;
   try {
     const d = await postJSON("/api/card-states", { ids: uniq, ...(assumptions ? { assumptions } : {}) });
+    // a later call (other levers, other cards) asked since: its answer is the one to keep
+    if (statesKey !== key) return false;
     STATES.clear();
     for (const [k, v] of Object.entries(d.states || {})) STATES.set(k, v);
     return true;

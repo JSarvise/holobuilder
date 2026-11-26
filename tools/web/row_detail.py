@@ -456,6 +456,13 @@ _LEAF_TTL = 120.0
 _LEAF_HELD = 3
 
 
+def _chart_song(song: str, difficulty: str | None = None) -> str:
+    """`materials_plan.chart_song` (imported when used: it is the server side's)."""
+    import materials_plan  # noqa: PLC0415
+
+    return materials_plan.chart_song(song, difficulty) or song
+
+
 def _leaf_inputs(
     basis: str, song: str | None, difficulty: str, assumptions=None, play: tuple | None = None
 ) -> dict:
@@ -881,7 +888,9 @@ def two_stage_detail(
     chart = None
     sings = None
     judge_charts = None
-    plan_song, judge_difficulty = song, difficulty
+    # the planner's id of the row's chart (`materials_plan.chart_song`): a HARD row's plan is
+    # valued on HARD, as the search planned it
+    plan_song, judge_difficulty = _chart_song(song, difficulty), difficulty
     if shared_board is not None:
         built, chart, plan_song, sings, judge_charts = _shared_board(
             basis, song, difficulty, shared_board, assumptions, play
@@ -955,8 +964,9 @@ def two_stage_detail(
         pace=pace,
         sings=sings,
     )
-    if shared_board is not None:
-        # the song the ONE board was planned for (the whole-account plan view re-plans it)
+    if shared_board is not None or plan_song != song:
+        # the chart the board was planned for (a shared board's song; a chart other than
+        # EXPERT): the whole-account plan view re-plans it
         out["plan_song"] = plan_song if whole_plan is not None else None
     if whole_plan is not None:
         out["plan_optimal"] = optimal  # False: a MILP stopped on the solver's time limit
@@ -1010,7 +1020,7 @@ def _shared_board(
     cast = SongCast(frozenset(str(c) for c in shared.get("cast") or ()), str(shared.get("scope") or ""))
     built = _leaf_inputs(basis, None, _rating_engine_difficulty(), assumptions, play)
     ctx = dataclasses.replace(built["ctx"], charts=charts, board_per_chart=False, board_cast=cast)
-    plan_song = ondemand.shared_plan_chart(keys, charts, cast).split("/", 1)[0]
+    plan_song = _chart_song(ondemand.shared_plan_chart(keys, charts, cast))
     return (
         dict(built, ctx=ctx),
         charts[keys.index(key)],

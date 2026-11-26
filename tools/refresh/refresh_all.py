@@ -59,6 +59,7 @@ from pathlib import Path
 from typing import Any
 
 import atomic_io
+import chart_coef
 from refresh_steps import ACCOUNT_STEPS, PICTURE_STEPS, STEP_NAMES, STEPS, Step, _assets_pyexe, _pyexe
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this checkout's hbuilder first
@@ -98,6 +99,8 @@ class Snap:
     facts: dict[str, Any] = field(default_factory=dict)
     ids: dict[str, set[str]] = field(default_factory=dict)
     error: str = ""
+    # per-chart (level, permil, K): compared value by value (`chart_coef.change_lines`)
+    coef: dict[str, tuple[int, int, int]] = field(default_factory=dict)
 
 
 def _load(path: Path) -> Any:
@@ -177,6 +180,25 @@ def probe_chart_library() -> Snap:
         return {"charts": len(names)}, {"card": names}
 
     return _probe("charts.json", DUMPS / "charts.json", extract)
+
+
+def probe_chart_coefficients() -> Snap:
+    """`charts_all.json`'s per-chart coefficients (level, permil, K) on every difficulty.
+
+    The game can retune a chart that already exists, with no new chart file; `delta_lines`
+    names each value that moved (`chart_coef.change_lines`)."""
+    path = DUMPS / "charts_all.json"
+    if not path.exists():
+        return Snap("charts_all.json coefficients", path, exists=False)
+    try:
+        coef = chart_coef.from_chart_file(_load(path))
+    except Exception as exc:  # noqa: BLE001
+        return Snap("charts_all.json coefficients", path, exists=True, error=f"{type(exc).__name__}: {exc}")
+    facts = {
+        "charts": len(coef),
+        "K not 10000": sum(1 for v in coef.values() if v[2] != chart_coef.DEFAULT_PERMYRIAD),
+    }
+    return Snap("charts_all.json coefficients", path, exists=True, facts=facts, coef=coef)
 
 
 def probe_song_titles() -> Snap:
@@ -447,6 +469,7 @@ def delta_lines(before: Snap, after: Snap) -> list[str]:
     if not before.exists:
         facts = ", ".join(f"{k} {v}" for k, v in after.facts.items() if k != "mtime")
         out.append(f"{after.label}: CREATED -- {facts}")
+        out.extend(f"{after.label}: {line}" for line in chart_coef.change_lines({}, after.coef))
         return out
     if before.error:
         out.append(f"{after.label}: was unreadable before, now reads OK")
@@ -465,6 +488,8 @@ def delta_lines(before: Snap, after: Snap) -> list[str]:
             out.append(f"{after.label}: new {kind} ({len(gained)}): {_fmt_ids(gained)}")
         if lost:
             out.append(f"{after.label}: gone {kind} ({len(lost)}): {_fmt_ids(lost)}")
+
+    out.extend(f"{after.label}: {line}" for line in chart_coef.change_lines(before.coef, after.coef))
 
     if not out:
         rewritten = before.facts.get("mtime") != after.facts.get("mtime")
@@ -671,6 +696,7 @@ def probe_table(args: argparse.Namespace) -> dict[str, Callable[[], Snap]]:
         "cards_json": probe_cards_json,
         "songs": probe_songs,
         "chart_library": probe_chart_library,
+        "chart_coefficients": probe_chart_coefficients,
         "song_titles": probe_song_titles,
         "song_casts": probe_song_casts,
         "jackets": probe_jackets,
@@ -976,6 +1002,8 @@ def hand_merge_report(account: str = "main") -> tuple[list[str], bool]:
     library = probe_chart_library()
     if library.exists and not library.error:
         lines.append(f"  charts.json holds {library.facts.get('charts')} EXPERT charts")
+    # a field the score tables gained is a rule the scorer may be missing
+    lines += [f"  {line}" for line in chart_coef.score_table_report()]
 
     return lines, need_a or need_b
 

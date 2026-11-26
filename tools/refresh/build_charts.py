@@ -11,8 +11,10 @@ charts from two caches (rebuilt here with `--rebuild-caches`):
   (`sus_parse.hidden_points`), which weigh in the divisor and score nothing.
   `fv` is the Multi Live fever section `[start, end]` from the `#mmm0C`/`#mmm0D`
   markers (`fever_window`), null when they are invalid and the client uses its default.
-* `dumps/music_coef.json` — `{chart_name: (difficulty_level, permil)}` from
-  master `MusicDifficulty` field 3 and `Music` field 17 (`load_music_coefficients`).
+* `dumps/music_coef.json` — `{chart_name: (difficulty_level, permil, K)}` from
+  master `MusicDifficulty` field 3, `Music` field 17 and `MusicDifficultyChart` field 7
+  (`chart_coef`). Re-read from the master on every `--rebuild-caches` run, since the game
+  can retune a chart that already exists; an older two-element value reads as K = 10000.
 
 The one real computation is recovering `perfect_permil` from the cache's `w`.
 The cache stores the pre-multiplied weight
@@ -44,6 +46,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # this che
 from hbuilder import paths  # noqa: E402
 
 HERE = str(paths.REFRESH_DIR)
+sys.path.insert(0, HERE)
+import chart_coef  # noqa: E402 -- beside this script
+
 DUMPS = str(paths.DUMPS)
 CHART_CACHE = os.path.join(DUMPS, "lattice_charts.json")
 MUSIC_CACHE = os.path.join(DUMPS, "music_coef.json")
@@ -171,28 +176,41 @@ def build_chart_cache() -> dict:
 
 
 def load_music_coefficients() -> dict:
-    """{chart asset name: (difficulty_level, live_score_coefficient_permil)}.
+    """{chart asset name: (difficulty_level, live_score_coefficient_permil, K permyriad)}.
 
     Read from `dumps/music_coef.json` if present, else rebuilt from the game's local
-    master cache (`Music` field 17 and `MusicDifficulty` fields 3/4) and written there."""
+    master cache (`chart_coef.read_master`) and written there."""
     if os.path.exists(MUSIC_CACHE):
-        return {k: tuple(v) for k, v in json.load(open(MUSIC_CACHE, encoding="utf-8")).items()}
-    sys.path.insert(0, HERE)
-    import master_cache as mc  # noqa: PLC0415
-
-    def _f(d, i):
-        v = d.get(str(i)) or d.get(i)
-        return v[0] if v else None
-
-    music = {r["id"]: r["data"] for r in mc.rows("Music")}
-    out = {}
-    for r in mc.rows("MusicDifficulty"):
-        d = r["data"]
-        out[_f(d, 4)] = (_f(d, 3), _f(music[_f(d, 1)], 17))
-    import atomic_io  # noqa: PLC0415 -- beside this script
-
-    atomic_io.write_text(MUSIC_CACHE, json.dumps(out), "utf-8")
+        return chart_coef.read_cache(MUSIC_CACHE)
+    out = chart_coef.read_master()
+    chart_coef.write_cache(MUSIC_CACHE, out)
     return out
+
+
+def refresh_music_coefficients() -> list[str]:
+    """Re-read every chart's coefficients from the master and rewrite `music_coef.json` when
+    one moved; returns the change lines (`chart_coef.change_lines`).
+
+    A PC that cannot read the master keeps the file it has and says so: the coefficients
+    then come from whatever was synced or built before."""
+    try:
+        fresh = chart_coef.read_master()
+    except Exception as exc:  # noqa: BLE001 -- keep the cache, never fail the build on it
+        print(f"  music_coef.json kept: the master is not readable here ({type(exc).__name__}: {exc})")
+        return []
+    if not fresh:
+        print("  music_coef.json kept: the master returned no chart rows")
+        return []
+    before = chart_coef.read_cache(MUSIC_CACHE)
+    lines = chart_coef.change_lines(before, fresh)
+    if fresh != before:
+        chart_coef.write_cache(MUSIC_CACHE, fresh)
+        print(f"  music_coef.json re-read from the master: {len(fresh)} charts")
+    else:
+        print(f"  music_coef.json matches the master: {len(fresh)} charts")
+    for line in lines:
+        print(f"  {line}")
+    return lines
 
 
 MUSIC_MASTER = str(paths.HOLODORI / "main_Music.json")
@@ -314,7 +332,7 @@ def build(difficulty: str = "EXPERT") -> dict:
             continue
 
         raw = cache[name]
-        level, permil = music[name]
+        level, permil, k_permyriad = chart_coef.as_coef(music[name])
         if "f" not in raw:
             # A lattice cache from before the flick index list existed: refusing
             # is the honest failure — a flick-less chart would silently score
@@ -352,6 +370,8 @@ def build(difficulty: str = "EXPERT") -> dict:
             "difficulty": chart_difficulty,
             "difficulty_level": int(level),
             "live_score_coefficient_permil": int(permil),
+            # `MusicDifficultyChart` field 7: the chart's factor on every note, in 1/10000
+            "score_coefficient_permyriad": int(k_permyriad),
             "notes": notes,
             "special_cues": [float(cue) for cue in raw.get("cues", ())],
             # the slides' invisible points: in the divisor, never scored
@@ -381,7 +401,8 @@ def rebuild_caches_if_stale() -> bool:
     tutorial difficulties are skipped by design, so the cache is expected to sit
     exactly four below the .sus count. `music_coef.json` is rebuilt from the local
     master (`load_music_coefficients`) whenever the lattice is, since a new song is
-    new in both. Returns True when a rebuild happened."""
+    new in both, and re-read from it on every other run (`refresh_music_coefficients`),
+    since the master can retune an existing chart. Returns True when a rebuild happened."""
     sus_dir = os.path.join(DUMPS, "charts_cdn")
     if not os.path.isdir(sus_dir):
         print("  charts_cdn/ missing -- nothing to rebuild")
@@ -407,6 +428,9 @@ def rebuild_caches_if_stale() -> bool:
             parsed = -1
     if parsed >= expected:
         print(f"  lattice cache current: {parsed} parsed vs {on_disk} .sus (-4 tutorial)")
+        # The coefficients are the master's, not the .sus files': re-read them every run.
+        if os.path.exists(MUSIC_CACHE):
+            refresh_music_coefficients()
         # The two caches are rebuilt together but they can FAIL apart, and then the
         # lattice check alone declares everything current forever: a rebuild that writes
         # the lattice and dies on the master read before music_coef leaves every later run

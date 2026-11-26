@@ -397,13 +397,19 @@ class Oracle:
         # of those charts, so every value the planner measures (a node, a grouping chain, an
         # Act level) is its value over the pool, not on `song` alone. `song` still names the
         # chart the singer terms read.
+        # A song id is a music id (its EXPERT chart) or `"<music>/<DIFFICULTY>"`
+        # (`materials_plan.chart_song`): every node value and Act level is measured on the chart the
+        # plan's run plays, so a HARD run's plan is valued on the HARD notes.
         self.song = song
         self._chart = None
         self._pool: tuple = ()
         if song or pool_songs:
             from hbuilder.domain.song import load_charts  # noqa: PLC0415
 
-            charts_file = Path(charts_path) if charts_path else (DUMPS / "charts.json")
+            ids = [song, *(m for m, _share in pool_songs or ())]
+            every = any("/" in str(m) for m in ids if m)
+            default = DUMPS / ("charts_all.json" if every else "charts.json")
+            charts_file = Path(charts_path) if charts_path else default
             library = load_charts(charts_file)
             if library is None:
                 raise MissingInput(
@@ -411,12 +417,13 @@ class Oracle:
                     "with tools/refresh/build_charts.py"
                 )
 
-            def chart_of(music_id):
-                chart = library.get(music_id)
+            def chart_of(song_id):
+                music_id, _, difficulty = str(song_id).partition("/")
+                chart = library.get(music_id, difficulty or "EXPERT")
                 if chart is None:
                     known = ", ".join(library.music_ids[:8])
                     raise MissingInput(
-                        f"--song: no EXPERT chart for {music_id!r} in {charts_file} "
+                        f"--song: no {difficulty or 'EXPERT'} chart for {music_id!r} in {charts_file} "
                         f"({len(library.music_ids)} songs available; e.g. {known})"
                     )
                 return chart

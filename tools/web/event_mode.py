@@ -309,8 +309,16 @@ def parse_event_body(body: Mapping) -> dict:
     if basis == "maxed" and assumptions is not None:
         raise EventRequestError("'assumptions' are the account's levers: not with basis 'maxed'")
     filters = {k: body.get(k) for k in FILTER_KEYS if body.get(k) not in (None, "", [], False)}
+    # Sort by Max (Event Song Score on one song, solo): the teams ranked by their Max (every
+    # Active fires), as the Score goal's Sort by Max ranks
+    rank = (
+        "max"
+        if body.get("rank") == "max" and objective == "event_song" and not is_highlight(song) and not multi
+        else "expected"
+    )
     return {
         "objective": objective,
+        "rank": rank,
         "song": song,
         "boosts": boosts,
         "holopass": holopass,
@@ -1186,7 +1194,8 @@ def row_payload(
         "event_song_score": mar.event_song_score(raw, p),
         "source": r["source"],
         "status": r.get("status"),
-        "refined": bool(r.get("refined")),
+        # the refinement level the row is served at: True (1), or 2 (the frequency counts too)
+        "refined": 2 if r.get("refined") == 2 else bool(r.get("refined")),
     }
     if "plan_optimal" in r:
         out["plan_optimal"] = r["plan_optimal"]
@@ -1215,11 +1224,11 @@ def add_row_detail(
     *,
     detail_fn: Callable | None = None,
     with_distribution: bool = False,
-    refine: bool = False,
+    refine: bool | int = False,
 ) -> None:
     """Fill a row with its slot order, deck power, ceiling, board state and Unit
     Score panel (`row_detail.leaf_detail`, the event leaf; with its activation nodes
-    re-chosen when the row was `refine`d). A failure leaves the row as it was and says
+    re-chosen when the row was `refine`d: True, or 2 with the frequency counts too). A failure leaves the row as it was and says
     why (`detail_error`)."""
     try:
         if detail_fn is None:
@@ -1285,7 +1294,7 @@ def row_ceilings(
             continue
         keys.append(r)
         teams.append(Team(leader=r["leader"], members=tuple(reps[i] for i in r["members"])))
-        refine.append(1 if r.get("refined") else 0)
+        refine.append(2 if r.get("refined") == 2 else 1 if r.get("refined") else 0)
         boards.append(board)
     for r, value in zip(keys, pool.batch_ceiling(teams, [0], refine, boards)):
         r["song_max"] = float(value)
@@ -1318,6 +1327,38 @@ def _screen_rows(rows, reps, bonus, objective, pool, room=None):
         )
     keyed.sort(key=lambda t: -t[0])
     return [r for _o, r in keyed] + list(rows[REPLAN_SCREEN:])
+
+
+def _max_rows(rows, reps, bonus, objective, pool, n, room=None, plain_only=False):
+    """The best `n` rows of a search by Max (`row["score"]` its Max on the plain develop),
+    each on the board with the highest Max among the plain develop and the two activation
+    refinements for the song (level 1, level 2 with the frequency counts; `plain_only`: the
+    plain develop alone, for boards as they are or a certified answer), as the Score goal's
+    `ondemand.Engine._max_boards`: its `song_max` that Max, its `score` the expectation on that
+    board, ranked by the event objective on the Max. A tie keeps the lower level."""
+    from hbuilder.domain.team import Team  # noqa: PLC0415
+
+    head = rows[:n]
+    teams = [Team(leader=r["leader"], members=tuple(reps[i] for i in r["members"])) for r in head]
+    levels = (False,) if plain_only else (False, True, 2)
+    per = [pool.batch_score_and_ceiling(teams, [0], level) for level in levels]
+    out = []
+    for k, r in enumerate(head):
+        level, e, c = max(((lv, *per[j][k]) for j, lv in enumerate(levels)), key=lambda t: t[2])
+        live, song = _aggregate(bonus, r["members"])
+        out.append(
+            {
+                **r,
+                "score": float(e),
+                "song_max": float(c),
+                "refined": level,
+                "objective": mar.event_objective(
+                    float(c), objective=objective, live_permil=live, song_permil=song, **(room or {})
+                ),
+            }
+        )
+    out.sort(key=lambda r: -float(r["objective"]))
+    return out + list(rows[n:])
 
 
 def _refine_rows(rows, reps, bonus, objective, pool, n, room=None):
@@ -1471,6 +1512,13 @@ def _replan_rows(
     return out, failed
 
 
+def _chart_song(song: str, difficulty: str) -> str:
+    """`materials_plan.chart_song` (imported when used: it is the server side's)."""
+    import materials_plan  # noqa: PLC0415
+
+    return materials_plan.chart_song(song, difficulty) or song
+
+
 def materials_plan_for(
     row: Mapping[str, Any], reps: Sequence[Card], song: str | None, assumptions: Assumptions
 ) -> tuple[dict, dict] | None:
@@ -1529,6 +1577,9 @@ def run_account_search(
             raise KeyError(f"Highlight: no song of the event holomems has a chart at {difficulty} on disk")
     # the song the leaf is built on (Highlight: the pool's first, its charts swapped in below)
     build_song = pool_ids[0] if highlight else song
+    # the planner's id of the chart a row's board is planned for (`materials_plan.chart_song`):
+    # a HARD song's plan is valued on HARD
+    plan_song = song if highlight else _chart_song(song, difficulty)
     blooms: dict[str, Any] = {k: (v or {}).get("bloom") for k, v in collection.items()}
     cache: dict[str, tuple[int, int]] = {}
 
@@ -1710,6 +1761,8 @@ def run_account_search(
         on_fallback=lambda line: print(f"  ! {line}", flush=True),
     ) as pool:
         sampled = [hl_sample is not None]
+        # the search scores Max instead of the expectation (`search_by_max` below)
+        by_max = [False]
 
         def batch(teams):
             # on the sample the search only orders (SEARCH); every chart: the served score
@@ -1717,7 +1770,8 @@ def run_account_search(
                 from hbuilder.solver.parallel_refine import SEARCH  # noqa: PLC0415
 
                 return pool.batch_score(teams, chart_indices=hl_sample, refine_activation=SEARCH)  # type: ignore[arg-type]
-            return pool.batch_score(teams, chart_indices=None)
+            # a search by Max scores each team's Max (`by_max` below)
+            return pool.batch_score(teams, chart_indices=None, ceiling=by_max[0])
 
         def score(leader, sets):
             check()
@@ -1801,6 +1855,12 @@ def run_account_search(
         # Event Song Score on one song: every served row gets its Max (a Highlight pool has
         # no single run; Event Points are not ranked by a best run)
         with_max = objective == "event_song" and not highlight
+        # Sort by Max: ranked by each team's Max. The search scores Max unless the boards are
+        # re-planned within the materials (a plan moves the Max more than the plain develop
+        # shows: the teams to plan are picked as by the expected score, the rows go by Max)
+        rank_max = with_max and opts.get("rank") == "max" and not fever_weight
+        search_by_max = rank_max and not replan
+        by_max[0] = search_by_max
         found = search_event(
             reps=reps,
             leaders=leaders,
@@ -1827,6 +1887,7 @@ def run_account_search(
             and not multi_points,
             search_options=search_options,
         )
+        by_max[0] = False
         if sampled[0]:
             # the sample only chose the candidates: each is scored on every chart of the
             # pool, and that full mean is what is ranked and served
@@ -1872,7 +1933,7 @@ def run_account_search(
                 reps,
                 bonus,
                 objective,
-                song,
+                plan_song,
                 assumptions,
                 pool,
                 check,
@@ -1888,7 +1949,7 @@ def run_account_search(
             # Live split) below
             every = with_max or bool(fever_weight)
             for r in found["rows"][: max(DETAIL_ROWS, opts["top"]) if every else DETAIL_ROWS]:
-                whole = materials_plan_for(r, reps, song, assumptions)  # type: ignore[arg-type]
+                whole = materials_plan_for(r, reps, plan_song, assumptions)  # type: ignore[arg-type]
                 if whole is not None:
                     planned[id(r)] = whole
             on_stage("replan", "done", {"failed": len(replan_failed)})
@@ -1896,6 +1957,22 @@ def run_account_search(
         # a CERTIFIED answer keeps the leaf its bound was proved on. Testing the dict
         # itself would skip this refine on every event search (it is worth +0.86 % on
         # m0020's #1, the Score goal's #1 under the same options)
+        elif search_by_max:
+            # each head row on its board with the highest Max, its expectation on that board
+            on_stage("refine", "active", {})
+            found["rows"] = _max_rows(
+                found["rows"],
+                reps,
+                bonus,
+                objective,
+                pool,
+                max(opts["top"], ondemand.REFINE_HEAD),
+                room,
+                plain_only=(assumptions is not None and assumptions.boards == "as_is")
+                or bool((found.get("bound") or {}).get("certified")),
+            )
+            check()
+            on_stage("refine", "done", {})
         elif not (assumptions is not None and assumptions.boards == "as_is") and not (
             found.get("bound") or {}
         ).get("certified"):
@@ -1914,8 +1991,25 @@ def run_account_search(
         if with_max:
             # every served row's Max (`row_ceilings`), so the page can rank by it
             on_stage("ceiling", "active", {"teams": min(len(found["rows"]), opts["top"])})
-            row_ceilings(found["rows"][: opts["top"]], reps, pool, planned if replan else None)
+            row_ceilings(
+                [r for r in found["rows"][: opts["top"]] if r.get("song_max") is None],
+                reps,
+                pool,
+                planned if replan else None,
+            )
             check()
+            if rank_max and not search_by_max:
+                # the re-planned rows ranked by their Max on their own plan
+                for r in found["rows"]:
+                    if r.get("song_max") is not None:
+                        r["objective"] = mar.event_objective(
+                            float(r["song_max"]),
+                            objective=objective,
+                            live_permil=r["live_permil"],
+                            song_permil=r["song_permil"],
+                            **room,
+                        )
+                found["rows"].sort(key=lambda r: (r.get("song_max") is None, -float(r["objective"])))
             on_stage("ceiling", "done", {})
         if fever_weight:
             # Multi Live: each served row's own score and MULTI SCORE contribution (and Max)
@@ -1944,7 +2038,7 @@ def run_account_search(
                 if replan:
                     for r in found["rows"][: opts["top"]]:
                         if id(r) not in planned:
-                            whole = materials_plan_for(r, reps, song, assumptions)  # type: ignore[arg-type]
+                            whole = materials_plan_for(r, reps, plan_song, assumptions)  # type: ignore[arg-type]
                             if whole is not None:
                                 planned[id(r)] = whole
                 row_split(
@@ -2000,7 +2094,7 @@ def run_account_search(
             r["leader"],
             [reps[i] for i in r["members"]],
             with_distribution=k < QUANTILE_ROWS,
-            refine=bool(r.get("refined")),
+            refine=2 if r.get("refined") == 2 else bool(r.get("refined")),
         )
         emit({"type": "progress", "stage": "detail", "done": k + 1, "total": n_detail})
     emit({"type": "stage", "stage": "detail", "state": "done"})

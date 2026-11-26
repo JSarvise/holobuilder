@@ -788,9 +788,10 @@ def maxed_bench_targets(team: Sequence[str] = (), difficulty: str = DEFAULT_DIFF
         always, a "to Advent" one only with an Advent member);
       * yellows (a holomem's per-song bonus counts on every song she sings, on the
         team or not);
-      * on a TEAM holomem, the reds that fire only when she sings (the song decides);
-    and the sockets holding a Connect card. A team holomem's other reds and blues are
-    the row's own plan (the caller's); a bench holomem's reach no team. No unlock paths
+      * on the LEADER's holomem, the reds that fire only when she sings (the song
+        decides); every red is leader-scoped, so a member's reds score nothing;
+    and the sockets holding a Connect card. The leader's other reds and the team's blues
+    are the row's own plan (the caller's); a bench holomem's reach no team. No unlock paths
     (they depend on the account's boards; the caller adds them). Measured over 9 teams
     x 24 charts: the bench pruned to its scoring greens + yellows + paths scores
     IDENTICALLY to the complete one; without the yellows up to -6.5 %."""
@@ -799,7 +800,7 @@ def maxed_bench_targets(team: Sequence[str] = (), difficulty: str = DEFAULT_DIFF
     state = maxed_bench_state(difficulty)
     bench, _state, by_id, _sockets = next(iter(_MAXED_BENCH.values()))
     cards = [by_id[c] for c in team if c in by_id]
-    team_chrs = {"chr-" + c.split("-")[1] for c in team}
+    leader_chr = "chr-" + team[0].split("-")[1] if team else None
     skilltree = json.loads(SKILLTREE_PATH.read_text(encoding="utf-8"))
     name_of = {m["chr"]: m["name"] for m in skilltree["members"]}
 
@@ -815,7 +816,9 @@ def maxed_bench_targets(team: Sequence[str] = (), difficulty: str = DEFAULT_DIFF
                 return any(_reaches(effect, holomem, c) for c in cards)
             except BoardError:  # a leader-scoped effect: keep it
                 return True
-        return chr_id in team_chrs and effect.conditional
+        # every red is leader-scoped (`set_live_leader`): it fires only while its holomem
+        # leads, so a member's reds score nothing, conditional or not
+        return chr_id == leader_chr and effect.conditional
 
     out = {}
     for chr_id, entry in state.items():

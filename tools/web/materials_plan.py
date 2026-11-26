@@ -92,6 +92,19 @@ FIRST = "first"
 _NOT_SOLVER_OPTS = ("candidates", "judge")
 
 
+def chart_song(music_id: str | None, difficulty: str | None = None) -> str | None:
+    """The planner's song id for a run of `music_id` at `difficulty`: the bare music id for
+    EXPERT (or no difficulty), else `"<music>/<DIFFICULTY>"`. The planner values every node
+    and Act level on that chart (`tree_optimise.Oracle`), and the id is part of every plan's
+    key, so a HARD run's plan is never an EXPERT one's. An id that already names its chart
+    keeps it."""
+    if not music_id:
+        return music_id
+    music, _, named = str(music_id).partition("/")
+    wanted = (named or difficulty or "EXPERT").upper()
+    return music if wanted == "EXPERT" else f"{music}/{wanted}"
+
+
 def first_opts(opts: dict) -> dict:
     """Plan options for the planner's first candidate alone, with the Act levels
     `refine_rows` re-plans the shown rows around. A plan of its own (its own key); no judge

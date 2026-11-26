@@ -1,14 +1,14 @@
 // Optimizer page: the song stage, the options, the goal switch
 // and the hand-off to the score search (opt-score.js) or the event search (opt-event.js).
 // Every number on the page comes from the server; this file only lays out the choices.
-import { byId, esc, fmt, dec, mmss, toast, getJSON, postJSON, AC, wirePopovers, normCard, loadRanks, when } from "/opt-util.js";
+import { byId, esc, fmt, dec, mmss, toast, getJSON, postJSON, AC, wirePopovers, normCard, loadRanks, when, effective } from "/opt-util.js";
 import { loadRanks as loadGradeRanks } from "/hb-grade.js";
-import { showScoreIdle, runScore, cancelScore, forgetDetails, redrawDetails } from "/opt-score.js";
-import { showEventIdle, runEvent, cancelEvent, forgetEventDetails, redrawEventDetails, HL, isHighlight, highlightTile, highlightPool, hlPct } from "/opt-event.js";
-import { initTargets } from "/opt-targets.js";
+import { showScoreIdle, runScore, cancelScore, forgetDetails, redrawDetails, scoreJob, stopScoreCheck, scoreOptionsMoved } from "/opt-score.js";
+import { showEventIdle, runEvent, cancelEvent, eventJob, forgetEventDetails, redrawEventDetails, HL, isHighlight, highlightTile, highlightPool, hlPct } from "/opt-event.js";
+import { initTargets, forgetTargetBoards } from "/opt-targets.js";
 import { setPowerUpNote } from "/opt-detail.js";
 import { wireCardDialog } from "/opt-carddlg.js";
-import { showRatingIdle, runRating, cancelRating, loadRatingList, ratingHolomem, ratingHeader, openHolomemPicker, levelOptions } from "/opt-rating.js";
+import { showRatingIdle, runRating, cancelRating, ratingJob, forgetPicked, loadRatingList, ratingHolomem, ratingHeader, openHolomemPicker, levelOptions } from "/opt-rating.js";
 import { openSongPicker } from "/hb-songpick.js";
 import { showMaxPoints } from "/hbd-util.js";
 
@@ -229,13 +229,21 @@ function renderChapters() {
   }).join("");
 }
 // the chapter's bonus rows; a chapter the last refresh no longer lists falls back to the running one
+// Overlapping loads of one kind (a second chapter, level or Live Boost picked before the first
+// answered): the last one ASKED wins, not the last to answer
+const loadSeq = {};
+const nextLoad = kind => { const n = (loadSeq[kind] || 0) + 1; loadSeq[kind] = n; return () => loadSeq[kind] === n; };
 async function loadEvent() {
+  const current = nextLoad("event");
   const get = key => getJSON("/api/event" + (key ? `?event=${encodeURIComponent(key)}` : ""));
-  try { D.event = await get(S.chapter); }
+  let ev = null;
+  try { ev = await get(S.chapter); }
   catch (_) {
-    D.event = null;
-    if (S.chapter) { S.chapter = ""; try { D.event = await get(""); } catch (_e) { D.event = null; } }
+    if (!current()) return;
+    if (S.chapter) { S.chapter = ""; try { ev = await get(""); } catch (_e) { ev = null; } }
   }
+  if (!current()) return;
+  D.event = ev;
   // the running chapter is the default, not a choice to carry
   const c = chapterShown();
   if (c && c.now) S.chapter = "";
@@ -256,7 +264,7 @@ function summary() {
     S.rsort === "max" ? "by Max" : "by Expected", LABEL.cards[S.cards], S.cards === "maxed" ? "" : LABEL.boards[S.boards]].filter(Boolean).join(" · ");
   if (isEvent()) return [S.chapter && chapterShown() ? `Chapter ${chapterShown().number} · ${chapterWho(chapterShown())}` : "", S.goal === "event_song" && S.multi ? "MULTI SCORE contribution" : S.goal === "event_points" && S.multi ? LABEL.evgoal[S.goal] + " · Multi Live (FEVER)" : LABEL.evgoal[S.goal], `Live Boost ${S.boosts}`, S.goal === "event_points" ? `HoloPass ${S.holopass ? "on" : "off"}` : LABEL.sort[evMax() ? "max" : "avg"],
     LABEL.cards[S.cards], S.cards === "maxed" ? "" : LABEL.boards[S.boards]].filter(Boolean).join(" · ");
-  return [LABEL.cards[S.cards], LABEL.boards[S.boards], LABEL.sort[S.sort], S.multi ? "Multi Live (FEVER)" : ""].filter(Boolean).join(" · ");
+  return [LABEL.cards[S.cards], S.cards === "maxed" ? "" : LABEL.boards[S.boards], LABEL.sort[S.sort], S.multi ? "Multi Live (FEVER)" : ""].filter(Boolean).join(" · ");
 }
 // "Upgraded cards" and "Maxed account" score with other account bonuses than the account's
 // own (every card's level raises the Member Power-Up; the maxed account owns every card and
@@ -336,6 +344,8 @@ async function refresh() {
 // the account changed: every kept team detail is dropped, and the one on screen is computed again
 // on the refreshed boards, cards and cubes (only the goal on screen draws; the other just forgets)
 function afterRefresh() {
+  // the account moved: the target picker's boards and the assumed Power-Up are read again
+  forgetTargetBoards(); assumed = { q: null, v: null }; renderFresh();
   if (isEvent()) { forgetDetails(); redrawEventDetails(); }
   else { forgetEventDetails(); redrawDetails(); }
 }
@@ -405,15 +415,26 @@ function applyGoal() {
   if (isEvent()) setPressed(byId("evgoal"), S.goal);
   renderChapters();
 }
-// options set beyond the three the summary names (Cards, Boards, Sort)
+// options set beyond the three the summary names (Cards, Boards, Sort): only those the goal shows
+// and acts on (`effective`); Maxed account hides the board options
 function moreCount() {
-  const shared = [S.lmember, S.nooverlap, S.require.length, S.exclude.length,
-    S.boards === "develop" && (S.maxpoints || S.infmats || S.allinvited || S.targets.length || S.branches !== "GBRY" || S.maxresets !== "-1" || S.resetgain !== "0.01")];
-  if (isEvent()) return [...shared, S.platform !== "mobile", S.auto, S.multi].filter(Boolean).length;
-  return [...shared, S.pool !== "all", S.platform !== "mobile", S.auto, S.goal === "score" && S.multi].filter(Boolean).length;
+  const E = effective(S);
+  const shared = [E.lmember, E.nooverlap, E.require.length, E.exclude.length,
+    E.cards !== "maxed" && E.boards === "develop" && (E.maxpoints || E.infmats || E.allinvited || E.targets.length || E.branches !== "GBRY" || E.maxresets !== "-1" || E.resetgain !== "0.01")];
+  return [...shared, E.pool !== "all", E.platform !== "mobile", E.auto, E.multi].filter(Boolean).length;
 }
 async function changed(key) {
-  if (key === "pool") prunePins();
+  // first, before any load: a change that moves the running search's request (another goal,
+  // song, holomem or option) cancels it, since its answer would not be these options'. A
+  // view-only change (Teams to show, Sort on Every song) is not in its key and leaves it running
+  const job = runningJob(), cancelled = !!job && job.keyNow(S) !== job.key;
+  if (cancelled) job.cancel(true);
+  // another goal's view takes the page: the Score answer's other-chart check has no view left
+  if (key === "goal" && S.goal !== "score") stopScoreCheck();
+  // the songs picked by hand were the holomem's within that level and owned filter
+  if (key === "rholomem" || key === "rlevel" || key === "rowned") forgetPicked();
+  if (key === "pool" || key === "cards" || key === "goal") prunePins();
+  if (key === "cards" && pinDraw.outfits) { const had = S.loutfit; pinDraw.outfits(); if (had && !S.loutfit) toast("A Maxed account plays 5★ outfits: the leader's outfit is back to the best she has."); }
   // Highlight: Event Song Score is the MULTI SCORE contribution, so picking it turns Multi Live on,
   // and turning Multi Live off gives way to Event Points again
   if (key === "goal" && isHL() && S.goal === "event_song" && !S.multi) {
@@ -435,8 +456,10 @@ async function changed(key) {
   if (["goal", "song", "rlevel", "cards", "boards", "maxpoints", "infmats", "maxresets", "resetgain", "alevel", "abloom", "aspt", "keephigher", "allinvited", "norefund", "branches", "targets", "lvmode", "lvlo", "boosts", "holopass", "chapter"].includes(key)) { setProv(""); showSong(); renderFresh(); showIdle(); }
   else if (key === "sort" || key === "evsort" || key === "top" || key === "evtop") { renderFresh(); showIdle(true); }
   else if (isEvent()) { renderFresh(); showIdle(); }   // a leader or pinned-card change: the event answer shown no longer applies
-  else renderFresh();
+  else { renderFresh(); if (cancelled) showIdle(true); else if (S.goal === "score") scoreOptionsMoved(S); }
 }
+// the one search in flight on the page, whichever goal started it
+const runningJob = () => scoreJob() || eventJob() || ratingJob();
 
 /* the More options sheet */
 function wireMore() {
@@ -487,13 +510,16 @@ function wireMore() {
   bindSeg("top", "top", Number); bindSeg("evtop", "evtop", Number); bindSeg("evsort", "evsort");
 }
 const pinDraw = {};
-// Card pool switched to 5★ only: a member pinned below 5★ can no longer be in the team
+// Must include = a member of the pool: 5★ only with Card pool "5★ only" (a Score option) or with a
+// Maxed account (its pool is the five-star catalogue)
+const fiveOnly = () => effective(S).pool === "5star" || S.cards === "maxed";
+// Card pool switched to 5★ only (or Maxed account): a member pinned below 5★ can no longer be in the team
 function prunePins() {
-  if (S.pool !== "5star") { if (pinDraw.require) pinDraw.require(); return; }
+  if (!fiveOnly()) { if (pinDraw.require) pinDraw.require(); return; }
   const drop = S.require.filter(id => String((D.cards.get(id) || {}).rarity) !== "5");
   if (drop.length) {
     S.require = S.require.filter(id => !drop.includes(id));
-    toast(`Card pool is 5★ only: unpinned ${drop.map(id => (D.cards.get(id) || {}).member || id).join(", ")} from Must include.`);
+    toast(`${S.cards === "maxed" ? "A Maxed account plays 5★ cards" : "Card pool is 5★ only"}: unpinned ${drop.map(id => (D.cards.get(id) || {}).member || id).join(", ")} from Must include.`);
   }
   if (pinDraw.require) pinDraw.require();
 }
@@ -505,12 +531,15 @@ function fillLeaders() {
   byId("lmember").insertAdjacentHTML("beforeend", members.map(m => `<option>${esc(m)}</option>`).join(""));
   const outfits = () => {
     const o = byId("loutfit");
-    o.innerHTML = `<option value="">The best outfit she has</option>` + owned.filter(c => c.member === S.lmember)
+    // a Maxed account plays her 5★ outfits only
+    o.innerHTML = `<option value="">The best outfit she has</option>` + owned.filter(c => c.member === S.lmember && (S.cards !== "maxed" || String(c.rarity) === "5"))
       .map(c => `<option value="${esc(c.id)}">${esc(c.costume_name || c.id)} · ${c.rarity}★${c.owned ? "" : " · not owned"}</option>`).join("");
     o.disabled = !S.lmember; o.value = S.loutfit || "";
+    if (o.value !== (S.loutfit || "")) S.loutfit = "";
   };
   byId("lmember").value = S.lmember || ""; if (byId("lmember").value !== (S.lmember || "")) S.lmember = "";
   outfits();
+  pinDraw.outfits = outfits;
   byId("lmember").onchange = e => { S.lmember = e.target.value; S.loutfit = ""; outfits(); changed("lmember"); };
   byId("loutfit").onchange = e => { S.loutfit = e.target.value; changed("loutfit"); };
   // the card pins: Must include / Ban (every card, the account's own first). The leader is chosen
@@ -521,16 +550,19 @@ function fillLeaders() {
   // Must include = a MEMBER: with Card pool "5★ only" it offers 5★ cards only; the leader pin
   // and the ban list keep every card (outfits are not in the pool filter)
   byId("cardlist").insertAdjacentHTML("afterend", `<datalist id="cardlist5">${owned.filter(c => String(c.rarity) === "5").map(c => `<option value="${esc(label(c))}">`).join("")}</datalist>`);
-  const memberOK = id => S.pool !== "5star" || String((D.cards.get(id) || {}).rarity) === "5";
+  const memberOK = id => !fiveOnly() || String((D.cards.get(id) || {}).rarity) === "5";
   for (const key of ["require", "exclude"]) {
     const box = byId("pin-" + key);
     const draw = () => {
-      const list = key === "require" && S.pool === "5star" ? "cardlist5" : "cardlist";
+      const list = key === "require" && fiveOnly() ? "cardlist5" : "cardlist";
       box.innerHTML = S[key].map(id => { const c = D.cards.get(id); return `<span class="o-chip">${esc(c ? label(c) : id)}<button type="button" data-unpin="${esc(id)}" aria-label="Remove">×</button></span>`; }).join("")
         + `<input list="${list}" placeholder="Type a holomem or outfit, pick a card${list === "cardlist5" ? " (5★ only)" : ""}" aria-label="Add a card">`;
       box.querySelector("input").addEventListener("change", e => {
         const id = byLabel.get(e.target.value);
         if (id && !S[key].includes(id) && (key !== "require" || memberOK(id))) {
+          // a card is either required or banned: pinning it in one list takes it out of the other
+          const other = key === "require" ? "exclude" : "require";
+          if (S[other].includes(id)) { S[other] = S[other].filter(x => x !== id); pinDraw[other](); toast(`Taken out of ${other === "require" ? "Must include" : "Ban"}: a card cannot be both.`); }
           S[key] = [...S[key], id]; changed(key); draw();
           // the account's own pool holds only its cards: a card it does not own plays on a maxed account
           if (key === "require" && !(D.cards.get(id) || {}).owned && S.cards !== "maxed") toast("That card is not on your account: Must include finds it with Cards set to Maxed account.", 6000);
@@ -597,7 +629,8 @@ async function play() {
   byId("out").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
 }
 document.addEventListener("click", e => {
-  if (e.target.closest("[data-cancel]")) { if (isRating()) cancelRating(); else if (isEvent()) cancelEvent(); else cancelScore(); return; }
+  // Cancel stops the search in flight, whichever goal started it
+  if (e.target.closest("[data-cancel]")) { const job = runningJob(); if (job) job.cancel(false); else if (isRating()) cancelRating(); else if (isEvent()) cancelEvent(); else cancelScore(); return; }
   const c = e.target.closest("[data-close]"); if (c) { c.closest("dialog").close(); return; }
 });
 // a click on the backdrop closes a dialog -- only when the press began there too: a press inside
@@ -611,13 +644,15 @@ document.querySelectorAll("dialog").forEach(d => {
 
 /* ------------------------------------------------------------------ loading */
 async function loadSongs() {
+  const current = nextLoad("songs");
   try {
     // each song at its hardest chart up to the level (`songs.chart_picks`, the Holomem Rating's
     // rule); `max_level` null: the level leaves every song at its Expert chart
     const doc = await getJSON(`/api/songs?max_level=${encodeURIComponent(S.rlevel)}`);
+    if (!current()) return;
     D.songs = (doc.songs || []).filter(s => s.notes != null || s.difficulty_level != null);
     D.capped = doc.max_level ?? null;
-  } catch (e) { D.songs = []; D.capped = null; toast("Songs unavailable: " + e.message); }
+  } catch (e) { if (!current()) return; D.songs = []; D.capped = null; toast("Songs unavailable: " + e.message); }
   if (S.song && !isHighlight(S.song) && !D.songs.some(s => s.music_id === S.song)) { toast(`No chart of ${S.song} up to level ${S.rlevel}.`); S.song = ""; }
   syncDifficulty();
 }
@@ -628,8 +663,11 @@ function syncDifficulty() {
   S.difficulty = (s && s.difficulty) || "EXPERT";
 }
 async function loadEventSongs() {
-  try { D.evsongs = (await getJSON(`/api/event/songs?boosts=${S.boosts}&max_level=${encodeURIComponent(S.rlevel)}${S.chapter ? `&event=${encodeURIComponent(S.chapter)}` : ""}`)).songs || []; }
-  catch (_) { D.evsongs = []; }
+  const current = nextLoad("evsongs");
+  let songs = [];
+  try { songs = (await getJSON(`/api/event/songs?boosts=${S.boosts}&max_level=${encodeURIComponent(S.rlevel)}${S.chapter ? `&event=${encodeURIComponent(S.chapter)}` : ""}`)).songs || []; }
+  catch (_) { songs = []; }
+  if (current()) D.evsongs = songs;
 }
 const defaultEventSong = () => ((D.evsongs || []).find(s => s.chart_available !== false && s.length_permil != null) || {}).music_id || "";
 

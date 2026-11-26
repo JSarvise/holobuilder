@@ -112,6 +112,12 @@ def parse_run(body: Mapping) -> dict:
         chosen = pool[: max(1, min(rating_mode.MAX_SONGS, count))]
     cap = rating_mode.MAX_SONGS if mode == "each" else rating_mode.MAX_MERGED_SONGS
     chosen = chosen[:cap]
+    play = ondemand.parse_play(body, fever=0.0)  # a Multi run is a Score-goal option
+    if mode == "each" and body.get("chart_check") is not False and not play[1]:
+        # each song's other chart (HARD for an EXPERT pick, within the level), tried after
+        # the song's own (`rating_mode._check_chart`); not with AUTO, whose model the check
+        # was not measured on
+        chosen = [{**s, **_contender(s, max_level)} for s in chosen]
     filters = ondemand.parse_filters(body)
     name = rating_mode.holomem_names().get(chr_id)
     if not name:
@@ -133,8 +139,24 @@ def parse_run(body: Mapping) -> dict:
         "basis": basis_name,
         "assumptions": assumptions,
         "filters": filters,
-        "play": ondemand.parse_play(body, fever=0.0),  # a Multi run is a Score-goal option
+        "play": play,
     }
+
+
+def _contender(song: Mapping, max_level: int) -> dict:
+    """`{"contender": {difficulty, level}}` for `song`'s other chart worth trying, or `{}`. A
+    chart file it cannot read leaves the song without the check, never the run without an
+    answer."""
+    from hbweb.search import _charts_all  # noqa: PLC0415
+
+    try:
+        alt = _charts_all().contender(song["music_id"], song["difficulty"], max_level)
+    except Exception:  # noqa: BLE001 -- logged; the song is searched on its own chart only
+        import traceback  # noqa: PLC0415
+
+        print(traceback.format_exc(), flush=True)
+        return {}
+    return {"contender": {"difficulty": alt.difficulty, "level": alt.difficulty_level}} if alt else {}
 
 
 def start_run(h: Handler) -> None:

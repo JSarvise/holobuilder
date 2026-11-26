@@ -40,8 +40,9 @@ class _Stub:
         self.raise_ = raise_
         self.calls = []
 
-    def search(self, song, filters, *, emit, cancel, top):
+    def search(self, song, filters, *, emit, cancel, top, objective="expected"):
         self.calls.append((song, filters, top))
+        self.objective = objective
         if self.raise_:
             raise self.raise_
         emit(
@@ -652,7 +653,7 @@ def test_a_replanned_team_is_remembered_under_its_own_name(monkeypatch):
         difficulty="EXPERT",
         levels=None,
         max_level=None,
-        charts=[SimpleNamespace(singers=("chr-00031",))],
+        charts=[SimpleNamespace(singers=("chr-00031",), difficulty="EXPERT")],
         index={"m0020": 0},
         pool=SimpleNamespace(
             _pool=FakeWorkers(), new_generation=lambda: 1, stop_through=lambda _g: None, ctx=leaf
@@ -842,7 +843,7 @@ class _ChartStub:
         self.best, self.probe, self.raise_ = best, probe, raise_
         self.calls = []
 
-    def search(self, song, filters, *, emit, cancel, top):
+    def search(self, song, filters, *, emit, cancel, top, objective="expected"):
         pinned = bool(filters.leader_card)
         self.calls.append(("probe" if pinned else "search", top))
         if self.raise_ and pinned:
@@ -958,3 +959,78 @@ def test_contender_of_never_fails_the_search(monkeypatch):
 
     monkeypatch.setattr(search, "_charts_all", missing)
     assert search.contender_of("m0459", "EXPERT", {}) is None
+
+
+def test_max_boards_serves_the_highest_max_and_a_tie_keeps_the_lower_level():
+    """Objective Max: each team on the board whose Max is highest among the plain develop and
+    the two activation refinements; equal Max keeps the lower level."""
+    import ondemand
+
+    per_level = {
+        False: [(10.0, 100.0), (10.0, 100.0), (10.0, 100.0)],
+        True: [(11.0, 104.0), (11.0, 100.0), (11.0, 103.0)],
+        2: [(12.0, 103.0), (12.0, 100.0), (12.0, 105.0)],
+    }
+    eng = ondemand.Engine.__new__(ondemand.Engine)
+    eng.pool = SimpleNamespace(
+        batch_score_and_ceiling=lambda teams, ci, level: per_level[level][: len(teams)]
+    )
+    assert eng._max_boards(["a", "b", "c"], (0,)) == [
+        (True, 11.0, 104.0),
+        (False, 10.0, 100.0),
+        (2, 12.0, 105.0),
+    ]
+    assert eng._max_boards([], (0,)) == []
+
+
+def test_sort_by_max_reaches_the_search_as_the_max_objective():
+    """Sort by Max on a song is a Max search (the job passes the objective on); the default
+    is the expected score."""
+    for objective in ("max", "expected"):
+        stub = _Stub()
+        jobs.run_search_job(
+            jobs.Job(job_id="o"), _opts(objective=objective), engine_for=lambda b, d, s=stub: s
+        )
+        assert stub.objective == objective
+    stub = _Stub()
+    jobs.run_search_job(jobs.Job(job_id="d"), _opts(), engine_for=lambda b, d: stub)
+    assert stub.objective == "expected"
+
+
+def test_a_direct_probe_skips_the_pinned_search_and_a_better_probe_tops_the_other_chart():
+    """`jobs._check_chart` with `probe_at` (the team's served value, `Engine.served_value`): no
+    pinned search when the full search's #1 is the best; when the probed team scores above that
+    #1 it is the other chart's #1, its row from a pinned search, and the gain is its own."""
+    members = ["c1", "c2", "c3", "c4", "c5"]
+    first = {"difficulty": "EXPERT", "ranking": [{"best": 100.0, "leader": "L", "members": members}]}
+    contender = {"other": "HARD", "levels": {"EXPERT": 26, "HARD": 18}}
+
+    def run(probe_value, full_value):
+        calls = []
+
+        def search_at(diff, filters, *, top, progress=None, eng=None):
+            pinned = bool(filters.leader_card)
+            calls.append(("pinned" if pinned else "full", diff))
+            rows = (
+                [{"best": probe_value, "leader": "L", "members": members}]
+                if pinned
+                else [{"best": full_value, "leader": "M", "members": members}]
+            )
+            return {"difficulty": diff, "ranking": rows}
+
+        def probe_at(diff, leader, ms):
+            calls.append(("direct", diff))
+            return probe_value
+
+        ev = jobs._check_chart(
+            first, "EXPERT", contender, ondemand.Filters(), search_at, 5, probe_at=probe_at
+        )
+        return ev, calls
+
+    ev, calls = run(99.0, 103.0)
+    assert calls == [("direct", "HARD"), ("full", "HARD")]
+    assert ev["check"]["wins"] and ev["payload"]["ranking"][0]["leader"] == "M"
+    ev, calls = run(104.0, 102.0)
+    assert calls == [("direct", "HARD"), ("full", "HARD"), ("pinned", "HARD")]
+    assert ev["payload"]["ranking"][0]["leader"] == "L"
+    assert ev["check"]["other_best"] == 104.0 and ev["check"]["gain"] == pytest.approx(0.04)

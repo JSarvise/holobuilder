@@ -69,6 +69,13 @@ COUNTS_MARGIN = 0.015
 # plain value or its exact plan within the materials
 LENS_SEARCH = True
 RANKING = 50  # teams served, best first (a true top N)
+# objective Max (Sort by Max, Holomem Rating): every served team is served on the board with
+# the highest Max among the plain develop and the two activation refinements (level 1, level 2 =
+# also the frequency counts), each chosen for the song's own chart, and the rows ranked by it. A
+# team the plain Max ranks low can top the list on its best board (m0459 maxed: 4,818,851 from
+# a team ranked by its plain develop below the expected search's best, 4,807,812); the whole
+# served list costs 0.7-1.1 s a search, maxed
+MAX_BOARDS_HEAD = RANKING
 ROWS = 8  # per-leader rows (each leader's best), the secondary view
 HINTS = 20  # pairs kept per (song, filters) as the next request's seeds
 # merged (Holomem Rating) searches: the rows served, and the teams re-planned song by song
@@ -812,9 +819,12 @@ class Engine:
         # shown on a song and for every row off a song (`SHOWN_ROWS`)
         first = materials_plan.first_opts(opts)
         singers = set(self.charts[self.index[song]].singers or ()) if song in self.index else set()
-        # an engine on a list of charts indexes them "<music>/<DIFFICULTY>": the planner takes
-        # the music id
-        song = song.split("/", 1)[0] if song else song
+        # the planner's id of the chart the leaf scores (`materials_plan.chart_song`): a HARD
+        # chart's plan is valued on HARD (an engine on a list of charts indexes them
+        # "<music>/<DIFFICULTY>"; "Up to level" mixes difficulties)
+        if song:
+            chart = self.charts[self.index[song]] if song in self.index else None
+            song = materials_plan.chart_song(song, chart.difficulty if chart is not None else None)
 
         def sings(r):
             return "chr-" + leaders[r[1]].id.split("-")[1] in singers
@@ -1181,6 +1191,108 @@ class Engine:
         self._leader_factors[key] = factors
         return factors
 
+    def _max_boards(self, teams, chart_indices) -> list[tuple[bool | int, float, float]]:
+        """Per team `(level, expectation, Max)` on the board whose Max is highest: the plain
+        develop (False), the activation refinement (True) or that and the frequency counts (2),
+        each refined for `chart_indices` (`batch_score_and_ceiling`); a tie keeps the lower
+        level. The refinements aim at the expectation, so the plain develop can be the best
+        Max."""
+        return self._best_boards(teams, chart_indices, "max")
+
+    def _best_boards(self, teams, chart_indices, objective: str) -> list[tuple[bool | int, float, float]]:
+        """`_max_boards`, the board chosen by the Max or (`objective` "expected") by the
+        expectation: the number a one-song search serves a team at, the better of its plain and
+        refined boards. A tie keeps the lower level."""
+        if not teams:
+            return []
+        levels = (False, True, 2)
+        at = 2 if objective == "max" else 1
+        per = [self.pool.batch_score_and_ceiling(teams, chart_indices, level) for level in levels]
+        return [
+            max(((level, *per[j][k]) for j, level in enumerate(levels)), key=lambda t: t[at])
+            for k in range(len(teams))
+        ]
+
+    def served_max(
+        self, song: str, leader_id: str, member_ids: Sequence[str], assumptions: Assumptions | None = None
+    ) -> float | None:
+        """The Max a search with objective max serves for this one team on `song`, on the board
+        its best rows are served on (`_max_boards`). None when a search would serve
+        the team on another board (the account's: re-planned within the materials or its
+        boards as they are), the song is not this engine's or a card is not in its pool; then
+        only a search pinned to the team answers. Three evaluations of one team (a fraction of a
+        second) where a pinned search scores its sample and rounds (~2,500 teams) for the same
+        figure."""
+        from hbuilder.domain.team import Team  # noqa: PLC0415
+
+        a = self.assumptions if assumptions is None else assumptions
+        if a is not None or song not in self.index:
+            return None
+        try:
+            team = Team(leader=self.by_id[leader_id], members=tuple(self.by_id[m] for m in member_ids))
+        except KeyError:
+            return None
+        return self._max_boards([team], (self.index[song],))[0][2]
+
+    def served_value(
+        self,
+        song: str,
+        leader_id: str,
+        member_ids: Sequence[str],
+        assumptions: Assumptions | None = None,
+        objective: str = "expected",
+    ) -> float | None:
+        """`served_max` for either objective: the number a one-song search serves this team at
+        (expected: the best expectation over its plain and refined boards; max: the best Max),
+        or None where only a search pinned to the team answers (the account's boards, a song or
+        card this engine lacks). Equal to that pinned search's on 16 of 16 teams (8 songs,
+        maxed), at 0.1-0.6 s instead of 0.8-1.6 s."""
+        a = self.assumptions if assumptions is None else assumptions
+        if a is not None and a.replan and song in self.index:
+            return self._planned_value(song, leader_id, member_ids, a, objective)
+        if objective == "max":
+            return self.served_max(song, leader_id, member_ids, assumptions)
+        from hbuilder.domain.team import Team  # noqa: PLC0415
+
+        if a is not None or song not in self.index:
+            return None
+        try:
+            team = Team(leader=self.by_id[leader_id], members=tuple(self.by_id[m] for m in member_ids))
+        except KeyError:
+            return None
+        return self._best_boards([team], (self.index[song],), "expected")[0][1]
+
+    def _planned_value(
+        self, song: str, leader_id: str, member_ids: Sequence[str], a: Assumptions, objective: str
+    ) -> float | None:
+        """`served_value` on boards re-planned within the materials: the team planned for
+        `song`'s chart (`_within_materials` on that one team, its plan's other candidates
+        included, as a search pinned to it plans and serves it) and scored on that plan: its
+        expectation, or its Max on the same board. None when a card is not in the pool or the
+        wallet cannot fund a plan."""
+        from hbuilder.domain.team import Team  # noqa: PLC0415
+
+        pool, usable = candidates(self.reps, Filters())
+        position = {c.id: k for k, c in enumerate(pool)}
+        leader = next((c for c in usable if c.id == leader_id), None)
+        if leader is None or not all(m in position for m in member_ids):
+            return None
+        s = tuple(sorted(position[m] for m in member_ids))
+        chart_indices = (self.index[song],)
+        ranked, _failed, _optimal, planned = self._within_materials(
+            a, [(0.0, 0, s)], [leader], pool, song, chart_indices, None
+        )
+        if not ranked:
+            return None
+        value = float(ranked[0][0])
+        if objective != "max":
+            return value
+        board = planned.get((0, s))
+        if board is None:
+            return None
+        team = Team(leader=leader, members=tuple(pool[i] for i in s))
+        return float(self.pool.batch_ceiling([team], chart_indices, [0], [board])[0])
+
     # ------------------------------------------------------------------ search
     def search(
         self,
@@ -1211,6 +1323,12 @@ class Engine:
         ):
             raise ValueError("these assumptions are scored on another engine")
         replan = a is not None and a.replan
+        # objective Max with the boards re-planned within the materials: a team's plan moves its
+        # Max far more than its plain develop shows (m0161 on the account: +10 % for a team the
+        # plain Max left out of the teams planned, the served #1 1.3 % below the expected
+        # search's), so the search picks the teams to plan as the expected search does and only
+        # the rows are ranked and served by Max
+        search_by_max = by_max and not replan
         filters = filters or Filters()
         general = not song
         if general and by_max:
@@ -1273,7 +1391,7 @@ class Engine:
         # team that only shines with fewer frequency nodes out of the teams it plans (m0342:
         # a #1 0.85 % higher, the same #1 on four other songs, the same time). Boards as they
         # are have no count to choose
-        lens = LENS_SEARCH and not general and (a is None or a.boards != "as_is") and not by_max
+        lens = LENS_SEARCH and not general and (a is None or a.boards != "as_is") and not search_by_max
 
         # a lens search re-planned within the materials keeps each team's plain value too, for
         # the plain order's pick (`LENS_UNION`)
@@ -1284,7 +1402,7 @@ class Engine:
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
             teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for li, s in pairs]
-            if by_max:
+            if search_by_max:
                 return self.pool.batch_score(teams, chart_indices=chart_indices, ceiling=True)
             if plain_of is not None:
                 both = self.pool.batch_score(
@@ -1473,7 +1591,7 @@ class Engine:
                 # activation refinement on a board that is not the one served (`as_is` above)
                 chosen = (
                     []
-                    if as_is or by_max
+                    if as_is or search_by_max
                     else self._count_funnel(ranking, leaders, pool, chart_indices, lens=lens)
                 )
                 teams = [Team(leader=leaders[li], members=tuple(pool[i] for i in s)) for _v, li, s in chosen]
@@ -1501,7 +1619,7 @@ class Engine:
                     ranking, plain_order = self._screen_for_replan(
                         ranking, leaders, pool, chart_indices, also=plain_order
                     )
-                elif replan and not by_max:
+                elif replan:
                     ranking = self._screen_for_replan(ranking, leaders, pool, chart_indices)
         t_refine = time.perf_counter() - t0 - search_seconds
         better = {(li, s): max(float(v), plain) for (plain, li, s), v in zip(chosen, refined)}
@@ -1600,19 +1718,20 @@ class Engine:
             )
         if by_max and served:
             if not replan:
-                # the search's values are the Max; each row's expectation on the same board
+                # the search's values are the plain develop's Max; the best rows on the board
+                # whose Max is highest (`_max_boards`), the others' expectation on the plain one
+                teams = [
+                    Team(
+                        leader=leaders[lpos[r["leader"]]],
+                        members=tuple(pool[position[m]] for m in r["members"]),
+                    )
+                    for r in served
+                ]
+                n_head = 0 if general else min(MAX_BOARDS_HEAD, len(served))
+                for row, (level, e, c) in zip(served, self._max_boards(teams[:n_head], chart_indices)):
+                    row["best"], row["song_max"], row["refined"] = e, c, level
                 for row, e in zip(
-                    served,
-                    self.pool.batch_score(
-                        [
-                            Team(
-                                leader=leaders[lpos[r["leader"]]],
-                                members=tuple(pool[position[m]] for m in r["members"]),
-                            )
-                            for r in served
-                        ],
-                        chart_indices=chart_indices,
-                    ),
+                    served[n_head:], self.pool.batch_score(teams[n_head:], chart_indices=chart_indices)
                 ):
                     row["best"] = float(e)
             served.sort(key=lambda t: -(t["song_max"] if t["song_max"] is not None else t["best"]))

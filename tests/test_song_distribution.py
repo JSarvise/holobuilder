@@ -81,6 +81,45 @@ def test_the_ceiling_is_at_the_rows_own_slot_order(cards, cfg):
     assert score_team_ceiling(team, chart, cfg, free.member_order) == free.total_score
 
 
+def test_one_slot_order_is_that_orders_total_in_the_full_walk(cards, cfg):
+    """`score_song_detailed(only_order=)` walks one slot order: its total is the total that
+    order gets among the 120 (`order_totals`, the reference walk), bit for bit, for orders the
+    best is not, on the expectation and on the all-fire config. A list of totals is refused."""
+    import dataclasses
+
+    import pytest as _pytest
+
+    from hbuilder.domain.song import SongError
+
+    leader, members = cards[0], tuple(cards[1:6])
+    chart = _chart()
+    for c in (cfg, dataclasses.replace(cfg, active_all_fire=True)):
+        power = overall_power_for(members, leader, c)
+        totals: dict = {}
+        score_song_detailed(members, (leader,), chart, c, deck_power=power, order_totals=totals)
+        orders = sorted(totals.items(), key=lambda kv: kv[1])
+        for (_leader_id, order), total in (orders[0], orders[len(orders) // 2], orders[-1]):
+            got = score_song_detailed(members, (leader,), chart, c, deck_power=power, only_order=order)[0]
+            assert tuple(got.member_order) == tuple(order)
+            assert got.total_score == total
+    with _pytest.raises(SongError):
+        score_song_detailed(members, (leader,), chart, cfg, only_order=orders[0][0][1], order_totals={})
+
+
+def test_the_ceiling_takes_the_rows_power_and_gives_the_same_figure(cards, cfg):
+    """`score_team_ceiling(deck_power=)`: the expectation's Overall Power gives the same Max
+    as the power computed on the all-fire config (the switch moves only the skills' chances)."""
+    from hbuilder.domain.song_rank import score_team_ceiling, score_team_on_chart
+    from hbuilder.domain.team import Team
+
+    chart = _chart()
+    team = Team(leader=cards[0], members=tuple(cards[1:6]))
+    row = score_team_on_chart(team, chart, cfg)
+    alone = score_team_ceiling(team, chart, cfg, row.member_order)
+    power = overall_power_for(tuple(team.members), team.leader, cfg)
+    assert score_team_ceiling(team, chart, cfg, row.member_order, deck_power=power) == alone
+
+
 @pytest.mark.parametrize("cap", [12, 24])
 def test_a_binned_law_keeps_the_exact_extremes_and_an_unbiased_body(cards, cfg, cap):
     """A long chart's law is binned once its support passes `cap`. Binning must not

@@ -110,10 +110,15 @@ def start_search(h: Handler) -> None:
     except basis.HttpError as exc:
         h.reply_json(exc.code, exc.obj)
         return
+    # Sort by Max: a song's teams ranked by their Max (every Active fires) and each served on
+    # the board with the highest Max, as Holomem Rating ranks (`ondemand.Engine.search`);
+    # off a song every chart is averaged, so there is no single run to rank by
+    objective = "max" if song and body.get("objective") == "max" else "expected"
     opts = {
         "song": song,
         "basis": basis_name,
         "difficulty": difficulty,
+        "objective": objective,
         "top": top,
         "filters": ondemand.parse_filters(body),
         "assumptions": assumptions,

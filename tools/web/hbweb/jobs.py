@@ -94,12 +94,17 @@ CHART_SEARCH_GAP = 0.0185
 CHART_PROBE_GATE = (1.0 + CHART_MIN_GAIN) / (1.0 + CHART_SEARCH_GAP)
 
 
-def _check_chart(payload: dict, difficulty: str, contender: Mapping, filters, search_at, top: int) -> dict:
+def _check_chart(
+    payload: dict, difficulty: str, contender: Mapping, filters, search_at, top: int, probe_at=None
+) -> dict:
     """The `chart` event that follows a song's result: is the song's other chart worth playing?
-    The served #1 team is scored on it first (the same leader and members, a one-team search);
-    only a probe at CHART_PROBE_GATE or above earns the other chart a full search, and its #1
-    wins when it scores CHART_MIN_GAIN more. `check` says what was tried; `payload` is the other
-    chart's search when it wins (its rows are what the page then shows), else None."""
+    The served #1 team is scored on it first: directly (`probe_at(chart, leader, members)`, the
+    number a search serves it at, `ondemand.Engine.served_value`), else by a search pinned to it
+    (the account's boards, planned on that chart). Only a probe at CHART_PROBE_GATE or above earns
+    the other chart a full search; the other chart's #1 is the better of that search's #1 and the
+    probed team (a search can settle below a team already scored), and it wins when it scores
+    CHART_MIN_GAIN more. `check` says what was tried; `payload` is the other chart's search when
+    it wins (its rows are what the page then shows), else None."""
     other = contender["other"]
     levels = contender.get("levels") or {}
     first = payload["ranking"][0]
@@ -114,13 +119,26 @@ def _check_chart(payload: dict, difficulty: str, contender: Mapping, filters, se
     pinned = dataclasses.replace(
         filters, leader_member="", leader_card=first["leader"], require=tuple(first["members"])
     )
-    probe = search_at(other, pinned, top=1)
-    rescored = ((probe.get("ranking") or [{}])[0]).get("best")
+    probe_rows: list = []
+    rescored = probe_at(other, first["leader"], first["members"]) if probe_at is not None else None
+    if rescored is None:
+        probe_rows = search_at(other, pinned, top=1).get("ranking") or []
+        rescored = (probe_rows[0] if probe_rows else {}).get("best")
     check["probe"] = rescored
     if rescored is None or rescored < CHART_PROBE_GATE * first["best"]:
         return {"type": "chart", "check": check, "payload": None}
     alt = search_at(other, filters, top=top)
     best_other = ((alt.get("ranking") or [{}])[0]).get("best")
+    if best_other is None or rescored > best_other:
+        # the probed team beats the search's #1: served first with its own row
+        if not probe_rows:
+            probe_rows = search_at(other, pinned, top=1).get("ranking") or []
+        if probe_rows:
+            mine = probe_rows[0]
+            same = (mine["leader"], sorted(mine["members"]))
+            rest = [r for r in alt.get("ranking") or [] if (r["leader"], sorted(r["members"])) != same]
+            alt["ranking"] = [mine, *rest][: max(top, len(rest))]
+            best_other = mine.get("best")
     check.update(searched=True, other_best=best_other)
     if best_other is None:
         return {"type": "chart", "check": check, "payload": None}
@@ -190,10 +208,34 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for: Callable[[str, str], 
         def search_at(diff: str, filters, *, top: int, progress=None, eng=None) -> dict:
             eng = eng if eng is not None else engine_at(diff)
             try:
-                return eng.search(opts["song"], filters, emit=progress, cancel=job.cancel, top=top, **own)
+                return eng.search(
+                    opts["song"],
+                    filters,
+                    emit=progress,
+                    cancel=job.cancel,
+                    top=top,
+                    objective=opts.get("objective") or "expected",
+                    **own,
+                )
             finally:
                 if engine_for is None:
                     eng.release()  # `ondemand.engine` took it for this search
+
+        def probe_at(diff: str, leader: str, members) -> float | None:
+            # a team's served value on `diff` scored directly, or None (`Engine.served_value`)
+            eng = engine_at(diff)
+            try:
+                value = getattr(eng, "served_value", None)
+                return (
+                    None
+                    if value is None
+                    else value(
+                        opts["song"], leader, members, assumptions, opts.get("objective") or "expected"
+                    )
+                )
+            finally:
+                if engine_for is None:
+                    eng.release()
 
         emit({"type": "stage", "stage": "build", "state": "active"})
         first = engine_at(difficulty)
@@ -206,7 +248,9 @@ def run_search_job(job: Job, opts: Mapping, *, engine_for: Callable[[str, str], 
         contender = opts.get("contender")
         if contender and payload.get("ranking"):
             try:
-                event = _check_chart(payload, difficulty, contender, opts["filters"], search_at, top)
+                event = _check_chart(
+                    payload, difficulty, contender, opts["filters"], search_at, top, probe_at=probe_at
+                )
             except ondemand.Cancelled:
                 raise
             except Exception as exc:  # noqa: BLE001 -- the answer above stands; say the check failed

@@ -41,8 +41,11 @@ const multiOn = S => (S.goal === "event_song" || S.goal === "event_points") && !
 // Live Boost changes Event Points only; "Teams to show" is how many rows the search refines and
 // serves, so a longer list is another search
 const optsKey = S => JSON.stringify([S.goal, S.song, S.difficulty, isHighlight(S.song) ? S.rlevel : 0, S.goal === "event_points" ? S.boosts : 0, S.goal === "event_points" ? S.holopass : 0,
-  S.platform, !!S.auto, eventAssumptions(S), eventFilters(S), S.chapter || "", multiOn(S), S.evtop]);
+  S.platform, !!S.auto, eventAssumptions(S), eventFilters(S), S.chapter || "", multiOn(S), S.evtop, maxRank(S)]);
 const isEP = S => S.goal === "event_points";
+// Event Song Score on one song, solo, Sort by Max: a search by Max (a change of Sort by is a new
+// search), as the Score goal's; with Multi Live the rows are only re-sorted by their Max
+const maxRank = S => S.goal === "event_song" && S.evsort === "max" && !isHighlight(S.song) && !multiOn(S);
 
 /* ------------------------------------------------------------------ Highlight */
 // The multi Live pick "Highlight": a random WHOLE song among the songs of the
@@ -144,15 +147,18 @@ export function redrawEventDetails() {
   const c = shownC;
   if (c && c.rows[sel] && c.ctx.out().querySelector(".o-sel > .o-team")) select(c, sel);
 }
-export function cancelEvent() {
+export function cancelEvent(quiet = false) {
   if (!run) return;
-  if (run.job) postJSON(`/cancel/${encodeURIComponent(run.job)}`, {}).catch(e => toast(e.message));
+  // a job the server already dropped (its stream closed first) answers 404: it has stopped either way
+  if (run.job) postJSON(`/cancel/${encodeURIComponent(run.job)}`, {}).catch(() => {});
   const ctx = run.ctx;
   if (run.es) run.es.close();
   run.finish();
-  toast("Search cancelled.");
+  if (!quiet) toast("Search cancelled.");
   showEventIdle(ctx);
 }
+// the search in flight, for the page's one running-job record (opt-app.js `runningJob`)
+export const eventJob = () => run ? { key: run.key, keyNow: S => S.goal === "event_points" || S.goal === "event_song" ? optsKey(S) : null, cancel: quiet => cancelEvent(quiet) } : null;
 // this search's progress card (opt-progress.js), made once, then only updated
 let pc = null;
 function progress(ctx, order, stage, detail, ev) {
@@ -180,7 +186,7 @@ export async function runEvent(ctx, { certify = false } = {}) {
   const song = ctx.song();
   if (song && (ctx.D.evsongs || []).some(s => s.music_id === S.song && s.chart_available === false)) { toast("This song has no chart at that difficulty."); return; }
   ctx.setBusy(true);
-  const mine = run = { t0: performance.now(), ctx };
+  const mine = run = { t0: performance.now(), ctx, key };
   if (pc) pc.stop();
   pc = null;
   const A = eventAssumptions(S);
@@ -208,7 +214,7 @@ export async function runEvent(ctx, { certify = false } = {}) {
       ...(A ? { assumptions: A } : {}), ...eventFilters(S),
       // the chapter planned for, when it is not the running one (opt-app.js, S.chapter)
       ...(S.chapter ? { event: S.chapter } : {}),
-      platform: S.platform, auto: !!S.auto, multi: multiOn(S),
+      platform: S.platform, auto: !!S.auto, multi: multiOn(S), ...(maxRank(S) ? { rank: "max" } : {}),
       // Highlight: each pool song at its hardest chart up to the level
       ...(isHighlight(S.song) ? { max_level: S.rlevel } : {}) });
   } catch (e) { ctx.out().innerHTML = `<div class="o-error">The event search could not start: ${esc(e.message)}</div>`; done(); return; }
@@ -610,7 +616,7 @@ async function songDetail(c, r, i, det) {
     const body = { song: onPool ? poolIds[0] : song, difficulty: (own && own.difficulty) || S.difficulty, basis: isMaxed(S) ? "maxed" : "account", cards,
       platform: S.platform, auto: !!S.auto, multi: multiOn(S),   // the search's play, or the detail is not the row's
       ...(c.res.multi_points ? { fever_weight: c.res.multi_points.fever_weight } : {}),
-      refine: !!r.refined, assumptions: eventAssumptions(S) || undefined, member_order: hl ? undefined : r.member_order || undefined };
+      refine: r.refined === 2 ? 2 : !!r.refined, assumptions: eventAssumptions(S) || undefined, member_order: hl ? undefined : r.member_order || undefined };
     // the whole pool: one board and one slot order for every song (`row_detail.pool_detail`)
     const poolBody = { ...body, refine: undefined, pool: poolIds, ...(poolEvent.length ? { pool_event: poolEvent } : {}),
       ...(c.res.max_level ? { max_level: c.res.max_level } : {}) };
@@ -641,7 +647,7 @@ async function songDetail(c, r, i, det) {
       const A = eventAssumptions(S);
       if (A && A.boards === "plan" && !det.acct) {
         det.acctLoading = true; repaint(c, r, i);
-        await postJSON("/api/board-plan-account", { cards, song: onPool ? (d.plan_song || undefined) : song, song_pool: onPool ? (d.plan_pool || undefined) : undefined, assumptions: A, board_state: bs, bench_slots: det.fig.bench_slots })
+        await postJSON("/api/board-plan-account", { cards, song: onPool ? (d.plan_song || undefined) : (d.plan_song || song), song_pool: onPool ? (d.plan_pool || undefined) : undefined, assumptions: A, board_state: bs, bench_slots: det.fig.bench_slots })
           // a plan still running for the previous pool song no longer applies
           .then(x => { if (!stale()) det.acct = x; }).catch(e => { if (!stale()) det.acctErr = e.message; });
         if (!stale()) det.acctLoading = false;

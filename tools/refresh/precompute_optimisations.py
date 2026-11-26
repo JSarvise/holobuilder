@@ -237,6 +237,32 @@ def bench_reach_nodes(skilltree: dict, node_master: list, chr_id: str) -> list[s
     return out
 
 
+def prune_to_reach(nodes, kept, graph: dict) -> list[str]:
+    """`nodes` (a connected board holding the root) without every node that is neither in
+    `kept` nor needed to connect one of `kept` to the root: each is dropped while the rest
+    of `kept` stays reachable on `graph`, the farthest first, until none can go."""
+    left = set(nodes)
+    kept = (set(kept) & left) | {to.ROOT}
+
+    def reached(without: str) -> set:
+        seen, todo = {to.ROOT}, [to.ROOT]
+        while todo:
+            for nb in graph.get(todo.pop(), ()):
+                if nb in left and nb != without and nb not in seen:
+                    seen.add(nb)
+                    todo.append(nb)
+        return seen
+
+    changed = True
+    while changed:
+        changed = False
+        for node in sorted(left - kept, reverse=True):
+            if kept <= reached(node):
+                left.discard(node)
+                changed = True
+    return sorted(left)
+
+
 _ROWS_BY_GROUP: dict = {}
 
 
@@ -399,6 +425,17 @@ def maxed_account_bench(
     placements = [*placements, *(p for p in extra if (p.chr, p.socket) not in filled)]
     for p in placements:
         state[p.chr]["slots"][p.socket] = p.card
+    # A socket left empty lifts nothing, and the nodes bought only on the way to it (the
+    # reds before S-002, which fire only while that holomem leads) score nothing on a bench
+    # board: drop both, keeping every scoring green and yellow and the filled sockets.
+    for chr_id, entry in state.items():
+        model_id = model_for_character(skilltree, chr_id) or ""
+        if not model_id:
+            continue
+        wanted = {n for n in bench_reach_nodes(skilltree, node_master, chr_id) if not n.startswith("S-")}
+        entry["nodes"] = prune_to_reach(
+            entry["nodes"], wanted | set(entry["slots"]), to.adjacency(skilltree["models"][model_id])
+        )
     if state_out is not None:
         # `{chr: {"nodes": [her bench board], "slots": {socket: card}}}`: the same bench as
         # a board state, for showing what an account needs to reach it (the web's board

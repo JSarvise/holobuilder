@@ -2,7 +2,7 @@
 // ranking). Your rating, rank and borders on the chosen holomem, the songs that count for her,
 // and the searches (POST /api/rating/run + SSE): a team per song, or one team for all of them.
 // Every number comes from the server (rating_mode.py, hbuilder.domain.rating).
-import { byId, esc, fmt, toast, getJSON, postJSON, thumb, when, info, NOTES, cardHook, stash, unstash } from "/opt-util.js";
+import { byId, esc, fmt, toast, getJSON, postJSON, thumb, when, info, NOTES, cardHook, stash, unstash, effective } from "/opt-util.js";
 import { score } from "/hb-grade.js";
 import { progressCard } from "/opt-progress.js";
 import { assumptionsOf, renderTeams, forgetDetails } from "/opt-score.js";
@@ -41,10 +41,11 @@ function restore(ctx) {
 
 const LEVELS = [20, 22, 24, 25, 26, 27, 28, 29, 30, 31, 32];
 const statusQuery = S => `holomem=${encodeURIComponent(S.rholomem)}&max_level=${S.rlevel}&owned=${S.rowned ? 1 : 0}`;
-const runKey = S => JSON.stringify([S.rholomem, S.rlevel, S.rowned, S.rmode, S.rboard, S.rsort, S.rsongs, S.rteams,
+// the options a run acts on (`effective`): a hidden Score option never starts another run
+const runKey = S0 => { const S = effective(S0); return JSON.stringify([S.rholomem, S.rlevel, S.rowned, S.rmode, S.rboard, S.rsort, S.rsongs, S.rmode === "one" ? 0 : S.rteams,
   picked ? [...picked].sort() : null, S.cards, S.boards, S.maxpoints, S.infmats, S.platform, S.auto, S.pool,
   S.cards === "whatif" ? [S.alevel, S.abloom, S.aspt, !!S.keephigher] : 0, S.maxresets, S.resetgain, S.allinvited,
-  S.norefund, S.branches, JSON.stringify(S.targets), S.loutfit, S.nooverlap, S.require, S.exclude]);
+  S.norefund, S.branches, JSON.stringify(S.targets), S.loutfit, S.nooverlap, S.require, S.exclude]); };
 
 export async function loadRatingList(force) {
   if (list && !force) return list;
@@ -58,8 +59,11 @@ async function loadStatus(S) {
   const q = statusQuery(S);
   if (status && statusKey === q) return status;
   statusKey = q;
-  try { status = await getJSON("/api/rating/status?" + q); } catch (e) { status = { error: e.message }; }
+  // the last holomem asked for wins, not the last answer to arrive
+  let got;
+  try { got = await getJSON("/api/rating/status?" + q); } catch (e) { got = { error: e.message }; }
   if (statusKey !== q) return null;
+  status = got;
   return status;
 }
 
@@ -116,6 +120,8 @@ export async function showRatingIdle(ctx, keepLive) {
     return;
   }
   if (live && live.key !== runKey(S)) cancelRating(true);
+  // another holomem: nothing of the previous one stays on screen while hers loads
+  if (!status || status.holomem !== S.rholomem) ctx.out().innerHTML = `<section class="o-empty"><h2>Reading her songs…</h2></section>`;
   const st = await loadStatus(S);
   if (!st || st.holomem !== S.rholomem && !st.error) return;
   if (ctx.onStatus) ctx.onStatus();
@@ -123,13 +129,17 @@ export async function showRatingIdle(ctx, keepLive) {
 }
 
 /* ------------------------------------------------------------------ run */
-function body(S) {
+// the run's request: only what Rating shows (`effective`). One team has no "Teams per song":
+// it lists the server's default number of teams
+function body(S0) {
+  const S = effective(S0);
   const a = assumptionsOf(S);
   const b = {
     holomem: S.rholomem, mode: S.rmode, max_level: S.rlevel, owned_only: !!S.rowned,
-    objective: S.rsort === "max" ? "max" : "expected", one_board: S.rboard !== "per", teams: S.rteams,
+    objective: S.rsort === "max" ? "max" : "expected", one_board: S.rboard !== "per",
     basis: S.cards === "maxed" ? "maxed" : "account", platform: S.platform, auto: !!S.auto,
   };
+  if (S.rmode !== "one") b.teams = S.rteams;
   if (picked && picked.size) b.songs = [...picked];
   else b.song_count = S.rsongs === "all" ? 20 : +S.rsongs;
   if (a) b.assumptions = a;
@@ -179,7 +189,9 @@ export async function runRating(ctx) {
     if (live !== mine) return;
     if (ev.type === "progress" && pc) {
       const i = ev.song != null ? order.get(ev.song) ?? 0 : 0;
-      pc.update({ active: S.rmode === "one" ? 0 : i, detail: S.rmode === "one" ? (ev.round ? `round ${ev.round}` : ev.sub === "materials" ? "planning within your materials" : "") : `song ${i + 1} of ${songs.length}`,
+      pc.update({ active: S.rmode === "one" ? 0 : i, detail: S.rmode === "one" ? (ev.round ? `round ${ev.round}` : ev.sub === "materials" ? "planning within your materials" : "")
+        // after every song on its own chart: each song's other chart (Hard for an Expert pick)
+        : ev.stage === "charts" ? `trying Hard: ${ev.done + 1} of ${ev.total}` : `song ${i + 1} of ${songs.length}`,
         // a time left only from a count within the step (the one team's plans per song); the
         // songs ARE the steps, so their count says nothing about the step running
         ...(S.rmode === "one" && ev.sub === "materials" ? { done: ev.done, total: ev.total } : {}) });
@@ -203,6 +215,11 @@ export async function runRating(ctx) {
   es.onerror = () => { es.close(); if (live === mine && !doc) { live = null; ctx.setBusy(false); endCard(); toast("Lost the search's event stream."); render(ctx); } };
 }
 function endCard(answered) { if (pc) { if (answered) pc.done(); else pc.stop(); } pc = null; }
+// the search in flight, for the page's one running-job record (opt-app.js `runningJob`)
+export const ratingJob = () => live ? { key: live.key, keyNow: S => S.goal === "rating" ? runKey(S) : null, cancel: quiet => cancelRating(quiet) } : null;
+// the songs picked by hand belong to one holomem, level and owned filter: another one starts
+// from her default songs again
+export function forgetPicked() { picked = null; }
 export function cancelRating(quiet) {
   if (!live) return;
   if (live.es) live.es.close();
@@ -217,6 +234,13 @@ export function cancelRating(quiet) {
 /* ------------------------------------------------------------------ rendering */
 const jacket = id => `<img class="o-rt-jk" src="/jacket/${encodeURIComponent(id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`;
 const diffBadge = (d, lv) => d ? `<span class="diff ${esc(String(d).toLowerCase())}">${lv != null ? `<b>${lv}</b>` : ""}${esc(d[0] + d.slice(1).toLowerCase())}</span>` : "";
+// a song the search rated higher on its other chart (`chart_check`): say which, and against what
+const chartTag = r => {
+  const c = r && r.chart_check;
+  if (!c || !c.wins) return "";
+  const name = (d, lv) => `${d[0] + d.slice(1).toLowerCase()}${lv != null ? " " + lv : ""}`;
+  return `<span class="tag" title="Your rating keeps your best score on any difficulty: on ${esc(name(c.other, c.other_level))} her best team rates ${fmt(c.other_rating)}, on ${esc(name(c.difficulty, c.level))} ${fmt(c.rating)}.">rates more than ${esc(name(c.difficulty, c.level))}</span>`;
+};
 const gainChip = g => g > 0 ? `<span class="o-rt-gain up num">+${fmt(g)}</span>` : `<span class="o-rt-gain num">±0</span>`;
 const mini = (ids, cardOf) => `<span class="o-rt-team">${ids.map((id, k) => {
   const c = cardOf(id) || {};
@@ -330,7 +354,8 @@ function showDetail(ctx, doc) {
         shared: doc.one_board ? doc.shared_board || null : null };
     });
   }
-  const S = { ...ctx.S, goal: "score", song: music, difficulty, sort: byMax ? "max" : "avg", top: Math.max(3, ranking.length), lvmode: "expert" };
+  // the detail is a Score detail of the run's own options: nothing Rating hides (Multi Live) reaches it
+  const S = { ...effective(ctx.S), goal: "score", song: music, difficulty, sort: byMax ? "max" : "avg", top: Math.max(3, ranking.length), lvmode: "expert" };
   const sctx = { ...ctx, S, out: () => document.getElementById("o-rt-detail"), song: () => ({ music_id: music, title }) };
   renderTeams(sctx, {
     scope: "song", on_demand: true, state: "fresh", seconds,
@@ -388,7 +413,7 @@ function songTable(ctx, st, doc, running, cardOf) {
     return `<div class="o-rt-row${on ? " on" : ""}${top3.has(s.music_id) ? " top3" : ""}${has ? " pick" : ""}"${has ? ` data-rtsong="${esc(s.music_id)}" aria-selected="${isSel}" title="Show this song's teams below"` : ""}>
       <label class="o-rt-chk" title="${on ? "Searched" : "Not searched"}"><input type="checkbox" data-pick="${esc(s.music_id)}"${on ? " checked" : ""}${running ? " disabled" : ""}></label>
       ${jacket(s.music_id)}
-      <div class="o-rt-title"><b>${esc(s.title)}</b><span>${diffBadge(s.difficulty, s.level)}<span class="tag muted">${s.singer_type === "solo" ? "Solo" : "Unit"}</span>${top3.has(s.music_id) ? `<span class="tag muted">in your top 3</span>` : ""}</span></div>
+      <div class="o-rt-title"><b>${esc(s.title)}</b><span>${r ? diffBadge(r.difficulty, r.level) : diffBadge(s.difficulty, s.level)}${chartTag(r)}<span class="tag muted">${s.singer_type === "solo" ? "Solo" : "Unit"}</span>${top3.has(s.music_id) ? `<span class="tag muted">in your top 3</span>` : ""}</span></div>
       <div class="o-rt-cell"><span class="lbl">Your record</span>${cur ? `<span class="num o-rt-r">${fmt(cur.rating)}</span><small>${fmt(cur.score)} · ${esc(cur.difficulty[0] + cur.difficulty.slice(1).toLowerCase())}</small>` : `<span class="num o-rt-r dim">—</span><small>not played with her leading</small>`}</div>
       <div class="o-rt-cell"><span class="lbl">${byMax ? "Max" : "Expected"} ${info("ratingmax")}</span>${best ? `<span class="num">${score(val)}</span><small>${byMax ? `Expected ${fmt(best.expected)}` : `Max ${fmt(best.max)}`}</small>` : running && on ? `<span class="o-sk" style="width:140px;height:22px"></span>` : `<span class="dim">${on ? "press Find best teams" : "not searched"}</span>`}</div>
       <div class="o-rt-cell"><span class="lbl">Rating ${info("ratinggain")}</span>${r ? `<span class="o-rt-to"><span class="num o-rt-r">${fmt(r.rating)}</span>${gainChip(r.gain)}</span>` : `<span class="dim">—</span>`}</div>
@@ -420,7 +445,7 @@ function oneTeamInner(ctx, doc, cardOf) {
       <div class="o-rt-title"><b>${esc(c.title || c.music_id)}</b><span>${diffBadge(c.difficulty, c.level)}</span></div>
       <div class="o-rt-cell"><span class="lbl">Your record</span><span class="num o-rt-r${c.current_rating ? "" : " dim"}">${c.current_rating ? fmt(c.current_rating) : "—"}</span></div>
       <div class="o-rt-cell"><span class="lbl">${byMax ? "Max" : "Expected"} ${info("ratingmax")}</span><span class="num">${score(byMax ? c.max : c.expected)}</span><small>${byMax ? `Expected ${fmt(c.expected)}` : `Max ${fmt(c.max)}`}</small></div>
-      <div class="o-rt-cell"><span class="lbl">Rating</span><span class="o-rt-to"><span class="num o-rt-r">${fmt(c.rating)}</span>${gainChip(Math.max(0, c.rating - c.current_rating))}</span></div>
+      <div class="o-rt-cell"><span class="lbl">Rating</span><span class="o-rt-to"><span class="num o-rt-r">${fmt(c.rating)}</span>${gainChip(c.gain != null ? c.gain : Math.max(0, c.rating - c.current_rating))}</span></div>
       <div class="o-rt-cell o-rt-teamcell"><span class="o-rt-see">${selSong === c.music_id ? "Shown below" : "Details"}<svg class="i s"><use href="#i-chev"/></svg></span></div>
     </div>`).join("");
   const boards = doc.one_board ? "one Holomem Board setup for every song" : "each song on its own Holomem Boards";

@@ -18,15 +18,17 @@ const details = new Map();   // team key -> detail {dev, cur, tl, doc, err…}
 let wallet = null;
 
 const basisOf = S => S.cards === "maxed" ? "maxed" : "account";
+// "Max Holomem Board Pt" is an option of planned boards: hidden (and inert) with boards as they are
+const maxPt = S => S.boards === "develop" && !!S.maxpoints;
 // the server basis of a team's numbers (leaf_inputs.BASES); null = a what-if the
 // on-demand search does not cover (upgraded cards at a level other than Max, or a bloom)
 const tsBasis = S => {
   if (basisOf(S) !== "account") return "maxed";
   if (S.cards === "whatif") {
     if (S.alevel !== "max" || S.abloom !== "account") return null;
-    return S.maxpoints ? "account-levelmax-max" : "account-levelmax";
+    return maxPt(S) ? "account-levelmax-max" : "account-levelmax";
   }
-  return S.maxpoints ? "account-max" : "account";
+  return maxPt(S) ? "account-max" : "account";
 };
 // Multi Live (FEVER) is a Score-goal option: no other goal's request carries it
 const multiOn = S => S.goal === "score" && !!S.multi;
@@ -117,6 +119,9 @@ function odBody(S) {
   else b.max_level = S.rlevel;
   // the other-chart check is calibrated on the expected score of a manual, solo run
   if (S.song && (S.sort === "max" || multiOn(S) || S.auto)) b.chart_check = false;
+  // Sort by Max on a song: the search ranks by Max and serves each team on its best-Max board,
+  // as Holomem Rating does; a change of Sort by is a new search
+  if (S.song && S.sort === "max") b.objective = "max";
   if (S.require.length) b.require = S.require;
   if (S.exclude.length) b.exclude = S.exclude;
   // Card pool "5★ only": the five members; the leader slot stays any rarity
@@ -149,12 +154,12 @@ function cancelOnDemand() {
   if (od.job) fetch("/cancel/" + od.job, { method: "POST" }).catch(() => {});
   od = null;
 }
-async function searchNow(ctx, key) {
+async function searchNow(ctx, key, again = false) {
   const url = "search:" + key;
-  if (cache && cache.url === url) { render(ctx, cache); return; }
+  if (!again && cache && cache.url === url) { render(ctx, cache); return; }
   if (od && od.key === key) return;                 // already searching these options
   cancelOnDemand();
-  const mine = od = { key, ctx, t0: performance.now() };
+  const mine = od = { key, ctx, t0: performance.now(), req: JSON.parse(JSON.stringify(ctx.S)) };
   newCard();
   // the third stage as the server runs it (`ondemand.Assumptions.replan` / `Engine.search`)
   const A = assumptionsOf(ctx.S);
@@ -187,7 +192,9 @@ async function searchNow(ctx, key) {
     const rows = rowsOf(ctx, doc);
     const S = ctx.S, skipped = (started.opts && started.opts.unchecked) || null;
     const why = S.sort === "max" ? "with Sort by Max" : multiOn(S) ? "with Multi Live" : S.auto ? "with AUTO" : "";
-    cache = { url, doc, rows, cards: ctx.D.cards, cached: true,
+    // the request this answer is for (`req`): its rows' details, Now, compare and export are
+    // asked with it, not with options changed since (the list stays on screen, C01)
+    cache = { url, doc, rows, cards: ctx.D.cards, cached: true, req: mine.req,
       check: contender ? { state: "checking", other: contender.other, other_level: (contender.levels || {})[contender.other] }
         : skipped && why ? { state: "skipped", other: skipped.other, other_level: (skipped.levels || {})[skipped.other], why } : null };
     if (contender) chk = { es, job: mine.job, url, ctx };
@@ -316,10 +323,10 @@ function chartNoteHTML(ctx, res = cache) {
   if (!c) return "";
   const other = `${titleCase(c.other)}${c.other_level != null ? ` ${c.other_level}` : ""}`;
   const cards = basisOf(ctx.S) === "account" ? "with your cards" : "with these cards";
-  if (c.state === "checking") return `<span class="o-chk-spin" aria-hidden="true"></span>Checking whether ${esc(other)} scores more ${cards}…`;
+  if (c.state === "checking") return `<span class="o-chk-spin" aria-hidden="true"></span>Checking whether ${esc(other)} scores more ${cards}… <button class="o-link" type="button" data-stopcheck>Stop</button>`;
   if (c.state === "failed") return `Couldn't check whether ${esc(other)} scores more: the check failed on the server. These teams are still the best on this chart.`;
-  // the check is calibrated on the expected score of a manual, solo run: it is not tried otherwise
-  if (c.state === "skipped") return `${esc(other)} was not checked ${esc(c.why)}: the check compares the expected score of a manual, solo run.`;
+  // a check not tried (Multi Live, AUTO, Sort by Max) is said in the provenance popover (`setProv`)
+  if (c.state === "skipped") return "";
   if (c.state !== "won") return "";
   const picked = `${titleCase(c.difficulty)}${c.level != null ? ` ${c.level}` : ""}`;
   return cache.doc && cache.doc.difficulty === c.other
@@ -336,13 +343,13 @@ function paintChartNote(ctx) {
 /* ------------------------------------------------------------------ cancel and progress */
 // Cancel answers at once: the page drops the search and shows what it showed before; the
 // server is told too and stops at its next check (between batches of teams)
-export function cancelScore() {
+export function cancelScore(quiet = false) {
   if (od) {
     const ctx = od.ctx;
     cancelOnDemand();
     endCard();
     const pw = ctx.out().querySelector(":scope > .o-progwrap"); if (pw) pw.remove();
-    toast("Search cancelled.");
+    if (!quiet) toast("Search cancelled.");
     if (!ctx.out().querySelector(".o-split")) showScoreIdle(ctx, true);
   }
 }
@@ -379,7 +386,13 @@ export function redrawDetails() {
   const T = shown;
   if (T && T.goal === T.ctx.S.goal && T.rows[sel] && T.ctx.out() && T.ctx.out().querySelector(".o-sel > .o-team")) select(T, sel);
 }
-export async function runScore(ctx) { cache = null; forgetDetails(); searchNow(ctx, optsKey(ctx.S)); }
+// the answer on screen (and its cache: Show Expert, Sort by Max) stays until the new one
+// arrives, so a cancelled re-Find leaves it working
+export async function runScore(ctx) { forgetDetails(); searchNow(ctx, optsKey(ctx.S), true); }
+// the search in flight, for the page's one running-job record (opt-app.js `runningJob`)
+export const scoreJob = () => od ? { key: od.key, keyNow: S => S.goal === "score" ? optsKey(S) : null, cancel: quiet => cancelScore(quiet) } : null;
+// the other chart's check of an answer no longer on screen (another goal)
+export function stopScoreCheck() { cancelCheck(); }
 
 // Another goal's answer laid out as this goal's setlist and team detail (the Holomem Rating
 // goal, opt-rating.js): `ctx` carries that song's options (S.song, S.difficulty, S.sort) and an
@@ -414,6 +427,10 @@ function sorted(ctx, res) {
 const listOpts = S => ({ onePerLeader: onePer, limit: S.top });
 const shownLine = (rows, S) => `${shownRows(rows.map(T => ({ leader: { id: T.leader } })), listOpts(S)).length} teams`;
 function render(ctx, res) {
+  // a search's answer is drawn, and its teams' details asked, with its own request; only the
+  // view options (Sort, Teams to show) are the page's
+  const live = ctx.S;
+  if (res && res.req) ctx = { ...ctx, S: { ...res.req, sort: live.sort, top: live.top } };
   const rows = sorted(ctx, res);
   const cardOf = id => withState(res.cards.get(id) || ctx.D.cards.get(id) || null);
   const S = ctx.S;
@@ -433,6 +450,7 @@ function render(ctx, res) {
     <aside class="dlg o-setlist" aria-label="Ranked teams">
       <div class="dlg-h"><h2>${res.cached ? "Setlist of best teams" : "Search results"}</h2><span class="r"><span data-shown>${shownLine(rows, S)}</span> · ${res.cached ? (res.doc.scope === "general" ? "average over every chart" : byMax(ctx, rows) ? `Max on ${esc(chartName(ctx, res.doc))}: every Active skill fires` : `expected score on ${esc(chartName(ctx, res.doc))}`) : "this search"}</span></div>
       <p class="o-chartnote" data-chartnote${chartNoteHTML(ctx, res) ? "" : " hidden"}>${chartNoteHTML(ctx, res)}</p>
+      <p class="o-chartnote" data-stale${staleOf(live, res) ? "" : " hidden"}>Options changed since this search: these teams and their details are for the options it ran with. Press <b>Find best team</b> to search with the new ones.</p>
       <div class="o-listctl" role="group" aria-label="List view">
         <button class="chip" type="button" data-diffmode aria-pressed="${diffMode}" title="Outline the cards that differ from #1">Diff vs #1</button>
         <button class="chip" type="button" data-oneper aria-pressed="${onePer}" title="Show only each leader card's best team">One per leader</button></div>
@@ -441,8 +459,10 @@ function render(ctx, res) {
     </aside>
     <section class="o-sel" aria-label="Selected team"><article class="o-team" data-open="true" id="team${sel}">${block(ctxT, rows[sel], sel)}</article></section>
   </div>`;
+  ctxT.root = ctx.out().querySelector(":scope > .o-split");
   ctx.out().onclick = e => {
     const r = e.target.closest(".rk-row[data-i]"); if (r) return select(ctxT, +r.dataset.i);
+    if (e.target.closest("[data-stopcheck]")) { cancelCheck(); return paintChartNote(ctx); }
     if (e.target.closest("[data-diffmode]")) { diffMode = !diffMode; return relist(ctxT); }
     if (e.target.closest("[data-oneper]")) { onePer = !onePer; return relist(ctxT); }
     if (e.target.closest("[data-chartswap]")) return swapChart(ctx);
@@ -452,6 +472,13 @@ function render(ctx, res) {
   };
   wakeFigure(ctx.out());
   after(ctxT, rows[sel], sel);
+}
+// the page's options no longer those of the answer on screen
+const staleOf = (S, res) => !!(res && res.req) && optsKey(S) !== optsKey({ ...res.req, sort: S.sort });
+// an option changed with the answer on screen (the list stays): say so on it
+export function scoreOptionsMoved(S) {
+  const el = shown && shown.root && shown.root.isConnected && shown.root.querySelector("[data-stale]");
+  if (el) el.hidden = !staleOf(S, shown.res);
 }
 // ranked by Max: asked for, and every row has one (a one-chart search; "Every song" has none)
 const byMax = (ctx, rows) => ctx.S.sort === "max" && rows.every(r => typeof r.max === "number");
@@ -487,7 +514,7 @@ function setProv(res) {
   const el = byId("prov"); if (!el) return;
   if (!res.cached) { el.innerHTML = ""; return; }
   const d = res.doc, st = d.on_demand ? ["fresh", "Searched now"] : d.state === "fresh" ? ["fresh", "Up to date"] : d.state === "missing" ? ["missing", "Not computed yet"] : ["stale", "Older data"];
-  NOTES.prov = `${NOTES.cached || ""}<br><br>${cacheLine(d)}`;
+  NOTES.prov = `${NOTES.cached || ""}<br><br>${cacheLine(d)}${skippedLine(res)}`;
   const n = (d.exact_evals && d.legal_sets ? `${fmt(d.exact_evals)} of ${fmt(d.legal_sets)} teams scored exactly` : "Search")
     + (d.on_demand && d.seconds != null ? ` in ${Number(d.seconds).toFixed(1)} s` : "");
   // the worker processes failed during the search (the batches finished in one process)
@@ -495,6 +522,14 @@ function setProv(res) {
   // Export search: the Holomem Rating goal has its own, at the head of its answer
   const xs = window.hbExportButton && !String(res.url).startsWith("rating:") ? window.hbExportButton() : "";
   el.innerHTML = `<span class="o-state ${st[0]}">${st[1]}</span><span class="o-provtxt">${n}${d.written ? ` · ${esc(when(d.written))}` : ""}</span>${warn}${info("prov")}${xs}`;
+}
+// the other chart's check is calibrated on the expected score of a manual, solo run: with Multi
+// Live, AUTO or Sort by Max it is not tried, and the popover says so
+function skippedLine(res) {
+  const c = res && res.check;
+  if (!c || c.state !== "skipped") return "";
+  const other = `${titleCase(c.other)}${c.other_level != null ? ` ${c.other_level}` : ""}`;
+  return `<br><br>${esc(other)} not compared ${esc(c.why)}: the check for the higher-scoring chart is calibrated on a manual, solo run.`;
 }
 function cacheLine(doc) {
   const bits = [];
@@ -624,7 +659,9 @@ function repaint(ctxT, T, i) {
     if (!now || shown.res.url !== ctxT.res.url || now.source !== T.source || now.key !== T.key) return;
     ctxT = shown; T = now;
   }
-  if (!el || !open.has(i) || ctxT.rows[i] !== T) return;
+  // another view (Event, another goal's answer) took the page: its "team0" is not this row's
+  if (!el || !ctxT.root || !ctxT.root.isConnected || !ctxT.root.contains(el)) return;
+  if (!open.has(i) || ctxT.rows[i] !== T) return;
   const planOpen = el.querySelector("details.o-plan");
   const keepPlan = planOpen ? planOpen.open : i === 0;
   const openRows = [...el.querySelectorAll("details.o-pr")].map(d => d.open);
@@ -669,7 +706,9 @@ function fromRowDetail(d) {
   return { route: "the team's own board", api: "/api/row-detail", value: d.song_est, song_max: d.song_max, member_order: d.member_order, deck_power: d.deck_power,
     solo: d.song_est_solo ?? null, fever: d.fever_score ?? null,
     deck_power_basis: d.deck_power_basis, panel: d.panel, score_bonus: d.score_bonus, distribution: d.distribution || null,
-    board_state: d.board_state, bench_sockets: d.bench_sockets || null, bench_slots: d.bench_slots || null, unit_off: null };
+    board_state: d.board_state, bench_sockets: d.bench_sockets || null, bench_slots: d.bench_slots || null, unit_off: null,
+    // the chart the row's board was planned for when it is not the song's EXPERT one (a HARD row, a shared board)
+    plan_song: d.plan_song || null };
 }
 function baseOf(S) {
   const b = { basis: basisOf(S), song: S.song, across: !S.song, platform: S.platform, uptime_model: "finite", auto: !!S.auto, multi: multiOn(S),
@@ -701,15 +740,18 @@ function boardDoc(ctxT, T, i, det, bs, cards) {
   // the bench's the exact assignment the score used, or the row's own deal of them), shown against
   // the account's REAL boards -- what the user would have to unlock; measured against a max-level
   // holomem's points
+  // a general row's detail moves from song to song ("On"): an answer for a song no longer shown
+  // is dropped, whichever arrives last
+  const asked = det.song || null, still = () => (det.song || null) === asked;
   if (basisOf(S) === "maxed") {
     det.acctLoading = true;
     return postJSON("/api/board-doc", { board_state: bs, cards, basis: "maxed", budget: "max", complete: true, bench_slots: (det.fig || {}).bench_slots || null })
-      .then(d => { det.acct = det.doc = d; det.acctErr = det.docErr = null; })
-      .catch(e => { det.acctErr = det.docErr = e.message; })
-      .finally(() => { det.acctLoading = false; });
+      .then(d => { if (still()) { det.acct = det.doc = d; det.acctErr = det.docErr = null; } })
+      .catch(e => { if (still()) det.acctErr = det.docErr = e.message; })
+      .finally(() => { if (still()) det.acctLoading = false; });
   }
   return postJSON("/api/board-doc", { board_state: bs, cards, basis: basisOf(S), budget: baseOf(S).budget })
-    .then(d => { det.doc = d; det.docErr = null; }).catch(e => { det.docErr = e.message; });
+    .then(d => { if (still()) { det.doc = d; det.docErr = null; } }).catch(e => { if (still()) det.docErr = e.message; });
 }
 
 /* the row's run distribution, asked on its own after the figures (it takes seconds more, so

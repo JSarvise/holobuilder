@@ -108,6 +108,39 @@ def _event_run(song: str, basis: str):
     return body
 
 
+def _rating_each_maxed():
+    # Pavolia Reine on a maxed account: Illusion Night (its HARD rates higher than its EXPERT),
+    # and two songs whose HARD does not
+    return {
+        "holomem": "chr-03006",
+        "mode": "each",
+        "max_level": 30,
+        "owned_only": False,
+        "objective": "max",
+        "teams": 3,
+        "basis": "maxed",
+        "songs": ["m0459", "m0116", "m0054"],
+        **PLAY,
+    }
+
+
+def _rating_each_account():
+    # Tokoyami Towa on the account, boards planned: Shallow Shadow moves to its HARD chart (the
+    # plan valued on HARD's notes), and a song whose HARD does not
+    return {
+        "holomem": "chr-00027",
+        "mode": "each",
+        "max_level": 30,
+        "owned_only": True,
+        "objective": "max",
+        "teams": 3,
+        "basis": "account",
+        "assumptions": PLAN,
+        "songs": ["m0365", "m0095"],
+        **PLAY,
+    }
+
+
 def _chapter_windows(meta: dict) -> dict[str, tuple[int, int]]:
     """`{chapter id: (start_ms, end_ms)}` as `event_mode.chapter_windows` reads `event_meta.json`:
     a chapter starts when the one before it ends, the first at the event's start."""
@@ -163,6 +196,8 @@ GROUPS = [
     ("event_song_account", "/api/event/run", lambda: _event_run(EVENT_SONG, "account"), ("points",)),
     ("event_highlight_account", "/api/event/run", lambda: _event_run("highlight", "account"), ()),
     ("event_highlight_maxed", "/api/event/run", lambda: _event_run("highlight", "maxed"), ()),
+    ("rating_each_maxed", "/api/rating/run", _rating_each_maxed, ()),
+    ("rating_each_account", "/api/rating/run", _rating_each_account, ()),
 ]
 
 # `--serial`: two searches that plan boards within the account's materials, run with ONE worker
@@ -294,8 +329,10 @@ def _canon(doc) -> str:
 
 # --------------------------------------------------------------------------- follow-ups
 def _rows(payload: dict) -> list[dict]:
-    # the Optimizer search answers `ranking`, the event search `rows`
-    return list((payload or {}).get("ranking") or (payload or {}).get("rows") or [])
+    # the Optimizer search answers `ranking`, the event search `rows`, Holomem Rating each song's
+    payload = payload or {}
+    songs = [r for s in payload.get("songs") or [] for r in s.get("rows") or []]
+    return list(payload.get("ranking") or payload.get("rows") or songs)
 
 
 def _id(card) -> str:

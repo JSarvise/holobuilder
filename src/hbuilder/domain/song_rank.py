@@ -14,6 +14,7 @@ from dataclasses import replace
 
 from hbuilder.domain.scoring_config import ScoringConfig
 from hbuilder.domain.song import (
+    OverallPower,
     SongChart,
     SongScore,
     overall_power_for,
@@ -129,18 +130,41 @@ def score_team_orders(team: Team, chart: SongChart, cfg: ScoringConfig) -> dict[
 
 
 def score_team_ceiling(
-    team: Team, chart: SongChart, cfg: ScoringConfig, member_order: Sequence[str]
+    team: Team,
+    chart: SongChart,
+    cfg: ScoringConfig,
+    member_order: Sequence[str],
+    *,
+    deck_power: OverallPower | None = None,
+    team_setup: dict | None = None,
 ) -> float:
     """The run score if every ACTIVE fires, at `member_order` (the order the row plays):
     the top of that row's own run-score law.
 
-    `score_team_on_chart` with `active_all_fire` alone picks the order best for the
-    all-fire case, which can differ from the row's (SPECIAL cues land on other members)
-    and so report a ceiling the row cannot reach; then the all-fire law at the row's
-    order gives the figure."""
+    It is the all-fire walk of that one order (`score_song_detailed(only_order=)`): the
+    best order for the all-fire case can differ from the row's (SPECIAL cues land on other
+    members) and would report a ceiling the row cannot reach. `deck_power`: the team's
+    Overall Power on `cfg`'s board when the caller holds it (the all-fire switch moves only
+    the skills' chances, not the power); `team_setup`: `score_song_detailed`'s. When the one
+    order cannot be walked alone, the all-fire law at the row's order gives the same figure."""
     from hbuilder.domain.song_distribution import run_score_distribution  # noqa: PLC0415
 
     cfg_max = replace(cfg, active_all_fire=True)
+    order = tuple(member_order)
+    if deck_power is None and cfg.song_absolute_deck_power:
+        deck_power = overall_power_for(tuple(team.members), team.leader, cfg_max)
+    forced = score_song_detailed(
+        tuple(team.members),
+        (team.leader,),
+        chart,
+        cfg_max,
+        deck_power=deck_power,
+        auto=cfg.song_auto,
+        team_setup=team_setup,
+        only_order=order,
+    )
+    if forced and tuple(forced[0].member_order) == order and forced[0].total_score != float("-inf"):
+        return forced[0].total_score
     free = _score_one(team, chart, cfg_max)
     if tuple(free.member_order) == tuple(member_order):
         return free.total_score

@@ -6,7 +6,9 @@ add a per-song term for every caller). `scoring.py` ranks with no song-length te
 a time axis, because three things do not cancel:
 
 1. `LiveScoreMusicCoefficient = 1 + (Music.liveScoreCoefficientPermil/1000) x
-   (difficultyLevel - 5)`, 0.968 .. 1.200 over the real charts.
+   (difficultyLevel - 5)`, 0.968 .. 1.200 over the real charts, times the chart's own
+   factor `MusicDifficultyChart.scoreCoefficientPermyriadMultiply / 10000` (x1 on most
+   charts; `SongChart.music_coefficient`).
 2. SPECIAL fire times are written into the chart (channel `#mmm0B`, one cue per deck
    slot, five on every real chart): not probabilistic, not uniformly spread.
 3. A SPECIAL Score UP is a `ScoreUpBoostSkillEffect` (`scoring._score_up_implements_boost`):
@@ -1174,6 +1176,7 @@ def score_song_detailed(
     order_totals: dict | None = None,
     note_rows: dict | None = None,
     team_setup: dict | None = None,
+    only_order: Sequence[str] | None = None,
 ) -> tuple[SongScore, ...]:
     """`score_song`, plus the slot order and the deck power each total used.
 
@@ -1203,7 +1206,12 @@ def score_song_detailed(
     chart cue fires each member's SPECIAL. The stat pool does not depend on it (a
     count-limited passive stat buff reaches the members with the highest stat it
     raises, `scoring_config.SLOT_ORDER_RULES`), so the deck power is the same for
-    every order and the maximum is the cue assignment."""
+    every order and the maximum is the cue assignment.
+
+    `only_order` (member ids in slot order): that one slot order is scored, not the best of
+    the 120: the total that order gets in the full walk, as one walk of it (a run's Max at
+    the order its expectation plays, `song_rank.score_team_ceiling`). It takes no
+    `order_totals`, `note_rows` or several leaders."""
     return _score_song(
         members,
         leaders,
@@ -1214,6 +1222,7 @@ def score_song_detailed(
         order_totals=order_totals,
         note_rows=note_rows,
         team_setup=team_setup,
+        only_order=only_order,
     )
 
 
@@ -1517,6 +1526,19 @@ def _score_song_by_rate(
     return [stitch(lambda answer, v=v: answer[v]) for v in range(variants)]
 
 
+def _forced_outcomes(
+    only_order: Sequence[str], member_index_by_id: Mapping[str, int], recipes: list, support_outcomes
+) -> tuple:
+    """`((outcome index, recipes, allowed), ...)`: the team's recipients outcomes
+    (`_support_tie_outcomes`; one, the team's recipes, without a tie) that hold the slot
+    order `only_order`, each allowed that order alone. The outcomes split the 120 orders, so
+    one of them holds it."""
+    index = _PERMUTATION_INDEX[tuple(member_index_by_id[c] for c in only_order)]
+    mask = tuple(k == index for k in range(len(_PERMUTATIONS)))
+    outcomes = [(recipes, None)] if support_outcomes is None else list(support_outcomes)
+    return tuple((o, r, mask) for o, (r, allowed) in enumerate(outcomes) if allowed is None or allowed[index])
+
+
 def _score_song(
     members: tuple[Card, ...],
     leaders: tuple[Card, ...],
@@ -1530,10 +1552,20 @@ def _score_song(
     cooldown_variants: tuple[Mapping[str, float], ...] | None = None,
     cooldown_screen: bool | str = False,
     team_setup: dict | None = None,
+    only_order: Sequence[str] | None = None,
 ):
     """`score_song_detailed`'s body; with `cooldown_variants`, one result tuple per variant
     (`score_song_cooldown_variants`); with `cooldown_screen` too, one estimated total per
     variant (`screen_song_cooldown_variants`). `team_setup`: `score_song_detailed`'s."""
+    if only_order is not None and (
+        cooldown_variants is not None
+        or order_totals is not None
+        or note_rows is not None
+        or len(leaders) != 1
+    ):
+        raise SongError(
+            "only_order scores one leader's one slot order: no variants, order totals or note rows"
+        )
     if len(members) != SPECIAL_CUE_COUNT:
         raise SongError(
             f"score_song needs exactly {SPECIAL_CUE_COUNT} members — one per "
@@ -1593,6 +1625,14 @@ def _score_song(
         active_elsewhere,
         support_outcomes,
     ) = held[2]
+    # `only_order`: the recipients outcome that holds that order, walked over it alone
+    forced = (
+        None
+        if only_order is None
+        else _forced_outcomes(only_order, member_index_by_id, recipes, support_outcomes)
+    )
+    if forced is not None:
+        support_outcomes = tuple((r, allowed) for _o, r, allowed in forced)
 
     variant_terms: dict = {}
 
@@ -2174,6 +2214,7 @@ def _score_song(
             note_weights,
             perfect_sum,
             music_coefficient,
+            forced,
         )
         if scored is not None:
             return scored
@@ -2258,6 +2299,7 @@ def _score_by_chart_kernel(
     note_weights: tuple[float, ...],
     perfect_sum: float,
     music_coefficient: float,
+    forced: tuple | None = None,
 ) -> tuple[SongScore, ...] | None:
     """`_score_song`'s answer with each leader's per-chart step in the chart kernel
     (`CHART_KERNEL`), the team's terms built once per board (`_chart_kernel_spec`, kept in
@@ -2288,6 +2330,9 @@ def _score_by_chart_kernel(
     ) = held[2]
     specs = held[4]
     outcomes = [(recipes, None)] if support_outcomes is None else list(support_outcomes)
+    # each outcome under its index among the team's outcomes (the key its spec is held
+    # under); `forced` (`_forced_outcomes`): only the one holding the asked order
+    indexed = list(enumerate(outcomes)) if forced is None else [(o, (r, allowed)) for o, r, allowed in forced]
     song_seconds = times[-1]
     out = []
     for leader in leaders:
@@ -2307,7 +2352,7 @@ def _score_by_chart_kernel(
         constant = power * SCORE_COEFFICIENT * music_coefficient / perfect_sum * (1.0 + board_score_rate)
         best: tuple[float, tuple[int, ...]] | None = None
         best_index = 0
-        for o, (recipes_o, allowed) in enumerate(outcomes):
+        for o, (recipes_o, allowed) in indexed:
             key = (o, leader.id)
             spec = specs.get(key, False)
             if spec is False:

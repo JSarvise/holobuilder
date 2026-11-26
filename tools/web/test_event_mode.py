@@ -60,6 +60,7 @@ def test_body_defaults():
     opts = em.parse_event_body({"song": "m0342"})
     assert opts == {
         "objective": "event_points",
+        "rank": "expected",
         "song": "m0342",
         "boosts": 3,
         "holopass": True,
@@ -75,6 +76,19 @@ def test_body_defaults():
         "room_others": None,
         "basis": "account",
     }
+
+
+def test_sort_by_max_is_for_event_song_score_on_one_solo_song():
+    """`rank: "max"` (Sort by Max) ranks by Max on Event Song Score of one song, solo; not on
+    Event Points or Multi Live, which stay by the expected score (a Highlight pool has no
+    Event Song Score of its own)."""
+    assert em.parse_event_body({"song": "m0342", "objective": "event_song", "rank": "max"})["rank"] == "max"
+    for body in (
+        {"song": "m0342", "objective": "event_points", "rank": "max"},
+        {"song": "m0342", "objective": "event_song", "rank": "max", "multi": True},
+        {"song": "m0342", "objective": "event_song"},
+    ):
+        assert em.parse_event_body(body)["rank"] == "expected", body
 
 
 def test_body_takes_the_maxed_account_basis_without_account_levers():

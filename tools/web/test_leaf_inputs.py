@@ -144,12 +144,32 @@ def test_the_maxed_bench_as_a_board_state_is_a_max_level_board_with_its_connect_
         for m in skilltree["members"]
         if m.get("model") in skilltree["models"]
     }
+    import tree_optimise as to
+
+    model_of = {m["chr"]: m["model"] for m in skilltree["members"] if m.get("model") in skilltree["models"]}
     assert set(state) == set(trees)
     for chr_id, entry in state.items():
         nodes = set(entry["nodes"])
-        assert _bench_reach(chr_id) <= nodes <= trees[chr_id], chr_id
+        reach = _bench_reach(chr_id)
+        # every green and yellow that scores; a socket only when it holds a card
+        assert {n for n in reach if not n.startswith("S-")} | set(entry["slots"]) <= nodes <= trees[chr_id], (
+            chr_id
+        )
         assert sum(costs.get(n, 0) for n in nodes) <= build.maxed_budget(), chr_id
         assert set(entry["slots"]) <= {n for n in nodes if n.startswith("S-")}
+        # nothing else: any other node (a red, a blue, an empty socket) is on the only way
+        # to one of those, so dropping it cuts the board
+        kept = {n for n in reach if not n.startswith("S-")} | set(entry["slots"]) | {to.ROOT}
+        graph = to.adjacency(skilltree["models"][model_of[chr_id]])
+        for extra in nodes - kept:
+            left = nodes - {extra}
+            seen, todo = {to.ROOT}, [to.ROOT]
+            while todo:
+                for nb in graph.get(todo.pop(), ()):
+                    if nb in left and nb not in seen:
+                        seen.add(nb)
+                        todo.append(nb)
+            assert not kept <= seen, (chr_id, extra)
     assert sum(len(e["slots"]) for e in state.values()) >= len(state)  # sockets filled
 
 
@@ -188,7 +208,7 @@ def test_the_maxed_bench_targets_are_only_what_scores():
     bench = next(iter(build._MAXED_BENCH.values()))[0]
     skilltree = json.loads((build.DUMPS / "skilltree.json").read_text(encoding="utf-8"))
     name_of = {m["chr"]: m["name"] for m in skilltree["members"]}
-    team_chrs = {"chr-" + c.split("-")[1] for c in team}
+    leader_chr = "chr-" + team[0].split("-")[1]
     for chr_id, entry in targets.items():
         effects = {e["node"]: e["effects"] for e in bench[name_of[chr_id]]}
         for node in entry["nodes"]:
@@ -197,8 +217,9 @@ def test_the_maxed_bench_targets_are_only_what_scores():
                 continue
             parsed = [parse_effect_id(x, branch=node[0]) for x in effects[node]]
             assert any(p.kind != "ignored" for p in parsed), (chr_id, node)
-            # a bench red or blue reaches no team; a team red only when its singer sings
-            assert node[0] in "GY" or (chr_id in team_chrs and any(p.conditional for p in parsed)), (
+            # a bench red or blue reaches no team; every red fires only while its holomem
+            # leads, so a red counts on the leader's board alone, when she sings
+            assert node[0] in "GY" or (chr_id == leader_chr and any(p.conditional for p in parsed)), (
                 chr_id,
                 node,
             )

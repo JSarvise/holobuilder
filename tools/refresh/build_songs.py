@@ -221,8 +221,8 @@ def build():
                     "level": g(dd, 3),
                     "chart_asset_id": asset,
                     "full_combo_note_count": g(ch, 3),
-                    "normal_note_count": g(ch, 6),
-                    "chart_hash": g(ch, 5),
+                    # the chart's factor on every note, in 1/10000 (x1 when the row lacks it)
+                    "score_coefficient_permyriad": g(ch, 7, 10000),
                     # what the "N combo" reward threshold is measured against, per difficulty
                     "max_combo_reward_threshold": g(ch, 4),
                     "chart_file": rel(sus),

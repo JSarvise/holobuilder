@@ -505,3 +505,20 @@ def test_a_row_sure_to_be_shown_is_refined_while_the_last_plans_run(monkeypatch)
     refined = {e[2] for e in pool.log if e[:2] == ("submit", "refine")}
     assert refined == {0, 3, 4, 5}  # the four shown, never row 1
     assert seen[-1] == (14, 14)  # 6 plans + 4 rows x 2 candidates
+
+
+def test_chart_song_names_every_chart_but_expert():
+    assert materials_plan.chart_song("m0365") == "m0365"
+    assert materials_plan.chart_song("m0365", "EXPERT") == "m0365"
+    assert materials_plan.chart_song("m0365/EXPERT") == "m0365"
+    assert materials_plan.chart_song("m0365", "hard") == "m0365/HARD"
+    assert materials_plan.chart_song("m0365/HARD", "EXPERT") == "m0365/HARD"
+    assert materials_plan.chart_song(None, "HARD") is None
+
+
+def test_a_hard_plan_never_shares_an_expert_plans_key():
+    first = materials_plan.first_opts({"boards": "plan", "judge": '["HARD"]'})
+    team = ("ldr", ("m1", "m2", "m3", "m4", "m5"))
+    expert = materials_plan._plan_key(*team, materials_plan.chart_song("m0365", "EXPERT"), first)
+    hard = materials_plan._plan_key(*team, materials_plan.chart_song("m0365", "HARD"), first)
+    assert expert != hard

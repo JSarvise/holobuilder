@@ -10286,17 +10286,9 @@
 "type": "int32"
 },
 {
-"json": "chartHash",
-"n": 5,
-"name": "chart_hash",
-"pk": false,
-"repeated": false,
-"type": "string"
-},
-{
-"json": "normalNoteCount",
-"n": 6,
-"name": "normal_note_count",
+"json": "scoreCoefficientPermyriadMultiply",
+"n": 7,
+"name": "score_coefficient_permyriad_multiply",
 "pk": false,
 "repeated": false,
 "type": "int32"

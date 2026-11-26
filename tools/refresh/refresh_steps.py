@@ -514,7 +514,7 @@ STEPS: list[Step] = [
         "lattice/music_coef caches if stale, then dumps/charts.json + "
         "dumps/charts_all.json (every difficulty, --verify)",
         network=False,
-        probes=["chart_library"],
+        probes=["chart_library", "chart_coefficients"],
         build=cmd_chart_lib,
     ),
     Step(

@@ -583,23 +583,31 @@ def evaluate(
             hit = powers[id(key)] = (key, power)
         return hit[1]
 
-    def song_score(chart, cfg) -> float:
-        """One chart's score on `power_of(cfg)`."""
+    def song_result(chart, cfg):
+        """One chart's `SongScore` on `power_of(cfg)`, or None."""
         s = score_song_detailed(
             team.members, (team.leader,), chart, cfg, deck_power=power_of(cfg), team_setup=setups
         )
-        return s[0].total_score if s else 0.0
+        return s[0] if s else None
+
+    def song_score(chart, cfg) -> float:
+        """One chart's score on `power_of(cfg)`."""
+        s = song_result(chart, cfg)
+        return s.total_score if s is not None else 0.0
+
+    def ceiling_at(chart, cfg, s) -> float:
+        """The all-fire score at `s`'s slot order on `cfg`'s board (`score_team_ceiling`), on
+        the power the expectation used: one walk of that order."""
+        if s is None:
+            return 0.0
+        return score_team_ceiling(team, chart, cfg, s.member_order, deck_power=power_of(cfg))
 
     def served(chart, cfg) -> float:
         """The number this evaluation returns for one chart: the expectation, or with
         `ceiling` the all-fire score at the expectation's slot order."""
         if not ceiling:
             return song_score(chart, cfg)
-        power = None
-        if cfg.song_absolute_deck_power:
-            power = overall_power_for(tuple(team.members), team.leader, cfg)
-        s = score_song_detailed(team.members, (team.leader,), chart, cfg, deck_power=power)
-        return score_team_ceiling(team, chart, cfg, s[0].member_order) if s else 0.0
+        return ceiling_at(chart, cfg, song_result(chart, cfg))
 
     def develop(sings: bool | AbstractSet[str], charts_for=(), assemble_cast=None):
         ctx_d = _with_singer_bench(ctx, by_id, tree_for, budget_for, plan_cache, sings)
@@ -689,17 +697,14 @@ def evaluate(
     def expectation_and_ceiling(chart, cfg) -> tuple[float, ...]:
         """`served` without and with `ceiling`, on the one board `cfg` carries; with `split`,
         also the score without the fever weight at the expectation's slot order."""
-        e = song_score(chart, cfg)
-        power = (
-            overall_power_for(tuple(team.members), team.leader, cfg) if cfg.song_absolute_deck_power else None
-        )
-        s = score_song_detailed(team.members, (team.leader,), chart, cfg, deck_power=power)
-        top = score_team_ceiling(team, chart, cfg, s[0].member_order) if s else 0.0
+        s = song_result(chart, cfg)
+        e = s.total_score if s is not None else 0.0
+        top = ceiling_at(chart, cfg, s)
         if not split:
             return e, top
         solo = (
-            score_team_at_order(team, chart, dataclasses.replace(cfg, fever_weight=0.0), s[0].member_order)
-            if s
+            score_team_at_order(team, chart, dataclasses.replace(cfg, fever_weight=0.0), s.member_order)
+            if s is not None
             else 0.0
         )
         return e, top, solo

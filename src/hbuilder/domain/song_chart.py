@@ -171,10 +171,20 @@ class SongChart:
     # chart's `#mmm0D` markers (or the client's fallback when they are missing or invalid).
     # `None`: a chart file built before the section was read; a Multi score refuses it.
     fever: tuple[float, float] | None = None
+    # `MusicDifficultyChart.scoreCoefficientPermyriadMultiply` (master field 7), in 1/10000:
+    # a per-chart factor `CalcScore` multiplies into every note's value after `(1 + Y)` and
+    # before the ceil. 10000 (x1) on a chart whose master row lacks the field; it can sit
+    # below 10000.
+    score_coefficient_permyriad: int = 10000
 
     def __post_init__(self) -> None:
         if not self.notes:
             raise SongError(f"chart {self.music_id}/{self.difficulty} has no notes")
+        if self.score_coefficient_permyriad <= 0:
+            raise SongError(
+                f"chart {self.music_id}/{self.difficulty} score coefficient "
+                f"{self.score_coefficient_permyriad} permyriad must be positive"
+            )
         if self.fever is not None and not self.fever[0] < self.fever[1]:
             raise SongError(
                 f"chart {self.music_id}/{self.difficulty} fever section {self.fever} does not end after it starts"
@@ -235,9 +245,15 @@ class SongChart:
             )
 
     def music_coefficient(self) -> float:
-        """`1 + (permil/1000) x (level - 5)`, as `LiveScoreCalculator`'s constructor
-        computes it: below 1 under level 5, 0.968 .. 1.200 over the real charts."""
-        return 1.0 + (self.live_score_coefficient_permil / 1000.0) * (self.difficulty_level - 5)
+        """`(1 + (permil/1000) x (level - 5)) x K`, the chart's whole factor on every note.
+
+        The first factor is the music coefficient as `LiveScoreCalculator`'s constructor
+        computes it: below 1 under level 5, 0.968 .. 1.200 over the real charts. `K` is
+        `score_coefficient_permyriad / 10000`, which `CalcScore` multiplies in after `(1 + Y)`
+        and before the ceil. Every caller places this factor inside that same per-note
+        product, so folding `K` in here applies it where the game does."""
+        base = 1.0 + (self.live_score_coefficient_permil / 1000.0) * (self.difficulty_level - 5)
+        return base * (self.score_coefficient_permyriad / 10000.0)
 
     def notes_perfect_coefficient_sum(self, platform: str = DEFAULT_PLATFORM) -> float:
         """`(1/1000) x SUM over notes of map[PERFECT][type]`,
@@ -477,6 +493,8 @@ def charts_from_mapping(raw: object, *, source: str = "<mapping>") -> ChartLibra
                 hidden_points=int(row.get("hidden_points", 0)),
                 # absent from a chart file built before the fever section was read
                 fever=(float(row["fever"][0]), float(row["fever"][1])) if row.get("fever") else None,
+                # absent from a chart file built before the field was read: x1
+                score_coefficient_permyriad=int(row.get("score_coefficient_permyriad", 10000)),
             )
         except SongError as exc:
             # SongChart's own __post_init__ checks (no notes, times out of

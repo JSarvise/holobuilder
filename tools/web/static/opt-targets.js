@@ -161,6 +161,8 @@ function toggle(ch, node) {
 
 /** Wire the target list and the board dialog. `S.targets` is edited in place;
  *  `onChange()` runs once when the dialog closes with changes (or a chip is removed). */
+// a refresh moved the account's boards: the target picker reads them again when next opened
+export function forgetTargetBoards() { T.board = null; T.docs.clear(); }
 export function initTargets(S, cards, onChange) {
   T.S = S; T.onChange = onChange;
   for (const c of cards) if (c.owned && !T.names.has(chrOf(c.id))) T.names.set(chrOf(c.id), c.member);
